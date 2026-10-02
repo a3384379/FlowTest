@@ -293,6 +293,8 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('质量总览加载失败')).toBeVisible()
     expect(screen.getByText('最近执行暂不可用')).toBeVisible()
+    expect(screen.getByText('未提供终态通过率')).toBeVisible()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
     expect(screen.getByText('暂无执行记录')).toBeVisible()
   })
 
@@ -311,6 +313,8 @@ describe('DashboardPage', () => {
     renderDashboard()
 
     expect(await screen.findByText('统计暂不可用')).toBeVisible()
+    expect(screen.getByText('未提供执行数据')).toBeVisible()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
     expect(screen.getByText('暂无执行记录')).toBeVisible()
   })
 })

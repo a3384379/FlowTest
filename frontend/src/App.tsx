@@ -32,6 +32,7 @@ import { useProjectContext } from './features/projects/use-project-context'
 import { groupForSection, sectionLabels } from './features/navigation/navigation-config'
 import ShellSidebar from './features/navigation/ShellSidebar'
 import GlobalSearch from './features/search/GlobalSearch'
+import AppearanceSettings from './theme/AppearanceSettings'
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const ServiceCatalogPage = lazy(() => import('./pages/ServiceCatalogPage'))
@@ -146,10 +147,12 @@ function AuthenticatedShell() {
       <Layout>
         <Header className="topbar">
           <Space className="shell-topbar-left">
+            <Link to="/dashboard" className="shell-brand" aria-label="FlowTest 首页">
+              FlowTest
+            </Link>
             <Typography.Text strong className="shell-platform-title">
               接口自动化测试平台
             </Typography.Text>
-            <GlobalSearch />
             <Select
               aria-label="全局项目"
               className="global-project-select"
@@ -163,8 +166,13 @@ function AuthenticatedShell() {
                 label: project.name,
               }))}
             />
+            <GlobalSearch />
           </Space>
           <Space className="shell-topbar-account">
+            <AppearanceSettings
+              key={authenticatedUserId(user)}
+              userId={authenticatedUserId(user)}
+            />
             <Tag color="blue">LOCAL</Tag>
             <Avatar size="small" icon={<UserOutlined />} />
             <Typography.Text className="shell-user-name">{user?.display_name}</Typography.Text>

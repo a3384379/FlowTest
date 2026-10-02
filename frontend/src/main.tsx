@@ -1,9 +1,10 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App as AntdApp, ConfigProvider } from 'antd'
+import { App as AntdApp } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import zhCN from 'antd/locale/zh_CN'
+import IceThemeProvider from './theme/IceThemeProvider'
+import { applyIceAppearance } from './theme/ice-theme'
 
 import App from './App'
 import { useAuthStore } from './features/auth/auth-store'
@@ -21,29 +22,20 @@ const queryClient = new QueryClient({
   },
 })
 
+applyIceAppearance(document.documentElement)
+
 useAuthStore.subscribe((state, previous) => {
   if (state.epoch !== previous.epoch) queryClient.clear()
 })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: '#5b5cf0',
-          borderRadius: 10,
-          colorBgLayout: '#f5f7fb',
-          colorText: '#172033',
-          colorBorder: '#dce2ec',
-        },
-      }}
-    >
+    <IceThemeProvider>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
           <RouterProvider router={router} />
         </QueryClientProvider>
       </AntdApp>
-    </ConfigProvider>
+    </IceThemeProvider>
   </StrictMode>,
 )

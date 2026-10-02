@@ -304,11 +304,14 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
 
 async function chooseOption(page: Page, select: Locator, optionName: string) {
   await expect(select).toBeEnabled()
+  const modal = page.locator('.ant-modal:visible').last()
+  if (await modal.count()) await expect(modal).not.toHaveClass(/ant-zoom-(?:appear|enter|leave)/)
   await select.click()
   if (await select.isEditable()) await select.fill(optionName)
   const dropdown = page.locator('.ant-select-dropdown:visible').last()
   const option = dropdown.getByText(optionName, { exact: true })
   await expect(option).toBeVisible()
+  await expect(dropdown).not.toHaveClass(/ant-slide-up-(?:appear|enter|leave)/)
   await option.click()
   await expect(selectControl(select)).toContainText(optionName)
 }

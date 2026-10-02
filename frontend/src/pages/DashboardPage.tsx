@@ -55,17 +55,6 @@ const riskColors: Record<ReleaseRiskSummary['risk_level'], string> = {
   critical: 'error',
 }
 
-const emptySummary: DashboardSummary = {
-  project_count: 0,
-  api_count: 0,
-  workflow_count: 0,
-  today_total: 0,
-  today_passed: 0,
-  today_failed: 0,
-  pass_rate: 0,
-  trend: [],
-}
-
 type DashboardState = ReturnType<typeof useDashboard>
 
 export default function DashboardPage() {
@@ -128,10 +117,9 @@ function DashboardHeading({
 }
 
 function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState }) {
-  const summary = valueOr(dashboard.summary.data, emptySummary)
+  const summary = dashboard.summary.data
   const risk = firstItem(dashboard.risks.data)
   const impact = firstItem(dashboard.impactRuns.data)
-  const flaky = pageItems(dashboard.flaky.data)
   const decision = firstItem(dashboard.decisions.data)
   const projectId = required(dashboard.projectId)
   return (
@@ -140,7 +128,7 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
         summary={summary}
         risk={risk}
         impact={impact}
-        flaky={flaky}
+        flaky={dashboard.flaky.data?.items}
         decision={decision}
         qualityEnabled={dashboard.qualityEnabled}
         impactEnabled={dashboard.impactEnabled}
@@ -179,42 +167,42 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
 
 function GlobalQualityOverview({ dashboard }: { dashboard: DashboardState }) {
   if (dashboard.projects.data?.items.length === 0) return <ProjectEmptyState />
-  const summary = dashboard.summary.data ?? emptySummary
+  const metrics = globalSummaryMetrics(dashboard.summary.data)
   return (
     <>
       <div className="quality-command-stats">
         <QualityMetric
           title="可访问项目"
-          value={`${summary.project_count} 个`}
+          value={metrics.projects}
           detail="当前账号授权范围"
           icon={<FolderOpenOutlined />}
           loading={dashboard.summary.isLoading}
         />
         <QualityMetric
           title="接口资产"
-          value={`${summary.api_count} 个`}
+          value={metrics.apis}
           detail="已启用接口定义"
           icon={<ApiOutlined />}
           loading={dashboard.summary.isLoading}
         />
         <QualityMetric
           title="流程资产"
-          value={`${summary.workflow_count} 个`}
+          value={metrics.workflows}
           detail="可访问工作流"
           icon={<ApartmentOutlined />}
           loading={dashboard.summary.isLoading}
         />
         <QualityMetric
           title="今日执行"
-          value={`${summary.today_total} 次`}
-          detail={`失败或异常 ${summary.today_failed} 次`}
+          value={metrics.executions}
+          detail={metrics.executionDetail}
           icon={<ExclamationCircleOutlined />}
           loading={dashboard.summary.isLoading}
         />
         <QualityMetric
           title="今日终态通过率"
-          value={`${summary.pass_rate}%`}
-          detail={`${summary.today_passed} 个终态通过`}
+          value={metrics.passRate}
+          detail={metrics.passDetail}
           icon={<CheckCircleOutlined />}
           loading={dashboard.summary.isLoading}
         />
@@ -239,16 +227,17 @@ function ProjectQualityStats({
   impactEnabled,
   loading,
 }: {
-  summary: DashboardSummary
+  summary?: DashboardSummary
   risk?: ReleaseRiskSummary
   impact?: ImpactRunSummary
-  flaky: FlakyRecord[]
+  flaky?: FlakyRecord[]
   decision?: ReleaseDecision
   qualityEnabled: boolean
   impactEnabled: boolean
   loading: boolean
 }) {
-  const quarantined = flaky.filter((item) => item.quarantined).length
+  const executionState = executionSummaryMetric(summary)
+  const quarantined = flaky?.filter((item) => item.quarantined).length
   const riskState = riskMetric(risk, qualityEnabled)
   const impactState = impactMetric(impact, impactEnabled)
   const decisionState = decisionMetric(decision)
@@ -272,17 +261,17 @@ function ProjectQualityStats({
       />
       <QualityMetric
         title="今日终态通过率"
-        value={`${summary.pass_rate}%`}
-        detail={`今日 ${summary.today_passed} / ${summary.today_passed + summary.today_failed} 通过`}
-        tone={executionTone(summary.today_failed)}
+        value={executionState.value}
+        detail={executionState.detail}
+        tone={executionState.tone}
         icon={<CheckCircleOutlined />}
         loading={loading}
       />
       <QualityMetric
         title="Flaky 资产"
-        value={`${flaky.length} 项`}
-        detail={`其中隔离 ${quarantined} 项`}
-        tone={countTone(flaky.length)}
+        value={metricCount(flaky?.length, '项')}
+        detail={flaky ? `其中隔离 ${quarantined} 项` : '未提供 Flaky 资产数据'}
+        tone={flaky ? countTone(flaky.length) : 'default'}
         icon={<ApartmentOutlined />}
         loading={loading}
       />
@@ -296,6 +285,37 @@ function ProjectQualityStats({
       />
     </div>
   )
+}
+
+function executionSummaryMetric(summary?: DashboardSummary): {
+  value: string
+  detail: string
+  tone: string
+} {
+  if (!summary) return { value: '—', detail: '未提供执行数据', tone: 'default' }
+  const total = summary.today_passed + summary.today_failed
+  return {
+    value: total ? `${summary.pass_rate}%` : '—',
+    detail: `今日 ${summary.today_passed} / ${total} 个终态通过`,
+    tone: executionTone(summary.today_failed),
+  }
+}
+
+function globalSummaryMetrics(summary?: DashboardSummary) {
+  const execution = executionSummaryMetric(summary)
+  return {
+    projects: metricCount(summary?.project_count, '个'),
+    apis: metricCount(summary?.api_count, '个'),
+    workflows: metricCount(summary?.workflow_count, '个'),
+    executions: metricCount(summary?.today_total, '次'),
+    executionDetail: summary ? `失败或异常 ${summary.today_failed} 次` : '未提供执行数据',
+    passRate: execution.value,
+    passDetail: execution.detail,
+  }
+}
+
+function metricCount(value: number | undefined, unit: string): string {
+  return value === undefined ? '—' : `${value} ${unit}`
 }
 
 function QualityMetric({
@@ -331,7 +351,11 @@ function TrendCard({ summary, loading }: { summary?: DashboardSummary; loading: 
       <DashboardTrendChart points={summary?.trend ?? []} />
       <div className="dashboard-pass-rate">
         <Typography.Text type="secondary">今日终态通过率</Typography.Text>
-        <Progress percent={summary?.pass_rate ?? 0} status="active" />
+        {summary && summary.today_passed + summary.today_failed > 0 ? (
+          <Progress percent={summary.pass_rate} />
+        ) : (
+          <Typography.Text type="secondary">未提供终态通过率</Typography.Text>
+        )}
       </div>
     </Card>
   )
@@ -567,14 +591,6 @@ function countTone(count: number): string {
 
 function firstItem<T>(page: Page<T> | undefined): T | undefined {
   return page?.items.at(0)
-}
-
-function pageItems<T>(page: Page<T> | undefined): T[] {
-  return page?.items ?? []
-}
-
-function valueOr<T>(value: T | undefined, fallback: T): T {
-  return value ?? fallback
 }
 
 function anyLoading(...values: boolean[]): boolean {

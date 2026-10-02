@@ -17,11 +17,13 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { iceColors } from '../theme/ice-theme'
 
 import type {
   ReleaseDecision,
   ReleaseDecisionInput,
   ReleasePolicyInput,
+  ReleaseReason,
 } from '../features/release-gate/release-gate-service'
 import { useReleaseGate } from '../features/release-gate/use-release-gate'
 
@@ -44,6 +46,9 @@ export default function ReleaseGatePage() {
           decisionCount={state.decisions.data?.total}
           latest={state.decisions.data?.items.at(0)}
         />
+        {state.decisions.data?.items[0] && (
+          <LatestDecisionEvidence decision={state.decisions.data.items[0]} />
+        )}
         <PoliciesCard policies={state.policies.data} loading={state.policies.isLoading} />
         <DecisionsCard
           decisions={state.decisions.data?.items}
@@ -106,17 +111,95 @@ function ReleaseOverview({
 }) {
   return (
     <Card>
-      <Space size="large">
-        <Statistic title="发布策略" value={policyCount ?? 0} />
-        <Statistic title="历史判断" value={decisionCount ?? 0} />
+      <div className="release-overview-metrics">
+        <Statistic title="发布策略" value={policyCount ?? '—'} />
+        <Statistic title="历史判断" value={decisionCount ?? '—'} />
         <Statistic
           title="最新结果"
           value={latest ? latest.status.toUpperCase() : '—'}
-          styles={{ content: { color: latest?.status === 'pass' ? '#389e0d' : '#cf1322' } }}
+          styles={{
+            content: {
+              color: !latest
+                ? iceColors.textTertiary
+                : latest.status === 'pass'
+                  ? iceColors.success
+                  : iceColors.danger,
+            },
+          }}
         />
-      </Space>
+      </div>
+      <Typography.Paragraph type="secondary" className="release-evidence-context">
+        {latest
+          ? `候选版本 ${latest.candidate_ref} · ${latest.reasons.filter((reason) => reason.status === 'blocked').length} 项阻断 · 判断只读`
+          : '尚无发布判断。按策略收集必需证据后，才能生成 PASS/BLOCK。'}
+      </Typography.Paragraph>
     </Card>
   )
+}
+
+function LatestDecisionEvidence({ decision }: { decision: ReleaseDecision }) {
+  const reasons = [...decision.reasons].sort(
+    (left, right) => Number(left.status !== 'blocked') - Number(right.status !== 'blocked'),
+  )
+  return (
+    <section className="release-decision-workspace" aria-label="最新判断的冻结证据">
+      <Card title="逐项证据">
+        <Table<ReleaseReason>
+          rowKey="code"
+          size="small"
+          pagination={false}
+          scroll={{ x: 540 }}
+          dataSource={reasons}
+          locale={{ emptyText: '本次判断未提供逐项原因' }}
+          columns={[
+            {
+              title: '结果',
+              dataIndex: 'status',
+              width: 80,
+              render: (status: ReleaseReason['status']) => (
+                <Tag color={status === 'blocked' ? 'error' : 'success'}>
+                  {status === 'blocked' ? '阻断' : '通过'}
+                </Tag>
+              ),
+            },
+            {
+              title: '证据',
+              dataIndex: 'evidence_type',
+              width: 140,
+              render: (type: ReleaseReason['evidence_type']) => releaseEvidenceLabels[type],
+            },
+            { title: '判断依据', dataIndex: 'message' },
+          ]}
+        />
+      </Card>
+      <Card title="决策上下文">
+        <DecisionTag status={decision.status} />
+        <Typography.Paragraph strong>候选版本 {decision.candidate_ref}</Typography.Paragraph>
+        <Typography.Paragraph>策略：{decision.policy_snapshot.name}</Typography.Paragraph>
+        <Typography.Paragraph>
+          生成时间：{new Date(decision.created_at).toLocaleString('zh-CN', { hour12: false })}
+        </Typography.Paragraph>
+        <Typography.Paragraph>
+          证据指纹：
+          <Typography.Text code copyable>
+            {decision.fingerprint}
+          </Typography.Text>
+        </Typography.Paragraph>
+        <Typography.Text type="secondary">
+          策略与证据来自本次冻结快照。重新判断会创建新记录；该结论不会触发生产部署。
+        </Typography.Text>
+      </Card>
+    </section>
+  )
+}
+
+const releaseEvidenceLabels: Readonly<Record<ReleaseReason['evidence_type'], string>> = {
+  quality_gate: '质量门禁',
+  contract_compatibility: '契约兼容',
+  impact: '变更影响',
+  release_risk: '发布风险',
+  performance: '性能结果',
+  runner: 'Runner 执行',
 }
 
 function PoliciesCard({

@@ -22,6 +22,9 @@ for (const viewport of viewports) {
     test.setTimeout(90_000)
     await page.setViewportSize(viewport)
     await seedEditor(page)
+    await page.evaluate(() => document.fonts.ready)
+    await settleViewport(page)
+    await fitCanvas(page)
     const directory = resolve(matrixRoot, `${viewport.width}x${viewport.height}`)
     mkdirSync(directory, { recursive: true })
 
@@ -54,11 +57,8 @@ for (const viewport of viewports) {
 
     await page.getByRole('button', { name: '专注模式', exact: true }).click()
     await expect(page.getByTestId('workflow-focus-toolbar')).toBeVisible()
-    await page
-      .getByTestId('workflow-focus-toolbar')
-      .getByRole('button', { name: /适应画布/ })
-      .click()
     await settleViewport(page)
+    await fitCanvas(page)
     await captureState('07-focus-mode')
     await page.getByRole('button', { name: '退出专注模式', exact: true }).click()
 
@@ -69,6 +69,9 @@ for (const viewport of viewports) {
     expect(runtimeHeight).toBeGreaterThanOrEqual(200)
     expect(runtimeHeight).toBeLessThanOrEqual(280)
     await expect(page.locator('.ant-message-notice')).toHaveCount(0, { timeout: 6_000 })
+    await expect(page.locator('.flow-node.is-passed')).toHaveCount(3)
+    await settleViewport(page)
+    await fitCanvas(page)
     await captureState('08-run-mode')
 
     await page.getByTestId('workflow-runtime-tab-history').click()
@@ -76,6 +79,8 @@ for (const viewport of viewports) {
     await expect(page.getByText('历史快照 · 不可修改')).toBeVisible()
     await expect(page.locator('.workflow-workbench-card .ant-card-loading-content')).toHaveCount(0)
     await expect(page.locator('.workflow-workbench-card .react-flow__node').first()).toBeVisible()
+    await settleViewport(page)
+    await fitCanvas(page)
     await captureState('09-history-mode')
   })
 }
@@ -88,6 +93,7 @@ async function capture(
 ): Promise<void> {
   await expectNoOverflow(page)
   await page.evaluate(() => document.fonts.ready)
+  await settleViewport(page)
   const screenshot = resolve(directory, `${name}.png`)
   await page.screenshot({
     animations: 'disabled',
@@ -151,6 +157,7 @@ function visualFixtureMasks(page: Page, name: string): Locator[] {
     page.locator('.workflow-runtime-panel-heading .ant-typography-secondary'),
     page.locator('.workflow-meta .ant-tag').filter({ hasText: /^执行 / }),
     page.locator('.flow-node-status small'),
+    page.locator('.workflow-volatile-value'),
   ]
   if (name === '09-history-mode')
     masks.push(
@@ -166,10 +173,49 @@ async function settleViewport(page: Page): Promise<void> {
     let stableFrames = 0
     while (stableFrames < 10) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-      const current = document.querySelector('.react-flow__viewport')?.getAttribute('style') ?? ''
+      const current = JSON.stringify({
+        viewport: document.querySelector('.react-flow__viewport')?.getAttribute('style'),
+        nodes: Array.from(document.querySelectorAll('.react-flow__node'), (element) => {
+          const { x, y, width, height } = element.getBoundingClientRect()
+          return { x, y, width, height }
+        }),
+      })
       stableFrames = current === previous ? stableFrames + 1 : 0
       previous = current
     }
+  })
+}
+async function fitCanvas(page: Page): Promise<void> {
+  const fit = page.getByRole('button', { name: /适应画布/ })
+  await fit.click()
+  await settleViewport(page)
+  await expect
+    .poll(async () => {
+      const offset = await graphCenterOffset(page)
+      if (offset > 1) {
+        await fit.click()
+        await settleViewport(page)
+      }
+      return graphCenterOffset(page)
+    })
+    .toBeLessThanOrEqual(1)
+}
+async function graphCenterOffset(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('.react-flow')!.getBoundingClientRect()
+    const nodes = Array.from(document.querySelectorAll('.react-flow__node'), (element) =>
+      element.getBoundingClientRect(),
+    )
+    const centerX =
+      (Math.min(...nodes.map((node) => node.left)) + Math.max(...nodes.map((node) => node.right))) /
+      2
+    const centerY =
+      (Math.min(...nodes.map((node) => node.top)) + Math.max(...nodes.map((node) => node.bottom))) /
+      2
+    return Math.max(
+      Math.abs(centerX - canvas.x - canvas.width / 2),
+      Math.abs(centerY - canvas.y - canvas.height / 2),
+    )
   })
 }
 async function measureWorkbench(page: Page) {

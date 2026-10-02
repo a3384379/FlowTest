@@ -14,10 +14,12 @@ export default function WorkflowRuntimeDock({
   mode,
   status,
   children,
+  summary,
 }: {
   mode: RuntimeDockMode
   status?: ReactNode
   children: ReactNode
+  summary?: ReactNode
 }) {
   const [collapsed, setCollapsed] = useState(false)
   return (
@@ -41,6 +43,7 @@ export default function WorkflowRuntimeDock({
           onClick={() => setCollapsed((value) => !value)}
         />
       </header>
+      {collapsed && summary && <div className="workflow-runtime-dock-summary">{summary}</div>}
       {!collapsed && <div className="workflow-runtime-dock-body">{children}</div>}
     </section>
   )

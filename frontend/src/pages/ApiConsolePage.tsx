@@ -2,6 +2,7 @@ import {
   DownloadOutlined,
   EditOutlined,
   ImportOutlined,
+  FolderOutlined,
   PlayCircleOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
@@ -9,6 +10,7 @@ import {
   Button,
   Card,
   Dropdown,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -47,6 +49,7 @@ export default function ApiConsolePage() {
   const [importOpen, setImportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
   const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
   const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
   const userId = useAuthStore((state) => state.user?.id)
   const currentDefinition = selectedApiDefinition(consoleState)
@@ -77,27 +80,37 @@ export default function ApiConsolePage() {
   ])
 
   return (
-    <>
+    <div className="api-console-page">
       <ApiConsoleHeading
         state={consoleState}
         canCreateAssets={canCreateAssets}
         onDialog={setDialog}
         onImport={() => setImportOpen(true)}
-        onManageEnvironment={() => setEnvironmentManagerOpen(true)}
+        onArtifacts={() => setArtifactsOpen(true)}
       />
 
-      <div className="console-grid">
-        <Card
-          title="接口列表"
-          extra={
-            <Space wrap>
+      <div className="api-workspace">
+        <aside className="api-workspace-directory" aria-label="接口目录与环境">
+          <Card
+            className="api-directory-card"
+            title="接口集合"
+            extra={
+              <Button
+                type="text"
+                icon={<PlusOutlined />}
+                aria-label="新建接口"
+                disabled={!canCreateAssets}
+                onClick={() => setDialog('api')}
+              />
+            }
+          >
+            <div className="api-directory-filters">
               <Input.Search
                 aria-label="搜索接口"
                 allowClear
                 placeholder="搜索名称、路径或说明"
                 value={consoleState.apiSearchInput}
                 onChange={(event) => consoleState.setApiSearchInput(event.target.value)}
-                style={{ width: 220 }}
               />
               <Select
                 aria-label="接口方法筛选"
@@ -106,63 +119,100 @@ export default function ApiConsolePage() {
                 value={consoleState.apiMethod ?? undefined}
                 onChange={(value?: HttpMethod) => consoleState.setApiMethod(value ?? null)}
                 options={httpMethods.map((method) => ({ value: method, label: method }))}
-                style={{ width: 120 }}
+                style={{ width: '100%' }}
               />
+            </div>
+            <ApiTable
+              loading={consoleState.apis.isLoading}
+              items={apis}
+              selectedId={consoleState.apiId}
+              onSelect={consoleState.setApiSelection}
+              onRename={setRenameTarget}
+              page={consoleState.apis.data?.page ?? consoleState.apiPage}
+              pageSize={consoleState.apis.data?.page_size ?? 50}
+              total={consoleState.apis.data?.total ?? 0}
+              onPageChange={consoleState.setApiPage}
+            />
+          </Card>
+          <Card title="环境管理" className="api-environment-card">
+            <Select
+              aria-label="当前环境"
+              loading={consoleState.environments.isLoading}
+              placeholder={consoleState.environmentPlaceholder}
+              status={consoleState.environmentStatus}
+              value={consoleState.environmentId}
+              onChange={consoleState.setEnvironmentSelection}
+              disabled={!canCreateAssets}
+              options={projectOptions(consoleState.environments.data)}
+              style={{ width: '100%' }}
+            />
+            <Space wrap>
               <Button
-                type="primary"
-                icon={<PlusOutlined />}
+                type="text"
                 disabled={!canCreateAssets}
-                onClick={() => setDialog('api')}
+                onClick={() => setDialog('environment')}
               >
-                新建接口
+                新建环境
+              </Button>
+              <Button
+                type="text"
+                disabled={!consoleState.environmentId}
+                onClick={() => setEnvironmentManagerOpen(true)}
+              >
+                管理环境
               </Button>
             </Space>
-          }
-        >
-          <ApiTable
-            loading={consoleState.apis.isLoading}
-            items={apis}
-            selectedId={consoleState.apiId}
-            onSelect={consoleState.setApiSelection}
-            onRename={setRenameTarget}
-            page={consoleState.apis.data?.page ?? consoleState.apiPage}
-            pageSize={consoleState.apis.data?.page_size ?? 50}
-            total={consoleState.apis.data?.total ?? 0}
-            onPageChange={consoleState.setApiPage}
+          </Card>
+        </aside>
+        <div className="api-workspace-main">
+          <APIWorkbench
+            detail={consoleState.apiDetail.data}
+            loading={consoleState.apiDetail.isLoading}
+            saving={consoleState.savingVersion}
+            previewing={consoleState.previewing}
+            onSave={consoleState.saveVersion}
+            onPreview={consoleState.previewRequest}
+            onRename={() => setRenameTarget(currentDefinition)}
+            artifacts={artifacts}
+            redactionMode={consoleState.redactionMode}
+            draftScope={apiDraftScope(userId, consoleState.projectId)}
+            requestActions={<RunnerActions state={consoleState} enabled={canExecute} />}
           />
-        </Card>
-
-        <APIWorkbench
-          detail={consoleState.apiDetail.data}
-          loading={consoleState.apiDetail.isLoading}
-          saving={consoleState.savingVersion}
-          previewing={consoleState.previewing}
-          onSave={consoleState.saveVersion}
-          onPreview={consoleState.previewRequest}
-          onRename={() => setRenameTarget(currentDefinition)}
-          artifacts={artifacts}
-          redactionMode={consoleState.redactionMode}
-          draftScope={apiDraftScope(userId, consoleState.projectId)}
-        />
+          <Card
+            title="响应与验证"
+            className="api-response-panel"
+            extra={
+              <Space>
+                <Typography.Text type="secondary">预期状态码</Typography.Text>
+                <InputNumber
+                  aria-label="预期状态码"
+                  min={100}
+                  max={599}
+                  value={consoleState.expectedStatus}
+                  onChange={(value) => consoleState.setExpectedStatus(value ?? 200)}
+                />
+              </Space>
+            }
+          >
+            <RunnerContent enabled={canExecute} result={consoleState.result} history={history} />
+          </Card>
+        </div>
       </div>
-
-      <Card
-        title="请求运行器"
-        className="runner-card"
-        extra={<RunnerActions state={consoleState} enabled={canExecute} />}
+      <Drawer
+        title="文件仓库"
+        open={artifactsOpen}
+        onClose={() => setArtifactsOpen(false)}
+        size={760}
       >
-        <RunnerContent enabled={canExecute} result={consoleState.result} history={history} />
-      </Card>
-
-      <ArtifactPanel
-        disabled={!canCreateAssets}
-        loading={consoleState.artifacts.isLoading}
-        uploading={consoleState.uploading}
-        items={artifacts}
-        onUpload={consoleState.uploadFile}
-        onDownload={consoleState.downloadFile}
-      />
-
+        <ArtifactPanel
+          disabled={!canCreateAssets}
+          loading={consoleState.artifacts.isLoading}
+          uploading={consoleState.uploading}
+          items={artifacts}
+          onUpload={consoleState.uploadFile}
+          onDownload={consoleState.downloadFile}
+        />
+      </Drawer>
       <CreateDialogs
         open={dialog}
         submitting={consoleState.submitting}
@@ -207,7 +257,7 @@ export default function ApiConsolePage() {
           setEnvironmentManagerOpen(false)
         }}
       />
-    </>
+    </div>
   )
 }
 
@@ -222,32 +272,23 @@ function ApiConsoleHeading({
   canCreateAssets,
   onDialog,
   onImport,
-  onManageEnvironment,
+  onArtifacts,
 }: {
   state: ConsoleState
   canCreateAssets: boolean
   onDialog: (dialog: DialogState) => void
   onImport: () => void
-  onManageEnvironment: () => void
+  onArtifacts: () => void
 }) {
   return (
     <div className="page-heading">
       <div>
         <Typography.Title level={2}>接口管理</Typography.Title>
         <Typography.Text type="secondary">
-          创建接口、发送真实请求，并检查断言和历史记录。
+          编辑请求，发送已保存版本，并查看响应与断言证据。
         </Typography.Text>
       </div>
       <Space wrap>
-        <Select
-          aria-label="当前项目"
-          className="context-select"
-          loading={state.projects.isLoading}
-          placeholder="选择项目"
-          value={state.projectId}
-          onChange={state.selectProject}
-          options={projectOptions(state.projects.data?.items)}
-        />
         <Button icon={<PlusOutlined />} onClick={() => onDialog('project')}>
           新建项目
         </Button>
@@ -269,26 +310,8 @@ function ApiConsoleHeading({
             导出
           </Button>
         </Dropdown>
-        <Select
-          aria-label="当前环境"
-          className="context-select"
-          loading={state.environments.isLoading}
-          placeholder={state.environmentPlaceholder}
-          status={state.environmentStatus}
-          value={state.environmentId}
-          onChange={state.setEnvironmentSelection}
-          disabled={!canCreateAssets}
-          options={projectOptions(state.environments.data)}
-        />
-        <Button
-          icon={<PlusOutlined />}
-          disabled={!canCreateAssets}
-          onClick={() => onDialog('environment')}
-        >
-          新建环境
-        </Button>
-        <Button disabled={!state.environmentId} onClick={onManageEnvironment}>
-          管理环境
+        <Button icon={<FolderOutlined />} disabled={!canCreateAssets} onClick={onArtifacts}>
+          文件仓库
         </Button>
       </Space>
     </div>
@@ -297,25 +320,19 @@ function ApiConsoleHeading({
 
 function RunnerActions({ state, enabled }: { state: ConsoleState; enabled: boolean }) {
   return (
-    <Space>
-      <Typography.Text type="secondary">预期状态码</Typography.Text>
-      <InputNumber
-        aria-label="预期状态码"
-        min={100}
-        max={599}
-        value={state.expectedStatus}
-        onChange={(value) => state.setExpectedStatus(value ?? 200)}
-      />
+    <div className="api-send-action">
       <Button
         type="primary"
         icon={<PlayCircleOutlined />}
         disabled={!enabled}
         loading={state.executing}
         onClick={() => state.execute()}
+        aria-label="发送请求"
+        title="发送当前接口的已保存版本"
       >
-        发送请求
+        发送
       </Button>
-    </Space>
+    </div>
   )
 }
 
@@ -361,6 +378,8 @@ function ApiTable({
     <Table
       rowKey="id"
       size="small"
+      className="api-directory-table"
+      showHeader={false}
       loading={loading}
       pagination={{
         current: page,
@@ -376,11 +395,28 @@ function ApiTable({
       rowClassName={(record) => (record.id === selectedId ? 'selected-row' : '')}
       onRow={(record) => ({ onClick: () => onSelect(record.id) })}
       columns={[
-        { title: '名称', dataIndex: 'name' },
+        {
+          title: '名称',
+          dataIndex: 'name',
+          render: (name: string, definition: ApiDefinition) => (
+            <Button
+              type="text"
+              className="api-directory-select"
+              aria-label={`选择接口 ${name}`}
+              aria-pressed={definition.id === selectedId}
+              onClick={(event) => {
+                event.stopPropagation()
+                onSelect(definition.id)
+              }}
+            >
+              {name}
+            </Button>
+          ),
+        },
         {
           title: '版本',
           dataIndex: 'current_version',
-          width: 80,
+          width: 50,
           render: (version: number) => <Tag color="blue">v{version}</Tag>,
         },
         {

@@ -38,7 +38,7 @@ it('separates server/user/project preferences and sanitizes malformed dimensions
   })
   for (const raw of ['{', 'null', '[]', '3']) {
     localStorage.setItem(key, raw)
-    expect(readLayoutPreferences(key).inspectorWidth).toBe(400)
+    expect(readLayoutPreferences(key).inspectorWidth).toBe(320)
   }
 })
 it('reports write failure without throwing or clearing draft storage', () => {

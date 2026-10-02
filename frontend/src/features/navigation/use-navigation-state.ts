@@ -32,6 +32,7 @@ export function useNavigationState(
   userId: string,
   section: ProjectSection,
   isSystemAdmin: boolean,
+  presentation: 'sidebar' | 'directory' = 'sidebar',
 ) {
   const location = useLocation()
   const viewport = useSyncExternalStore(subscribeViewport, viewportMode)
@@ -48,7 +49,10 @@ export function useNavigationState(
       drawerOpen: false,
     }
   })
-  const collapsed = viewport !== 'mobile' && (state.collapsedPreference ?? viewport === 'compact')
+  const collapsed =
+    presentation === 'sidebar' &&
+    viewport !== 'mobile' &&
+    (state.collapsedPreference ?? viewport === 'compact')
   if (state.route !== route || state.viewport !== viewport) {
     // Synchronize only on navigation or breakpoint changes, never on ordinary renders.
     setState({

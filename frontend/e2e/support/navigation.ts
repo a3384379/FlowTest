@@ -11,8 +11,12 @@ const groups: Record<string, string[]> = {
 
 /** Navigate through the same visible parent/leaf controls as a person. */
 export async function navigateMenu(page: Page, label: string): Promise<void> {
-  const trigger = page.getByRole('button', { name: '打开导航', exact: true })
-  if (await trigger.isVisible()) await trigger.click()
+  const trigger = page
+    .getByRole('button', { name: '打开导航', exact: true })
+    .or(page.getByRole('button', { name: '全部模块', exact: true }))
+  if ((await trigger.isVisible()) && (await trigger.getAttribute('aria-expanded')) !== 'true') {
+    await trigger.click()
+  }
   const navigation = page.getByRole('navigation', { name: '功能导航' })
   const group = Object.entries(groups).find(([, leaves]) => leaves.includes(label))?.[0]
   if (group) {

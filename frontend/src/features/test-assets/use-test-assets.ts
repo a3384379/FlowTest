@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 
 import { listFolders } from '../projects/asset-service'
-import { listEnvironments, listWorkflows } from '../workflows/workflow-service'
+import { listEnvironments } from '../workflows/workflow-service'
 import { useProjectContext } from '../projects/use-project-context'
-import type { TestCase, TestCaseRun, TestSuite, VersionDiff } from '../../lib/api'
+import { getProjectPermission } from '../projects/project-service'
+import type { TestCase, TestSuite, VersionDiff } from '../../lib/api'
 import {
   cloneTestCase,
   cloneTestSuite,
@@ -12,10 +13,7 @@ import {
   createTestSuite,
   diffTestCaseVersions,
   diffTestSuiteVersions,
-  listTestCases,
-  listLatestTestCaseRuns,
   listTestCaseVersions,
-  listTestSuites,
   listTestSuiteVersions,
   moveTestCases,
   moveTestSuites,
@@ -28,56 +26,28 @@ import {
   updateTestCase,
   updateTestSuite,
 } from './test-asset-service'
+import { listAssetWorkflows, listCaseCatalog, listSuiteCatalog } from './asset-workspace-service'
 
 export function useTestAssets() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const [search, setSearch] = useState('')
   const [tag, setTag] = useState('')
-  const [casePage, setCasePage] = useState(1)
-  const [suitePage, setSuitePage] = useState(1)
   const [diff, setDiff] = useState<VersionDiff | null>(null)
-  const updateSearch = useCallback((value: string) => {
-    setSearch(value)
-    setCasePage(1)
-    setSuitePage(1)
-  }, [])
-  const updateTag = useCallback((value: string) => {
-    setTag(value)
-    setCasePage(1)
-    setSuitePage(1)
-  }, [])
   const enabled = Boolean(projectId)
   const cases = useQuery({
-    queryKey: ['test-cases', projectId, search, tag, casePage],
-    queryFn: () => listTestCases(projectId!, search, tag, casePage),
+    queryKey: ['test-cases', projectId, search, tag],
+    queryFn: () => listCaseCatalog(projectId!, search, tag),
     enabled,
-  })
-  const suiteCaseOptions = useQuery({
-    queryKey: ['test-cases', projectId, 'suite-options'],
-    queryFn: () => listTestCases(projectId!, '', '', 1, 100),
-    enabled,
-  })
-  const caseIds = cases.data?.items.map((item) => item.id) ?? []
-  const latestRuns = useQuery({
-    queryKey: ['test-case-runs', projectId, caseIds.join('|')],
-    queryFn: () => listLatestTestCaseRuns(projectId!, caseIds),
-    enabled: enabled && cases.isSuccess,
-    refetchInterval: (query) =>
-      (query.state.data as TestCaseRun[] | undefined)?.some(
-        (run) => run.status === 'queued' || run.status === 'running',
-      )
-        ? 2000
-        : false,
   })
   const suites = useQuery({
-    queryKey: ['test-suites', projectId, search, tag, suitePage],
-    queryFn: () => listTestSuites(projectId!, search, tag, suitePage),
+    queryKey: ['test-suites', projectId, search, tag],
+    queryFn: () => listSuiteCatalog(projectId!, search, tag),
     enabled,
   })
   const workflows = useQuery({
     queryKey: ['workflows', projectId, 'asset-options'],
-    queryFn: () => listWorkflows(projectId!),
+    queryFn: () => listAssetWorkflows(projectId!),
     enabled,
   })
   const environments = useQuery({
@@ -90,11 +60,24 @@ export function useTestAssets() {
     queryFn: () => listFolders(projectId!),
     enabled,
   })
+  const caseOptions = useQuery({
+    queryKey: ['test-cases', projectId, '', ''],
+    queryFn: () => listCaseCatalog(projectId!, '', ''),
+    enabled,
+  })
+  const permissions = useQuery({
+    queryKey: ['project-permission', projectId],
+    queryFn: () => getProjectPermission(projectId!),
+    enabled,
+  })
 
   async function invalidateAssets() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['test-cases', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['test-suites', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['test-asset', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['test-case-versions', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['test-suite-versions', projectId] }),
     ])
   }
 
@@ -160,19 +143,17 @@ export function useTestAssets() {
     projectId,
     search,
     tag,
-    setSearch: updateSearch,
-    setTag: updateTag,
-    casePage,
-    suitePage,
-    setCasePage,
-    setSuitePage,
+    setSearch,
+    setTag,
     cases,
-    suiteCaseOptions,
-    latestRuns,
     suites,
     workflows,
     environments,
     folders,
+    caseOptions,
+    permissions,
+    canEdit: permissions.data?.capabilities.includes('edit') ?? false,
+    canExecute: permissions.data?.capabilities.includes('execute') ?? false,
     diff,
     setDiff,
     saveCase: saveCaseMutation.mutateAsync,

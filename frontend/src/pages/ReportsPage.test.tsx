@@ -1,7 +1,8 @@
+import { createIceTheme } from '../theme/ice-theme'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -13,8 +14,9 @@ import type {
   ReportExecution,
   ReportExecutionDetail,
   ReportTrend,
+  WorkflowNodeObservation,
 } from '../lib/api'
-import { project } from '../test/fixtures'
+import { project, workflowExecutionDetail } from '../test/fixtures'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import ReportsPage from './ReportsPage'
@@ -112,6 +114,25 @@ const artifact: Artifact = {
 
 describe('ReportsPage', () => {
   beforeEach(() => {
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, () =>
+        HttpResponse.json({ items: [execution], total: 1, page: 1, page_size: 50 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/trends`, () => HttpResponse.json(trend)),
+      http.get(`/api/v1/projects/${project.id}/notification-webhooks`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/notification-deliveries`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflow-executions/${execution.id}`, () =>
+        HttpResponse.json({
+          ...workflowExecutionDetail,
+          execution: { ...workflowExecutionDetail.execution, id: execution.id },
+        }),
+      ),
+    )
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:report'),
@@ -121,6 +142,42 @@ describe('ReportsPage', () => {
       value: vi.fn(),
     })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  })
+
+  it('labels page statistics and filters only the loaded page when the server total is larger', async () => {
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, () =>
+        HttpResponse.json({
+          items: [
+            execution,
+            { ...execution, id: 'passed-execution', workflow_name: '通过流程', status: 'passed' },
+          ],
+          total: 120,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/trends`, () => HttpResponse.json(trend)),
+      http.get(`/api/v1/projects/${project.id}/notification-webhooks`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/notification-deliveries`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    expect(await screen.findByText('1/2 条本页记录')).toBeVisible()
+    expect(screen.getByText('本页通过率')).toBeVisible()
+    expect(screen.getByText('当前页 2 / 2 条 · 全部记录 120 条')).toBeVisible()
+    await browser.click(screen.getByRole('combobox', { name: '本页执行状态' }))
+    await browser.click(
+      screen.getByText('本页失败', { selector: '.ant-select-item-option-content' }),
+    )
+    expect(screen.getByText('当前页 1 / 2 条 · 全部记录 120 条')).toBeVisible()
+    expect(screen.queryByText('通过流程 · v3')).not.toBeInTheDocument()
+    expect(screen.getByText('订单回归流程 · v3')).toBeVisible()
   })
 
   it('drills into reports, exports HTML and manages signed notifications', async () => {
@@ -183,10 +240,12 @@ describe('ReportsPage', () => {
     expect(screen.getByText('workflow.completed')).toBeVisible()
 
     await browser.click(screen.getByRole('button', { name: /详情/ }))
-    expect(await screen.findByText('执行报告详情')).toBeInTheDocument()
-    expect(await screen.findByText('校验订单状态')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '执行报告详情' })).toBeInTheDocument()
+    expect((await screen.findAllByText('校验订单状态')).length).toBeGreaterThan(0)
+    await waitFor(() => expect(screen.getByText('期望值')).toBeVisible())
+    expect(screen.getByText('实际值')).toBeVisible()
     expect(calls.detail).toBe(1)
-    await browser.keyboard('{Escape}')
+    await browser.click(screen.getByRole('button', { name: '返回执行列表' }))
 
     await browser.click(screen.getByRole('button', { name: /HTML/ }))
     await waitFor(() => expect(calls.export).toBe(1))
@@ -201,19 +260,113 @@ describe('ReportsPage', () => {
     expect(await screen.findByText(createdWebhook.secret)).toBeInTheDocument()
     expect(calls.created).toBe(1)
   })
+
+  it('links a report node to the same execution snapshot and preserves the execution in its URL', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json(detail),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}&node=assert-order`)
+    const link = await screen.findByRole('link', { name: '定位画布' })
+    expect(link).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order`,
+    )
+    expect(screen.getByText('期望值')).toBeVisible()
+    expect(screen.getByText('"pending"')).toBeVisible()
+  })
+
+  it('loads the next report page from the server', async () => {
+    const pages: string[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, ({ request }) => {
+        const page = new URL(request.url).searchParams.get('page')!
+        pages.push(page)
+        return HttpResponse.json({
+          items: [{ ...execution, workflow_name: page === '2' ? '第二页流程' : '第一页流程' }],
+          total: 120,
+          page: Number(page),
+          page_size: 50,
+        })
+      }),
+    )
+    renderPage()
+    await screen.findByText('第一页流程 · v3')
+    fireEvent.click(screen.getByTitle('2'))
+    expect(await screen.findByText('第二页流程 · v3')).toBeVisible()
+    expect(pages).toEqual(['1', '2'])
+  })
+
+  it('selects the exact request attempt and keeps it in the canvas link', async () => {
+    const observation = (attempt: number): WorkflowNodeObservation => ({
+      kind: 'http',
+      attempt,
+      request: {
+        method: 'GET',
+        url: `https://orders.example.test/${attempt}`,
+        headers: {},
+        body: null,
+      },
+      response: {
+        status_code: attempt === 1 ? 503 : 200,
+        headers: {},
+        body: { selected_attempt: attempt },
+        size_bytes: 20,
+      },
+      mappings: [],
+      duration_ms: 20,
+      started_at: execution.started_at,
+      completed_at: '2026-08-15T08:00:01Z',
+      error_code: null,
+      error_message: null,
+    })
+    const apiNode = {
+      ...detail.nodes[0],
+      id: 'api-node',
+      node_id: 'api',
+      node_type: 'api',
+      name: '查询订单',
+      status: 'passed' as const,
+      assertion: null,
+      attempts: 2,
+      observations: [observation(1), observation(2)],
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json({ ...detail, nodes: [apiNode, detail.nodes[0]] }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}&node=api&attempt=1`)
+    const link = await screen.findByRole('link', { name: '定位画布' })
+    expect(link).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=api&attempt=1`,
+    )
+    expect(screen.getByText(/"selected_attempt": 1/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /校验订单状态/ }))
+    expect(await screen.findByText('期望值')).toBeVisible()
+    expect(screen.getByRole('link', { name: '定位画布' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order`,
+    )
+    expect(screen.queryByText(/"selected_attempt": 1/)).not.toBeInTheDocument()
+  })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="reports">
-          <ReportsPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={createIceTheme(true)}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="reports" initialEntry={initialEntry}>
+            <ReportsPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }

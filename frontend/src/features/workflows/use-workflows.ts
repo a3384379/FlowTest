@@ -37,7 +37,7 @@ import {
   writeWorkflowDraft,
   type WorkflowDraftKey,
 } from './workflow-draft-store'
-import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
+import { useRouteScopedSelection, useRouteScopedState } from '../../lib/use-route-scoped-state'
 import {
   createWorkflow,
   deleteWorkflow,
@@ -73,7 +73,7 @@ export type WorkflowDraftEdit = {
   editVersion: number
 }
 
-export function useWorkflows(initialWorkflowId?: string) {
+export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: string) {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const token = useAuthStore((store) => store.token)
@@ -110,8 +110,8 @@ export function useWorkflows(initialWorkflowId?: string) {
   const [eventHistoryIncompleteId, setEventHistoryIncompleteId] = useState<string | null>(null)
   const [liveNodes, setLiveNodes] = useState<Record<string, WorkflowNodeExecution>>({})
   const [executionDefinition, setExecutionDefinition] = useState<WorkflowDefinition | null>(null)
-  const [workspaceMode, setWorkspaceMode] = useState<WorkflowWorkspaceMode>('draft')
-  const [historyExecutionId, setHistoryExecutionId] = useState<string | null>(null)
+  const { workspaceMode, setWorkspaceMode, historyExecutionId, setHistoryExecutionId } =
+    useExecutionSelection(projectId, initialExecutionId)
   const [breakpointSelection, setBreakpointSelection] = useState<string | null>(null)
   const [debugResult, setDebugResult] = useState<WorkflowDebugResult | null>(null)
   const [versionDiff, setVersionDiff] = useState<WorkflowVersionDiff | null>(null)
@@ -170,6 +170,7 @@ export function useWorkflows(initialWorkflowId?: string) {
     workflowSelection,
     workflowSelectionCleared,
     workflows.data,
+    Boolean(initialExecutionId),
   )
   const setDraftStorageError = useCallback(
     (error: string | null, targetId = workflowId) => {
@@ -774,6 +775,8 @@ export function useWorkflows(initialWorkflowId?: string) {
     showHistory,
     historyExecutionId,
     historyLoading: historyExecution.isLoading,
+    historyError: historyErrorText(historyExecution.error),
+    reloadHistory: () => void historyExecution.refetch(),
     breakpointNodes,
     breakpointNodeId,
     setBreakpointSelection,
@@ -805,18 +808,34 @@ export function useWorkflows(initialWorkflowId?: string) {
   }
 }
 
+function useExecutionSelection(projectId: string | null, executionId?: string) {
+  const [workspaceMode, setWorkspaceMode] = useRouteScopedState<WorkflowWorkspaceMode>(
+    projectId,
+    executionId ?? null,
+    executionId ? 'history' : 'draft',
+  )
+  const [historyExecutionId, setHistoryExecutionId] = useRouteScopedSelection(
+    projectId,
+    executionId ?? null,
+  )
+  return { workspaceMode, setWorkspaceMode, historyExecutionId, setHistoryExecutionId }
+}
+
+function historyErrorText(error: Error | null): string | null {
+  return error ? apiErrorMessage(error) : null
+}
+
 function useSelectedWorkflow(
   projectId: string | null,
   workflowSelection: string | null,
   workflowSelectionCleared: boolean,
   workflows: Page<Workflow> | undefined,
+  preserveExplicitSelection: boolean,
 ) {
   const listed = workflows?.items
-  const workflowId = resolveSelectedWorkflowId(
-    workflowSelection,
-    workflowSelectionCleared,
-    workflows,
-  )
+  const workflowId = preserveExplicitSelection
+    ? workflowSelection
+    : resolveSelectedWorkflowId(workflowSelection, workflowSelectionCleared, workflows)
   const listedWorkflow = listed?.find((item) => item.id === workflowId) ?? null
   const workflowDetail = useQuery({
     queryKey: ['workflow', projectId, workflowId],

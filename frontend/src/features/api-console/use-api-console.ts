@@ -127,7 +127,15 @@ export function useApiConsole(initialApiId?: string) {
     onSuccess: async (value) => {
       setResult(value)
       await queryClient.invalidateQueries({ queryKey: ['executions', projectId] })
-      void message.success(executionMessage(value))
+      void message.open({
+        type:
+          value.execution.status === 'passed'
+            ? 'success'
+            : value.execution.status === 'running'
+              ? 'info'
+              : 'error',
+        content: executionMessage(value),
+      })
     },
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
@@ -362,7 +370,13 @@ function requiredId(value: string | null): string {
 }
 
 function executionMessage(result: ExecutionDetail): string {
-  return result.execution.status === 'passed' ? '接口执行通过' : '接口执行完成'
+  const labels: Record<ExecutionDetail['execution']['status'], string> = {
+    passed: '接口执行通过',
+    running: '接口正在执行',
+    failed: '接口执行失败，请查看断言和响应',
+    error: '接口执行出错，请查看诊断',
+  }
+  return labels[result.execution.status]
 }
 
 async function withErrorMessage(

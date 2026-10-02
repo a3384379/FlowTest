@@ -185,9 +185,10 @@ export async function listTestSuites(
   search: string,
   tag: string,
   page = 1,
+  pageSize = 20,
 ): Promise<Page<TestSuite>> {
   const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
-    params: { page, page_size: 20, search: search || undefined, tag: tag || undefined },
+    params: { page, page_size: pageSize, search: search || undefined, tag: tag || undefined },
   })
   return response.data
 }

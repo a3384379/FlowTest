@@ -68,119 +68,117 @@ function mockViewport(width: number) {
     })
 }
 
-describe('grouped shell navigation', () => {
+describe('task rail and full module directory', () => {
   beforeEach(() => localStorage.clear())
   afterEach(() => vi.restoreAllMocks())
 
-  it('restores a manually expanded dashboard group on reload while an unconfigured dashboard stays closed', async () => {
+  async function openDirectory(browser: ReturnType<typeof userEvent.setup>) {
+    await browser.click(screen.getByRole('button', { name: '全部模块' }))
+    return within(await screen.findByRole('dialog'))
+  }
+
+  it('keeps the six task shortcuts and preserves deep links and drafts while searching the directory', async () => {
     const browser = userEvent.setup()
+    renderWorkspace()
+    expect(
+      within(screen.getByRole('navigation', { name: '常用任务' })).getAllByRole('link'),
+    ).toHaveLength(6)
+    const directory = await openDirectory(browser)
+    await browser.type(directory.getByLabelText('搜索模块'), '协议')
+    expect(directory.getByRole('link', { name: '多协议工作台' })).toHaveAttribute(
+      'href',
+      '/protocols',
+    )
+    expect(directory.queryByRole('link', { name: '平台管理' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/workflows?focus=node&proposal=p#draft',
+    )
+    expect(screen.getByLabelText('本地草稿')).toHaveValue('未保存草稿')
+  })
+
+  it('restores a manually expanded dashboard group without overwriting the old collapse preference', async () => {
+    const browser = userEvent.setup()
+    localStorage.setItem(
+      'flowtest:navigation:v1:alice',
+      JSON.stringify({ collapsed: true, openKeys: [] }),
+    )
     const view = renderWorkspace('/dashboard')
-    const group = screen.getByRole('menuitem', { name: '质量分析' })
+    const directory = await openDirectory(browser)
+    const group = directory.getByRole('menuitem', { name: '质量分析' })
     expect(group).toHaveAttribute('aria-expanded', 'false')
     await browser.click(group)
     view.unmount()
     renderWorkspace('/dashboard')
-    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
+    const restored = await openDirectory(browser)
+    expect(restored.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
-    await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
-    await browser.click(screen.getByRole('button', { name: '展开侧栏' }))
-    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
+    expect(JSON.parse(localStorage.getItem('flowtest:navigation:v1:alice')!).collapsed).toBe(true)
   })
 
-  it('keeps URL, local draft and manually closed active group stable across ordinary renders', async () => {
+  it('keeps a manually closed group stable across ordinary renders', async () => {
     const browser = userEvent.setup()
-    localStorage.setItem(
-      'flowtest:navigation:v1:alice',
-      JSON.stringify({ openKeys: ['nav:system'] }),
-    )
     renderWorkspace()
-    const group = screen.getByRole('menuitem', { name: '测试设计' })
-    expect(group).toHaveAttribute('aria-expanded', 'true')
+    const directory = await openDirectory(browser)
+    const group = directory.getByRole('menuitem', { name: '测试设计' })
     await browser.click(group)
     await browser.click(screen.getByRole('button', { name: '重新渲染' }))
     expect(group).toHaveAttribute('aria-expanded', 'false')
-    await browser.click(screen.getByRole('menuitem', { name: '项目与接口' }))
+    expect(screen.getByLabelText('本地草稿')).toHaveValue('普通 render')
+  })
+
+  it('tracks task navigation and browser history without discarding drafts', async () => {
+    const browser = userEvent.setup()
+    renderWorkspace()
+    await browser.click(screen.getByRole('link', { name: '测试报告' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/reports')
+    expect(screen.getByRole('link', { name: '测试报告' })).toHaveAttribute('aria-current', 'page')
+    await browser.click(screen.getByRole('button', { name: '后退' }))
     expect(screen.getByTestId('location')).toHaveTextContent(
       '/workflows?focus=node&proposal=p#draft',
     )
-    expect(screen.getByLabelText('本地草稿')).toHaveValue('普通 render')
-    await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
-    await browser.click(screen.getByRole('button', { name: '展开侧栏' }))
-    expect(screen.getByRole('menuitem', { name: '测试设计' })).toHaveAttribute(
+    const directory = await openDirectory(browser)
+    expect(directory.getByRole('menuitem', { name: '测试设计' })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
-    expect(screen.getByLabelText('本地草稿')).toHaveValue('普通 render')
+    expect(screen.getByLabelText('本地草稿')).toHaveValue('未保存草稿')
   })
 
-  it('navigates via row and collapsed dashboard icon activation without a text Link', async () => {
-    const browser = userEvent.setup()
-    renderWorkspace()
-    await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
-    await browser.click(screen.getByRole('menuitem', { name: '质量总览' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/dashboard')
-  })
-
-  it('opens the matching parent on Tab navigation and browser history, and uses an accordion', async () => {
-    const browser = userEvent.setup()
-    renderWorkspace()
-    await browser.click(screen.getByRole('menuitem', { name: '项目与接口' }))
-    expect(screen.getByRole('menuitem', { name: '测试设计' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
-    await browser.click(screen.getByRole('button', { name: '打开报告 Tab' }))
-    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
-    await browser.click(screen.getByRole('button', { name: '后退' }))
-    expect(screen.getByRole('menuitem', { name: '测试设计' })).toHaveAttribute(
-      'aria-expanded',
-      'true',
-    )
-    expect(screen.getByRole('menuitem', { name: '质量分析' })).toHaveAttribute(
-      'aria-expanded',
-      'false',
-    )
-  })
-
-  it('defaults the dashboard to closed parents and filters admin leaves after role changes', async () => {
+  it('filters administrator modules from both browsing and search after role changes', async () => {
     const browser = userEvent.setup()
     const view = renderWorkspace('/dashboard')
-    await browser.click(screen.getByRole('menuitem', { name: '系统管理' }))
-    await waitFor(() => expect(screen.getByRole('link', { name: '平台管理' })).toBeVisible())
+    const directory = await openDirectory(browser)
+    await browser.type(directory.getByLabelText('搜索模块'), '平台')
+    expect(directory.getByRole('link', { name: '平台管理' })).toBeVisible()
     view.rerender(
       <MemoryRouter initialEntries={['/dashboard']}>
         <Workspace admin={false} />
       </MemoryRouter>,
     )
-    await browser.click(screen.getByRole('menuitem', { name: '系统管理' }))
-    await waitFor(() => expect(screen.getByRole('link', { name: '组织治理' })).toBeVisible())
-    expect(screen.queryByRole('link', { name: '平台管理' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: '分布式执行面' })).not.toBeInTheDocument()
+    const filtered = await openDirectory(browser)
+    expect(filtered.queryByRole('link', { name: '平台管理' })).not.toBeInTheDocument()
+    await browser.clear(filtered.getByLabelText('搜索模块'))
+    await browser.click(filtered.getByRole('menuitem', { name: '系统管理' }))
+    await waitFor(() => expect(filtered.getByRole('link', { name: '组织治理' })).toBeVisible())
+    expect(filtered.queryByRole('link', { name: '分布式执行面' })).not.toBeInTheDocument()
   })
 
-  it('defaults compact screens to collapsed without overwriting the explicit desktop preference', async () => {
+  it('uses the same compact rail at desktop widths without changing saved preferences', () => {
     const resize = mockViewport(1100)
-    const browser = userEvent.setup()
+    localStorage.setItem(
+      'flowtest:navigation:v1:alice',
+      JSON.stringify({ collapsed: true, openKeys: [] }),
+    )
     renderWorkspace('/dashboard')
-    expect(screen.getByRole('button', { name: '展开侧栏' })).toBeVisible()
-    expect(localStorage.getItem('flowtest:navigation:v1:alice')).toBeNull()
-    resize(1440)
-    await browser.click(screen.getByRole('button', { name: '收起侧栏' }))
-    resize(1100)
+    expect(screen.getByRole('button', { name: '全部模块' })).toBeVisible()
     resize(1920)
-    expect(screen.getByRole('button', { name: '展开侧栏' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '全部模块' })).toBeVisible()
     expect(JSON.parse(localStorage.getItem('flowtest:navigation:v1:alice')!).collapsed).toBe(true)
   })
 
-  it('uses a narrow-screen drawer, closes after choosing a leaf and restores trigger focus', async () => {
+  it('closes the mobile directory on navigation or Escape and restores trigger focus', async () => {
     mockViewport(390)
     const browser = userEvent.setup()
     renderWorkspace('/dashboard')
@@ -194,6 +192,5 @@ describe('grouped shell navigation', () => {
     await browser.click(trigger)
     fireEvent.keyDown(await screen.findByRole('dialog'), { key: 'Escape', keyCode: 27 })
     await waitFor(() => expect(trigger).toHaveAttribute('aria-expanded', 'false'))
-    expect(localStorage.getItem('flowtest:navigation:v1:alice')).toEqual(expect.any(String))
   })
 })

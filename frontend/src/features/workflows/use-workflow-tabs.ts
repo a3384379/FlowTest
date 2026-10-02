@@ -149,6 +149,9 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     input.selectWorkflow(workflowId)
     const next = new URLSearchParams(input.searchParams)
     next.set('focus', workflowId)
+    next.delete('execution')
+    next.delete('node')
+    next.delete('attempt')
     input.setSearchParams(next, { replace: true })
   }
 
@@ -175,6 +178,9 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     input.selectWorkflow(null)
     const next = new URLSearchParams(input.searchParams)
     next.delete('focus')
+    next.delete('execution')
+    next.delete('node')
+    next.delete('attempt')
     input.setSearchParams(next, { replace: true })
   }
 

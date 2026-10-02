@@ -1,0 +1,27 @@
+number,module,route_baseline,existing_path,permission_guard,handler,new_navigation,test_or_screenshot,status
+1,质量总览,dashboard,frontend/src/pages/DashboardPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useDashboard,常用/质量总览,frontend/src/pages/DashboardPage.test.tsx,已验证
+2,接口管理,apis,frontend/src/pages/ApiConsolePage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useApiConsole / useWatch,常用/项目与接口,frontend/src/pages/ApiConsolePage.test.tsx,已验证
+3,服务目录,services,frontend/src/pages/ServiceCatalogPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useServiceCatalog,项目与接口,frontend/src/pages/ServiceCatalogPage.test.tsx,已映射
+4,请求目标,request-targets,frontend/src/pages/RequestTargetsPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useMessage / useEnvironmentSelection,项目与接口,frontend/src/pages/RequestTargetsPage.test.tsx,已映射
+5,多协议工作台,protocols,frontend/src/pages/ProtocolWorkbenchPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useProtocolInventory / useSelectedAsset / useWatch,项目与接口,frontend/src/pages/ProtocolWorkbenchPage.test.tsx,已映射
+6,项目管理,settings,frontend/src/pages/ProjectsPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useProjectsPageState / useApp,项目与接口,frontend/src/pages/ProjectsPage.test.tsx,已映射
+7,流程编排,workflows,frontend/src/pages/WorkflowsPage.tsx,登录与 ProjectProvider；项目 capabilities.edit 控制设计器；执行与发布沿用 useWorkflows,useWorkflows / useWorkflowTabs / useFailedRecordPage,常用/测试设计,frontend/src/pages/WorkflowsPage.test.tsx,已验证
+8,测试用例,assets,frontend/src/pages/TestAssetsPage.tsx,ProjectProvider；既有项目 permissions capabilities；服务端授权保持,useTestAssets / runCase / addCaseToPlan / listLatestCaseRuns / createAssetPlan / runTestPlan / getAssetRun,常用/测试设计,TestAssetsPage / TestAssetsWorkspace / AssetPlanDialog 回归；指定旧版本直接运行/加入已有计划；28–34 本地截图,已验证
+9,数据与 Mock,data,frontend/src/pages/DataMockPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useApp / useWatch,测试设计,frontend/src/pages/DataMockPage.test.tsx,已映射
+10,契约中心,contracts,frontend/src/pages/ContractHubPage.tsx,登录与项目作用域；useContractHub 的 feature flag 与服务端授权,useContractHub,测试设计,frontend/src/pages/ContractHubPage.test.tsx,已映射
+11,测试工程,test-engineering,frontend/src/pages/TestEngineeringPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useTestEngineering / useEndpointVariants / useWatch,测试设计,frontend/src/pages/TestEngineeringPage.test.tsx,已映射
+12,任务执行,tasks,frontend/src/pages/TestPlansPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useTestPlans / useWatch,执行与环境,frontend/src/pages/TestPlansPage.test.tsx,已映射
+13,环境实验室,environments,frontend/src/pages/EnvironmentLabPage.tsx,登录与项目作用域；系统管理员才可注册模板；实例/TTL 沿用 useEnvironmentLab,useEnvironmentLab / useWatch,执行与环境,frontend/src/pages/EnvironmentLabPage.test.tsx,已映射
+14,性能实验室,performance,frontend/src/pages/PerformanceLabPage.tsx,登录与项目作用域；usePerformanceLab；默认不自动产生负载,usePerformanceLab / useWatch,执行与环境,frontend/src/pages/PerformanceLabPage.test.tsx,已映射
+15,测试报告,reports,frontend/src/pages/ReportsPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useReports,常用/质量分析,frontend/src/pages/ReportsPage.test.tsx,已验证
+16,影响分析,impact,frontend/src/pages/ImpactAnalysisPage.tsx,登录与项目作用域；Impact feature flag；沿用 useImpactAnalysis,useImpactAnalysis,质量分析,frontend/src/pages/ImpactAnalysisPage.test.tsx,已映射
+17,变更回归,change-regression,frontend/src/pages/ChangeRegressionPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useChangeRegression / useForm / useWatch,质量分析,frontend/src/pages/ChangeRegressionPage.test.tsx,已映射
+18,质量中心,quality,frontend/src/pages/QualityCenterPage.tsx,登录与项目作用域；Quality feature flag；沿用 useQualityCenter,useQualityCenter,质量分析,frontend/src/pages/QualityCenterPage.test.tsx,已映射
+19,发布门禁,release,frontend/src/pages/ReleaseGatePage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useReleaseGate,常用/质量分析,frontend/src/pages/ReleaseGatePage.test.tsx,已验证
+20,AI 助手,ai,frontend/src/pages/AIAssistantPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useAIReview / useSuggestionReview / useApp,AI 与集成,frontend/src/pages/AIAssistantPage.test.tsx,已映射
+21,上下文检查器,contexts,frontend/src/pages/ContextInspectorPage.tsx,登录与 ProjectProvider；项目作用域及现有服务端授权,useContextInspector,AI 与集成,frontend/src/pages/ContextInspectorPage.test.tsx,已映射
+22,AI 变更集,ai-changes,frontend/src/pages/AIChangeSetsPage.tsx,登录与项目作用域；人工逐项审核后仅修改草稿,useAIChangeSets / useWatch,AI 与集成,frontend/src/pages/AIChangeSetsPage.test.tsx,已映射
+23,MCP 变更集,mcp-changes,frontend/src/pages/MCPChangeSetsPage.tsx,登录；精确 focus ID；manual_approval_required 与 approval ID；服务端授权,useApp,AI 与集成,frontend/src/pages/MCPChangeSetsPage.test.tsx,已映射
+24,组织治理,/organization,frontend/src/pages/OrganizationGovernancePage.tsx,登录；canManage=系统管理员或 owner/admin；canRotate=系统管理员或 owner；创建组织仅系统管理员,useApp / useOrganizationWorkspace / useForm,系统管理,frontend/src/pages/OrganizationGovernancePage.test.tsx,已映射
+25,分布式执行面,/execution-fabric,frontend/src/pages/ExecutionFabricPage.tsx,登录；页面系统管理员守卫；非管理员导航不显示,useApp,系统管理,frontend/src/pages/ExecutionFabricPage.test.tsx,已映射
+26,平台管理,/platform,frontend/src/pages/PlatformCapabilitiesPage.tsx,登录；管理数据查询 enabled=isSystemAdmin；非管理员导航不显示,useSystemAdminStatus / usePlatformInventory / useSelectedCapability,系统管理,frontend/src/pages/PlatformCapabilitiesPage.test.tsx,已映射

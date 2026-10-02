@@ -294,6 +294,64 @@ describe('TestAssetsPage', () => {
     expect(screen.getByDisplayValue(testSuite.name)).toHaveValue(testSuite.name)
   })
 
+  it('keeps a suite member on its saved version when only metadata changes', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const older = {
+      ...testSuite,
+      draft_definition: { items: [{ test_case_id: testCase.id, test_case_version: 1 }] },
+    }
+    render(
+      <AntdApp>
+        <SuiteDialog
+          current={older}
+          cases={[testCase]}
+          folders={[folder]}
+          submitting={false}
+          onClose={vi.fn()}
+          onSave={onSave}
+        />
+      </AntdApp>,
+    )
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('说明'), { target: { value: '更新说明' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }))
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: '更新说明',
+          items: [{ test_case_id: testCase.id, test_case_version: 1 }],
+        }),
+      ),
+    )
+  })
+
+  it('allows an explicit member-version change without changing other members', () => {
+    const previous = [{ test_case_id: testCase.id, test_case_version: 1 }]
+    const values = { name: '版本测试', description: '', tags: [], caseIds: [testCase.id] }
+    expect(
+      suiteInput(values, [testCase], { ...testSuite, draft_definition: { items: previous } }).items,
+    ).toEqual(previous)
+    expect(
+      suiteInput({ ...values, memberVersions: { [testCase.id]: 2 } }, [testCase], {
+        ...testSuite,
+        draft_definition: { items: previous },
+      }).items,
+    ).toEqual([{ test_case_id: testCase.id, test_case_version: 2 }])
+    expect(
+      caseInput(
+        {
+          name: '用例',
+          description: '',
+          tags: [],
+          workflowId: workflow.id,
+          workflowVersion: null,
+          environmentId: environment.id,
+        },
+        testCase.draft_definition,
+      ).definition.workflow_version,
+    ).toBeNull()
+  })
+
   it('dispatches suite row actions and renders a structured version diff', async () => {
     const state = assetState()
     const diff = {

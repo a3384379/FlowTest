@@ -3,7 +3,7 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
-import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
+import { useRouteScopedSelection, useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   createNotificationWebhook,
@@ -28,9 +28,10 @@ export function useReports(initialExecutionId?: string) {
   )
   const [webhookOpen, setWebhookOpen] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
+  const [page, setPage] = useRouteScopedState(projectId, 'report-list', 1)
   const reports = useQuery({
-    queryKey: ['reports', projectId],
-    queryFn: () => listReportExecutions(required(projectId)),
+    queryKey: ['reports', projectId, page],
+    queryFn: () => listReportExecutions(required(projectId), page),
     enabled: Boolean(projectId),
     refetchInterval: (query) =>
       query.state.data?.items.some((item) => item.status === 'running') ? 1000 : false,
@@ -44,6 +45,7 @@ export function useReports(initialExecutionId?: string) {
     queryKey: ['report-detail', projectId, selectedExecutionId],
     queryFn: () => getReportExecution(required(projectId), required(selectedExecutionId)),
     enabled: Boolean(projectId && selectedExecutionId),
+    refetchInterval: (query) => (query.state.data?.summary.status === 'running' ? 1000 : false),
   })
   const webhooks = useQuery({
     queryKey: ['notification-webhooks', projectId],
@@ -107,6 +109,8 @@ export function useReports(initialExecutionId?: string) {
     projectId,
     setProjectSelection: selectProject,
     reports,
+    page,
+    setPage,
     trend,
     detail,
     selectedExecutionId,

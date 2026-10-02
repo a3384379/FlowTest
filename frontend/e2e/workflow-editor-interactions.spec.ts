@@ -74,14 +74,12 @@ test('HIST/KEY/PAL：拖动单事务、输入焦点保护和节点库新增', as
   await page.getByRole('button', { name: '应用节点配置', exact: true }).click()
   await expect(page.getByText('节点内容已从外部更新', { exact: false })).toHaveCount(0)
   await closeInspector(page)
-  await page.getByRole('button', { name: 'plus 添加节点', exact: true }).click()
-  await page.getByRole('button', { name: '基础', exact: true }).click()
-  await page
-    .locator('.workflow-library-card')
+  const library = page.getByRole('complementary', { name: '节点库', exact: true })
+  await library
+    .locator('.workflow-library-row')
     .filter({ hasText: '等待' })
-    .dragTo(page.getByLabel('工作流画布', { exact: true }), { targetPosition: { x: 180, y: 140 } })
+    .dragTo(page.locator('.react-flow__pane'), { targetPosition: { x: 180, y: 140 } })
   await expect(page.locator('.react-flow__node')).toHaveCount(4)
-  await page.getByRole('button', { name: '返回画布', exact: true }).click()
   await page.getByRole('button', { name: 'undo 撤销', exact: true }).click()
   await expect(page.locator('.react-flow__node')).toHaveCount(3)
 })

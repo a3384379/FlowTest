@@ -15,12 +15,14 @@ test('S30 发布风险证据经 AI 变更集逐项审核后只生成草稿', asy
   await expect(page.getByRole('heading', { name: '质量中心' })).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: '分析发布风险' }).click()
   const riskDialog = page.getByRole('dialog', { name: '分析发布风险' })
+  await expect(riskDialog).toBeVisible()
+  await expect(riskDialog).not.toHaveClass(/ant-zoom.*-(appear|enter|leave)/)
   await riskDialog.getByLabel('候选版本').fill('S30 浏览器 RC')
   await riskDialog.getByLabel('影响分析').click()
-  await page
-    .getByText(/S30 浏览器影响分析/)
-    .last()
-    .click()
+  const impactDropdown = page.locator('.ant-select-dropdown:visible').last()
+  await expect(impactDropdown.getByText(/S30 浏览器影响分析/)).toBeVisible()
+  await expect(impactDropdown).not.toHaveClass(/ant-slide-up-(?:appear|enter|leave)/)
+  await impactDropdown.getByText(/S30 浏览器影响分析/).click()
   const riskCreated = page.waitForResponse(
     (response) =>
       response.url().endsWith('/release-risks') && response.request().method() === 'POST',
@@ -36,12 +38,14 @@ test('S30 发布风险证据经 AI 变更集逐项审核后只生成草稿', asy
   await expect(page.getByText(/AI 只生成草稿/)).toBeVisible()
   await page.getByRole('button', { name: '生成 Draft Change Set' }).click()
   const changeSetDialog = page.getByRole('dialog', { name: '生成 Draft Change Set' })
+  await expect(changeSetDialog).toBeVisible()
+  await expect(changeSetDialog).not.toHaveClass(/ant-zoom.*-(appear|enter|leave)/)
   await changeSetDialog.getByLabel('变更集名称').fill('S30 浏览器 Draft Change Set')
   await changeSetDialog.getByLabel('发布风险证据').click()
-  await page
-    .getByText(/S30 浏览器 RC/)
-    .last()
-    .click()
+  const riskDropdown = page.locator('.ant-select-dropdown:visible').last()
+  await expect(riskDropdown.getByText(/S30 浏览器 RC/)).toBeVisible()
+  await expect(riskDropdown).not.toHaveClass(/ant-slide-up-(?:appear|enter|leave)/)
+  await riskDropdown.getByText(/S30 浏览器 RC/).click()
   const changeSetCreated = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/v1/ai/change-sets') && response.request().method() === 'POST',

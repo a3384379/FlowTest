@@ -132,6 +132,48 @@ describe('WorkflowsPage', () => {
     expect(missingRequests).toBe(0)
   })
 
+  it('opens a report deep link in the frozen execution and locates its node', async () => {
+    renderPage(
+      `/projects/${project.id}/workflows?focus=${workflow.id}&execution=${workflowRunningExecution.id}&node=api&attempt=1`,
+    )
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    expect(screen.getByText('执行版本 v2')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '查询用户', level: 5 })).toBeVisible()
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    expect(screen.getByRole('link', { name: '查看完整报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=${workflowRunningExecution.id}&node=api&attempt=1`,
+    )
+  })
+
+  it('keeps the execution snapshot readable after its workflow was removed', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflows/${workflow.id}`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'WORKFLOW_NOT_FOUND',
+              message: '流程已删除',
+              trace_id: 'history-removed',
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    )
+    renderPage(
+      `/projects/${project.id}/workflows?focus=${workflow.id}&execution=${workflowRunningExecution.id}&node=api`,
+    )
+    expect(await screen.findByRole('heading', { name: '查询用户', level: 5 })).toBeVisible()
+    expect(screen.getByText('执行版本 v2')).toBeVisible()
+    expect(screen.getByTestId('rf__node-api')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存草稿' })).not.toBeInTheDocument()
+  })
+
   it('debugs the selected workflow without changing its definition', async () => {
     renderPage()
     const browser = userEvent.setup()
@@ -182,7 +224,7 @@ describe('WorkflowsPage', () => {
     expect(await screen.findByText('工作流执行通过')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /保存草稿/ })).toBeEnabled()
     expect(screen.getAllByText('查询用户').length).toBeGreaterThan(0)
-    expect(screen.getByText('2')).toBeVisible()
+    expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByTestId('workflow-replay-api'))
     expect(await screen.findByText('节点重放完成')).toBeInTheDocument()
     expect(screen.getByText('节点重放结果')).toBeVisible()
@@ -293,7 +335,7 @@ describe('WorkflowsPage', () => {
       expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
       await browser.click(screen.getByTestId('workflow-runtime-tab-run'))
       await browser.click(await screen.findByRole('button', { name: /派生重跑失败项/ }))
-      const dialog = screen.getByRole('dialog', { name: '派生重跑失败项' })
+      const dialog = await screen.findByRole('dialog', { name: '派生重跑失败项' })
       expect(within(dialog).getByText(/原报告保留/)).toBeInTheDocument()
       await browser.click(within(dialog).getByRole('combobox', { name: '选择失败轮次' }))
       await browser.click(await screen.findByText('第 2 项（input_index 1）'))

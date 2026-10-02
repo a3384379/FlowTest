@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
+import { navigateMenu } from './support/navigation'
 
 type Identified = { id: string }
 
@@ -28,9 +29,10 @@ test('S31 全局搜索进入发布门禁并生成不可变 PASS 判断', async (
   await dialog.locator('.ant-modal-footer .ant-btn-primary').click()
   expect((await created).status()).toBe(201)
 
-  await expect(page.getByText('v3.0.0-rc.browser')).toBeVisible()
+  const decisionRow = page.getByRole('row').filter({ hasText: 'v3.0.0-rc.browser' })
+  await expect(decisionRow).toBeVisible()
   await expect(page.getByText('PASS').last()).toBeVisible()
-  await page.getByRole('button', { name: '查看证据' }).click()
+  await decisionRow.getByRole('button', { name: '查看证据' }).click()
   const detail = page.getByRole('dialog', { name: '发布判断证据' })
   await expect(detail.getByText(/历史判断只读/)).toBeVisible()
   await expect(detail.getByText('QUALITY_GATE_EVIDENCE_MISSING_OPTIONAL')).toBeVisible()
@@ -114,14 +116,11 @@ test('S31 质量指挥中心展示真实历史判断并保持证据深链', asyn
     'href',
     `/projects/${project.id}/impact`,
   )
-  await page
-    .getByRole('navigation', { name: '功能导航' })
-    .getByRole('menuitem', { name: '质量分析', exact: true })
-    .click()
-  await expect(page.getByRole('link', { name: '发布门禁' }).first()).toHaveAttribute(
-    'href',
-    `/projects/${project.id}/release`,
-  )
+  await expect(
+    page.getByRole('navigation', { name: '常用任务' }).getByRole('link', { name: '发布门禁' }),
+  ).toHaveAttribute('href', `/projects/${project.id}/release`)
+  await navigateMenu(page, '发布门禁')
+  await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/release$`))
 })
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {

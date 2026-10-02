@@ -8,7 +8,6 @@ import {
   Alert,
   Button,
   Card,
-  Descriptions,
   Form,
   Input,
   Modal,
@@ -22,6 +21,10 @@ import {
   Typography,
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
+import { useState } from 'react'
+import ReportExecutionWorkspace from '../features/reports/ReportExecutionWorkspace'
+import { executionAttempt } from '../features/workflows/execution-navigation'
+import { iceColors } from '../theme/ice-theme'
 
 import { ReportTrendChart } from '../features/reports/ReportTrendChart'
 import type { CreateNotificationWebhookInput } from '../features/reports/report-service'
@@ -31,20 +34,57 @@ import type {
   NotificationDelivery,
   NotificationWebhook,
   ReportExecution,
-  ReportNode,
 } from '../lib/api'
 
 export default function ReportsPage() {
-  const [searchParams] = useSearchParams()
-  const state = useReports(searchParams.get('execution') ?? undefined)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const reports = useReports(searchParams.get('execution') ?? undefined)
+  const state = {
+    ...reports,
+    selectExecution: (executionId: string | null) => {
+      const next = new URLSearchParams(searchParams)
+      next.delete('node')
+      next.delete('attempt')
+      if (executionId) next.set('execution', executionId)
+      else next.delete('execution')
+      setSearchParams(next)
+    },
+  }
+  if (state.selectedExecutionId && state.projectId)
+    return (
+      <ReportExecutionWorkspace
+        projectId={state.projectId}
+        executionId={state.selectedExecutionId}
+        detail={state.detail.data}
+        loading={state.detail.isLoading}
+        error={state.detail.error}
+        nodeId={searchParams.get('node')}
+        attempt={executionAttempt(searchParams)}
+        onSelectNode={(nodeId) => {
+          const next = new URLSearchParams(searchParams)
+          next.set('node', nodeId)
+          next.delete('attempt')
+          setSearchParams(next, { replace: true })
+        }}
+        onSelectAttempt={(nodeId, attempt) => {
+          const next = new URLSearchParams(searchParams)
+          next.set('node', nodeId)
+          next.set('attempt', String(attempt))
+          setSearchParams(next, { replace: true })
+        }}
+        onBack={() => state.selectExecution(null)}
+        onRetry={() => void state.detail.refetch()}
+        onExport={() => void state.exportHtml(state.selectedExecutionId!)}
+      />
+    )
   return (
-    <>
+    <div className="reports-page">
       <ReportHeading state={state} />
       <ReportOverview state={state} />
       <ExecutionCard state={state} />
       <NotificationCard state={state} />
       <ReportDialogs state={state} />
-    </>
+    </div>
   )
 }
 
@@ -82,56 +122,129 @@ function ReportHeading({ state }: { state: ReportState }) {
 }
 
 function ReportOverview({ state }: { state: ReportState }) {
-  const items = state.reports.data?.items ?? []
-  const passed = items.filter((item) => item.status === 'passed').length
-  const failed = items.filter((item) => item.status === 'failed').length
-  const passRate = items.length ? Math.round((passed * 1000) / items.length) / 10 : 0
   return (
     <>
-      <div className="stat-grid">
-        <Card>
-          <Statistic title="执行总数" value={state.reports.data?.total ?? 0} />
-        </Card>
-        <Card>
-          <Statistic title="通过" value={passed} styles={{ content: { color: '#22a06b' } }} />
-        </Card>
-        <Card>
-          <Statistic title="失败" value={failed} styles={{ content: { color: '#dc4446' } }} />
-        </Card>
-        <Card>
-          <Statistic title="通过率" value={passRate} suffix="%" />
-          <Progress percent={passRate} showInfo={false} strokeColor="#22a06b" />
-        </Card>
-      </div>
+      <ReportCounts data={state.reports.data} />
       <div className="report-overview-grid">
         <Card title="最近 7 日趋势" loading={state.trend.isLoading}>
           <ReportTrendChart trend={state.trend.data} />
         </Card>
         <Card title="失败分类">
-          <Space wrap>
-            {(state.trend.data?.failures ?? []).map((item) => (
-              <Tag color="red" key={item.category}>
-                {failureLabel(item.category)} {item.count}
-              </Tag>
-            ))}
-            {!state.trend.data?.failures.length && (
-              <Typography.Text type="secondary">暂无失败</Typography.Text>
-            )}
-          </Space>
+          <FailureCategories trend={state.trend.data} />
         </Card>
       </div>
     </>
   )
 }
 
-function ExecutionCard({ state }: { state: ReportState }) {
+function ReportCounts({ data }: { data: ReportState['reports']['data'] }) {
+  const items = data?.items ?? []
+  const passed = items.filter((item) => item.status === 'passed').length
+  const failed = items.filter((item) => item.status === 'failed').length
+  const passRate = items.length ? Math.round((passed * 1000) / items.length) / 10 : null
   return (
-    <Card title="执行中心" className="workflow-result-card" loading={state.reports.isLoading}>
+    <div className="stat-grid">
+      <Card>
+        <Statistic title="执行总数" value={data?.total ?? '—'} />
+      </Card>
+      <Card>
+        <Statistic
+          title="本页通过"
+          value={data ? passed : '—'}
+          styles={{ content: { color: iceColors.success } }}
+        />
+      </Card>
+      <Card>
+        <Statistic
+          title="本页失败"
+          value={data ? failed : '—'}
+          styles={{ content: { color: iceColors.danger } }}
+        />
+      </Card>
+      <ReportPassRate rate={passRate} passed={passed} count={data ? items.length : null} />
+    </div>
+  )
+}
+
+function ReportPassRate({
+  rate,
+  passed,
+  count,
+}: {
+  rate: number | null
+  passed: number
+  count: number | null
+}) {
+  return (
+    <Card>
+      <Statistic title="本页通过率" value={rate ?? '—'} suffix={rate === null ? undefined : '%'} />
+      <Typography.Text type="secondary">
+        {count === null ? '未提供本页记录' : `${passed}/${count} 条本页记录`}
+      </Typography.Text>
+      {rate !== null && (
+        <Progress percent={rate} showInfo={false} strokeColor={iceColors.success} />
+      )}
+    </Card>
+  )
+}
+
+function FailureCategories({ trend }: { trend: ReportState['trend']['data'] }) {
+  return (
+    <Space wrap>
+      {trend?.failures.map((item) => (
+        <Tag color="error" key={item.category}>
+          {failureLabel(item.category)} {item.count}
+        </Tag>
+      ))}
+      {!trend?.failures.length && (
+        <Typography.Text type="secondary">
+          {trend ? '最近 7 日暂无失败' : '未提供分类数据'}
+        </Typography.Text>
+      )}
+    </Space>
+  )
+}
+
+function ExecutionCard({ state }: { state: ReportState }) {
+  const [status, setStatus] = useState<string>('all')
+  const items = state.reports.data?.items ?? []
+  const visible = status === 'all' ? items : items.filter((item) => item.status === status)
+  return (
+    <Card
+      title="执行记录"
+      className="workflow-result-card"
+      loading={state.reports.isLoading}
+      extra={
+        <Select
+          aria-label="本页执行状态"
+          value={status}
+          onChange={setStatus}
+          style={{ width: 150 }}
+          options={[
+            { value: 'all', label: '本页全部状态' },
+            { value: 'failed', label: '本页失败' },
+            { value: 'passed', label: '本页通过' },
+            { value: 'running', label: '本页运行中' },
+            { value: 'cancelled', label: '本页已取消' },
+          ]}
+        />
+      }
+    >
+      <Typography.Paragraph type="secondary">
+        当前页 {visible.length} / {items.length} 条 · 全部记录 {state.reports.data?.total ?? '—'} 条
+      </Typography.Paragraph>
       <Table
         rowKey="id"
         size="small"
-        pagination={false}
-        dataSource={state.reports.data?.items ?? []}
+        pagination={{
+          current: state.page,
+          pageSize: 50,
+          total: state.reports.data?.total ?? 0,
+          showSizeChanger: false,
+          onChange: state.setPage,
+        }}
+        scroll={{ x: 800 }}
+        dataSource={visible}
         locale={{ emptyText: '暂无执行记录' }}
         columns={executionColumns(state)}
       />
@@ -143,6 +256,7 @@ function executionColumns(state: ReportState) {
   return [
     {
       title: '工作流',
+      width: 220,
       render: (_: unknown, item: ReportExecution) =>
         `${item.workflow_name} · v${item.workflow_version}`,
     },
@@ -168,7 +282,8 @@ function executionColumns(state: ReportState) {
       title: '耗时',
       dataIndex: 'duration_ms',
       width: 100,
-      render: (value: number | null) => (value === null ? '运行中' : `${value} ms`),
+      render: (value: number | null, item: ReportExecution) =>
+        value === null ? (item.status === 'running' ? '运行中' : '未提供') : `${value} ms`,
     },
     {
       title: '开始时间',
@@ -254,7 +369,6 @@ function NotificationCard({ state }: { state: ReportState }) {
 function ReportDialogs({ state }: { state: ReportState }) {
   return (
     <>
-      <ReportDetailDialog state={state} />
       <WebhookDialog
         open={state.webhookOpen}
         submitting={state.creatingWebhook}
@@ -273,81 +387,6 @@ function ReportDialogs({ state }: { state: ReportState }) {
         </Typography.Paragraph>
       </Modal>
     </>
-  )
-}
-
-function ReportDetailDialog({ state }: { state: ReportState }) {
-  const detail = state.detail.data
-  return (
-    <Modal
-      title="执行报告详情"
-      open={Boolean(state.selectedExecutionId)}
-      width={1040}
-      footer={null}
-      loading={state.detail.isLoading}
-      onCancel={() => state.selectExecution(null)}
-    >
-      {detail && (
-        <>
-          <Descriptions
-            size="small"
-            items={[
-              { key: 'workflow', label: '工作流', children: detail.summary.workflow_name },
-              { key: 'version', label: '版本', children: `v${detail.summary.workflow_version}` },
-              {
-                key: 'status',
-                label: '状态',
-                children: <StatusTag status={detail.summary.status} />,
-              },
-              { key: 'duration', label: '耗时', children: `${detail.summary.duration_ms ?? 0} ms` },
-            ]}
-          />
-          <Table
-            rowKey="id"
-            size="small"
-            pagination={false}
-            dataSource={detail.nodes}
-            expandable={{ expandedRowRender: (node) => <NodePayload node={node} /> }}
-            columns={[
-              { title: '步骤', dataIndex: 'name' },
-              { title: '类型', dataIndex: 'node_type' },
-              {
-                title: '状态',
-                dataIndex: 'status',
-                render: (value: string) => <StatusTag status={value} />,
-              },
-              { title: '尝试', dataIndex: 'attempts' },
-              {
-                title: '耗时',
-                dataIndex: 'duration_ms',
-                render: (value: number | null) => `${value ?? 0} ms`,
-              },
-              { title: '错误', dataIndex: 'error_message' },
-            ]}
-          />
-        </>
-      )}
-    </Modal>
-  )
-}
-
-function NodePayload({ node }: { node: ReportNode }) {
-  return (
-    <div className="report-payload-grid">
-      <Payload title="请求" value={node.request} />
-      <Payload title="响应" value={node.response} />
-      <Payload title="提取/断言" value={node.extraction ?? node.assertion} />
-      <Payload title="变量映射" value={node.input_mappings} />
-    </div>
-  )
-}
-
-function Payload({ title, value }: { title: string; value: unknown }) {
-  return (
-    <div>
-      <Typography.Text strong>{title}</Typography.Text>
-      <pre className="report-code">{JSON.stringify(value, null, 2) ?? '—'}</pre>
-    </div>
   )
 }
 

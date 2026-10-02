@@ -37,7 +37,8 @@ describe('App authentication', () => {
       useAuthStore.setState({ user: { ...user, is_system_admin: isAdmin } })
       renderApp(`/projects/${project.id}/dashboard`)
       await screen.findByRole('heading', { name: '质量指挥中心' })
-      const navigation = within(document.querySelector('.sidebar') as HTMLElement)
+      await userEvent.setup().click(screen.getByRole('button', { name: '全部模块' }))
+      const navigation = within(await screen.findByRole('dialog'))
       const sections = {
         dashboard: '质量总览',
         settings: '项目管理',
@@ -138,7 +139,6 @@ describe('App authentication', () => {
     expect(close).toBeInstanceOf(HTMLElement)
     fireEvent.click(close as HTMLElement)
     expect(screen.queryByRole('tab', { name: '接口管理' })).not.toBeInTheDocument()
-    await browser.click(screen.getByRole('menuitem', { name: '项目与接口' }))
     await browser.click(screen.getByRole('link', { name: '接口管理' }))
     expect(await screen.findByRole('tab', { name: '接口管理' })).toBeVisible()
     await browser.click(screen.getByRole('tab', { name: '质量总览' }))
@@ -286,11 +286,11 @@ describe('App authentication', () => {
 
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     expect((await screen.findAllByText(project.name)).length).toBeGreaterThanOrEqual(2)
+    await userEvent.setup().click(screen.getByRole('button', { name: '全部模块' }))
     await userEvent.setup().click(screen.getByRole('menuitem', { name: '项目与接口' }))
-    expect(screen.getByRole('link', { name: '接口管理' })).toHaveAttribute(
-      'href',
-      `/projects/${project.id}/apis`,
-    )
+    expect(
+      within(screen.getByRole('dialog')).getByRole('link', { name: '接口管理' }),
+    ).toHaveAttribute('href', `/projects/${project.id}/apis`)
     expect(screen.getByRole('link', { name: '服务目录' })).toHaveAttribute(
       'href',
       `/projects/${project.id}/services`,

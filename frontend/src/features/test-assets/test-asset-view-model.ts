@@ -107,15 +107,23 @@ export function suiteInput(
     tags: values.tags ?? [],
     items: values.caseIds.map((caseId) => ({
       test_case_id: caseId,
-      test_case_version:
-        values.memberVersions && Object.hasOwn(values.memberVersions, caseId)
-          ? values.memberVersions[caseId]
-          : (previous?.draft_definition.items.find((item) => item.test_case_id === caseId)
-              ?.test_case_version ??
-            cases.find((item) => item.id === caseId)?.current_version ??
-            null),
+      test_case_version: selectedMemberVersion(caseId, values, previous, cases),
     })),
   }
+}
+
+function selectedMemberVersion(
+  caseId: string,
+  values: SuiteFormValues,
+  previous: TestSuite | undefined,
+  cases: TestCase[],
+): number | null {
+  if (values.memberVersions && Object.hasOwn(values.memberVersions, caseId)) {
+    return values.memberVersions[caseId]
+  }
+  const saved = previous?.draft_definition.items.find((item) => item.test_case_id === caseId)
+  if (saved) return saved.test_case_version
+  return cases.find((item) => item.id === caseId)?.current_version ?? null
 }
 
 export function pageItems<T>(page: { items: T[] } | undefined): T[] {

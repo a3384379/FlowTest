@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import WorkflowRunInspector from './WorkflowRunInspector'
 import { workflowDefinition } from '../test/fixtures'
@@ -9,6 +9,32 @@ import type { WorkflowNodeExecution } from '../lib/api'
 import { server } from '../test/server'
 
 describe('WorkflowRunInspector', () => {
+  it('opens the linked attempt and reports a later attempt selection', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    const onSelectAttempt = vi.fn()
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={execution}
+        nodes={[execution]}
+        context={{}}
+        initialAttempt={1}
+        onSelectAttempt={onSelectAttempt}
+      />,
+    )
+    expect(screen.getByText('31.2 ms')).toBeVisible()
+    await browser.click(screen.getByRole('tab', { name: '响应' }))
+    expect(screen.getByText(/"busy"/)).toBeVisible()
+    expect(screen.queryByText(/"Ada"/)).not.toBeInTheDocument()
+    await selectAttempt(browser, /第 2 次/)
+    expect(onSelectAttempt).toHaveBeenCalledWith(2)
+    expect(screen.getAllByText('82.35 ms')[0]).toBeVisible()
+    expect(screen.getByText(/"Ada"/)).toBeVisible()
+  })
+
   it('shows an authorized download action for a stored response body', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()
@@ -284,7 +310,8 @@ describe('WorkflowRunInspector', () => {
       />,
     )
     expect(screen.getByText('pending')).toBeVisible()
-    expect(screen.getByText('计时中')).toBeVisible()
+    expect(screen.queryByText('计时中')).not.toBeInTheDocument()
+    expect(screen.getAllByText('未提供').length).toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('历史快照')).not.toBeInTheDocument()
 
     await browser.click(screen.getByRole('tab', { name: '请求' }))

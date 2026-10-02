@@ -5,15 +5,19 @@ import {
   FolderOpenOutlined,
   MinusCircleOutlined,
   MoreOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
 import {
+  Alert,
+  App,
   Button,
   Card,
   Dropdown,
   Form,
   Input,
+  InputNumber,
   Modal,
   Pagination,
   Radio,
@@ -26,11 +30,26 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
+import { useProjectContext } from '../features/projects/use-project-context'
+import AssetDetailDrawer from '../features/test-assets/AssetDetailDrawer'
+import AssetPlanDialog from '../features/test-assets/AssetPlanDialog'
+import { AssetHistoryNotice } from '../features/test-assets/AssetRunEvidence'
+import {
+  PublishedCaseBinding,
+  RecentAssetCell,
+  type AssetTableWorkspace,
+} from '../features/test-assets/AssetTableContext'
+import type {
+  AssetKind,
+  PublishedAssetTarget,
+} from '../features/test-assets/asset-workspace-service'
+import { useAssetHistory } from '../features/test-assets/use-asset-history'
 import {
   addCaseToPlan,
   getTestCase,
-  getTestSuite,
+  listLatestTestCaseRuns,
   listTestCaseVersions,
   type RunCaseInput,
 } from '../features/test-assets/test-asset-service'
@@ -65,85 +84,173 @@ import {
 } from '../lib/api'
 
 export default function TestAssetsPage() {
+  const { projectId } = useProjectContext()
+  return <TestAssetsWorkspace key={projectId} />
+}
+
+function TestAssetsWorkspace() {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { message } = App.useApp()
   const state = useTestAssets()
+  const history = useAssetHistory(state.projectId)
   const [caseEditor, setCaseEditor] = useState<TestCase | null | undefined>(undefined)
   const [suiteEditor, setSuiteEditor] = useState<TestSuite | null | undefined>(undefined)
   const [runCase, setRunCase] = useState<TestCase | null>(null)
   const [planCase, setPlanCase] = useState<TestCase | null>(null)
+  const [runVersion, setRunVersion] = useState<number>()
+  const [planVersion, setPlanVersion] = useState<number>()
   const [recentRun, setRecentRun] = useState<TestCaseRun | null>(null)
-  const [focusError, setFocusError] = useState<string | null>(null)
   const [selectedCases, setSelectedCases] = useState<string[]>([])
   const [selectedSuites, setSelectedSuites] = useState<string[]>([])
   const [folderId, setFolderId] = useState<string | null>(null)
+  const [casePage, setCasePage] = useState(1)
+  const [suitePage, setSuitePage] = useState(1)
+  const [plan, setPlan] = useState<{ targets: PublishedAssetTarget[]; execute: boolean } | null>(
+    null,
+  )
   const cases = pageItems(state.cases.data)
   const suites = pageItems(state.suites.data)
-  const publishedCases = pageItems(state.suiteCaseOptions.data).filter(
-    (item) => item.current_version,
-  )
+  const publishedCases = pageItems(state.caseOptions.data).filter((item) => item.current_version)
+  const browseFolder = searchParams.get('folder') ?? 'all'
+  function resetSelection() {
+    setSelectedCases([])
+    setSelectedSuites([])
+    setCasePage(1)
+    setSuitePage(1)
+  }
+  function browse(folder: string): void {
+    resetSelection()
+    const next = new URLSearchParams(searchParams)
+    next.set('folder', folder)
+    next.delete('focus')
+    next.delete('version')
+    setSearchParams(next)
+  }
   const focusedId = searchParams.get('focus') ?? undefined
   const focusedType = searchParams.get('type')
-  const projectId = state.projectId
-  const setSearch = state.setSearch
-  const setCasePage = state.setCasePage
-  const setSuitePage = state.setSuitePage
-  useEffect(() => {
-    if (!focusedId || !projectId || focusedType === 'contracts') return
-    let active = true
-    const request =
-      focusedType === 'suite'
-        ? getTestSuite(projectId, focusedId)
-        : getTestCase(projectId, focusedId)
-    void request
-      .then((item) => {
-        if (!active) return
-        setFocusError(null)
-        setSearch(item.name)
-        setCasePage(1)
-        setSuitePage(1)
-      })
-      .catch((reason: unknown) => {
-        if (active) setFocusError(`无法定位深链目标：${apiErrorMessage(reason)}`)
-      })
-    return () => {
-      active = false
-    }
-  }, [focusedId, focusedType, projectId, setCasePage, setSearch, setSuitePage])
   useEffect(() => {
     if (focusedType === 'contracts' && state.projectId) {
       navigate(`/projects/${state.projectId}/contracts?tab=automation`, { replace: true })
     }
   }, [focusedType, navigate, state.projectId])
+  function focus(kind: AssetKind, id: string) {
+    const next = new URLSearchParams(searchParams)
+    next.set('focus', id)
+    next.set('type', kind)
+    next.delete('version')
+    setSearchParams(next)
+  }
+  function setFocusVersion(version: number | 'draft') {
+    const next = new URLSearchParams(searchParams)
+    next.set('version', String(version))
+    setSearchParams(next)
+  }
+  function closeDetail() {
+    const next = new URLSearchParams(searchParams)
+    next.delete('focus')
+    next.delete('version')
+    setSearchParams(next)
+  }
+  async function action(operation: () => Promise<unknown>) {
+    try {
+      await operation()
+    } catch (error) {
+      void message.error(apiErrorMessage(error))
+    }
+  }
+  function changeTab(key: string) {
+    resetSelection()
+    const next = new URLSearchParams(searchParams)
+    next.set('type', key === 'suites' ? 'suite' : 'case')
+    next.delete('focus')
+    next.delete('version')
+    setSearchParams(next)
+  }
+  function openTarget(target: PublishedAssetTarget, execute: boolean) {
+    if (target.kind === 'suite') return setPlan({ targets: [target], execute })
+    void action(async () => {
+      const item = await getTestCase(state.projectId!, target.id)
+      if (execute) {
+        setRunVersion(target.version)
+        setRunCase(item)
+      } else {
+        setPlanVersion(target.version)
+        setPlanCase(item)
+      }
+    })
+  }
+  const workspace: AssetTableWorkspace = {
+    projectId: state.projectId ?? '',
+    page: casePage,
+    onPage: (page) => {
+      setCasePage(page)
+      setSelectedCases([])
+    },
+    onFocus: focus,
+    onPlan: openTarget,
+    workflows: pageItems(state.workflows.data),
+    history,
+    canEdit: state.canEdit,
+    canExecute: state.canExecute,
+  }
 
   return (
-    <>
-      <AssetHeading state={state} />
-      {focusError && <Typography.Text type="danger">{focusError}</Typography.Text>}
-      <AssetTabs
-        state={state}
-        cases={cases}
-        suites={suites}
-        publishedCases={publishedCases}
-        selectedCases={selectedCases}
-        selectedSuites={selectedSuites}
-        folderId={folderId}
-        setCaseEditor={setCaseEditor}
-        setSuiteEditor={setSuiteEditor}
-        setSelectedCases={setSelectedCases}
-        setSelectedSuites={setSelectedSuites}
-        setFolderId={setFolderId}
-        onRunCase={setRunCase}
-        onPlanCase={setPlanCase}
-        onViewRun={(run) => {
-          if (state.projectId)
-            navigate(
-              `/projects/${state.projectId}/workflows?focus=${run.workflow_id}&execution=${run.execution_id}`,
-            )
-        }}
-        focusedId={focusedId}
-        focusedType={focusedType}
-      />
+    <div className="test-assets-page">
+      <AssetHeading state={state} onFilter={() => resetSelection()} />
+      <div className="test-asset-workspace">
+        <AssetDirectory
+          folders={folderItems(state)}
+          selected={browseFolder}
+          cases={cases}
+          suites={suites}
+          loaded={Boolean(state.cases.data && state.suites.data)}
+          onBrowse={browse}
+        />
+        <div className="test-asset-main">
+          <AssetCatalogScope state={state} />
+          <AssetHistoryNotice history={history} />
+          <AssetTabs
+            state={state}
+            cases={filterLoadedAssets(cases, browseFolder)}
+            suites={filterLoadedAssets(suites, browseFolder)}
+            publishedCases={publishedCases}
+            selectedCases={selectedCases}
+            selectedSuites={selectedSuites}
+            folderId={folderId}
+            setCaseEditor={setCaseEditor}
+            setSuiteEditor={setSuiteEditor}
+            setSelectedCases={setSelectedCases}
+            setSelectedSuites={setSelectedSuites}
+            setFolderId={setFolderId}
+            focusedId={focusedId}
+            focusedType={focusedType}
+            workspace={workspace}
+            suiteWorkspace={{
+              ...workspace,
+              page: suitePage,
+              onPage: (page) => {
+                setSuitePage(page)
+                setSelectedSuites([])
+              },
+            }}
+            onChangeTab={changeTab}
+            onAction={action}
+            onPlan={(targets) => setPlan({ targets, execute: false })}
+            onRunCase={(item) => {
+              setRunVersion(undefined)
+              setRunCase(item)
+            }}
+            onPlanCase={(item) => {
+              setPlanVersion(undefined)
+              setPlanCase(item)
+            }}
+            onViewRun={(run) =>
+              navigate(`/projects/${state.projectId}/reports?execution=${run.execution_id}`)
+            }
+          />
+        </div>
+      </div>
       <AssetDialogs
         state={state}
         caseEditor={caseEditor}
@@ -153,10 +260,64 @@ export default function TestAssetsPage() {
         setSuiteEditor={setSuiteEditor}
       />
       {state.diff && <DiffDialog diff={state.diff} onClose={() => state.setDiff(null)} />}
+      <WorkspaceAssetDetail
+        state={state}
+        params={searchParams}
+        history={history}
+        onVersion={setFocusVersion}
+        onClose={closeDetail}
+        onEditCase={setCaseEditor}
+        onEditSuite={setSuiteEditor}
+        onPlan={openTarget}
+      />
+      <WorkspaceAssetPlan projectId={state.projectId} plan={plan} onClose={() => setPlan(null)} />
+      <WorkspaceCaseDialogs
+        state={state}
+        runCase={runCase}
+        runVersion={runVersion}
+        planCase={planCase}
+        planVersion={planVersion}
+        recentRun={recentRun}
+        setRunCase={setRunCase}
+        setPlanCase={setPlanCase}
+        setRecentRun={setRecentRun}
+        onNewPlan={(target) => setPlan({ targets: [target], execute: false })}
+      />
+    </div>
+  )
+}
+
+function WorkspaceCaseDialogs({
+  state,
+  runCase,
+  runVersion,
+  planCase,
+  planVersion,
+  recentRun,
+  setRunCase,
+  setPlanCase,
+  setRecentRun,
+  onNewPlan,
+}: {
+  state: AssetState
+  runCase: TestCase | null
+  runVersion?: number
+  planCase: TestCase | null
+  planVersion?: number
+  recentRun: TestCaseRun | null
+  setRunCase: (value: TestCase | null) => void
+  setPlanCase: (value: TestCase | null) => void
+  setRecentRun: (value: TestCaseRun | null) => void
+  onNewPlan: (target: PublishedAssetTarget) => void
+}) {
+  const navigate = useNavigate()
+  return (
+    <>
       {runCase && state.projectId && (
         <RunCaseDialog
           key={runCase.id}
           item={runCase}
+          initialVersion={runVersion}
           projectId={state.projectId}
           workflow={pageItems(state.workflows.data).find(
             (workflow) => workflow.id === runCase.draft_definition.workflow_id,
@@ -177,8 +338,13 @@ export default function TestAssetsPage() {
         <AddCaseToPlanDialog
           key={planCase.id}
           item={planCase}
+          initialVersion={planVersion}
           projectId={state.projectId}
           onClose={() => setPlanCase(null)}
+          onCreate={(version) => {
+            onNewPlan({ kind: 'case', id: planCase.id, name: planCase.name, version })
+            setPlanCase(null)
+          }}
         />
       )}
       {recentRun && (
@@ -203,10 +369,151 @@ export default function TestAssetsPage() {
   )
 }
 
+function AssetCatalogScope({ state }: { state: AssetState }) {
+  const loading = state.cases.isPending || state.suites.isPending
+  return (
+    <Typography.Paragraph type="secondary" className="asset-loaded-scope">
+      {loading
+        ? '正在分页读取完整资产目录…'
+        : `筛选命中 ${state.cases.data?.total ?? '—'} 个用例、${state.suites.data?.total ?? '—'} 个套件。`}
+    </Typography.Paragraph>
+  )
+}
+
+function WorkspaceAssetDetail(
+  props: Pick<
+    Parameters<typeof AssetDetailDrawer>[0],
+    'history' | 'onVersion' | 'onClose' | 'onEditCase' | 'onEditSuite' | 'onPlan'
+  > & {
+    state: AssetState
+    params: URLSearchParams
+  },
+) {
+  const { state, params } = props
+  const id = params.get('focus')
+  const type = params.get('type')
+  if (!state.projectId || !id || type === 'contracts') return null
+  return (
+    <AssetDetailDrawer
+      {...props}
+      key={`${type}:${id}`}
+      projectId={state.projectId}
+      kind={type === 'suite' ? 'suite' : 'case'}
+      id={id}
+      version={assetRouteVersion(params)}
+      workflows={pageItems(state.workflows.data)}
+      environments={state.environments.data ?? []}
+      cases={pageItems(state.caseOptions.data)}
+      canEdit={state.canEdit}
+      canExecute={state.canExecute}
+    />
+  )
+}
+
+function WorkspaceAssetPlan({
+  projectId,
+  plan,
+  onClose,
+}: {
+  projectId: string | null
+  plan: { targets: PublishedAssetTarget[]; execute: boolean } | null
+  onClose: () => void
+}) {
+  if (!projectId || !plan) return null
+  return (
+    <AssetPlanDialog
+      projectId={projectId}
+      targets={plan.targets}
+      execute={plan.execute}
+      onClose={onClose}
+    />
+  )
+}
+
+function assetRouteVersion(params: URLSearchParams): number | 'draft' | undefined {
+  const raw = params.get('version')
+  if (raw === 'draft') return raw
+  if (!raw || !/^[1-9]\d*$/.test(raw)) return undefined
+  const version = Number(raw)
+  return Number.isSafeInteger(version) ? version : undefined
+}
+
+function filterLoadedAssets<T extends { folder_id: string | null }>(
+  items: T[],
+  folder: string,
+): T[] {
+  if (folder === 'all') return items
+  return items.filter((item) => item.folder_id === (folder === 'unfiled' ? null : folder))
+}
+
+function AssetDirectory({
+  folders,
+  selected,
+  cases,
+  suites,
+  loaded,
+  onBrowse,
+}: {
+  folders: Folder[]
+  selected: string
+  cases: TestCase[]
+  suites: TestSuite[]
+  loaded: boolean
+  onBrowse: (folder: string) => void
+}) {
+  const entries = [
+    { id: 'all', name: '全部测试资产' },
+    { id: 'unfiled', name: '未分类' },
+    ...folders
+      .map((folder) => ({ ...folder, name: directoryPath(folder, folders) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+  ]
+  return (
+    <Card title="用例目录" className="test-asset-directory">
+      <nav aria-label="浏览测试资产目录">
+        {entries.map((entry) => (
+          <Button
+            key={entry.id}
+            type={selected === entry.id ? 'primary' : 'text'}
+            aria-pressed={selected === entry.id}
+            onClick={() => onBrowse(entry.id)}
+          >
+            <FolderOpenOutlined />
+            <span>{entry.name}</span>
+            <Tag>
+              {loaded
+                ? filterLoadedAssets(cases, entry.id).length +
+                  filterLoadedAssets(suites, entry.id).length
+                : '—'}
+            </Tag>
+          </Button>
+        ))}
+      </nav>
+      <Typography.Paragraph type="secondary">
+        数量覆盖全部筛选结果。批量移动目标在列表工具栏选择。
+      </Typography.Paragraph>
+    </Card>
+  )
+}
+
+function directoryPath(folder: Folder, folders: Folder[]): string {
+  const names = [folder.name]
+  const visited = new Set([folder.id])
+  let parentId = folder.parent_id
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId)
+    const parent = folders.find((item) => item.id === parentId)
+    if (!parent) break
+    names.unshift(parent.name)
+    parentId = parent.parent_id
+  }
+  return names.join(' / ')
+}
+
 type AssetState = ReturnType<typeof useTestAssets>
 type EditorSetter<T> = (value: T | null | undefined) => void
 
-function AssetHeading({ state }: { state: AssetState }) {
+function AssetHeading({ state, onFilter }: { state: AssetState; onFilter: () => void }) {
   return (
     <div className="page-heading">
       <div>
@@ -222,15 +529,20 @@ function AssetHeading({ state }: { state: AssetState }) {
           aria-label="搜索测试用例"
           allowClear
           placeholder="搜索名称或描述"
-          defaultValue={state.search}
-          onSearch={state.setSearch}
+          onSearch={(value) => {
+            onFilter()
+            state.setSearch(value)
+          }}
         />
         <Input
           aria-label="标签筛选"
           allowClear
           placeholder="标签筛选"
           value={state.tag}
-          onChange={(event) => state.setTag(event.target.value)}
+          onChange={(event) => {
+            onFilter()
+            state.setTag(event.target.value)
+          }}
         />
       </Space>
     </div>
@@ -255,15 +567,49 @@ function AssetTabs(props: {
   onViewRun: (run: TestCaseRun) => void
   focusedId?: string
   focusedType: string | null
+  workspace: AssetTableWorkspace
+  suiteWorkspace: AssetTableWorkspace
+  onChangeTab: (key: string) => void
+  onAction: (operation: () => Promise<unknown>) => Promise<void>
+  onPlan: (targets: PublishedAssetTarget[]) => void
 }) {
   return (
     <Card>
+      <AssetLoadErrors state={props.state} />
       <Tabs
         animated={false}
-        defaultActiveKey={props.focusedType === 'suite' ? 'suites' : 'cases'}
+        activeKey={props.focusedType === 'suite' ? 'suites' : 'cases'}
+        onChange={props.onChangeTab}
         items={[caseTab(props), suiteTab(props)]}
       />
     </Card>
+  )
+}
+
+function AssetLoadErrors({ state }: { state: AssetState }) {
+  const queries = [
+    state.cases,
+    state.suites,
+    state.workflows,
+    state.caseOptions,
+    state.environments,
+    state.folders,
+    state.permissions,
+  ]
+  const failed = queries.find((query) => query.error)
+  if (!failed) return null
+  return (
+    <Alert
+      type="error"
+      showIcon
+      title="资产数据读取失败"
+      description={apiErrorMessage(failed.error)}
+      action={
+        <Button onClick={() => void Promise.all(queries.map((query) => query.refetch()))}>
+          重新加载
+        </Button>
+      }
+    />
   )
 }
 
@@ -280,36 +626,38 @@ function caseTab(props: Parameters<typeof AssetTabs>[0]) {
         folderId={folderId}
         folders={folderItems(state)}
         createDisabled={
+          !state.canEdit ||
           !pageItems(state.workflows.data).some((workflow) => workflow.current_version !== null) ||
           !state.environments.data?.length
         }
         onFolderChange={setFolderId}
         onCreate={() => setCaseEditor(null)}
         onMove={() =>
-          void state.moveCases({ ids: selectedCases, folderId }).then(() => setSelectedCases([]))
+          void props.onAction(async () => {
+            await state.moveCases({ ids: selectedCases, folderId })
+            setSelectedCases([])
+          })
         }
+        moveDisabled={!state.canEdit}
+        onPlan={() => props.onPlan(selectedTargets('case', cases, selectedCases))}
+        planDisabled={!state.canEdit || !allPublished(cases, selectedCases)}
       >
-        <CaseTable
+        <WorkspaceCaseTable
           items={cases}
           workflows={pageItems(state.workflows.data)}
           environments={state.environments.data ?? []}
-          latestRuns={state.latestRuns.data}
-          latestLoading={state.latestRuns.isLoading}
-          latestError={state.latestRuns.isError}
-          total={state.cases.data?.total}
-          page={state.casePage}
-          onPageChange={state.setCasePage}
           focusedId={props.focusedId}
           loading={state.cases.isLoading}
           selected={selectedCases}
           onSelect={setSelectedCases}
           onEdit={setCaseEditor}
+          onPublish={(item) => void props.onAction(() => state.publishCase(item.id))}
+          onClone={(item) => void props.onAction(() => state.cloneCase(item))}
+          onDiff={(item) => void props.onAction(() => state.loadCaseDiff(item))}
+          workspace={props.workspace}
           onRun={props.onRunCase}
           onPlan={props.onPlanCase}
           onViewRun={props.onViewRun}
-          onPublish={(item) => void state.publishCase(item.id)}
-          onClone={(item) => void state.cloneCase(item)}
-          onDiff={(item) => void state.loadCaseDiff(item)}
         />
       </AssetPane>
     ),
@@ -336,30 +684,51 @@ function suiteTab(props: Parameters<typeof AssetTabs>[0]) {
         selected={selectedSuites}
         folderId={folderId}
         folders={folderItems(state)}
-        createDisabled={!publishedCases.length}
+        createDisabled={!state.canEdit || !publishedCases.length}
         onFolderChange={setFolderId}
         onCreate={() => setSuiteEditor(null)}
         onMove={() =>
-          void state.moveSuites({ ids: selectedSuites, folderId }).then(() => setSelectedSuites([]))
+          void props.onAction(async () => {
+            await state.moveSuites({ ids: selectedSuites, folderId })
+            setSelectedSuites([])
+          })
         }
+        moveDisabled={!state.canEdit}
+        onPlan={() => props.onPlan(selectedTargets('suite', suites, selectedSuites))}
+        planDisabled={!state.canEdit || !allPublished(suites, selectedSuites)}
       >
         <SuiteTable
           items={suites}
-          total={state.suites.data?.total}
-          page={state.suitePage}
-          onPageChange={state.setSuitePage}
           focusedId={props.focusedId}
           loading={state.suites.isLoading}
           selected={selectedSuites}
           onSelect={setSelectedSuites}
           onEdit={setSuiteEditor}
-          onPublish={(item) => void state.publishSuite(item.id)}
-          onClone={(item) => void state.cloneSuite(item)}
-          onDiff={(item) => void state.loadSuiteDiff(item)}
+          onPublish={(item) => void props.onAction(() => state.publishSuite(item.id))}
+          onClone={(item) => void props.onAction(() => state.cloneSuite(item))}
+          onDiff={(item) => void props.onAction(() => state.loadSuiteDiff(item))}
+          workspace={props.suiteWorkspace}
         />
       </AssetPane>
     ),
   }
+}
+
+function allPublished(items: Array<TestCase | TestSuite>, ids: string[]): boolean {
+  return (
+    ids.length > 0 &&
+    ids.every((id) => items.some((item) => item.id === id && item.current_version !== null))
+  )
+}
+
+function selectedTargets(
+  kind: AssetKind,
+  items: Array<TestCase | TestSuite>,
+  ids: string[],
+): PublishedAssetTarget[] {
+  return items
+    .filter((item) => ids.includes(item.id) && item.current_version !== null)
+    .map((item) => ({ kind, id: item.id, name: item.name, version: item.current_version! }))
 }
 
 function AssetDialogs({
@@ -424,6 +793,9 @@ export function AssetPane({
   onFolderChange,
   onCreate,
   onMove,
+  moveDisabled = false,
+  onPlan,
+  planDisabled = false,
   children,
 }: {
   title: string
@@ -434,6 +806,9 @@ export function AssetPane({
   onFolderChange: (value: string | null) => void
   onCreate: () => void
   onMove: () => void
+  moveDisabled?: boolean
+  onPlan?: () => void
+  planDisabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -450,12 +825,47 @@ export function AssetPane({
           options={folders.map((folder) => ({ value: folder.id, label: folder.name }))}
           onChange={(value?: string) => onFolderChange(value ?? null)}
         />
-        <Button icon={<FolderOpenOutlined />} disabled={!selected.length} onClick={onMove}>
+        <Button
+          icon={<FolderOpenOutlined />}
+          disabled={moveDisabled || !selected.length}
+          onClick={onMove}
+        >
           批量移动 ({selected.length})
         </Button>
+        {onPlan && (
+          <Button
+            icon={<PlayCircleOutlined />}
+            disabled={planDisabled || !selected.length}
+            onClick={onPlan}
+          >
+            加入计划 ({selected.length})
+          </Button>
+        )}
+        <Typography.Text type="secondary">仅选择当前页</Typography.Text>
       </Space>
       {children}
     </>
+  )
+}
+
+function WorkspaceCaseTable(props: Parameters<typeof CaseTable>[0]) {
+  const workspace = props.workspace!
+  const ids = props.items
+    .slice((workspace.page - 1) * 20, workspace.page * 20)
+    .map((item) => item.id)
+  const latest = useQuery({
+    queryKey: ['test-case-runs', workspace.projectId, ids.join('|')],
+    queryFn: () => listLatestTestCaseRuns(workspace.projectId, ids),
+    refetchInterval: (query) =>
+      query.state.data?.some((run) => ['queued', 'running'].includes(run.status)) ? 2000 : false,
+  })
+  return (
+    <CaseTable
+      {...props}
+      latestRuns={latest.data}
+      latestLoading={latest.isPending}
+      latestError={latest.isError}
+    />
   )
 }
 
@@ -466,9 +876,6 @@ export function CaseTable({
   latestRuns,
   latestLoading = false,
   latestError = false,
-  total,
-  page,
-  onPageChange,
   loading,
   selected,
   onSelect,
@@ -480,6 +887,7 @@ export function CaseTable({
   onClone,
   onDiff,
   focusedId,
+  workspace,
 }: {
   items: TestCase[]
   workflows?: Workflow[]
@@ -487,9 +895,6 @@ export function CaseTable({
   latestRuns?: TestCaseRun[]
   latestLoading?: boolean
   latestError?: boolean
-  total?: number
-  page?: number
-  onPageChange?: (page: number) => void
   loading: boolean
   selected: string[]
   onSelect: (ids: string[]) => void
@@ -501,20 +906,36 @@ export function CaseTable({
   onClone: (item: TestCase) => void
   onDiff: (item: TestCase) => void
   focusedId?: string
+  workspace?: AssetTableWorkspace
 }) {
   return (
     <Table
       rowKey="id"
       size="small"
       loading={loading}
-      pagination={
-        onPageChange ? { current: page, pageSize: 20, total, onChange: onPageChange } : false
-      }
+      pagination={assetPagination(workspace)}
+      scroll={workspace ? { x: 920 } : undefined}
       dataSource={items}
       rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       rowSelection={{ selectedRowKeys: selected, onChange: (keys) => onSelect(keys.map(String)) }}
       columns={[
-        { title: '名称', dataIndex: 'name' },
+        {
+          title: '用例',
+          dataIndex: 'name',
+          render: (name: string, item) =>
+            workspace ? (
+              <Button
+                type="link"
+                className="asset-name-button"
+                onClick={() => workspace.onFocus('case', item.id)}
+              >
+                {name}
+              </Button>
+            ) : (
+              name
+            ),
+        },
+        ...caseContextColumns(workspace),
         {
           title: '标签',
           dataIndex: 'tags',
@@ -524,12 +945,16 @@ export function CaseTable({
           title: '类型',
           render: (_, item) => (item.is_template ? <Tag color="purple">模板</Tag> : '用例'),
         },
-        {
-          title: '关联流程',
-          render: (_, item) =>
-            workflows.find((workflow) => workflow.id === item.draft_definition.workflow_id)?.name ??
-            '流程不可用',
-        },
+        ...(!workspace
+          ? [
+              {
+                title: '关联流程',
+                render: (_: unknown, item: TestCase) =>
+                  workflows.find((workflow) => workflow.id === item.draft_definition.workflow_id)
+                    ?.name ?? '流程不可用',
+              },
+            ]
+          : []),
         {
           title: '运行环境',
           render: (_, item) =>
@@ -573,6 +998,8 @@ export function CaseTable({
               onPublish={onPublish}
               onClone={onClone}
               onDiff={onDiff}
+              canEdit={workspace?.canEdit ?? true}
+              canExecute={workspace?.canExecute ?? true}
             />
           ),
         },
@@ -589,6 +1016,8 @@ function CaseRowActions({
   onPublish,
   onClone,
   onDiff,
+  canEdit,
+  canExecute,
 }: {
   item: TestCase
   onRun?: (item: TestCase) => void
@@ -597,22 +1026,32 @@ function CaseRowActions({
   onPublish: (item: TestCase) => void
   onClone: (item: TestCase) => void
   onDiff: (item: TestCase) => void
+  canEdit: boolean
+  canExecute: boolean
 }) {
   return (
     <Space size={0}>
-      <Button type="link" disabled={!onRun} onClick={() => onRun?.(item)}>
+      <Button
+        type="link"
+        disabled={!canEdit || !canExecute || !onRun}
+        onClick={() => onRun?.(item)}
+      >
         运行
       </Button>
-      <Button type="link" onClick={() => onEdit(item)}>
+      <Button type="link" disabled={!canEdit} onClick={() => onEdit(item)}>
         编辑
       </Button>
       <Dropdown
         trigger={['click']}
         menu={{
           items: [
-            { key: 'plan', label: '加入测试计划', disabled: !item.current_version || !onPlan },
-            { key: 'publish', label: '发布新版本' },
-            { key: 'clone', label: '克隆' },
+            {
+              key: 'plan',
+              label: '加入测试计划',
+              disabled: !canEdit || !item.current_version || !onPlan,
+            },
+            { key: 'publish', label: '发布新版本', disabled: !canEdit },
+            { key: 'clone', label: '克隆', disabled: !canEdit },
             {
               key: 'diff',
               label: '版本对比',
@@ -647,9 +1086,6 @@ function runStatusLabel(status: TestCaseRun['status']): string {
 
 export function SuiteTable({
   items,
-  total,
-  page,
-  onPageChange,
   loading,
   selected,
   onSelect,
@@ -658,11 +1094,9 @@ export function SuiteTable({
   onClone,
   onDiff,
   focusedId,
+  workspace,
 }: {
   items: TestSuite[]
-  total?: number
-  page?: number
-  onPageChange?: (page: number) => void
   loading: boolean
   selected: string[]
   onSelect: (ids: string[]) => void
@@ -671,22 +1105,38 @@ export function SuiteTable({
   onClone: (item: TestSuite) => void
   onDiff: (item: TestSuite) => void
   focusedId?: string
+  workspace?: AssetTableWorkspace
 }) {
   return (
     <Table
       rowKey="id"
       size="small"
       loading={loading}
-      pagination={
-        onPageChange ? { current: page, pageSize: 20, total, onChange: onPageChange } : false
-      }
+      pagination={assetPagination(workspace)}
+      scroll={workspace ? { x: 800 } : undefined}
       dataSource={items}
       rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       rowSelection={{ selectedRowKeys: selected, onChange: (keys) => onSelect(keys.map(String)) }}
       columns={[
-        { title: '名称', dataIndex: 'name' },
         {
-          title: '用例数',
+          title: '套件',
+          dataIndex: 'name',
+          render: (name: string, item) =>
+            workspace ? (
+              <Button
+                type="link"
+                className="asset-name-button"
+                onClick={() => workspace.onFocus('suite', item.id)}
+              >
+                {name}
+              </Button>
+            ) : (
+              name
+            ),
+        },
+        ...suiteContextColumns(workspace),
+        {
+          title: '草稿用例数',
           render: (_, item) => item.draft_definition.items.length,
         },
         {
@@ -707,7 +1157,7 @@ export function SuiteTable({
         { title: '版本', render: (_, item) => versionLabel(item.current_version) },
         {
           title: '操作',
-          width: 310,
+          width: workspace ? 200 : 310,
           render: (_, item) => (
             <RowActions
               version={item.current_version}
@@ -715,6 +1165,8 @@ export function SuiteTable({
               onPublish={() => onPublish(item)}
               onClone={() => onClone(item)}
               onDiff={() => onDiff(item)}
+              compact={Boolean(workspace)}
+              canEdit={workspace?.canEdit ?? true}
             />
           ),
         },
@@ -723,38 +1175,107 @@ export function SuiteTable({
   )
 }
 
+function assetPagination(workspace: AssetTableWorkspace | undefined) {
+  if (!workspace) return false as const
+  return {
+    current: workspace.page,
+    pageSize: 20,
+    showSizeChanger: false,
+    onChange: workspace.onPage,
+    showTotal: (total: number) => `共 ${total} 条`,
+  }
+}
+
+function caseContextColumns(workspace: AssetTableWorkspace | undefined) {
+  if (!workspace) return []
+  return [
+    {
+      title: '已发布绑定流程',
+      width: 220,
+      render: (_: unknown, item: TestCase) => (
+        <PublishedCaseBinding item={item} workspace={workspace} />
+      ),
+    },
+  ]
+}
+
+function suiteContextColumns(workspace: AssetTableWorkspace | undefined) {
+  if (!workspace) return []
+  return [
+    {
+      title: '最近结果（近 20 次计划运行）',
+      width: 200,
+      render: (_: unknown, item: TestSuite) => (
+        <RecentAssetCell kind="suite" id={item.id} workspace={workspace} />
+      ),
+    },
+  ]
+}
+
 function RowActions({
   version,
   onEdit,
   onPublish,
   onClone,
   onDiff,
+  compact = false,
+  canEdit = true,
 }: {
   version: number | null
   onEdit: () => void
   onPublish: () => void
   onClone: () => void
   onDiff: () => void
+  compact?: boolean
+  canEdit?: boolean
 }) {
   return (
     <Space size={0}>
-      <Button type="link" icon={<EditOutlined />} onClick={onEdit}>
+      <Button type="link" icon={<EditOutlined />} disabled={!canEdit} onClick={onEdit}>
         编辑
       </Button>
-      <Button type="link" icon={<RocketOutlined />} onClick={onPublish}>
+      <Button type="link" icon={<RocketOutlined />} disabled={!canEdit} onClick={onPublish}>
         发布
       </Button>
-      <Button type="link" icon={<CopyOutlined />} onClick={onClone}>
-        克隆
-      </Button>
-      <Button
-        type="link"
-        icon={<DiffOutlined />}
-        disabled={!version || version < 2}
-        onClick={onDiff}
-      >
-        Diff
-      </Button>
+      {compact ? (
+        <Dropdown
+          menu={{
+            items: [
+              {
+                key: 'clone',
+                label: '克隆',
+                icon: <CopyOutlined />,
+                disabled: !canEdit,
+                onClick: onClone,
+              },
+              {
+                key: 'diff',
+                label: '版本比较',
+                icon: <DiffOutlined />,
+                disabled: !version || version < 2,
+                onClick: onDiff,
+              },
+            ],
+          }}
+          trigger={['click']}
+        >
+          <Button type="text" aria-label="更多资产操作" icon={<MoreOutlined />} />
+        </Dropdown>
+      ) : (
+        <>
+          <Button type="link" icon={<CopyOutlined />} disabled={!canEdit} onClick={onClone}>
+            克隆
+          </Button>
+          <Button
+            type="link"
+            icon={<DiffOutlined />}
+            disabled={!version || version < 2}
+            onClick={onDiff}
+          >
+            Diff
+          </Button>
+        </>
+      )}
     </Space>
   )
 }
@@ -811,6 +1332,17 @@ export function CaseDialog({
     if (!form.isFieldsTouched()) return onClose()
     Modal.confirm({ title: '放弃未保存的修改？', onOk: onClose })
   }
+  const [error, setError] = useState<string | null>(null)
+  async function save() {
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setError(null)
+    try {
+      await onSave(caseInput(values, definition, current?.is_template ?? false))
+    } catch (failure) {
+      setError(apiErrorMessage(failure))
+    }
+  }
   return (
     <Modal
       title={caseDialogTitle(current)}
@@ -819,11 +1351,7 @@ export function CaseDialog({
       destroyOnHidden
       confirmLoading={submitting}
       onCancel={close}
-      onOk={() =>
-        void form
-          .validateFields()
-          .then((values) => onSave(caseInput(values, definition, current?.is_template ?? false)))
-      }
+      onOk={() => void save()}
     >
       <Form form={form} layout="vertical" initialValues={caseDialogDefaults(current)}>
         <Form.Item name="name" label="用例名称" rules={[{ required: true }]}>
@@ -874,6 +1402,7 @@ export function CaseDialog({
         <KeyValueEditor name="runtimeVariables" title="测试变量" addLabel="添加变量" />
         <KeyValueEditor name="runtimeHeaders" title="请求头覆盖" addLabel="添加请求头" headers />
       </Form>
+      {error && <Alert type="error" showIcon title="保存用例失败" description={error} />}
     </Modal>
   )
 }
@@ -934,6 +1463,7 @@ function KeyValueEditor({
 
 export function RunCaseDialog({
   item,
+  initialVersion,
   projectId,
   workflow,
   environment,
@@ -942,6 +1472,7 @@ export function RunCaseDialog({
   onRun,
 }: {
   item: TestCase
+  initialVersion?: number
   projectId: string
   workflow?: Workflow
   environment?: Environment
@@ -951,9 +1482,9 @@ export function RunCaseDialog({
 }) {
   const { versions, loading, loadError } = useCaseVersions(projectId, item.id)
   const [source, setSource] = useState<RunCaseSource | undefined>(
-    item.current_version ? undefined : 'draft',
+    initialVersion ? 'published' : item.current_version ? undefined : 'draft',
   )
-  const [version, setVersion] = useState(item.current_version ?? undefined)
+  const [version, setVersion] = useState(initialVersion ?? item.current_version ?? undefined)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const error = loadError ?? submitError
   const canRun = canRunCase(source, version, versions, item.draft_fingerprint, loading, error)
@@ -1141,13 +1672,21 @@ function hasDraftChanges(item: TestCase, current: TestCaseVersion, workflow?: Wo
 
 export function AddCaseToPlanDialog({
   item,
+  initialVersion,
   projectId,
   onClose,
+  onCreate,
 }: {
   item: TestCase
+  initialVersion?: number
   projectId: string
   onClose: () => void
+  onCreate?: (version: number) => void
 }) {
+  const client = useQueryClient()
+  const { versions, loading, loadError } = useCaseVersions(projectId, item.id)
+  const [version, setVersion] = useState(initialVersion ?? item.current_version ?? undefined)
+  const selectedVersion = versions.find((candidate) => candidate.version === version)
   const [page, setPage] = useState(1)
   const [plans, setPlans] = useState<TestPlan[]>([])
   const [total, setTotal] = useState(0)
@@ -1172,10 +1711,12 @@ export function AddCaseToPlanDialog({
     }
   }, [projectId, page])
   const submit = async () => {
-    if (!item.current_version || !planId) return
+    if (!selectedVersion || !planId) return
     setSaving(true)
     try {
-      await addCaseToPlan(projectId, planId, item.id, item.current_version)
+      await addCaseToPlan(projectId, planId, item.id, selectedVersion.version)
+      await client.invalidateQueries({ queryKey: ['test-plans', projectId] })
+      await client.invalidateQueries({ queryKey: ['asset-plans', projectId] })
       onClose()
     } catch (reason) {
       setError(apiErrorMessage(reason))
@@ -1189,13 +1730,32 @@ export function AddCaseToPlanDialog({
       open
       onCancel={onClose}
       onOk={() => void submit()}
-      okButtonProps={{ disabled: !planId || !item.current_version }}
+      okButtonProps={{ disabled: !canJoinPlan(planId, selectedVersion, loading, loadError) }}
       confirmLoading={saving}
     >
       <Space direction="vertical" style={{ width: '100%' }}>
         <Typography.Text>
-          {item.name} · 固定用例 v{item.current_version}。加入计划不会立即执行。
+          {item.name} · 固定用例 v{version ?? '—'}。加入计划不会立即执行。
         </Typography.Text>
+        <Select
+          aria-label="加入计划的用例版本"
+          value={version}
+          loading={loading}
+          disabled={saving}
+          options={versions.map((candidate) => ({
+            value: candidate.version,
+            label: `用例 v${candidate.version}`,
+          }))}
+          onChange={setVersion}
+        />
+        {onCreate && (
+          <Button
+            disabled={!selectedVersion || saving || Boolean(loadError)}
+            onClick={() => selectedVersion && onCreate(selectedVersion.version)}
+          >
+            新建计划
+          </Button>
+        )}
         <Select
           aria-label="选择测试计划"
           value={planId}
@@ -1212,10 +1772,21 @@ export function AddCaseToPlanDialog({
             setPlanId(undefined)
           }}
         />
-        {error && <Typography.Text type="danger">{error}</Typography.Text>}
+        {(loadError || error) && (
+          <Typography.Text type="danger">{loadError ?? error}</Typography.Text>
+        )}
       </Space>
     </Modal>
   )
+}
+
+function canJoinPlan(
+  planId: string | undefined,
+  version: TestCaseVersion | undefined,
+  loading: boolean,
+  error: string | null,
+): boolean {
+  return Boolean(planId && version && !loading && !error)
 }
 
 export function SuiteDialog({
@@ -1234,7 +1805,17 @@ export function SuiteDialog({
   onSave: (input: TestSuiteDraftInput) => Promise<void>
 }) {
   const [form] = Form.useForm<SuiteFormValues>()
-  const selectedCaseIds = Form.useWatch('caseIds', form) as string[] | undefined
+  const [error, setError] = useState<string | null>(null)
+  async function save() {
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setError(null)
+    try {
+      await onSave(suiteInput(values, cases, current ?? undefined))
+    } catch (failure) {
+      setError(apiErrorMessage(failure))
+    }
+  }
   return (
     <Modal
       title={suiteDialogTitle(current)}
@@ -1242,42 +1823,19 @@ export function SuiteDialog({
       destroyOnHidden
       confirmLoading={submitting}
       onCancel={onClose}
-      onOk={() =>
-        void form
-          .validateFields()
-          .then((values) => onSave(suiteInput(values, cases, current ?? undefined)))
-      }
+      onOk={() => void save()}
     >
       <Form form={form} layout="vertical" initialValues={suiteDialogDefaults(current)}>
         <Form.Item name="name" label="套件名称" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
+        <SuiteCaseVersions form={form} cases={cases} current={current} />
         <Form.Item name="description" label="说明">
           <Input.TextArea rows={2} />
         </Form.Item>
         <Form.Item name="caseIds" label="已发布测试用例" rules={[{ required: true }]}>
           <Select mode="multiple" showSearch optionFilterProp="label" options={cases.map(option)} />
         </Form.Item>
-        {selectedCaseIds?.map((caseId) => {
-          const member = cases.find((candidate) => candidate.id === caseId)
-          return (
-            <Form.Item
-              key={caseId}
-              name={['memberVersions', caseId]}
-              label={`${member?.name ?? caseId} 的用例版本`}
-            >
-              <Select
-                options={[
-                  { value: null, label: '发布套件时使用最新用例版本' },
-                  ...Array.from({ length: member?.current_version ?? 0 }, (_, index) => ({
-                    value: index + 1,
-                    label: `固定 v${index + 1}`,
-                  })),
-                ]}
-              />
-            </Form.Item>
-          )
-        })}
         <Typography.Text type="secondary">
           套件成员独立运行；展示顺序不代表共享变量或响应。
         </Typography.Text>
@@ -1288,7 +1846,46 @@ export function SuiteDialog({
           <Select mode="tags" tokenSeparators={[',']} />
         </Form.Item>
       </Form>
+      {error && <Alert type="error" showIcon title="保存套件失败" description={error} />}
     </Modal>
+  )
+}
+
+function SuiteCaseVersions({
+  form,
+  cases,
+  current,
+}: {
+  form: ReturnType<typeof Form.useForm<SuiteFormValues>>[0]
+  cases: TestCase[]
+  current: TestSuite | null
+}) {
+  const ids: string[] = Form.useWatch('caseIds', form) ?? []
+  return (
+    <div className="suite-version-fields">
+      {ids.map((id) => {
+        const item = cases.find((candidate) => candidate.id === id)
+        const pinned = current?.draft_definition.items.find(
+          (candidate) => candidate.test_case_id === id,
+        )
+        return (
+          <Form.Item
+            key={id}
+            name={['memberVersions', id]}
+            label={`${item?.name ?? id}：用例版本`}
+            initialValue={pinned ? pinned.test_case_version : item?.current_version}
+            rules={[{ type: 'integer', min: 1 }]}
+            extra="留空时在发布套件时固定最新已发布用例版本。"
+          >
+            <InputNumber
+              min={1}
+              max={item?.current_version ?? undefined}
+              placeholder="发布时固定最新"
+            />
+          </Form.Item>
+        )
+      })}
+    </div>
   )
 }
 
