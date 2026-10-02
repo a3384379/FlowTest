@@ -1,3 +1,4 @@
+backend/uv.lock
 docs/design/README.md
 docs/design/ui-v5/acceptance.csv
 docs/design/ui-v5/changed-files.txt
@@ -42,6 +43,8 @@ frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-07-focus-mode-ch
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-08-run-mode-chromium-linux.png
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/1920x1080-09-history-mode-chromium-linux.png
 frontend/e2e/workflow-editor-visual.spec.ts-snapshots/README.md
+frontend/package.json
+frontend/pnpm-lock.yaml
 frontend/src/App.test.tsx
 frontend/src/App.tsx
 frontend/src/features/api-console/APIWorkbench.tsx

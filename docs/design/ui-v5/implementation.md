@@ -8,7 +8,7 @@
 - 需求来源：[用户指定的共享对话](https://chatgpt.com/share/6abef2e2-07b8-83ea-bfde-691d3d72d13b)，使用其最新 v5 冰蓝白完整实施交接包，而非较早的 v3/v4 方向。完整方案、状态契约、全模块/节点矩阵、视觉规范、实施提示与验收材料在编辑前已读取。
 - 原工作区：`/Volumes/雷电/project/FlowTest`，`codex/control-flow-validation`。开始时工作区干净。
 - 实施工作树：`/Users/sqz/Documents/Codex/2026-10-02/task/FlowTest`，`codex/ui-v5-ice-light`。
-- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本需求相对该主干的改动限于前端、浏览器验收和设计记录，没有新增后端、数据库、执行引擎或依赖改动。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
+- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本功能改动集中于前端、浏览器验收和设计记录，没有新增后端业务、数据库、执行引擎或 CI 治理改动。提交合并时另修复安全门禁发现的 urllib3 与 Axios 依赖漏洞，见下方独立记录。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
 - 本地 Node 22.22.0。主干同步后在实施工作树独立执行冻结锁文件安装，保留仓库的 pnpm 11.16 声明。Linux 浏览器验证使用 Playwright 1.62.1；构建与远程门禁按仓库声明执行。
 
 ## 实际改动
@@ -74,6 +74,14 @@
 ## 主干同步后的提交前验证
 
 主干同步保留认证 epoch 变化时清理查询缓存、草稿运行确认、运行变量/headers 和套件成员固定版本。用例工作区新增回归验证：跨 100 条记录的旧版用例直接运行、将指定旧版加入已有计划，两项均校验精确 API 请求且不触发隐式计划或执行。最终前端覆盖率复核为 111 文件、651 测试通过：语句 84.88%、分支 80.41%、函数 84.41%、行 87.19%（`github-viewport-coverage.log`），四项均通过 80% 阈值。格式、Lint/类型与构建均通过；最大化表单宽度和空分支条件问题已修复，新增四项无条件/显式分支回归。运行视图的自动居中和安全范围采用实测节点尺寸，避免初始高度与运行状态高度不同导致取景位移；补齐七项视口回归，修改前四项表征通过，修改后相关三文件/33项通过（`github-viewport-characterization.log`、`github-viewport-targeted.log`）。Linux 27 张视觉基线已复核；不更新基线的普通模式复跑共 9 项全部通过（`github-buildkit-browser-canonical-verified.log`）：包含登录、三视口几何、三视口共 27 个像素检查点、S15 用例/套件及 V1 治理/报告主路径。像素阈值仍为 0.003。S11 业务、重试、超时、取消、并行、权限及报告冒烟另行通过（`github-buildkit-s11-seed.log`）。默认、专注、运行和历史视图通过真实“适应画布”取景，先等待字体、节点和视口稳定；用例选项在弹窗及下拉动画完成后用普通点击选择。远程合并门禁单独确认。
+
+### 合并门禁发现的依赖阻断
+
+[PR #125](https://github.com/a3384379/FlowTest/pull/125) 首轮完整自动检查在 Python 依赖审计发现 urllib3 2.7.0 的三个已知漏洞。本地前端审计也发现 Axios 1.19.0 的七项高危问题。因此独立修复 `backend/uv.lock` 中的 urllib3 至 2.8.0，以及前端 Axios 最低版本/锁定版本至 1.20.0（包含其 follow-redirects 传递依赖 1.16.1）。未改动扫描规则或风险门槛，也没有升级测试框架和其他工具链。[urllib3 官方说明](https://urllib3.readthedocs.io/en/stable/changelog.html)与 [Axios 官方发布说明](https://github.com/axios/axios/releases/tag/v1.20.0)列明修复及兼容注意事项；定制 HTTPS 代理应核对 urllib3 的代理 TLS 配置变更。
+
+依赖修复后，在本工作树独立环境使用冻结安装和仓库声明的 pnpm 11.16.0 验证：Python 160 包审计无已知漏洞，源码安全 Ruff 通过，存储/转移/运行输出/文件授权四文件 15 项定向回归通过（`github-urllib3-audit.json`、`github-security-fixed-ruff.log`、`github-urllib3-targeted.log`）。前端格式、Lint/类型、构建及 111 文件/651 项全量覆盖率均通过，四项覆盖率与上述数值一致（`github-security-fixed-coverage.log`、`github-security-fixed-lint.log`、`github-security-fixed-build.log`）。前端审计高危/严重项为 0，保留两项 Vitest / @vitest/mocker 中危开发依赖条目作单独跟踪（同一 [GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9)，`github-node-audit-final.json`）；既有 `--audit-level high` 门禁保持。
+
+上述本地 Linux 浏览器检查在依赖修复前完成；修复后的完整浏览器与部署检查以最新 PR 提交的远程自动验证为准，不沿用旧提交的绿灯。隔离验证栈和临时进程已清理，原工作区仍干净，已有运行实例健康。
 
 以下为此前各轮验证记录，不能替代主干同步后的最终门禁。
 
