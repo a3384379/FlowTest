@@ -8,7 +8,7 @@
 - 需求来源：[用户指定的共享对话](https://chatgpt.com/share/6abef2e2-07b8-83ea-bfde-691d3d72d13b)，使用其最新 v5 冰蓝白完整实施交接包，而非较早的 v3/v4 方向。完整方案、状态契约、全模块/节点矩阵、视觉规范、实施提示与验收材料在编辑前已读取。
 - 原工作区：`/Volumes/雷电/project/FlowTest`，`codex/control-flow-validation`。开始时工作区干净。
 - 实施工作树：`/Users/sqz/Documents/Codex/2026-10-02/task/FlowTest`，`codex/ui-v5-ice-light`。
-- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本功能改动集中于前端、浏览器验收和设计记录，没有新增后端业务、数据库、执行引擎或 CI 治理改动。提交合并时另修复安全门禁发现的 urllib3 与 Axios 依赖漏洞，见下方独立记录。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
+- 首轮代码基线：`cfe3594d055e1feb988df18041ed9dbedda8bc6b`。提交准备阶段已同步 `main@f7c3459`，保留其认证会话修复、用例直接运行和依赖更新。本功能改动集中于前端、浏览器验收和设计记录，没有新增后端业务、数据库、执行引擎或 CI 治理改动。提交合并时另修复安全门禁发现的 urllib3、Axios 依赖漏洞及 Debian 运行层漏洞，见下方独立记录。GitHub 合并结果以 PR 和最新提交的 Required Gate 为准。
 - 本地 Node 22.22.0。主干同步后在实施工作树独立执行冻结锁文件安装，保留仓库的 pnpm 11.16 声明。Linux 浏览器验证使用 Playwright 1.62.1；构建与远程门禁按仓库声明执行。
 
 ## 实际改动
@@ -81,7 +81,11 @@
 
 依赖修复后，在本工作树独立环境使用冻结安装和仓库声明的 pnpm 11.16.0 验证：Python 160 包审计无已知漏洞，源码安全 Ruff 通过，存储/转移/运行输出/文件授权四文件 15 项定向回归通过（`github-urllib3-audit.json`、`github-security-fixed-ruff.log`、`github-urllib3-targeted.log`）。前端格式、Lint/类型、构建及 111 文件/651 项全量覆盖率均通过，四项覆盖率与上述数值一致（`github-security-fixed-coverage.log`、`github-security-fixed-lint.log`、`github-security-fixed-build.log`）。前端审计高危/严重项为 0，保留两项 Vitest / @vitest/mocker 中危开发依赖条目作单独跟踪（同一 [GHSA-82fw-gwwq-j7x9](https://github.com/advisories/GHSA-82fw-gwwq-j7x9)，`github-node-audit-final.json`）；既有 `--audit-level high` 门禁保持。
 
-上述本地 Linux 浏览器检查在依赖修复前完成；修复后的完整浏览器与部署检查以最新 PR 提交的远程自动验证为准，不沿用旧提交的绿灯。隔离验证栈和临时进程已清理，原工作区仍干净，已有运行实例健康。
+源码依赖修复后的镜像扫描进一步发现缓存 Python 基础层中的 OpenSSL 与 PCRE2 高危条目。`backend/Dockerfile` 的共享 Python 运行层、`mock-target/Dockerfile` 的 Python 构建后运行层定向更新 `libssl3t64`、`openssl-provider-legacy`、`libpcre2-8-0`，校验最低 Debian 修复版本分别为 `3.5.7-1~deb13u3`、`3.5.7-1~deb13u3`、`10.46-1~deb13u3`，使缓存或复用基础镜像仍取得修复库。使用原 Debian 签名源，不改 Python/Go 版本、基础镜像默认值、扫描忽略规则或门槛。修复依据为 [Debian OpenSSL 安全公告](https://security-tracker.debian.org/tracker/DSA-6531-1)及 [PCRE2 包状态](https://security-tracker.debian.org/tracker/source-package/pcre2)。
+
+运行层修复在本地 Linux arm64 完成：应用运行镜像使用已有阶段二 Python 基础镜像构建通过，mock 镜像使用其正常源码构建通过；两份 Dockerfile 的 `docker build --check` 无警告。实际应用镜像导入 `app.main` 并以独立本地 CA 验证 HTTPS 成功响应、错误主机名拒绝、不可信 CA 拒绝，保持严格证书校验；三个库实际版本均达到上述下限（`github-debian-runtime-build.log`、`github-debian-mock-build.log`、`github-debian-runtime-probe-local-tls-fixed.log`）。CI 路由 91 项定向回归通过（`github-runtime-routing-targeted.log`）。这些构建验证没有替代最新提交的 Linux amd64 全镜像扫描或 Compose 检查。
+
+上述本地 Linux 浏览器检查在依赖修复前完成；修复后的完整浏览器与部署检查以最新 PR 提交的远程自动验证为准，不沿用旧提交的绿灯。`1259622` 的完整 CI 后端、Windows 和升级回滚检查通过；前端两项测试超时，浏览器矩阵暴露旧导航/布局定位与 1280px 运行截图问题，尚待修复并重新验证。隔离验证栈和临时进程已清理，原工作区仍干净，已有运行实例健康。
 
 以下为此前各轮验证记录，不能替代主干同步后的最终门禁。
 

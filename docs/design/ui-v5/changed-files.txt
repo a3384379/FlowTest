@@ -1,3 +1,4 @@
+backend/Dockerfile
 backend/uv.lock
 docs/design/README.md
 docs/design/ui-v5/acceptance.csv
@@ -125,3 +126,4 @@ frontend/src/theme/AppearanceSettings.tsx
 frontend/src/theme/IceThemeProvider.tsx
 frontend/src/theme/ice-theme.ts
 frontend/src/theme/use-reduced-motion.ts
+mock-target/Dockerfile
