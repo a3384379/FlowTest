@@ -19,6 +19,7 @@ class TokenPair:
     access_token: str
     refresh_token: str
     user: User
+    refresh_session_id: UUID
 
 
 class AuthService:
@@ -38,6 +39,12 @@ class AuthService:
 
     async def login(self, *, email: str, password: str) -> TokenPair:
         user = await self._users.get_by_email(_normalize_login_identifier(email))
+        if user is None:
+            raise AppError(code="INVALID_CREDENTIALS", message="账号或密码错误", status_code=401)
+        user_id = user.id
+        await self._session.rollback()
+        locked = await self._users.lock_session_changes(user_id)
+        user = await self._users.get(user_id) if locked else None
         if (
             user is None
             or not user.is_active
@@ -76,34 +83,51 @@ class AuthService:
     async def rotate(self, refresh_token: str) -> TokenPair:
         token_hash = self._tokens.digest_refresh_token(refresh_token)
         current = await self._refresh_sessions.get_by_hash(token_hash)
+        if current is None:
+            raise _invalid_refresh_token()
+        user_id = current.user_id
+        await self._session.rollback()
+        if not await self._users.lock_session_changes(user_id):
+            raise _invalid_refresh_token()
+        current = await self._refresh_sessions.get_by_hash(token_hash)
         now = datetime.now(UTC)
-        if current is None or current.revoked_at is not None:
-            raise AppError(code="INVALID_REFRESH_TOKEN", message="登录状态已失效", status_code=401)
-        expires_at = current.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=UTC)
-        if expires_at <= now:
-            raise AppError(code="INVALID_REFRESH_TOKEN", message="登录状态已失效", status_code=401)
-        user = await self._users.get(current.user_id)
+        if current is None or current.user_id != user_id:
+            raise _invalid_refresh_token()
+        if current.revoked_at is not None:
+            if current.replaced_by_id is not None and _as_utc(current.revoked_at) > now - timedelta(
+                seconds=10
+            ):
+                raise AppError(
+                    code="REFRESH_ROTATION_CONFLICT",
+                    message="登录状态正在更新。请稍后重试。",
+                    status_code=409,
+                )
+            raise _invalid_refresh_token()
+        if _as_utc(current.expires_at) <= now:
+            raise _invalid_refresh_token()
+        user = await self._users.get(user_id)
         if user is None or not user.is_active:
-            raise AppError(code="INVALID_REFRESH_TOKEN", message="登录状态已失效", status_code=401)
+            raise _invalid_refresh_token()
+        if not await self._refresh_sessions.consume(session_id=current.id, now=now):
+            raise _invalid_refresh_token()
         pair = await self._issue_pair(user)
-        current.revoked_at = now
-        await self._session.flush()
-        replacement = await self._refresh_sessions.get_by_hash(
-            self._tokens.digest_refresh_token(pair.refresh_token)
-        )
-        current.replaced_by_id = replacement.id if replacement is not None else None
+        current.replaced_by_id = pair.refresh_session_id
         await self._session.commit()
         return pair
 
-    async def logout(self, refresh_token: str | None, *, actor_user_id: UUID | None) -> None:
+    async def logout(self, refresh_token: str | None) -> None:
+        actor_user_id: UUID | None = None
         if refresh_token:
-            stored = await self._refresh_sessions.get_by_hash(
-                self._tokens.digest_refresh_token(refresh_token)
-            )
-            if stored is not None and stored.revoked_at is None:
-                stored.revoked_at = datetime.now(UTC)
+            token_hash = self._tokens.digest_refresh_token(refresh_token)
+            stored = await self._refresh_sessions.get_by_hash(token_hash)
+            if stored is not None:
+                user_id = stored.user_id
+                await self._session.rollback()
+                if await self._users.lock_session_changes(user_id):
+                    stored = await self._refresh_sessions.get_by_hash(token_hash)
+                    if stored is not None and stored.user_id == user_id:
+                        actor_user_id = user_id
+                        await self._revoke_chain(stored)
         self._audit.record(
             actor_user_id=actor_user_id,
             project_id=None,
@@ -116,39 +140,71 @@ class AuthService:
     async def change_password(
         self, *, user: User, current_password: str, new_password: str
     ) -> None:
-        if not self._passwords.verify(user.password_hash, current_password):
+        user_id = user.id
+        await self._session.rollback()
+        if not await self._users.lock_session_changes(user_id):
+            raise AppError(code="INVALID_ACCESS_TOKEN", message="访问令牌无效", status_code=401)
+        current_user = await self._users.get(user_id)
+        if current_user is None or not current_user.is_active:
+            raise AppError(code="INVALID_ACCESS_TOKEN", message="访问令牌无效", status_code=401)
+        if not self._passwords.verify(current_user.password_hash, current_password):
             raise AppError(code="INVALID_PASSWORD", message="当前密码错误", status_code=400)
         if current_password == new_password:
             raise AppError(code="PASSWORD_REUSED", message="新密码不能与当前密码相同")
-        user.password_hash = self._passwords.hash(new_password)
-        user.requires_password_change = False
-        await self._refresh_sessions.revoke_all(user_id=user.id, revoked_at=datetime.now(UTC))
+        current_user.password_hash = self._passwords.hash(new_password)
+        current_user.requires_password_change = False
+        await self._refresh_sessions.revoke_all(user_id=user_id, revoked_at=datetime.now(UTC))
         self._audit.record(
-            actor_user_id=user.id,
+            actor_user_id=user_id,
             project_id=None,
             action="user.password_changed",
             resource_type="user",
-            resource_id=user.id,
+            resource_id=user_id,
         )
         await self._session.commit()
 
     async def _issue_pair(self, user: User) -> TokenPair:
         refresh_token = self._tokens.create_refresh_token()
-        self._refresh_sessions.add(
-            RefreshSession(
-                user_id=user.id,
-                token_hash=self._tokens.digest_refresh_token(refresh_token),
-                expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_days),
-                revoked_at=None,
-                replaced_by_id=None,
-            )
+        refresh_session = RefreshSession(
+            user_id=user.id,
+            token_hash=self._tokens.digest_refresh_token(refresh_token),
+            expires_at=datetime.now(UTC) + timedelta(days=settings.refresh_token_days),
+            revoked_at=None,
+            replaced_by_id=None,
         )
+        self._refresh_sessions.add(refresh_session)
         await self._session.flush()
         return TokenPair(
             access_token=self._tokens.create_access_token(user.id),
             refresh_token=refresh_token,
             user=user,
+            refresh_session_id=refresh_session.id,
         )
+
+    async def _revoke_chain(self, initial: RefreshSession) -> None:
+        current = initial
+        seen: set[UUID] = set()
+        now = datetime.now(UTC)
+        for _ in range(4096):
+            if current.id in seen:
+                break
+            seen.add(current.id)
+            await self._refresh_sessions.revoke(session_id=current.id, now=now)
+            if current.replaced_by_id is None:
+                return
+            next_session = await self._refresh_sessions.get(current.replaced_by_id)
+            if next_session is None or next_session.user_id != initial.user_id:
+                break
+            current = next_session
+        raise AppError(code="SESSION_CHAIN_INVALID", message="无法完成会话注销", status_code=409)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _invalid_refresh_token() -> AppError:
+    return AppError(code="INVALID_REFRESH_TOKEN", message="登录状态已失效", status_code=401)
 
 
 class UserService:

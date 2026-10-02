@@ -46,11 +46,11 @@ export type AssetRunDetail = { run: TestPlanRun; items: AssetRunItem[] }
 // These three existing resources share the same page contract. Complete catalogs
 // let directory filters and version pickers include records beyond page one.
 export function listCaseCatalog(projectId: string, search: string, tag: string) {
-  return collectPages((page) => listTestCases(projectId, search, tag, page))
+  return collectPages((page) => listTestCases(projectId, search, tag, page, 100))
 }
 
 export function listSuiteCatalog(projectId: string, search: string, tag: string) {
-  return collectPages((page) => listTestSuites(projectId, search, tag, page))
+  return collectPages((page) => listTestSuites(projectId, search, tag, page, 100))
 }
 
 export function listAssetWorkflows(projectId: string) {

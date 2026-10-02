@@ -55,13 +55,13 @@ test('V1.0 项目治理与脱敏报告主路径', async ({ page }) => {
   const businessExecution = page.getByRole('row', { name: /V1 登录下单流程/ })
   await expect(businessExecution).toContainText('8/8 通过')
   await businessExecution.getByRole('button', { name: '详情' }).click()
-  const report = page.getByRole('dialog', { name: '执行报告详情' })
+  const report = page.getByRole('region', { name: '执行报告详情' })
   await expect(report).toContainText('V1 登录下单流程')
   await expect(report).toContainText('登录')
   await expect(report).toContainText('查询用户')
   await expect(report).toContainText('创建订单')
   await expect(page.locator('body')).not.toContainText('mock-token')
-  await page.keyboard.press('Escape')
+  await report.getByRole('button', { name: '返回执行列表', exact: true }).click()
   await expect(report).toBeHidden()
 
   for (const [menu, heading] of [

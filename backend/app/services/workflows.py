@@ -1085,6 +1085,7 @@ class WorkflowService:
         runtime_variables: dict[str, str],
         runtime_headers: dict[str, str],
         iteration_debug: WorkflowIterationDebugOptions | None = None,
+        commit: bool = True,
     ) -> tuple[WorkflowExecution, WorkflowExecutionPlan]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         workflow = await self._get_workflow(project_id, workflow_id)
@@ -1118,7 +1119,7 @@ class WorkflowService:
                 version=selected,
                 environment_id=environment_id,
                 snapshot=prepared.runs[0].snapshot,
-                commit=iteration_debug is None,
+                commit=commit and iteration_debug is None,
             )
             plan: WorkflowExecutionPlan = self._run_plan(
                 execution=execution,
@@ -1139,8 +1140,11 @@ class WorkflowService:
                 definition=definition,
                 prepared=prepared,
                 runtime_variables=runtime_variables,
+                commit=commit,
             )
-        await self._persist_execution_plan(execution, plan, commit=iteration_debug is None)
+        await self._persist_execution_plan(
+            execution, plan, commit=commit and iteration_debug is None
+        )
         return execution, plan
 
     async def prepare_failed_item_rerun(
@@ -2693,6 +2697,7 @@ class WorkflowService:
         definition: WorkflowDefinition,
         prepared: PreparedWorkflow,
         runtime_variables: dict[str, str],
+        commit: bool = True,
     ) -> tuple[WorkflowExecution, WorkflowBatchPlan]:
         parent = self._execution_model(
             actor=actor,
@@ -2717,8 +2722,11 @@ class WorkflowService:
         ]
         self._workflows.add(parent)
         self._workflows.add_all(children)
-        await self._session.commit()
-        await self._session.refresh(parent)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(parent)
+        else:
+            await self._session.flush()
         plans = tuple(
             self._run_plan(
                 execution=child,

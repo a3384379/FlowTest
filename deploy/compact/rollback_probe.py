@@ -28,7 +28,9 @@ class ProbeClient:
         expected_status: int | None = None,
     ) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode()
-        headers = {"Content-Type": "application/json"} if body is not None else {}
+        headers = {"X-Requested-With": "FlowTest"}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
         if token:
             headers["Authorization"] = f"Bearer {token}"
         status, content = self._request(

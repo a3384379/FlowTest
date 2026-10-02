@@ -114,7 +114,7 @@ class APIClient:
 
     @staticmethod
     def _headers(token: str | None, *, content_type: str | None = None) -> dict[str, str]:
-        headers: dict[str, str] = {}
+        headers: dict[str, str] = {"X-Requested-With": "FlowTest"}
         if content_type:
             headers["Content-Type"] = content_type
         if token:

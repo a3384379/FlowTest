@@ -58,9 +58,11 @@ export default function WorkflowNodeRelations({
             onClick={() => onLocateNode?.(edge.target)}
           >
             {definition.nodes.find((item) => item.id === edge.target)?.name ?? edge.target}
-            {edge.condition === null
-              ? ''
-              : ` · ${edge.condition === 'true' ? '条件成立' : '条件不成立'}`}
+            {edge.condition === 'true'
+              ? ' · 条件成立分支'
+              : edge.condition === 'false'
+                ? ' · 条件不成立分支'
+                : ''}
           </Button>
         ))}
       </Space>

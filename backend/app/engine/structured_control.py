@@ -640,6 +640,7 @@ class StructuredControlRunner:
             checkpoint_phase=parent.checkpoint_phase,
             checkpoint_best_effort=parent.checkpoint_best_effort,
             nested_checkpoint_records=parent.nested_checkpoint_records,
+            restored_nested_variables=parent.restored_nested_variables,
             cancellation=parent.cancellation,
             allow_return=parent.allow_return,
             rerun_loop_node_id=parent.rerun_loop_node_id,
@@ -940,14 +941,16 @@ class StructuredControlRunner:
         child.cancellation = token
         child.loop_variables = deepcopy(loop_values)
         child.checkpoint_phase = parent.checkpoint_phase or node.phase
-        child.input_variables = self._loop_inputs(config.inputs, region.inputs, parent, child)
-        scoped_executor = (
-            self._executor.fork_branch()
-            if isolate and isinstance(self._executor, BranchForkableExecutor)
-            else None
-        )
+        gate = child.iteration_debug_gate
+        gate_started = False
+        result: WorkflowRunResult | None = None
         try:
-            gate = child.iteration_debug_gate
+            child.input_variables = self._loop_inputs(config.inputs, region.inputs, parent, child)
+            scoped_executor = (
+                self._executor.fork_branch()
+                if isolate and isinstance(self._executor, BranchForkableExecutor)
+                else None
+            )
             if gate is not None:
                 await gate.before_iteration(
                     owner_node_id=node.id,
@@ -955,6 +958,7 @@ class StructuredControlRunner:
                     scope=scope,
                     context=child,
                 )
+                gate_started = True
             try:
                 result = await self._run_region(region, child, token, executor=scoped_executor)
             finally:
@@ -967,8 +971,8 @@ class StructuredControlRunner:
                 result.status,
                 allow_missing=result.control_signal is not None,
             )
-        except NodeExecutionError:
-            if gate is not None:
+        except NodeExecutionError as error:
+            if gate is not None and gate_started:
                 await gate.after_iteration(
                     owner_node_id=node.id,
                     input_index=index,
@@ -976,7 +980,35 @@ class StructuredControlRunner:
                     context=child,
                     status=WorkflowRunStatus.FAILED,
                 )
-            raise
+            if error.code not in {"VALUE_SOURCE_MISSING", "INVALID_VALUE_SOURCE"}:
+                raise
+            failed_result = WorkflowRunResult(
+                status=WorkflowRunStatus.FAILED,
+                records=result.records if result is not None else (),
+                context=child.snapshot(),
+            )
+            return (
+                {
+                    "input_index": index,
+                    "instance_path": list(scope),
+                    "status": "failed",
+                    "test_verdict": "failed",
+                    "error_code": error.code,
+                    "error_message": error.message,
+                    "outputs": {},
+                    "nodes": [
+                        {
+                            "node_id": record.node_id,
+                            "instance_id": _instance_id(scope, record.node_id),
+                            "status": record.status.value,
+                            "error_code": record.error_code,
+                            "error_message": record.error_message,
+                        }
+                        for record in failed_result.records
+                    ],
+                },
+                failed_result,
+            )
         if gate is not None:
             await gate.after_iteration(
                 owner_node_id=node.id,
@@ -1131,20 +1163,10 @@ class StructuredControlRunner:
         token: CancellationToken,
         index: int,
     ) -> dict[str, JsonValue]:
-        try:
-            summary, _ = await self._run_iteration(
-                node, config, items, region, parent, token, index, items[index], isolate=True
-            )
-            return summary
-        except NodeExecutionError as error:
-            return {
-                "input_index": index,
-                "status": "failed",
-                "test_verdict": "failed",
-                "error_code": error.code,
-                "outputs": {},
-                "nodes": [],
-            }
+        summary, _ = await self._run_iteration(
+            node, config, items, region, parent, token, index, items[index], isolate=True
+        )
+        return summary
 
     @staticmethod
     def _collect(
@@ -1182,6 +1204,17 @@ class StructuredControlRunner:
             )
             is not None
         )
+        restored = [
+            (record.completed_at, context.restored_nested_variables[instance_id])
+            for record in records
+            if record.status in {NodeStatus.PASSED, NodeStatus.SKIPPED}
+            if (instance_id := _instance_id(context.checkpoint_scope, record.node_id))
+            in context.restored_nested_variables
+        ]
+        if restored:
+            context.restore_extracted_variables(
+                deepcopy(max(restored, key=lambda item: item[0])[1])
+            )
 
         async def publish(update: NodeStatusUpdate) -> None:
             instance_id = _instance_id(context.checkpoint_scope, update.node_id)

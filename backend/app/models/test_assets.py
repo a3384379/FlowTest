@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.domain.test_assets import definition_fingerprint
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
 
 
@@ -41,6 +42,10 @@ class TestCase(UuidPrimaryKeyMixin, TimestampMixin, Base):
     draft_definition: Mapped[dict[str, Any]] = mapped_column(JSON)
     current_version: Mapped[int | None] = mapped_column(Integer)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
+    @property
+    def draft_fingerprint(self) -> str:
+        return definition_fingerprint(self.draft_definition)
 
 
 class TestCaseVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):

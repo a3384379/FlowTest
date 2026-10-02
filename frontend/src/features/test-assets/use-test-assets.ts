@@ -19,6 +19,8 @@ import {
   moveTestSuites,
   publishTestCase,
   publishTestSuite,
+  runTestCase,
+  type RunCaseInput,
   type TestCaseDraftInput,
   type TestSuiteDraftInput,
   updateTestCase,
@@ -93,6 +95,11 @@ export function useTestAssets() {
     mutationFn: (caseId: string) => publishTestCase(projectId!, caseId),
     onSuccess: invalidateAssets,
   })
+  const runCaseMutation = useMutation({
+    mutationFn: ({ caseId, input }: { caseId: string; input: RunCaseInput }) =>
+      runTestCase(projectId!, caseId, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
+  })
   const publishSuiteMutation = useMutation({
     mutationFn: (suiteId: string) => publishTestSuite(projectId!, suiteId),
     onSuccess: invalidateAssets,
@@ -152,6 +159,8 @@ export function useTestAssets() {
     saveCase: saveCaseMutation.mutateAsync,
     saveSuite: saveSuiteMutation.mutateAsync,
     publishCase: publishCaseMutation.mutateAsync,
+    runCase: runCaseMutation.mutateAsync,
+    runningCase: runCaseMutation.isPending,
     publishSuite: publishSuiteMutation.mutateAsync,
     cloneCase: cloneCaseMutation.mutateAsync,
     cloneSuite: cloneSuiteMutation.mutateAsync,

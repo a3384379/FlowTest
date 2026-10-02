@@ -173,6 +173,19 @@ const unsafeCheck: DeploymentCheck = {
 }
 
 describe('ContractHubPage', () => {
+  it('opens contract automation through the dedicated deep link', async () => {
+    installHandlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-runs`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/contracts?tab=automation`)
+    expect(await screen.findByText('OpenAPI 契约分析')).toBeVisible()
+    expect(screen.getByRole('tab', { name: '契约自动化' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('契约运行')).toBeVisible()
+  })
+
   it('renders unified assets, graph, matrix, and persists a deployment decision', async () => {
     let checkPayload: Record<string, unknown> | null = null
     installHandlers()
@@ -447,14 +460,14 @@ function installHandlers({ empty = false }: { empty?: boolean } = {}) {
   )
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="contracts">
+        <ProjectTestProvider section="contracts" initialEntry={initialEntry}>
           <ContractHubPage />
         </ProjectTestProvider>
       </QueryClientProvider>

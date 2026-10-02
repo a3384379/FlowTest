@@ -56,7 +56,7 @@ V5-054,接口资产与报告,导入,文档导入预览/冲突合并,原工作流
 V5-055,接口资产与报告,版本冲突,资产服务端版本改变,不静默覆盖,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-056,接口资产与报告,最终目标,切Service/环境Variant,预览与真实请求目标一致,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-057,接口资产与报告,用例发布,绑定已发布流程与套件,版本状态与执行结果分开,已验证,assets-targeted-final.log; assets-frontend-all.log; 28-assets-list-1440.png; 32-suite-fixed-versions-1440.png,本地前端：固定发布绑定/套件成员、独立结果、计划/显式执行/报告关联。真实后端发布执行、全历史聚合和导入导出未验收。
-V5-058,接口资产与报告,批量范围,跨页选择/删除/导出,对象范围明确,已验证,frontend/src/pages/TestAssetsWorkspace.test.tsx; 17-assets-1440.png,目录仅当前已加载记录；切目录清除选择；未改变服务端分页/批量接口。
+V5-058,接口资产与报告,批量范围,跨页选择/删除/导出,对象范围明确,已映射,frontend/src/pages/TestAssetsWorkspace.test.tsx; github-new-case-actions-passed.log,完整分页目录与当前页 20 条选择已验证；切目录/页码/筛选清空选择。批量删除/原生导出未实现，不能把选择范围回归当作完整批量验收。
 V5-059,接口资产与报告,失败筛选,选择仅失败,结果列表无通过记录混入,已验证,frontend/src/pages/ReportsPage.test.tsx,本地前端验证；不代表远程 CI 或完整发布验收。
 V5-060,接口资产与报告,统计分母,后端total与当前页不同,每项指标标范围，分母正确,已验证,frontend/src/pages/ReportsPage.test.tsx; logs/association-mobile-report-tests.log,后端total/本页指标分开，并已连接服务端分页；每页50条；当前页失败筛选沿用标注范围。
 V5-061,接口资产与报告,导出,报告/请求导出,冻结证据与脱敏保持,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
@@ -75,7 +75,7 @@ V5-073,质量与交付,特殊状态,登录/改密/无权限/空错态,同主题�
 V5-074,质量与交付,键盘焦点,导航/抽屉/模态/检查器,可达、可见、关闭后返回,已验证,frontend/src/features/navigation/ShellSidebar.test.tsx; frontend/src/flow/WorkflowWorkspaceShell.test.tsx; frontend/src/flow/WorkflowEditorSurfaces.test.tsx,新增目录/列表抽屉关闭焦点恢复及既有检查器测试；不是完整屏幕阅读器审计。
 V5-075,质量与交付,减弱动效,系统减少动效,非必要动画取消，状态仍可见,已验证,frontend/src/theme/use-reduced-motion.ts; qa-appearance-delivery-result.log,Antd/图表/画布响应系统减少动效；非必要 CSS 动画取消。
 V5-076,质量与交付,图规模,同环境小/中/大图前后对照,不凭空宣称性能提升,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
-V5-077,质量与交付,工作区保护,对比修改前后status/diff,不覆盖原有修改/编码,已验证,git-status-delivery.log; git-diff-delivery.patch,原工作区基线干净，改动仅在独立工作树；无 reset/clean/数据库操作。
-V5-078,质量与交付,当前版本,核对lockfile与baseline差异,不为适配设计升级全部依赖,已验证,git-diff-delivery.patch；package.json/锁文件未修改,本地前端验证；不代表远程 CI 或完整发布验收。
-V5-079,质量与交付,真实测试,检查测试日志与截图来源,未测不写通过，不用原型替代,已验证,logs/frontend-delivery-tests.log；浏览器只读隔离夹具,日志记录实际 102 文件 555 测试；不以原型渲染作为实现通过。
+V5-077,质量与交付,工作区保护,对比修改前后status/diff,不覆盖原有修改/编码,已验证,git-status-delivery.log; git-diff-delivery.patch,原工作区基线干净，改动仅在独立工作树；同步最新主干并保留其修改，无 reset/clean。浏览器服务仅使用本任务独立数据库。
+V5-078,质量与交付,当前版本,核对lockfile与baseline差异,不为适配设计升级全部依赖,已验证,git diff origin/main -- frontend/package.json frontend/pnpm-lock.yaml,相对 main@f7c3459 无本任务依赖改动；同步主干包含其原有依赖升级。本地前端验证不代表远程 CI 或完整发布验收。
+V5-079,质量与交付,真实测试,检查测试日志与截图来源,未测不写通过，不用原型替代,已验证,github-viewport-coverage.log; frontend/e2e/workflow-editor-visual.spec.ts-snapshots/README.md,最终本地前端 111 文件 / 651 测试通过；Linux 基线为合成项目真实 DOM，保留 0.003 像素阈值。完整远程门禁与发布验收单独确认。
 V5-080,质量与交付,回滚,回退本次主题/组件挂接,不清数据库/草稿/session,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。

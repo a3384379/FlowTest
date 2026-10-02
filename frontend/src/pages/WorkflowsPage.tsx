@@ -1230,7 +1230,8 @@ function ExecutionReportTab({
       className="execution-report-tab"
       to={reportExecutionPath(projectId, { executionId: execution.id })}
     >
-      <BarChartOutlined /> 执行报告 {execution.id.slice(0, 8)}
+      <BarChartOutlined /> 执行报告{' '}
+      <span className="workflow-volatile-value">{execution.id.slice(0, 8)}</span>
     </Link>
   )
 }

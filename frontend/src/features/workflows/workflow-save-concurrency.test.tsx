@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { DraftSessionProvider } from '../drafts/DraftSessionProvider'
 import { useWorkflows } from './use-workflows'
 import { useAuthStore } from '../auth/auth-store'
+import { authenticateTestUser } from '../../test/auth'
 import { workflow, user as actor } from '../../test/fixtures'
 
 vi.mock('../projects/use-project-context', () => ({
@@ -138,7 +139,7 @@ function setup() {
   return workflowDraftKey(actor.id, 'one', workflow.id)
 }
 beforeEach(() => {
-  useAuthStore.setState({ user: actor })
+  authenticateTestUser(actor)
   vi.mocked(updateWorkflowDraft).mockReset()
   vi.mocked(publishWorkflow).mockReset()
 })

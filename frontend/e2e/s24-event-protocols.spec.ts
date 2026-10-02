@@ -68,7 +68,9 @@ async function runWebSocketExchange(page: Page) {
 }
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {
-  const response = await request.post('/api/v1/auth/refresh')
+  const response = await request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(response.ok(), await response.text()).toBeTruthy()
   return ((await response.json()) as { access_token: string }).access_token
 }

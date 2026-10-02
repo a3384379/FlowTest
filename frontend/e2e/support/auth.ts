@@ -8,7 +8,15 @@ export const authenticationStatePath = '.playwright/.auth/administrator.json'
 export async function authenticate(page: Page): Promise<void> {
   const authenticatedShell = page.getByRole('button', { name: '退出' })
   const login = page.getByRole('heading', { name: '登录账号' })
-  await expect(authenticatedShell.or(login)).toBeVisible()
+  const reconnect = page.getByRole('button', { name: '重试连接' })
+  await expect(authenticatedShell.or(login).or(reconnect)).toBeVisible()
+  if (await reconnect.isVisible()) {
+    // Saved setup cookies can already have rotated in a previous test context.
+    // Start a new session through the normal login UI instead of reusing them.
+    await page.context().clearCookies()
+    await page.reload()
+    await expect(login).toBeVisible()
+  }
   if (await authenticatedShell.isVisible()) return
 
   await page.getByLabel('账号').fill(administratorEmail)

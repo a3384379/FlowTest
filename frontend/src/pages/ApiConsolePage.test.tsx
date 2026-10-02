@@ -1,5 +1,6 @@
 import { createIceTheme } from '../theme/ice-theme'
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
@@ -14,7 +15,7 @@ import type { ExecutionDetail } from '../lib/api'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 
-beforeEach(() => useAuthStore.setState({ user: authenticatedUser }))
+beforeEach(() => authenticateTestUser(authenticatedUser))
 afterEach(() => {
   useAuthStore.setState({ user: null })
   localStorage.clear()

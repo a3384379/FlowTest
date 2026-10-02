@@ -45,7 +45,7 @@ class APIClient:
         token: str | None = None,
     ) -> dict[str, Any]:
         body = None if payload is None else json.dumps(payload).encode()
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "X-Requested-With": "FlowTest"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         request = Request(

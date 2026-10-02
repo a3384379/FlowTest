@@ -24,7 +24,7 @@ test('S16 子流程、ForEach、调试重放与画布编辑主路径', async ({ 
   const listToggle = page.getByRole('button', { name: '切换工作流列表' })
   if ((await listToggle.getAttribute('aria-expanded')) === 'false') await listToggle.click()
   await page.getByRole('button', { name: parentName, exact: true }).click()
-  await listToggle.click()
+  if ((await listToggle.getAttribute('aria-expanded')) === 'true') await listToggle.click()
   await expect(page.getByText('已发布 v2')).toBeVisible()
 
   await selectWorkflowEnvironment(page)
@@ -96,7 +96,9 @@ async function verifyExecutionDebugAndReplay(page: Page) {
 }
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {
-  const response = await request.post('/api/v1/auth/refresh')
+  const response = await request.post('/api/v1/auth/refresh', {
+    headers: { 'X-Requested-With': 'FlowTest' },
+  })
   expect(response.ok(), await response.text()).toBeTruthy()
   return ((await response.json()) as { access_token: string }).access_token
 }

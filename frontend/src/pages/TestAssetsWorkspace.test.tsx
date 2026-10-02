@@ -9,6 +9,7 @@ import type { Folder, TestCase, TestPlanRun } from '../lib/api'
 import { environment, project, user, workflow } from '../test/fixtures'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { server } from '../test/server'
+import { authenticateTestUser } from '../test/auth'
 import { createIceTheme } from '../theme/ice-theme'
 import TestAssetsPage from './TestAssetsPage'
 
@@ -44,7 +45,7 @@ const baseCase: TestCase = {
 }
 const laterCase = { ...baseCase, id: 'case-later-page', name: '跨页用例' }
 
-beforeEach(() => useAuthStore.setState({ user }))
+beforeEach(() => authenticateTestUser(user))
 afterEach(() => useAuthStore.setState({ user: null }))
 
 function mockWorkspace(viewer = false) {
@@ -93,6 +94,7 @@ function mockWorkspace(viewer = false) {
     http.get(root + '/test-suites', () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
     ),
+    http.get(root + '/test-cases/runs/latest', () => HttpResponse.json([])),
     http.get(root + '/test-cases/:id/versions', ({ params }) =>
       HttpResponse.json(
         [2, 1].map((version) => ({
@@ -267,4 +269,87 @@ it('links only matching case-run evidence to the report and frozen workflow', as
     '/projects/' + project.id + '/workflows?focus=' + workflow.id + '&execution=execution-case-1',
   )
   expect(within(drawer).getByText(/最近 1 次计划运行 \/ 全部 81 次/)).toBeVisible()
+})
+
+it('runs the selected older case version directly without creating a plan', async () => {
+  const { writes } = mockWorkspace()
+  const submitted = vi.fn()
+  server.use(
+    http.post(root + '/test-cases/:id/runs', async ({ request }) => {
+      submitted(await request.json())
+      return HttpResponse.json(
+        {
+          case_id: laterCase.id,
+          case_version: 1,
+          workflow_id: workflow.id,
+          workflow_version: 1,
+          execution_id: 'execution-direct',
+          source: 'direct',
+          status: 'queued',
+        },
+        { status: 202 },
+      )
+    }),
+  )
+  renderWorkspace(
+    '/projects/' + project.id + '/assets?type=case&focus=' + laterCase.id + '&version=1',
+  )
+  const drawer = await screen.findByRole('dialog', { name: '测试资产详情' })
+  const execute = await within(drawer).findByRole('button', { name: /^执行$/ })
+  await waitFor(() => expect(execute).toBeEnabled())
+  fireEvent.click(execute)
+  // Ant Design uses one test ID for modal titles; scope by the visible title.
+  const confirmation = (await screen.findByText('运行测试用例：跨页用例')).closest<HTMLElement>(
+    '[role=dialog]',
+  )!
+  const run = within(confirmation).getByRole('button', { name: '运行已发布版本' })
+  await waitFor(() => expect(run).toBeEnabled())
+  fireEvent.click(run)
+  await screen.findByText('运行已提交')
+  expect(submitted).toHaveBeenCalledWith({ source: 'published', version: 1 })
+  expect(writes).not.toHaveBeenCalled()
+})
+
+it('adds the selected fixed case version to an existing plan without executing it', async () => {
+  const { writes } = mockWorkspace()
+  const submitted = vi.fn()
+  server.use(
+    http.get(root + '/test-plans', () =>
+      HttpResponse.json({
+        items: [{ id: 'plan-existing', name: '已有回归计划', items: [] }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      }),
+    ),
+    http.post(root + '/test-plans/plan-existing/items', async ({ request }) => {
+      submitted(await request.json())
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  renderWorkspace(
+    '/projects/' + project.id + '/assets?type=case&focus=' + laterCase.id + '&version=1',
+  )
+  const drawer = await screen.findByRole('dialog', { name: '测试资产详情' })
+  const join = await within(drawer).findByRole('button', { name: /加入计划/ })
+  await waitFor(() => expect(join).toBeEnabled())
+  fireEvent.click(join)
+  const confirmation = (await screen.findByText('加入测试计划')).closest<HTMLElement>(
+    '[role=dialog]',
+  )!
+  fireEvent.mouseDown(within(confirmation).getByRole('combobox', { name: '选择测试计划' }))
+  fireEvent.click(
+    await screen.findByText('已有回归计划', { selector: '.ant-select-item-option-content' }),
+  )
+  const confirm = within(confirmation).getByRole('button', { name: /确\s*定|OK/ })
+  await waitFor(() => expect(confirm).toBeEnabled())
+  fireEvent.click(confirm)
+  await waitFor(() =>
+    expect(submitted).toHaveBeenCalledWith({
+      target_type: 'case',
+      target_id: laterCase.id,
+      target_version: 1,
+    }),
+  )
+  expect(writes).not.toHaveBeenCalled()
 })

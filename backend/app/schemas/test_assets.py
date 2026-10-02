@@ -1,8 +1,9 @@
+import re
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.domain.api_assets import JsonValue
 
@@ -11,7 +12,21 @@ TagName = Annotated[str, Field(min_length=1, max_length=50)]
 AssetName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
-class TestCaseDefinitionInput(BaseModel):
+def validate_runtime_headers(headers: dict[str, str]) -> dict[str, str]:
+    seen: set[str] = set()
+    for name, value in headers.items():
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
+            raise ValueError("Header 名称不合法")
+        if "\r" in value or "\n" in value:
+            raise ValueError("Header 值不能包含换行")
+        key = name.lower()
+        if key in seen:
+            raise ValueError("Header 名称重复")
+        seen.add(key)
+    return headers
+
+
+class StoredTestCaseDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workflow_id: UUID
@@ -21,7 +36,18 @@ class TestCaseDefinitionInput(BaseModel):
     runtime_headers: dict[str, str] = Field(default_factory=dict)
 
 
+class TestCaseDefinitionInput(StoredTestCaseDefinition):
+    @field_validator("runtime_headers")
+    @classmethod
+    def validate_headers(cls, headers: dict[str, str]) -> dict[str, str]:
+        return validate_runtime_headers(headers)
+
+
 class PublishedTestCaseDefinition(TestCaseDefinitionInput):
+    workflow_version: int = Field(ge=1)
+
+
+class StoredPublishedTestCaseDefinition(StoredTestCaseDefinition):
     workflow_version: int = Field(ge=1)
 
 
@@ -53,7 +79,8 @@ class TestCaseResponse(BaseModel):
     description: str
     tags: list[str]
     is_template: bool
-    draft_definition: TestCaseDefinitionInput
+    draft_definition: StoredTestCaseDefinition
+    draft_fingerprint: str
     current_version: int | None
     created_by_id: UUID
     created_at: datetime
@@ -64,13 +91,42 @@ class VersionPublish(BaseModel):
     change_note: str = Field(default="", max_length=1000)
 
 
+class TestCaseRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["published", "draft"] = "published"
+    version: int | None = Field(default=None, ge=1)
+    publish_draft: bool = False
+    expected_draft_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    runtime_variables: dict[RuntimeName, str] = Field(default_factory=dict)
+    runtime_headers: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("runtime_headers")
+    @classmethod
+    def validate_headers(cls, headers: dict[str, str]) -> dict[str, str]:
+        return validate_runtime_headers(headers)
+
+
+class TestCaseRunResponse(BaseModel):
+    execution_id: UUID
+    case_id: UUID
+    case_version: int
+    workflow_id: UUID
+    workflow_version: int
+    environment_id: UUID
+    status: str
+    source: Literal["direct", "plan"]
+    started_at: datetime
+    created_new_version: bool = False
+
+
 class TestCaseVersionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     test_case_id: UUID
     version: int
-    definition: PublishedTestCaseDefinition
+    definition: StoredPublishedTestCaseDefinition
     fingerprint: str
     change_note: str
     created_by_id: UUID

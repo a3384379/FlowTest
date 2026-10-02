@@ -90,7 +90,9 @@ BACKEND_CRITICAL = (
     "backend/app/repositories/",
     "backend/migrations/",
 )
-MIGRATION_PREFIXES = ("backend/migrations/", "backend/app/schemas/")
+MIGRATION_PREFIXES = ("backend/migrations/",)
+MIGRATION_SUPPORT_PREFIX = "backend/app/migrations_support/"
+STANDALONE_SCHEMA_FILE = "backend/app/core/standalone_schema.py"
 BACKEND_IMAGE_INPUTS = frozenset({"backend/Dockerfile", "backend/.dockerignore"})
 FRONTEND_IMAGE_INPUTS = frozenset(
     {"frontend/Dockerfile", "frontend/.dockerignore", "frontend/nginx.conf"}
@@ -100,6 +102,8 @@ DEPLOY_IMAGE_INPUTS = frozenset(
         "compose.yaml",
         "mock-target/Dockerfile",
         "mock-target/.dockerignore",
+        "mock-target/pyproject.toml",
+        "mock-target/uv.lock",
         "deploy/postgres-walg/Dockerfile",
         "deploy/compact/compose.yaml",
         "deploy/compact/compose.build.yaml",
@@ -231,6 +235,9 @@ class Routing:
         self.domains.add("frontend")
         self.tier = _tier_max(self.tier, "standard")
         self.frontend_sources.append(path)
+        if path == "frontend/playwright.config.ts" or path.startswith("frontend/e2e/"):
+            self.domains.add("compose")
+            self.reasons.add("Playwright 用例、辅助文件或配置需浏览器验收")
         if path.startswith(FRONTEND_SHARED):
             self.tier = _tier_max(self.tier, "integration")
             self.reasons.add("共享前端状态/契约需完整消费者测试")
@@ -257,6 +264,14 @@ class Routing:
             self.tier = _tier_max(self.tier, "integration")
             self.domains.add("compose")
             self.reasons.add("关键后端运行或数据路径")
+        if path == STANDALONE_SCHEMA_FILE:
+            self.tier = _tier_max(self.tier, "integration")
+            self.domains.add("windows")
+            self.reasons.add("Standalone SQLite 初始化与现存安装升级需运行形态验证")
+        if path.startswith(MIGRATION_SUPPORT_PREFIX):
+            self.tier = _tier_max(self.tier, "integration")
+            self.domains.update(("upgrade", "windows"))
+            self.reasons.add("历史迁移与 Standalone 共用辅助逻辑需数据演进验证")
         if path.startswith(("backend/app/domain/execution", "backend/app/engine/")):
             self.domains.update(("frontend", "windows"))
             self.reasons.add("引擎结果需前端契约与 Standalone 验证")

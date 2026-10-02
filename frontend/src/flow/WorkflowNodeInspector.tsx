@@ -103,33 +103,35 @@ export default function WorkflowNodeInspector({
               key: 'config',
               label: '配置',
               children: (
-                <InspectorNodeFields
-                  node={node}
-                  definition={definition}
-                  apis={apis}
-                  artifacts={artifacts}
-                  workflows={workflows}
-                  credentials={credentials}
-                  graphqlSchemas={graphqlSchemas}
-                  grpcDescriptors={grpcDescriptors}
-                  eventSources={eventSources}
-                  projectId={projectId}
-                  environmentId={environmentId}
-                  editable={editable}
-                  onUpdate={updateNode}
-                  onStructureChange={(next) => onChange(next, 'structure')}
-                  onRegionUpdate={(region) =>
-                    onChange(
-                      {
-                        ...definition,
-                        regions: definition.regions?.map((item) =>
-                          item.id === region.id ? region : item,
-                        ),
-                      },
-                      'regions',
-                    )
-                  }
-                />
+                <div className="workflow-node-fields">
+                  <InspectorNodeFields
+                    node={node}
+                    definition={definition}
+                    apis={apis}
+                    artifacts={artifacts}
+                    workflows={workflows}
+                    credentials={credentials}
+                    graphqlSchemas={graphqlSchemas}
+                    grpcDescriptors={grpcDescriptors}
+                    eventSources={eventSources}
+                    projectId={projectId}
+                    environmentId={environmentId}
+                    editable={editable}
+                    onUpdate={updateNode}
+                    onStructureChange={(next) => onChange(next, 'structure')}
+                    onRegionUpdate={(region) =>
+                      onChange(
+                        {
+                          ...definition,
+                          regions: definition.regions?.map((item) =>
+                            item.id === region.id ? region : item,
+                          ),
+                        },
+                        'regions',
+                      )
+                    }
+                  />
+                </div>
               ),
             },
             {

@@ -14,6 +14,7 @@ from app.engine.contracts import (
     ConditionExpression,
     NodeStatus,
     NodeType,
+    VariableValueSource,
     WorkflowDefinition,
     WorkflowPhase,
     WorkflowRunStatus,
@@ -34,6 +35,7 @@ from app.engine.structured_control import (
     _instance_id,
     control_placeholder,
 )
+from app.engine.structured_values import resolve_value
 from app.services.api_assets import PreparedRequest, PreparedVariable
 from app.services.workflow_runtime import (
     PreparedSubflow,
@@ -636,6 +638,232 @@ def test_control_signal_outside_loop_is_rejected() -> None:
     payload["regions"] = []
     with pytest.raises(ValidationError, match="inside a serial loop"):
         WorkflowDefinition.model_validate(payload)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal", ["break", "continue", "return"])
+@pytest.mark.parametrize("retain_skipped", [False, True])
+async def test_resumed_iteration_preserves_control_signal(
+    signal: str, retain_skipped: bool
+) -> None:
+    payload = _definition()
+    signal_node = (
+        _return_node("signal") if signal == "return" else _node("signal", f"flow.control.{signal}")
+    )
+    region = payload["regions"][0]
+    region["nodes"] = [signal_node, _node("step")]
+    region["entry_node_id"] = "signal"
+    region["exit_node_ids"] = ["step"]
+    region["edges"] = [{"id": "signal-step", "source": "signal", "target": "step"}]
+    definition = WorkflowDefinition.model_validate(payload)
+    values = {"cases": [1, 2, 3]}
+    first_context = ExecutionContext(runtime_variables=values, allow_return=True)
+    first = await WorkflowScheduler(CountingExecutor(definition)).run(
+        definition, context=first_context
+    )
+    if signal == "return":
+        assert first.control_signal == "return"
+        assert first.return_output == {"result": 42}
+    scope = ("region", "body", "iteration", "0")
+    checkpoints = [
+        first.records[0],
+        first_context.nested_checkpoint_records[_instance_id(scope, "signal")],
+    ]
+    if retain_skipped:
+        checkpoints.append(first_context.nested_checkpoint_records[_instance_id(scope, "step")])
+
+    executor = CountingExecutor(definition)
+    resumed = await WorkflowScheduler(executor).run(
+        definition,
+        context=ExecutionContext(runtime_variables=values, allow_return=True),
+        resume_records=tuple(checkpoints),
+    )
+
+    assert resumed.status == first.status
+    assert resumed.control_signal == first.control_signal
+    assert resumed.return_output == first.return_output
+    assert resumed.records[1].output["started_count"] == first.records[1].output["started_count"]
+    assert executor.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("concurrency", [1, 2])
+async def test_resumed_iterations_restore_their_own_local_variables(
+    concurrency: int,
+) -> None:
+    payload = _definition()
+    payload["nodes"][1]["configuration"]["policy"]["concurrency"] = concurrency
+    region = payload["regions"][0]
+    region["nodes"] = [
+        {
+            "id": "extract",
+            "type": "api",
+            "name": "提取编号的请求",
+            "position": {"x": 0, "y": 0},
+            "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+        },
+        _node("use"),
+    ]
+    region["entry_node_id"] = "extract"
+    region["exit_node_ids"] = ["use"]
+    region["edges"] = [{"id": "extract-use", "source": "extract", "target": "use"}]
+    definition = WorkflowDefinition.model_validate(payload)
+    local_source = VariableValueSource.model_validate(
+        {"kind": "variable", "scope": "local", "path": ["recordId"]}
+    )
+
+    class ScopeExecutor:
+        def __init__(self) -> None:
+            self.extracted: list[str] = []
+            self.used: list[str] = []
+
+        async def execute(self, node, context: ExecutionContext):
+            if node.capability_id:
+                return await StructuredControlRunner(definition, self).execute(node, context)
+            if node.id == "start":
+                context.record_variable("recordId", "root", node_id=node.id, path="recordId")
+            if node.id == "extract":
+                item = context.loop_variables["item"]
+                assert isinstance(item, dict)
+                value = item["id"]
+                assert isinstance(value, str)
+                self.extracted.append(value)
+                context.record_variable("recordId", value, node_id=node.id, path="recordId")
+            if node.id == "use":
+                value = resolve_value(local_source, context)
+                assert isinstance(value, str)
+                self.used.append(value)
+            return {"node": node.id}
+
+    updates = []
+
+    async def capture(update):
+        updates.append(update)
+
+    values = {"cases": [{"id": "first"}, {"id": "second"}]}
+    first_context = ExecutionContext(runtime_variables=values)
+    first = await WorkflowScheduler(ScopeExecutor()).run(
+        definition, context=first_context, on_node_status=capture
+    )
+    assert first.status == "passed"
+    snapshots = {
+        update.node_id: update.context_snapshot["extracted_variables"]
+        for update in updates
+        if update.context_snapshot is not None and update.status is NodeStatus.PASSED
+    }
+    retained = [first.records[0]]
+    resumed_context = ExecutionContext(runtime_variables=values)
+    resumed_context.restore_checkpoint(
+        node_id="start", output=first.records[0].output, extracted_variables=snapshots["start"]
+    )
+    for index in range(2):
+        instance_id = _instance_id(("region", "body", "iteration", str(index)), "extract")
+        record = first_context.nested_checkpoint_records[instance_id]
+        retained.append(record)
+        resumed_context.restore_checkpoint(
+            node_id=instance_id,
+            output=record.output,
+            extracted_variables=snapshots[instance_id],
+        )
+    assert resumed_context.variable("recordId") == "root"
+
+    executor = ScopeExecutor()
+    resumed = await WorkflowScheduler(executor).run(
+        definition, context=resumed_context, resume_records=tuple(retained)
+    )
+
+    assert resumed.status == "passed"
+    assert executor.extracted == []
+    assert sorted(executor.used) == ["first", "second"]
+    assert resumed_context.variable("recordId") == "root"
+
+
+@pytest.mark.asyncio
+async def test_resumed_parallel_branches_keep_local_variables_isolated() -> None:
+    payload = _parallel_definition()
+    for region in payload["regions"]:
+        branch = region["id"].split("_")[0]
+        extract_id = f"{branch}_extract"
+        use_id = f"{branch}_use"
+        region["nodes"] = [
+            {
+                "id": extract_id,
+                "type": "api",
+                "name": "提取编号的请求",
+                "position": {"x": 0, "y": 0},
+                "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+            },
+            _node(use_id),
+        ]
+        region["entry_node_id"] = extract_id
+        region["exit_node_ids"] = [use_id]
+        region["edges"] = [{"id": f"{extract_id}-{use_id}", "source": extract_id, "target": use_id}]
+    definition = WorkflowDefinition.model_validate(payload)
+    local_source = VariableValueSource.model_validate(
+        {"kind": "variable", "scope": "local", "path": ["recordId"]}
+    )
+
+    class ScopeExecutor:
+        def __init__(self) -> None:
+            self.extracted: list[str] = []
+            self.used: list[str] = []
+
+        async def execute(self, node, context: ExecutionContext):
+            if node.capability_id:
+                return await StructuredControlRunner(definition, self).execute(node, context)
+            if node.id == "start":
+                context.record_variable("recordId", "root", node_id=node.id, path="recordId")
+            if node.id.endswith("_extract"):
+                branch = node.id.split("_")[0]
+                self.extracted.append(branch)
+                context.record_variable("recordId", branch, node_id=node.id, path="recordId")
+            if node.id.endswith("_use"):
+                value = resolve_value(local_source, context)
+                assert isinstance(value, str)
+                self.used.append(value)
+            return {"node": node.id}
+
+    updates = []
+
+    async def capture(update):
+        updates.append(update)
+
+    first_context = ExecutionContext()
+    first = await WorkflowScheduler(ScopeExecutor()).run(
+        definition, context=first_context, on_node_status=capture
+    )
+    assert first.status == "passed"
+    snapshots = {
+        update.node_id: update.context_snapshot["extracted_variables"]
+        for update in updates
+        if update.context_snapshot is not None and update.status is NodeStatus.PASSED
+    }
+    retained = [first.records[0]]
+    resumed_context = ExecutionContext()
+    resumed_context.restore_checkpoint(
+        node_id="start", output=first.records[0].output, extracted_variables=snapshots["start"]
+    )
+    for branch in ("first", "second", "third"):
+        instance_id = _instance_id(
+            ("region", f"{branch}_region", "branch", branch), f"{branch}_extract"
+        )
+        record = first_context.nested_checkpoint_records[instance_id]
+        retained.append(record)
+        resumed_context.restore_checkpoint(
+            node_id=instance_id,
+            output=record.output,
+            extracted_variables=snapshots[instance_id],
+        )
+    assert resumed_context.variable("recordId") == "root"
+
+    executor = ScopeExecutor()
+    resumed = await WorkflowScheduler(executor).run(
+        definition, context=resumed_context, resume_records=tuple(retained)
+    )
+    assert resumed.status == "passed"
+    assert executor.extracted == []
+    assert sorted(executor.used) == ["first", "second", "third"]
+    assert resumed_context.variable("recordId") == "root"
 
 
 def _parallel_definition(on_error: str = "collect_all") -> dict:
@@ -1297,6 +1525,48 @@ async def test_foreach_failure_policy_keeps_failed_verdict(on_error: str, expect
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("concurrency", [1, 2])
+@pytest.mark.parametrize("stage", ["inputs", "collect"])
+async def test_foreach_collects_per_item_value_errors(concurrency: int, stage: str) -> None:
+    payload = _definition()
+    config = payload["nodes"][1]["configuration"]
+    config["policy"].update({"concurrency": concurrency, "on_error": "continue_collect"})
+    config[stage] = {"recordId": {"kind": "variable", "scope": "loop", "path": ["item", "id"]}}
+    definition = WorkflowDefinition.model_validate(payload)
+    executor = CountingExecutor(definition)
+
+    result = await WorkflowScheduler(executor).run(
+        definition,
+        context=ExecutionContext(runtime_variables={"cases": [{"id": 1}, {}, {"id": 3}]}),
+    )
+
+    summary = result.records[1].output
+    assert result.status == "failed"
+    assert [item["status"] for item in summary["items"]] == ["passed", "failed", "passed"]
+    assert summary["items"][1]["error_code"] == "VALUE_SOURCE_MISSING"
+    assert summary["passed_count"] == 2
+    assert summary["failed_count"] == 1
+    assert [index for index, _ in executor.calls] == ([0, 2] if stage == "inputs" else [0, 1, 2])
+
+
+@pytest.mark.parametrize("kind", ["foreach", "repeat"])
+def test_return_cannot_cross_parallel_loop(kind: str) -> None:
+    payload = _definition()
+    config = payload["nodes"][1]["configuration"]
+    config["policy"]["concurrency"] = 2
+    if kind == "repeat":
+        payload["nodes"][1]["capability_id"] = "flow.control.repeat"
+        config.pop("collection")
+        config["count"] = 2
+    payload["regions"][0]["nodes"] = [_return_node()]
+    payload["regions"][0]["entry_node_id"] = "return_value"
+    payload["regions"][0]["exit_node_ids"] = ["return_value"]
+
+    with pytest.raises(ValidationError, match="serial loop"):
+        WorkflowDefinition.model_validate(payload)
+
+
+@pytest.mark.asyncio
 async def test_foreach_does_not_continue_collect_after_unknown_write_outcome() -> None:
     payload = _definition()
     payload["nodes"][1]["configuration"]["policy"]["on_error"] = "continue_collect"
@@ -1470,6 +1740,66 @@ async def test_group_api_runs_without_loop_variable() -> None:
 
     assert result.status == "passed"
     assert seen == ["/health"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_mode", ["timeout", "external"])
+async def test_group_reclaims_blocked_region_request(cancel_mode: str) -> None:
+    payload = _definition()
+    payload["nodes"][1]["capability_id"] = "flow.control.group"
+    payload["nodes"][1]["configuration"] = {
+        "body": {"kind": "inline", "region_id": "body"},
+        "policy": {"timeout_seconds": 1},
+    }
+    payload["regions"][0]["nodes"] = [
+        {
+            "id": "request",
+            "type": "api",
+            "name": "等待许可的请求",
+            "position": {"x": 0, "y": 0},
+            "config": {"api_definition_id": "00000000-0000-0000-0000-000000000001"},
+        }
+    ]
+    payload["regions"][0]["entry_node_id"] = "request"
+    payload["regions"][0]["exit_node_ids"] = ["request"]
+    definition = WorkflowDefinition.model_validate(payload)
+    sent: list[str] = []
+
+    class BlockedExecutor:
+        async def execute(self, node, context: ExecutionContext):
+            if node.capability_id:
+                return await StructuredControlRunner(definition, self).execute(node, context)
+            if node.id == "request":
+                sent.append(node.id)
+            return {"node": node.id}
+
+    waiting = asyncio.Event()
+
+    class WaitingSemaphore(asyncio.Semaphore):
+        async def acquire(self) -> bool:
+            waiting.set()
+            return await super().acquire()
+
+    permit = WaitingSemaphore(0)
+    existing_tasks = asyncio.all_tasks()
+    task = asyncio.create_task(
+        WorkflowScheduler(BlockedExecutor()).run(
+            definition, context=ExecutionContext(leaf_semaphore=permit)
+        )
+    )
+    await asyncio.wait_for(waiting.wait(), timeout=0.5)
+    if cancel_mode == "external":
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    else:
+        result = await task
+        assert result.records[1].error_code == "NODE_TIMEOUT"
+    await asyncio.sleep(0)
+    assert asyncio.all_tasks() - existing_tasks == set()
+    permit.release()
+    await asyncio.sleep(0.01)
+    assert sent == []
 
 
 @pytest.mark.asyncio

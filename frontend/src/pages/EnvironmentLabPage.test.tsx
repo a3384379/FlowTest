@@ -6,6 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import type {
   EnvironmentInstance,
   EnvironmentTemplateVersion,
@@ -94,7 +95,7 @@ const instance: EnvironmentInstance = {
 
 describe('EnvironmentLabPage', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user: { ...user, is_system_admin: true } })
+    authenticateTestUser({ ...user, is_system_admin: true })
   })
 
   afterEach(() => {

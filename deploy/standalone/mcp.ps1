@@ -16,6 +16,7 @@ if (-not (Test-Path -LiteralPath $Python)) {
     throw "缺少内置 Python 运行时：runtime\python.exe"
 }
 $env:PYTHONPATH = "$($Root)\backend;$($Root)\runtime\Lib\site-packages;$($env:PYTHONPATH)"
+$env:PYTHONIOENCODING = "utf-8"
 
 if ($ValidateOnly) {
     $validation = @'

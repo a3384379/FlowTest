@@ -28,6 +28,9 @@ import {
   Upload,
 } from 'antd'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+
+import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
 
 import type { ContractRun } from '../lib/api'
 import type {
@@ -51,6 +54,8 @@ type VerificationForm = {
 }
 
 export default function ContractHubPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') === 'automation' ? 'automation' : 'hub'
   const [providerId, setProviderId] = useState<string | null>(null)
   const state = useContractHub(providerId)
   const services = pageItems(state.services.data)
@@ -65,78 +70,97 @@ export default function ContractHubPage() {
 
   return (
     <>
-      <ContractHubHeader
-        brokerAvailable={Boolean(state.summary.data?.broker_available)}
-        hasPacts={pacts.length > 0}
-        onService={() => setServiceDialog(true)}
-        onOpenapi={() => setOpenapiDialog(true)}
-        onPact={() => setPactDialog('upload')}
-        onBroker={() => setPactDialog('broker')}
-        onVerify={() => setVerificationDialog(true)}
-      />
-      <Alert
-        showIcon
-        type="info"
-        className="page-alert"
-        title="Pact 文档按不可信输入处理"
-        description="仅支持 HTTP Exact Matcher；拒绝 Secret、Cookie、任意 Matching Rule、Generator 和 Plugin。Provider 请求继续受项目出站策略约束。"
-      />
-      <ContractOverview summary={state.summary.data} loading={state.summary.isLoading} />
-      <CompatibilityPanel
-        providers={providers}
-        providerId={providerId}
-        matrix={state.matrix.data}
-        checks={checks}
-        loading={state.matrix.isLoading}
-        checking={state.checking}
-        onProviderChange={setProviderId}
-        onRunCheck={state.runCheck}
-      />
-      <div className="contract-hub-grid">
-        <ServiceGraphPanel graph={state.graph.data} loading={state.graph.isLoading} />
-        <FailedEvidencePanel checks={checks} />
-      </div>
-      <UnifiedContractsPanel
-        services={services}
-        pacts={pacts}
-        openapiRuns={openapiRuns}
-        loading={state.pacts.isLoading || state.openapiRuns.isLoading}
-      />
-      <ServiceDialog
-        open={serviceDialog}
-        submitting={state.creatingService}
-        onClose={() => setServiceDialog(false)}
-        onSubmit={async (input) => {
-          if (await state.createService(input)) setServiceDialog(false)
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => {
+          const next = new URLSearchParams(searchParams)
+          if (key === 'automation') next.set('tab', key)
+          else next.delete('tab')
+          setSearchParams(next)
         }}
+        items={[
+          { key: 'hub', label: '契约中心' },
+          { key: 'automation', label: '契约自动化' },
+        ]}
       />
-      <PactDialog
-        key={pactDialog ?? 'closed'}
-        mode={pactDialog}
-        submitting={state.importing}
-        onClose={() => setPactDialog(null)}
-        onSubmit={async (input) => {
-          if (await state.importPact(input)) setPactDialog(null)
-        }}
-      />
-      <OpenapiDialog
-        open={openapiDialog}
-        services={services}
-        submitting={state.importing}
-        onClose={() => setOpenapiDialog(false)}
-        onSubmit={async (input) => {
-          if (await state.importOpenapi(input)) setOpenapiDialog(false)
-        }}
-      />
-      <VerificationDialog
-        open={verificationDialog}
-        pacts={pacts}
-        submitting={state.verifying}
-        onClose={() => setVerificationDialog(false)}
-        onSubmit={async (input) => {
-          if (await state.verifyProvider(input)) setVerificationDialog(false)
-        }}
-      />
+      {activeTab === 'automation' ? (
+        <ContractAutomationPanel />
+      ) : (
+        <>
+          <ContractHubHeader
+            brokerAvailable={Boolean(state.summary.data?.broker_available)}
+            hasPacts={pacts.length > 0}
+            onService={() => setServiceDialog(true)}
+            onOpenapi={() => setOpenapiDialog(true)}
+            onPact={() => setPactDialog('upload')}
+            onBroker={() => setPactDialog('broker')}
+            onVerify={() => setVerificationDialog(true)}
+          />
+          <Alert
+            showIcon
+            type="info"
+            className="page-alert"
+            title="Pact 文档按不可信输入处理"
+            description="仅支持 HTTP Exact Matcher；拒绝 Secret、Cookie、任意 Matching Rule、Generator 和 Plugin。Provider 请求继续受项目出站策略约束。"
+          />
+          <ContractOverview summary={state.summary.data} loading={state.summary.isLoading} />
+          <CompatibilityPanel
+            providers={providers}
+            providerId={providerId}
+            matrix={state.matrix.data}
+            checks={checks}
+            loading={state.matrix.isLoading}
+            checking={state.checking}
+            onProviderChange={setProviderId}
+            onRunCheck={state.runCheck}
+          />
+          <div className="contract-hub-grid">
+            <ServiceGraphPanel graph={state.graph.data} loading={state.graph.isLoading} />
+            <FailedEvidencePanel checks={checks} />
+          </div>
+          <UnifiedContractsPanel
+            services={services}
+            pacts={pacts}
+            openapiRuns={openapiRuns}
+            loading={state.pacts.isLoading || state.openapiRuns.isLoading}
+          />
+          <ServiceDialog
+            open={serviceDialog}
+            submitting={state.creatingService}
+            onClose={() => setServiceDialog(false)}
+            onSubmit={async (input) => {
+              if (await state.createService(input)) setServiceDialog(false)
+            }}
+          />
+          <PactDialog
+            key={pactDialog ?? 'closed'}
+            mode={pactDialog}
+            submitting={state.importing}
+            onClose={() => setPactDialog(null)}
+            onSubmit={async (input) => {
+              if (await state.importPact(input)) setPactDialog(null)
+            }}
+          />
+          <OpenapiDialog
+            open={openapiDialog}
+            services={services}
+            submitting={state.importing}
+            onClose={() => setOpenapiDialog(false)}
+            onSubmit={async (input) => {
+              if (await state.importOpenapi(input)) setOpenapiDialog(false)
+            }}
+          />
+          <VerificationDialog
+            open={verificationDialog}
+            pacts={pacts}
+            submitting={state.verifying}
+            onClose={() => setVerificationDialog(false)}
+            onSubmit={async (input) => {
+              if (await state.verifyProvider(input)) setVerificationDialog(false)
+            }}
+          />
+        </>
+      )}
     </>
   )
 }

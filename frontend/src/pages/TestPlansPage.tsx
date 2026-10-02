@@ -320,7 +320,7 @@ function CreatePlanDialog({
         <Form.Item name="name" label="计划名称" rules={[{ required: true }]}>
           <Input maxLength={200} />
         </Form.Item>
-        <Form.Item name="targetType" label="资产类型" rules={[{ required: true }]}>
+        <Form.Item name="targetType" label="执行目标" rules={[{ required: true }]}>
           <Select
             options={[
               { value: 'workflow', label: '工作流' },

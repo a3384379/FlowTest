@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.access import ProjectRole, TeamGrantRole
@@ -25,6 +25,16 @@ class UserRepository:
 
     async def get(self, user_id: UUID) -> User | None:
         return await self._session.get(User, user_id)
+
+    async def lock_session_changes(self, user_id: UUID) -> bool:
+        # A write also serializes these operations on SQLite, where FOR UPDATE is ignored.
+        result = await self._session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(updated_at=User.updated_at)
+            .returning(User.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def get_by_email(self, email: str) -> User | None:
         result = await self._session.execute(select(User).where(User.email == email))
@@ -80,18 +90,41 @@ class RefreshSessionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get(self, session_id: UUID) -> RefreshSession | None:
+        return await self._session.get(RefreshSession, session_id)
+
+    async def consume(self, *, session_id: UUID, now: datetime) -> bool:
+        result = await self._session.execute(
+            update(RefreshSession)
+            .where(
+                RefreshSession.id == session_id,
+                RefreshSession.revoked_at.is_(None),
+                RefreshSession.expires_at > now,
+            )
+            .values(revoked_at=now)
+            .returning(RefreshSession.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def revoke(self, *, session_id: UUID, now: datetime) -> None:
+        await self._session.execute(
+            update(RefreshSession)
+            .where(RefreshSession.id == session_id, RefreshSession.revoked_at.is_(None))
+            .values(revoked_at=now)
+            .execution_options(synchronize_session=False)
+        )
+
     def add(self, refresh_session: RefreshSession) -> None:
         self._session.add(refresh_session)
 
     async def revoke_all(self, *, user_id: UUID, revoked_at: datetime) -> None:
-        sessions = await self._session.scalars(
-            select(RefreshSession).where(
-                RefreshSession.user_id == user_id,
-                RefreshSession.revoked_at.is_(None),
-            )
+        await self._session.execute(
+            update(RefreshSession)
+            .where(RefreshSession.user_id == user_id, RefreshSession.revoked_at.is_(None))
+            .values(revoked_at=revoked_at)
+            .execution_options(synchronize_session=False)
         )
-        for refresh_session in sessions:
-            refresh_session.revoked_at = revoked_at
 
 
 class ProjectRepository:

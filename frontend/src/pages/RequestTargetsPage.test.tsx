@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { ApiDefinition, Environment, RequestService, ServiceEndpoint } from '../lib/api'
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { apiDefinition, environment, project, user } from '../test/fixtures'
 import { server } from '../test/server'
@@ -57,7 +58,7 @@ const endpoint: ServiceEndpoint = {
 describe('RequestTargetsPage', () => {
   beforeEach(() => {
     localStorage.clear()
-    useAuthStore.setState({ user })
+    authenticateTestUser(user)
   })
   afterEach(() => {
     localStorage.clear()

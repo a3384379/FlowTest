@@ -948,7 +948,11 @@ function nodeDuration(
 }
 
 function Duration({ value, running }: { value: number | null; running: boolean }) {
-  return <span>{value === null ? (running ? '计时中' : '未提供') : formatDuration(value)}</span>
+  return (
+    <span className="workflow-volatile-value">
+      {value === null ? (running ? '计时中' : '未提供') : formatDuration(value)}
+    </span>
+  )
 }
 
 function formatDuration(value: number): string {

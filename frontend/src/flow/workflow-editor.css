@@ -780,9 +780,7 @@
 .workflow-split-body.inspector-maximized
   .workflow-node-configuration.is-fullscreen
   > .workflow-config-section,
-.workflow-split-body.inspector-maximized
-  .workflow-node-configuration-main
-  > .workflow-config-section,
+.workflow-split-body.inspector-maximized .workflow-node-fields > .workflow-config-section,
 .workflow-split-body.inspector-maximized
   .workflow-node-configuration-main:not(:has(> .workflow-config-section)) {
   padding: 18px;
@@ -792,19 +790,23 @@
   box-shadow: 0 4px 14px rgb(31 42 68 / 4%);
 }
 
-.workflow-split-body.inspector-maximized .workflow-node-configuration-main {
+.workflow-split-body.inspector-maximized .workflow-node-fields:has(> .workflow-config-section) {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 16px;
 }
 
-.workflow-split-body.inspector-maximized .workflow-node-configuration-main > .config-target,
-.workflow-split-body.inspector-maximized .workflow-node-configuration-main > .config-policy {
+.workflow-split-body.inspector-maximized .workflow-node-fields > * {
+  grid-column: 1 / -1;
+}
+
+.workflow-split-body.inspector-maximized .workflow-node-fields > .config-target,
+.workflow-split-body.inspector-maximized .workflow-node-fields > .config-policy {
   grid-column: span 4;
 }
 
-.workflow-split-body.inspector-maximized .workflow-node-configuration-main > .config-request,
-.workflow-split-body.inspector-maximized .workflow-node-configuration-main > .config-mapping {
+.workflow-split-body.inspector-maximized .workflow-node-fields > .config-request,
+.workflow-split-body.inspector-maximized .workflow-node-fields > .config-mapping {
   grid-column: span 8;
 }
 
@@ -817,9 +819,7 @@
 }
 
 @media (max-width: 1100px) {
-  .workflow-split-body.inspector-maximized
-    .workflow-node-configuration-main
-    > .workflow-config-section {
+  .workflow-split-body.inspector-maximized .workflow-node-fields > .workflow-config-section {
     grid-column: 1 / -1;
   }
 }

@@ -65,8 +65,10 @@ function TrajectoryContent({
         <Tag>{definition.nodes.length}</Tag>
       </header>
       <Typography.Text type="secondary">
-        {executionId ? executionId.slice(0, 8) : '等待执行记录'} ·{' '}
-        {mode === 'history' ? '历史只读' : '运行中视图'}
+        <span className="workflow-volatile-value">
+          {executionId ? executionId.slice(0, 8) : '等待执行记录'}
+        </span>{' '}
+        · {mode === 'history' ? '历史只读' : '运行中视图'}
       </Typography.Text>
       <nav>
         {definition.nodes.map((node) => (
@@ -118,7 +120,12 @@ function TrajectoryNode({
       <strong>{node.name}</strong>
       <span>
         {status ? (labels[status] ?? status) : '未提供节点记录'}
-        {duration !== undefined ? ` · ${duration} ms` : ''}
+        {duration !== undefined && (
+          <>
+            {' · '}
+            <span className="workflow-volatile-value">{Math.round(duration * 100) / 100} ms</span>
+          </>
+        )}
       </span>
     </button>
   )

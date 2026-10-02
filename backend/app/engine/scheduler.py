@@ -200,6 +200,10 @@ class ExecutionContext:
         default_factory=dict,
         repr=False,
     )
+    restored_nested_variables: dict[str, dict[str, JsonValue]] = field(
+        default_factory=dict,
+        repr=False,
+    )
     reset_retry_budget: bool = field(default=False, repr=False)
     cancellation: "CancellationToken | None" = field(default=None, repr=False)
     allow_return: bool = False
@@ -285,8 +289,14 @@ class ExecutionContext:
         output: JsonValue,
         extracted_variables: dict[str, JsonValue],
     ) -> None:
+        if node_id.startswith(NESTED_CHECKPOINT_PREFIX):
+            self.restored_nested_variables[node_id] = dict(extracted_variables)
+            return
         self._node_outputs[node_id] = output
         self._extracted_variables.update(extracted_variables)
+
+    def restore_extracted_variables(self, values: dict[str, JsonValue]) -> None:
+        self._extracted_variables.update(values)
 
     def _record_scope(self, values: dict[str, JsonValue], scope: str) -> None:
         for name in values:
@@ -652,93 +662,83 @@ class WorkflowScheduler:
         )
         if definition.schema_version == "4.0":
             _restore_uncertain_requests(nodes, statuses, records, run_context, resume_records)
+        control_signal, return_output = _restored_control_signal(records)
 
         await _notify_status_changes(
             nodes, statuses, records, notified, run_context, on_node_status
         )
 
-        while len(records) < len(nodes):
-            if _phase_cancelled(token, force_only=cancellation_force_only) or _has_unknown_outcome(
-                records,
-                run_context.nested_checkpoint_records,
-                run_context.checkpoint_phase or phase,
-            ):
-                await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
-                await _notify_status_changes(
-                    nodes, statuses, records, notified, run_context, on_node_status
-                )
-                break
+        try:
+            while len(records) < len(nodes):
+                if _phase_cancelled(
+                    token, force_only=cancellation_force_only
+                ) or _has_unknown_outcome(
+                    records,
+                    run_context.nested_checkpoint_records,
+                    run_context.checkpoint_phase or phase,
+                ):
+                    await _cancel_active(active)
+                    _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
+                    await _notify_status_changes(
+                        nodes, statuses, records, notified, run_context, on_node_status
+                    )
+                    break
 
-            _skip_blocked(nodes, incoming, statuses, records, run_context)
-            _schedule_ready(
-                definition,
-                nodes,
-                incoming,
-                statuses,
-                records,
-                active,
-                run_context,
-                self._run_node,
-                attempt_offsets,
-                reset_retry_budget,
-                request_budget,
-                on_node_status,
-                reservations,
-            )
-            await _notify_status_changes(
-                nodes, statuses, records, notified, run_context, on_node_status
-            )
-            if not active:
-                if len(records) < len(nodes):
+                if control_signal is not None:
                     _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED, reservations)
                     await _notify_status_changes(
                         nodes, statuses, records, notified, run_context, on_node_status
                     )
-                break
+                    break
 
-            cancellation_wait = asyncio.create_task(token.wait(force_only=cancellation_force_only))
-            done, _pending = await asyncio.wait(
-                {*active, cancellation_wait}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if cancellation_wait in done:
-                await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
+                _skip_blocked(nodes, incoming, statuses, records, run_context)
+                _schedule_ready(
+                    definition,
+                    nodes,
+                    incoming,
+                    statuses,
+                    records,
+                    active,
+                    run_context,
+                    self._run_node,
+                    attempt_offsets,
+                    reset_retry_budget,
+                    request_budget,
+                    on_node_status,
+                    reservations,
+                )
                 await _notify_status_changes(
                     nodes, statuses, records, notified, run_context, on_node_status
                 )
-                break
-            cancellation_wait.cancel()
-            await asyncio.gather(cancellation_wait, return_exceptions=True)
+                if not active:
+                    if len(records) < len(nodes):
+                        _record_remaining(
+                            nodes, statuses, records, NodeStatus.SKIPPED, reservations
+                        )
+                        await _notify_status_changes(
+                            nodes, statuses, records, notified, run_context, on_node_status
+                        )
+                    break
 
-            failed, control_signal, return_output = _record_completed_tasks(
-                active,
-                done,
-                records,
-                statuses,
-                run_context,
-                fail_fast_on_error=fail_fast_on_error,
-            )
-
-            await _notify_status_changes(
-                nodes, statuses, records, notified, run_context, on_node_status
-            )
-
-            if control_signal is not None:
-                await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.SKIPPED, reservations)
-                await _notify_status_changes(
-                    nodes, statuses, records, notified, run_context, on_node_status
+                stopped, control_signal, return_output = await _await_phase_progress(
+                    active=active,
+                    token=token,
+                    force_only=cancellation_force_only,
+                    nodes=nodes,
+                    statuses=statuses,
+                    records=records,
+                    notified=notified,
+                    context=run_context,
+                    on_node_status=on_node_status,
+                    reservations=reservations,
+                    fail_fast_on_error=fail_fast_on_error,
+                    stop_on_failure=definition.settings.fail_fast,
                 )
-                break
+                if stopped:
+                    break
 
-            if failed and definition.settings.fail_fast:
-                await _cancel_active(active)
-                _record_remaining(nodes, statuses, records, NodeStatus.CANCELLED, reservations)
-                await _notify_status_changes(
-                    nodes, statuses, records, notified, run_context, on_node_status
-                )
-                break
+        finally:
+            await _cancel_active(active)
 
         ordered = tuple(records[node.id] for node in nodes_for_phase)
         status, unknown_outcome = _phase_status(
@@ -1419,6 +1419,58 @@ async def _cancel_active(active: dict[asyncio.Task[NodeRunRecord], str]) -> None
     active.clear()
 
 
+async def _await_phase_progress(
+    *,
+    active: dict[asyncio.Task[NodeRunRecord], str],
+    token: CancellationToken,
+    force_only: bool,
+    nodes: dict[str, WorkflowNode],
+    statuses: dict[str, NodeStatus],
+    records: dict[str, NodeRunRecord],
+    notified: dict[str, NodeStatus],
+    context: ExecutionContext,
+    on_node_status: NodeStatusCallback | None,
+    reservations: dict[str, _AttemptReservation],
+    fail_fast_on_error: bool,
+    stop_on_failure: bool,
+) -> tuple[bool, Literal["break", "continue", "return"] | None, dict[str, JsonValue] | None]:
+    cancellation_wait = asyncio.create_task(token.wait(force_only=force_only))
+    try:
+        done, _pending = await asyncio.wait(
+            {*active, cancellation_wait}, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        cancellation_wait.cancel()
+        await asyncio.gather(cancellation_wait, return_exceptions=True)
+
+    signal: Literal["break", "continue", "return"] | None = None
+    return_output: dict[str, JsonValue] | None = None
+    stop_status: NodeStatus | None = None
+    if cancellation_wait in done:
+        stop_status = NodeStatus.CANCELLED
+    else:
+        failed, signal, return_output = _record_completed_tasks(
+            active,
+            done,
+            records,
+            statuses,
+            context,
+            fail_fast_on_error=fail_fast_on_error,
+        )
+        await _notify_status_changes(nodes, statuses, records, notified, context, on_node_status)
+        if signal is not None:
+            stop_status = NodeStatus.SKIPPED
+        elif failed and stop_on_failure:
+            stop_status = NodeStatus.CANCELLED
+
+    if stop_status is None:
+        return False, signal, return_output
+    await _cancel_active(active)
+    _record_remaining(nodes, statuses, records, stop_status, reservations)
+    await _notify_status_changes(nodes, statuses, records, notified, context, on_node_status)
+    return True, signal, return_output
+
+
 def _record_remaining(
     nodes: dict[str, WorkflowNode],
     statuses: dict[str, NodeStatus],
@@ -1490,6 +1542,15 @@ def _record_completed_tasks(
             signal = record.result.control_signal
             return_output = record.result.return_output
     return failed, signal, return_output
+
+
+def _restored_control_signal(
+    records: dict[str, NodeRunRecord],
+) -> tuple[Literal["break", "continue", "return"] | None, dict[str, JsonValue] | None]:
+    for record in records.values():
+        if record.status is NodeStatus.PASSED and record.result.control_signal is not None:
+            return record.result.control_signal, record.result.return_output
+    return None, None
 
 
 def _restore_records(

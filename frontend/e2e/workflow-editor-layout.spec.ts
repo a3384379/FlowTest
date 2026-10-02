@@ -2,9 +2,9 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { seedEditor } from './support/workflow-editor'
 
 const viewports = [
-  { width: 1280, height: 800, minimumCanvasHeight: 460, listVisible: false },
-  { width: 1440, height: 900, minimumCanvasHeight: 600, listVisible: true },
-  { width: 1920, height: 1080, minimumCanvasHeight: 720, listVisible: true },
+  { width: 1280, height: 800, minimumCanvasHeight: 460 },
+  { width: 1440, height: 900, minimumCanvasHeight: 600 },
+  { width: 1920, height: 1080, minimumCanvasHeight: 720 },
 ]
 
 for (const viewport of viewports) {
@@ -28,20 +28,21 @@ for (const viewport of viewports) {
       page.getByRole('button', { name: '切换工作流列表', exact: true }),
     )
     expect(toggle.x + toggle.width + 6).toBeLessThanOrEqual(title.x)
-    expect(title.x + title.width).toBeLessThanOrEqual(modes.x)
+    expect(title.y + title.height).toBeLessThanOrEqual(modes.y + 1)
+    expect(title.x + title.width).toBeLessThanOrEqual(actions.x)
     expect(modes.x + modes.width).toBeLessThanOrEqual(actions.x)
     expect((await requiredBox(canvas)).height).toBeGreaterThanOrEqual(viewport.minimumCanvasHeight)
     expect((await requiredBox(toolbar)).height).toBeLessThanOrEqual(56)
     await expectPageWithoutOverflow(page, viewport)
 
-    if (viewport.listVisible) {
-      await expect(list).toBeVisible()
-      const listWidth = (await requiredBox(list)).width
-      expect(listWidth).toBeGreaterThanOrEqual(240)
-      expect(listWidth).toBeLessThanOrEqual(280)
-    } else {
-      await expect(list).toBeHidden()
-    }
+    await expect(list).toBeHidden()
+    await page.getByRole('button', { name: '切换工作流列表', exact: true }).click()
+    await expect(list).toBeVisible()
+    const listWidth = (await requiredBox(list)).width
+    expect(listWidth).toBeGreaterThanOrEqual(280)
+    expect(listWidth).toBeLessThanOrEqual(400)
+    await page.keyboard.press('Escape')
+    await expect(list).toBeHidden()
 
     await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('default-edit.png') })
 
@@ -63,6 +64,18 @@ for (const viewport of viewports) {
     expect(canvasShare).toBeGreaterThanOrEqual(0.52)
     expect((await requiredBox(inspector)).width).toBeGreaterThanOrEqual(320)
 
+    await page.getByRole('button', { name: '最大化配置', exact: true }).click()
+    const fullscreen = page.getByRole('dialog', { name: '节点与连线配置', exact: true })
+    await expect(fullscreen).toBeVisible()
+    expect((await requiredBox(fullscreen.locator('.config-target'))).width).toBeGreaterThanOrEqual(
+      250,
+    )
+    expect((await requiredBox(fullscreen.locator('.config-request'))).width).toBeGreaterThanOrEqual(
+      (await requiredBox(fullscreen.locator('.workflow-node-fields'))).width * 0.6,
+    )
+    await expect(fullscreen.getByRole('tab', { name: 'Params', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '还原配置', exact: true }).click()
+
     await page.getByRole('button', { name: '专注模式', exact: true }).click()
     const focusToolbar = page.getByTestId('workflow-focus-toolbar')
     await expect(focusToolbar).toBeVisible()
@@ -83,7 +96,7 @@ for (const viewport of viewports) {
     }
     await expect(
       focusToolbar.getByRole('button', { name: '运行已发布版本', exact: true }),
-    ).toHaveCSS('color', 'rgb(71, 84, 103)')
+    ).toBeDisabled()
     await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('focus.png') })
 
     await focusToolbar.getByRole('button', { name: 'plus 添加节点', exact: true }).click()

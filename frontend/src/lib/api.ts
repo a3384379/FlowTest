@@ -1,33 +1,196 @@
-import axios from 'axios'
+import axios, { type AxiosError, type AxiosInstance, type InternalAxiosRequestConfig } from 'axios'
 
-export const apiClient = axios.create({
-  baseURL: '/api/v1',
-  timeout: 30_000,
-  withCredentials: true,
+import { useAuthStore } from '../features/auth/auth-store'
+import type { SessionSnapshot } from '../features/auth/auth-session'
+import { SessionBoundaryError } from './auth-client'
+
+export { authClient, SessionBoundaryError } from './auth-client'
+
+type ScopedConfig = InternalAxiosRequestConfig & {
+  authScope?: { epoch: number; userId: string; organizationId: string | null }
+  authTokenVersion?: number
+  authRetried?: boolean
+}
+
+export type PlatformAuthPort = {
+  snapshot: () => SessionSnapshot
+  ensureFreshAccessToken: () => Promise<string>
+  recoverExpiredAccessToken: (usedVersion: number | undefined) => Promise<string>
+  rejectInvalidAccessToken: (usedVersion: number | undefined) => void
+}
+
+export function createPlatformApiClient(port: PlatformAuthPort): AxiosInstance {
+  const client = axios.create({
+    baseURL: '/api/v1',
+    timeout: 30_000,
+    withCredentials: true,
+  })
+  client.interceptors.request.use((config) => preparePlatformRequest(config, port))
+  client.interceptors.response.use(
+    (response) => {
+      const config = response.config as ScopedConfig
+      if (config.authScope && !isCurrentScope(config.authScope, port)) {
+        throw new SessionBoundaryError('登录身份已变化')
+      }
+      return response
+    },
+    (error) => recoverPlatformRequest(error, port, client),
+  )
+  return client
+}
+
+const defaultSessionActions = useAuthStore.getState()
+
+export const apiClient = createPlatformApiClient({
+  snapshot: () => useAuthStore.getState(),
+  ensureFreshAccessToken: defaultSessionActions.requestAccessToken,
+  recoverExpiredAccessToken: defaultSessionActions.recoverExpiredAccessToken,
+  rejectInvalidAccessToken: defaultSessionActions.rejectInvalidAccessToken,
 })
 
-let accessToken: string | null = null
-let organizationId: string | null = null
-
-export function setAccessToken(token: string | null) {
-  accessToken = token
+export function setOrganizationId(id: string | null): void {
+  if (useAuthStore.getState().organizationId !== id) {
+    useAuthStore.setState({ organizationId: id })
+  }
 }
 
-export function setOrganizationId(id: string | null) {
-  organizationId = id
-}
-
-apiClient.interceptors.request.use((config) => {
-  if (accessToken) {
-    config.headers.Authorization = `Bearer ${accessToken}`
-  }
-  if (organizationId) {
-    config.headers['X-Organization-Id'] = organizationId
-  } else {
-    delete config.headers['X-Organization-Id']
-  }
+async function preparePlatformRequest(
+  config: ScopedConfig,
+  port: PlatformAuthPort,
+): Promise<ScopedConfig> {
+  assertPlatformUrl(config.url)
+  const snapshot = port.snapshot()
+  assignRequestScope(config, snapshot)
+  assertRequestScope(config, port)
+  const token = await requestToken(config, snapshot, port)
+  assertRequestScope(config, port)
+  assignRequestHeaders(config, token, port.snapshot().organizationId)
+  config.authTokenVersion = port.snapshot().tokenVersion
   return config
-})
+}
+
+function assertPlatformUrl(url: string | undefined): void {
+  if (url?.startsWith('//') || /^[a-z][a-z0-9+.-]*:/i.test(url ?? '')) {
+    throw new Error('平台请求不允许使用外部地址')
+  }
+}
+
+function assignRequestScope(config: ScopedConfig, snapshot: SessionSnapshot): void {
+  if (snapshot.phase === 'logging-out') throw new SessionBoundaryError('已退出登录')
+  if (snapshot.user && !config.authScope) config.authScope = scopeOf(snapshot)
+}
+
+function assignRequestHeaders(
+  config: ScopedConfig,
+  token: string | null,
+  organizationId: string | null,
+): void {
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  else delete config.headers.Authorization
+  if (organizationId) config.headers['X-Organization-Id'] = organizationId
+  else delete config.headers['X-Organization-Id']
+}
+
+async function requestToken(
+  config: ScopedConfig,
+  snapshot: SessionSnapshot,
+  port: PlatformAuthPort,
+) {
+  if (snapshot.user && !config.authRetried) {
+    return port.ensureFreshAccessToken()
+  }
+  return snapshot.token
+}
+
+function assertRequestScope(config: ScopedConfig, port: PlatformAuthPort): void {
+  if (config.authScope && !isCurrentScope(config.authScope, port)) {
+    throw new SessionBoundaryError('登录身份已变化')
+  }
+  if (config.signal?.aborted) throw new Error('请求已取消')
+}
+
+async function recoverPlatformRequest(
+  error: unknown,
+  port: PlatformAuthPort,
+  client: AxiosInstance,
+): Promise<unknown> {
+  if (isInvalidPlatformToken(error)) {
+    const config = error.config as ScopedConfig | undefined
+    if (config?.authScope && isCurrentScope(config.authScope, port)) {
+      port.rejectInvalidAccessToken(config.authTokenVersion)
+    }
+    throw error
+  }
+  if (!canRecover(error, port)) throw error
+  const config = error.config as ScopedConfig
+  config.authRetried = true
+  const token = await port.recoverExpiredAccessToken(config.authTokenVersion)
+  assertRequestScope(config, port)
+  config.headers.Authorization = `Bearer ${token}`
+  return client.request(config)
+}
+
+function isInvalidPlatformToken(error: unknown): error is AxiosError {
+  if (!axios.isAxiosError(error)) return false
+  const data = error.response?.data as { error?: { code?: string } } | undefined
+  return error.response?.status === 401 && data?.error?.code === 'INVALID_ACCESS_TOKEN'
+}
+
+function canRecover(error: unknown, port: PlatformAuthPort): error is AxiosError {
+  if (!axios.isAxiosError(error)) return false
+  const config = error.config as ScopedConfig | undefined
+  if (!config || config.authRetried || config.signal?.aborted) return false
+  return isExpiredPlatformError(error) && isRecoverableScope(config, port)
+}
+
+function isExpiredPlatformError(error: AxiosError): boolean {
+  const data = error.response?.data as { error?: { code?: string } } | undefined
+  return error.response?.status === 401 && data?.error?.code === 'ACCESS_TOKEN_EXPIRED'
+}
+
+function isRecoverableScope(config: ScopedConfig, port: PlatformAuthPort): boolean {
+  return Boolean(
+    config.authScope && isCurrentScope(config.authScope, port) && isReplayable(config.data),
+  )
+}
+
+function scopeOf(snapshot: SessionSnapshot) {
+  return {
+    epoch: snapshot.epoch,
+    userId: snapshot.user!.id,
+    organizationId: snapshot.organizationId,
+  }
+}
+
+function isCurrentScope(
+  scope: NonNullable<ScopedConfig['authScope']>,
+  port: PlatformAuthPort,
+): boolean {
+  const snapshot = port.snapshot()
+  return (
+    snapshot.epoch === scope.epoch &&
+    snapshot.user?.id === scope.userId &&
+    snapshot.organizationId === scope.organizationId
+  )
+}
+
+function isReplayable(data: unknown): boolean {
+  return data === undefined || data === null || typeof data === 'string'
+}
+
+export function shouldSkipAutomaticQueryRetry(error: unknown): boolean {
+  if (error instanceof SessionBoundaryError) return true
+  if (!axios.isAxiosError(error)) return false
+  if (error.response?.status === 429) return true
+  const data = error.response?.data as { error?: { code?: string } } | undefined
+  return [
+    'ACCESS_TOKEN_EXPIRED',
+    'INVALID_ACCESS_TOKEN',
+    'INVALID_REFRESH_TOKEN',
+    'AUTHENTICATION_REQUIRED',
+    'REFRESH_ROTATION_CONFLICT',
+  ].includes(data?.error?.code ?? '')
+}
 
 export type Page<T> = {
   items: T[]
@@ -1218,6 +1381,7 @@ export type TestCase = {
   tags: string[]
   is_template: boolean
   draft_definition: TestCaseDefinition
+  draft_fingerprint?: string
   current_version: number | null
   created_by_id: string
   created_at: string
@@ -1233,6 +1397,19 @@ export type TestCaseVersion = {
   change_note: string
   created_by_id: string
   created_at: string
+}
+
+export type TestCaseRun = {
+  execution_id: string
+  case_id: string
+  case_version: number
+  workflow_id: string
+  workflow_version: number
+  environment_id: string
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
+  source: 'direct' | 'plan'
+  started_at: string
+  created_new_version: boolean
 }
 
 export type TestSuiteItem = {

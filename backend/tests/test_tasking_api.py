@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -17,9 +18,12 @@ from app.core.errors import AppError
 from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.domain.tasking import webhook_signature
+from app.domain.test_assets import definition_fingerprint
 from app.main import app
 from app.models import Base
+from app.models import test_assets as test_asset_models
 from app.models.access import User
+from app.models.workflows import WorkflowExecution
 from app.services.execution_events import ExecutionEvent
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -82,6 +86,211 @@ async def tasking_context(
     await workflow_coordinator.shutdown()
     app.dependency_overrides.clear()
     await engine.dispose()
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_direct_case_run_pins_versions_and_reports_real_case_source(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    target = respx.get("http://workflow.example.com/users/v1").mock(
+        return_value=Response(200, json={"id": 1})
+    )
+    case_path = f"/api/v1/projects/{project_id}/test-cases"
+    definition = {
+        "workflow_id": workflow_id,
+        "workflow_version": 1,
+        "environment_id": environment_id,
+        "runtime_variables": {"account": "001"},
+        "runtime_headers": {"X-Case": "old"},
+    }
+    created = await client.post(
+        case_path, headers=headers, json={"name": "第一用例", "definition": definition}
+    )
+    assert created.status_code == 201, created.text
+    case_id = created.json()["id"]
+    run_path = f"{case_path}/{case_id}/runs"
+    assert (await client.get(f"{case_path}/{case_id}", headers=headers)).status_code == 200
+    missing_key = await client.post(run_path, headers=headers, json={"source": "published"})
+    assert missing_key.status_code == 422
+    assert missing_key.json()["error"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
+    unpublished = await client.post(
+        run_path,
+        headers={**headers, "Idempotency-Key": "unpublished"},
+        json={"source": "published"},
+    )
+    assert unpublished.status_code == 409, unpublished.text
+    fingerprint = created.json()["draft_fingerprint"]
+    run_headers = {**headers, "Idempotency-Key": "first-case-run"}
+    started = await client.post(
+        run_path,
+        headers=run_headers,
+        json={"source": "draft", "publish_draft": True, "expected_draft_fingerprint": fingerprint},
+    )
+    assert started.status_code == 202, started.text
+    assert started.json()["case_version"] == 1
+    assert started.json()["created_new_version"] is True
+    replay = await client.post(
+        run_path,
+        headers=run_headers,
+        json={"source": "draft", "publish_draft": True, "expected_draft_fingerprint": fingerprint},
+    )
+    assert replay.status_code == 202
+    assert replay.json()["execution_id"] == started.json()["execution_id"]
+    reused_key = await client.post(
+        run_path, headers=run_headers, json={"source": "published", "version": 1}
+    )
+    assert reused_key.status_code == 409
+    for _ in range(80):
+        latest = await client.get(
+            f"{case_path}/runs/latest", headers=headers, params={"case_ids": case_id}
+        )
+        assert latest.status_code == 200, latest.text
+        if latest.json() and latest.json()[0]["status"] not in {"queued", "running"}:
+            break
+        await asyncio.sleep(0.05)
+    assert latest.json()[0]["status"] == "passed"
+    assert latest.json()[0]["source"] == "direct"
+    assert latest.json()[0]["case_version"] == 1
+    assert len(target.calls) == 1
+    assert target.calls[0].request.headers["X-Case"] == "old"
+
+    definition["runtime_headers"] = {"X-Case": "new"}
+    changed = await client.patch(
+        f"{case_path}/{case_id}", headers=headers, json={"definition": definition}
+    )
+    assert changed.status_code == 200
+    old_run = await client.post(
+        run_path,
+        headers={**headers, "Idempotency-Key": "old-version-run"},
+        json={
+            "source": "published",
+            "version": 1,
+            "runtime_headers": {"x-case": "temporary"},
+        },
+    )
+    assert old_run.status_code == 202, old_run.text
+    assert old_run.json()["case_version"] == 1
+    for _ in range(80):
+        if len(target.calls) >= 2:
+            break
+        await asyncio.sleep(0.05)
+    assert len(target.calls) >= 2
+    assert target.calls[1].request.headers["X-Case"] == "temporary"
+    conflict = await client.post(
+        run_path,
+        headers={**headers, "Idempotency-Key": "stale-draft-run"},
+        json={"source": "draft", "publish_draft": True, "expected_draft_fingerprint": fingerprint},
+    )
+    assert conflict.status_code == 409
+    updated = await client.post(
+        run_path,
+        headers={**headers, "Idempotency-Key": "new-version-run"},
+        json={
+            "source": "draft",
+            "publish_draft": True,
+            "expected_draft_fingerprint": changed.json()["draft_fingerprint"],
+        },
+    )
+    assert updated.status_code == 202, updated.text
+    assert updated.json()["case_version"] == 2
+    assert updated.json()["workflow_version"] == 1
+    repeat_publish = await client.post(
+        run_path,
+        headers={**headers, "Idempotency-Key": "repeat-draft-run"},
+        json={
+            "source": "draft",
+            "publish_draft": True,
+            "expected_draft_fingerprint": changed.json()["draft_fingerprint"],
+        },
+    )
+    assert repeat_publish.status_code == 202, repeat_publish.text
+    assert repeat_publish.json()["created_new_version"] is False
+    assert repeat_publish.json()["case_version"] == 2
+
+    plan = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans",
+        headers=headers,
+        json={
+            "name": "固定版本计划",
+            "items": [
+                {
+                    "target_type": "workflow",
+                    "target_id": workflow_id,
+                    "environment_id": environment_id,
+                },
+            ],
+        },
+    )
+    assert plan.status_code == 201, plan.text
+    plan_id = plan.json()["id"]
+    added = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan_id}/items",
+        headers=headers,
+        json={"target_type": "case", "target_id": case_id, "target_version": 1},
+    )
+    assert added.status_code == 201, added.text
+    assert added.json()["items"][1]["target_version"] == 1
+    duplicate = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan_id}/items",
+        headers=headers,
+        json={"target_type": "case", "target_id": case_id, "target_version": 2},
+    )
+    assert duplicate.status_code == 409
+    queued = await client.post(
+        f"/api/v1/projects/{project_id}/test-plans/{plan_id}/runs", headers=headers
+    )
+    assert queued.status_code == 202, queued.text
+    await PlanRunCoordinator(tasking_context.session_maker, tasking_context.events).run(
+        UUID(queued.json()["id"])
+    )
+    latest_plan = await client.get(
+        f"{case_path}/runs/latest", headers=headers, params={"case_ids": case_id}
+    )
+    assert latest_plan.status_code == 200, latest_plan.text
+    assert latest_plan.json()[0]["source"] == "plan"
+    assert latest_plan.json()[0]["case_version"] == 1
+    historical_execution_id = UUID(latest_plan.json()[0]["execution_id"])
+    async with tasking_context.session_maker() as session:
+        historical_execution = await session.get(WorkflowExecution, historical_execution_id)
+        assert historical_execution is not None
+        historical_execution.source_case_id = None
+        historical_execution.source_case_version = None
+        historical_execution.source_trigger = None
+        historical_execution.source_plan_run_item_id = None
+        await session.commit()
+    historical_latest = await client.get(
+        f"{case_path}/runs/latest", headers=headers, params={"case_ids": case_id}
+    )
+    assert historical_latest.status_code == 200, historical_latest.text
+    assert historical_latest.json()[0]["execution_id"] == str(historical_execution_id)
+    assert historical_latest.json()[0]["source"] == "plan"
+
+    second = await client.post(
+        case_path,
+        headers=headers,
+        json={"name": "第二用例", "definition": definition},
+    )
+    assert second.status_code == 201, second.text
+    second_run = await client.post(
+        f"{case_path}/{second.json()['id']}/runs",
+        headers={**headers, "Idempotency-Key": "second-case-run"},
+        json={
+            "source": "draft",
+            "publish_draft": True,
+            "expected_draft_fingerprint": second.json()["draft_fingerprint"],
+        },
+    )
+    assert second_run.status_code == 202, second_run.text
+    latest_both = await client.get(
+        f"{case_path}/runs/latest",
+        headers=headers,
+        params=[("case_ids", case_id), ("case_ids", second.json()["id"])],
+    )
+    assert {row["case_id"] for row in latest_both.json()} == {case_id, second.json()["id"]}
 
 
 @respx.mock
@@ -412,6 +621,103 @@ async def test_quality_gate_flaky_quarantine_cron_junit_and_capacity(
                 runtime_headers={},
             )
         assert quota_error.value.code == "PROJECT_CONCURRENCY_EXCEEDED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("header_name", "header_value"),
+    [("X Legacy", "valid"), ("X-Legacy", "line\nbreak")],
+)
+async def test_legacy_case_headers_remain_readable_until_repaired(
+    tasking_context: TaskingTestContext, header_name: str, header_value: str
+) -> None:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    case_path = f"/api/v1/projects/{project_id}/test-cases"
+    definition = {
+        "workflow_id": workflow_id,
+        "workflow_version": 1,
+        "environment_id": environment_id,
+        "runtime_headers": {"X-Valid": "value"},
+    }
+    created = await client.post(
+        case_path, headers=headers, json={"name": "历史用例", "definition": definition}
+    )
+    assert created.status_code == 201, created.text
+    case_id = created.json()["id"]
+    published = await client.post(f"{case_path}/{case_id}/versions", headers=headers, json={})
+    assert published.status_code == 200, published.text
+
+    legacy_definition = {**definition, "runtime_headers": {header_name: header_value}}
+    async with tasking_context.session_maker() as session:
+        case = await session.get(test_asset_models.TestCase, UUID(case_id))
+        version = await session.scalar(
+            select(test_asset_models.TestCaseVersion).where(
+                test_asset_models.TestCaseVersion.test_case_id == UUID(case_id)
+            )
+        )
+        assert case is not None and version is not None
+        case.draft_definition = legacy_definition
+        version.definition = legacy_definition
+        version.fingerprint = definition_fingerprint(legacy_definition)
+        await session.commit()
+
+    listed = await client.get(case_path, headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"][0]["draft_definition"]["runtime_headers"] == {
+        header_name: header_value
+    }
+    fetched = await client.get(f"{case_path}/{case_id}", headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    versions = await client.get(f"{case_path}/{case_id}/versions", headers=headers)
+    assert versions.status_code == 200, versions.text
+    assert versions.json()[0]["definition"]["runtime_headers"] == {header_name: header_value}
+    metadata_update = await client.patch(
+        f"{case_path}/{case_id}", headers=headers, json={"description": "待修复"}
+    )
+    assert metadata_update.status_code == 200, metadata_update.text
+
+    invalid_create = await client.post(
+        case_path,
+        headers=headers,
+        json={"name": "新用例", "definition": legacy_definition},
+    )
+    assert invalid_create.status_code == 422, invalid_create.text
+    invalid_publish = await client.post(f"{case_path}/{case_id}/versions", headers=headers, json={})
+    assert invalid_publish.status_code == 422, invalid_publish.text
+    assert invalid_publish.json()["error"]["code"] == "INVALID_TEST_CASE_DEFINITION"
+    invalid_run = await client.post(
+        f"{case_path}/{case_id}/runs",
+        headers={**headers, "Idempotency-Key": "legacy-header-run"},
+        json={"source": "published", "version": 1},
+    )
+    assert invalid_run.status_code == 422, invalid_run.text
+    assert invalid_run.json()["error"]["code"] == "INVALID_TEST_CASE_DEFINITION"
+    invalid_draft_run = await client.post(
+        f"{case_path}/{case_id}/runs",
+        headers={**headers, "Idempotency-Key": "legacy-draft-run"},
+        json={
+            "source": "draft",
+            "publish_draft": True,
+            "expected_draft_fingerprint": fetched.json()["draft_fingerprint"],
+        },
+    )
+    assert invalid_draft_run.status_code == 422, invalid_draft_run.text
+    assert invalid_draft_run.json()["error"]["code"] == "INVALID_TEST_CASE_DEFINITION"
+    invalid_clone = await client.post(
+        f"{case_path}/{case_id}/clone", headers=headers, json={"name": "历史用例副本"}
+    )
+    assert invalid_clone.status_code == 422, invalid_clone.text
+    assert invalid_clone.json()["error"]["code"] == "INVALID_TEST_CASE_DEFINITION"
+
+    repaired = await client.patch(
+        f"{case_path}/{case_id}", headers=headers, json={"definition": definition}
+    )
+    assert repaired.status_code == 200, repaired.text
+    new_version = await client.post(f"{case_path}/{case_id}/versions", headers=headers, json={})
+    assert new_version.status_code == 200, new_version.text
+    assert new_version.json()["version"] == 2
 
 
 @pytest.mark.asyncio

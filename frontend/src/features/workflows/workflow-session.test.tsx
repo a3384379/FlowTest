@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { DraftSessionProvider } from '../drafts/DraftSessionProvider'
 import { useWorkflows } from './use-workflows'
 import { useAuthStore } from '../auth/auth-store'
+import { authenticateTestUser } from '../../test/auth'
 import { workflow, workflowDefinition, user as actor } from '../../test/fixtures'
 
 vi.mock('../projects/use-project-context', () => ({
@@ -56,7 +57,7 @@ afterEach(() => {
   useAuthStore.setState({ user: null })
 })
 it('preserves workflow memory across actual module unmounts and project switches with unavailable storage', async () => {
-  useAuthStore.setState({ user: actor })
+  authenticateTestUser(actor)
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new DOMException('quota')
   })

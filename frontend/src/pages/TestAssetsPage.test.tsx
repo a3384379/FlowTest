@@ -3,18 +3,21 @@ import { App as AntdApp } from 'antd'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Environment, Folder, TestCase, TestSuite, Workflow } from '../lib/api'
+import * as assetService from '../features/test-assets/test-asset-service'
 import {
   caseInput,
   editorKey,
   folderItems,
   pageItems,
   suiteInput,
+  validateEntries,
 } from '../features/test-assets/test-asset-view-model'
 import {
   AssetPane,
   CaseDialog,
   CaseTable,
   DiffDialog,
+  RunCaseDialog,
   SuiteDialog,
   SuiteTable,
 } from './TestAssetsPage'
@@ -114,7 +117,7 @@ describe('TestAssetsPage', () => {
     expect(within(caseRow).getByText('v2')).toBeVisible()
   })
 
-  it('renders editable and unpublished asset variants', () => {
+  it('renders editable and unpublished asset variants', async () => {
     const draftCase = { ...testCase, is_template: false, current_version: null }
     const onEdit = vi.fn()
     const { unmount } = render(
@@ -134,7 +137,11 @@ describe('TestAssetsPage', () => {
     const row = screen.getByRole('row', { name: /登录用例/ })
     expect(within(row).getByText('用例')).toBeVisible()
     expect(within(row).getByText('未发布')).toBeVisible()
-    expect(within(row).getByRole('button', { name: /Diff/ })).toBeDisabled()
+    fireEvent.click(within(row).getByRole('button', { name: /更多/ }))
+    expect(await screen.findByRole('menuitem', { name: /版本对比/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
     fireEvent.click(within(row).getByRole('button', { name: /编辑/ }))
     expect(onEdit).toHaveBeenCalledWith(draftCase)
     unmount()
@@ -177,14 +184,14 @@ describe('TestAssetsPage', () => {
     })
     await chooseSelect(dialog, '已发布工作流', workflow.name)
     await chooseSelect(dialog, '运行环境', environment.name)
-    fireEvent.click(within(dialog).getByText('设为用例模板'))
+    expect(within(dialog).queryByText('设为用例模板')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('button', { name: 'OK' }))
 
     await waitFor(() =>
       expect(state.saveCase).toHaveBeenCalledWith(
         expect.objectContaining({
           name: '支付用例',
-          isTemplate: true,
+          isTemplate: false,
           definition: expect.objectContaining({
             workflow_id: workflow.id,
             workflow_version: null,
@@ -224,9 +231,12 @@ describe('TestAssetsPage', () => {
     )
     const row = screen.getByRole('row', { name: /登录用例/ })
 
-    fireEvent.click(within(row).getByRole('button', { name: /发布/ }))
-    fireEvent.click(within(row).getByRole('button', { name: /克隆/ }))
-    fireEvent.click(within(row).getByRole('button', { name: /Diff/ }))
+    fireEvent.click(within(row).getByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '发布新版本' }))
+    fireEvent.click(within(row).getByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '克隆' }))
+    fireEvent.click(within(row).getByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '版本对比' }))
     fireEvent.click(within(row).getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: /批量移动 \(1\)/ }))
 
@@ -318,9 +328,14 @@ describe('TestAssetsPage', () => {
   it('allows an explicit member-version change without changing other members', () => {
     const previous = [{ test_case_id: testCase.id, test_case_version: 1 }]
     const values = { name: '版本测试', description: '', tags: [], caseIds: [testCase.id] }
-    expect(suiteInput(values, [testCase], previous).items).toEqual(previous)
     expect(
-      suiteInput({ ...values, caseVersions: { [testCase.id]: 2 } }, [testCase], previous).items,
+      suiteInput(values, [testCase], { ...testSuite, draft_definition: { items: previous } }).items,
+    ).toEqual(previous)
+    expect(
+      suiteInput({ ...values, memberVersions: { [testCase.id]: 2 } }, [testCase], {
+        ...testSuite,
+        draft_definition: { items: previous },
+      }).items,
     ).toEqual([{ test_case_id: testCase.id, test_case_version: 2 }])
     expect(
       caseInput(
@@ -328,7 +343,6 @@ describe('TestAssetsPage', () => {
           name: '用例',
           description: '',
           tags: [],
-          isTemplate: false,
           workflowId: workflow.id,
           workflowVersion: null,
           environmentId: environment.id,
@@ -387,7 +401,6 @@ describe('TestAssetsPage', () => {
           name: testCase.name,
           description: testCase.description,
           tags: undefined as never,
-          isTemplate: false,
           workflowId: workflow.id,
           environmentId: environment.id,
         },
@@ -411,6 +424,112 @@ describe('TestAssetsPage', () => {
       tags: [],
       items: [{ test_case_id: 'missing-case', test_case_version: null }],
     })
+  })
+
+  it('keeps legacy template status, values and fixed suite member versions', () => {
+    const edited = caseInput(
+      {
+        name: testCase.name,
+        description: testCase.description,
+        tags: testCase.tags,
+        workflowId: workflow.id,
+        workflowVersion: 2,
+        environmentId: environment.id,
+        runtimeVariables: [
+          { name: 'code', value: '001' },
+          { name: 'empty', value: '' },
+        ],
+        runtimeHeaders: [{ name: 'X-Trace', value: 'raw' }],
+      },
+      testCase.draft_definition,
+      testCase.is_template,
+    )
+    expect(edited.isTemplate).toBe(true)
+    expect(edited.definition.runtime_variables).toEqual({ code: '001', empty: '' })
+    expect(edited.definition.workflow_version).toBe(2)
+    expect(
+      suiteInput(
+        { name: testSuite.name, description: '', tags: [], caseIds: [testCase.id] },
+        [{ ...testCase, current_version: 3 }],
+        testSuite,
+      ).items,
+    ).toEqual([{ test_case_id: testCase.id, test_case_version: 2 }])
+    expect(
+      suiteInput(
+        {
+          name: testSuite.name,
+          description: '',
+          tags: [],
+          caseIds: [testCase.id],
+          memberVersions: { [testCase.id]: 3 },
+        },
+        [{ ...testCase, current_version: 3 }],
+        testSuite,
+      ).items,
+    ).toEqual([{ test_case_id: testCase.id, test_case_version: 3 }])
+  })
+
+  it('rejects duplicate and unsafe variable or header names', () => {
+    expect(
+      validateEntries(
+        [
+          { name: 'code', value: '' },
+          { name: 'code', value: '1' },
+        ],
+        false,
+      ),
+    ).toBeTruthy()
+    expect(validateEntries([{ name: '', value: '' }], false)).toBeTruthy()
+    expect(
+      validateEntries(
+        [
+          { name: 'Authorization', value: 'a' },
+          { name: 'authorization', value: 'b' },
+        ],
+        true,
+      ),
+    ).toBeTruthy()
+    expect(validateEntries([{ name: 'X-Trace', value: 'a\r\nb' }], true)).toBeTruthy()
+    expect(validateEntries([{ name: 'X-Trace', value: '001' }], true)).toBeUndefined()
+  })
+
+  it('requires an explicit run source and submits the pinned case version', async () => {
+    const versions = [
+      {
+        id: 'version-2',
+        test_case_id: testCase.id,
+        version: 2,
+        definition: { ...testCase.draft_definition, workflow_version: 2 },
+        fingerprint: 'f'.repeat(64),
+        change_note: '',
+        created_by_id: 'user-1',
+        created_at: '2026-08-10T00:00:00Z',
+      },
+    ]
+    const load = vi.spyOn(assetService, 'listTestCaseVersions').mockResolvedValue(versions)
+    const onRun = vi.fn().mockResolvedValue(undefined)
+    render(
+      <AntdApp>
+        <RunCaseDialog
+          item={{ ...testCase, draft_fingerprint: 'a'.repeat(64) }}
+          projectId="project-1"
+          workflow={workflow}
+          environment={environment}
+          submitting={false}
+          onClose={vi.fn()}
+          onRun={onRun}
+        />
+      </AntdApp>,
+    )
+    const dialog = screen.getByRole('dialog')
+    await waitFor(() => expect(load).toHaveBeenCalledWith('project-1', testCase.id))
+    fireEvent.click(within(dialog).getByLabelText('运行已发布用例版本'))
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '运行已发布版本' })).toBeEnabled(),
+    )
+    fireEvent.click(within(dialog).getByRole('button', { name: '运行已发布版本' }))
+    await waitFor(() => expect(onRun).toHaveBeenCalledWith({ source: 'published', version: 2 }))
+    load.mockRestore()
   })
 })
 

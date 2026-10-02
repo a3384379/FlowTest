@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { Capability, Plugin, RunnerPool } from '../features/capabilities/capability-service'
 import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import { user } from '../test/fixtures'
 import { server } from '../test/server'
 import PlatformCapabilitiesPage from './PlatformCapabilitiesPage'
@@ -95,7 +96,7 @@ const runnerPool: RunnerPool = {
 
 describe('PlatformCapabilitiesPage', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user, initialized: true, token: 'test-token' })
+    authenticateTestUser(user)
   })
 
   it('shows versioned capabilities and their pinned security contract', async () => {

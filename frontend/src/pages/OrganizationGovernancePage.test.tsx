@@ -5,7 +5,7 @@ import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { useAuthStore } from '../features/auth/auth-store'
+import { authenticateTestUser } from '../test/auth'
 import { user } from '../test/fixtures'
 import { server } from '../test/server'
 import OrganizationGovernancePage from './OrganizationGovernancePage'
@@ -14,7 +14,7 @@ const organizationId = '00000000-0000-4000-8000-000000000701'
 
 describe('OrganizationGovernancePage', () => {
   beforeEach(() => {
-    useAuthStore.setState({ user, initialized: true, token: 'test-token' })
+    authenticateTestUser(user)
     installHandlers()
   })
 

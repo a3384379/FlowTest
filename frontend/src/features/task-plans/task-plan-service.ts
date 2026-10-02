@@ -60,9 +60,13 @@ export async function listTaskTestSuites(projectId: string): Promise<Page<TestSu
   return response.data
 }
 
-export async function listTestPlans(projectId: string): Promise<Page<TestPlan>> {
+export async function listTestPlans(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<TestPlan>> {
   const response = await apiClient.get<Page<TestPlan>>(`/projects/${projectId}/test-plans`, {
-    params: { page: 1, page_size: 100 },
+    params: { page, page_size: pageSize },
   })
   return response.data
 }

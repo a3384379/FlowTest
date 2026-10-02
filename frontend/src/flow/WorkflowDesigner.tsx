@@ -2571,19 +2571,27 @@ function useCanvasAutoFrame(
   }, [canvasRef, flowRef, scope])
 }
 
-function keepSelectionVisible(
-  instance: ReactFlowInstance<CanvasNode, CanvasEdge>,
+type SelectionViewport = Pick<
+  ReactFlowInstance<CanvasNode, CanvasEdge>,
+  'getViewport' | 'setCenter'
+> & {
+  getNode: (id: string) => Pick<CanvasNode, 'measured' | 'width' | 'height'> | undefined
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function keepSelectionVisible(
+  instance: SelectionViewport,
   definition: WorkflowDefinition,
   selection: WorkflowSelection,
   size: { width: number; height: number },
   toolbar: { width: number; height: number },
 ): void {
-  const center = selectionCenter(definition, selection)
+  const center = selectionCenter(instance, definition, selection)
   if (!center) return
   const viewport = instance.getViewport()
   const x = center.x * viewport.zoom + viewport.x
   const y = center.y * viewport.zoom + viewport.y
-  const extent = selectionViewportExtent(selection, viewport.zoom, toolbar)
+  const extent = selectionViewportExtent(instance, selection, viewport.zoom, toolbar)
   const insetX = Math.min(size.width / 2, extent.width + 24)
   const insetY = Math.min(size.height / 2, extent.height + 24)
   if (x >= insetX && x <= size.width - insetX && y >= insetY && y <= size.height - insetY) return
@@ -2596,29 +2604,34 @@ function selectionToolbarSize(canvas: HTMLDivElement): { width: number; height: 
 }
 
 function selectionViewportExtent(
+  instance: SelectionViewport,
   selection: WorkflowSelection,
   zoom: number,
   toolbar: { width: number; height: number },
 ): { width: number; height: number } {
-  if (selection?.kind === 'node')
+  if (selection?.kind === 'node') {
+    const size = canvasNodeSize(instance, selection.id)
     return {
-      width: Math.max((NODE_INITIAL_WIDTH * zoom) / 2, toolbar.width / 2),
-      height: (NODE_INITIAL_HEIGHT * zoom) / 2 + toolbar.height + 12,
+      width: Math.max((size.width * zoom) / 2, toolbar.width / 2),
+      height: (size.height * zoom) / 2 + toolbar.height + 12,
     }
+  }
   return { width: toolbar.width / 2, height: toolbar.height / 2 + 44 }
 }
 
 function selectionCenter(
+  instance: SelectionViewport,
   definition: WorkflowDefinition,
   selection: WorkflowSelection,
 ): { x: number; y: number } | null {
   if (!selection) return null
   if (selection.kind === 'node') {
     const node = definition.nodes.find((candidate) => candidate.id === selection.id)
+    const size = canvasNodeSize(instance, selection.id)
     return node
       ? {
-          x: node.position.x + NODE_INITIAL_WIDTH / 2,
-          y: node.position.y + NODE_INITIAL_HEIGHT / 2,
+          x: node.position.x + size.width / 2,
+          y: node.position.y + size.height / 2,
         }
       : null
   }
@@ -2626,9 +2639,22 @@ function selectionCenter(
   const source = definition.nodes.find((candidate) => candidate.id === edge?.source)
   const target = definition.nodes.find((candidate) => candidate.id === edge?.target)
   if (!source || !target) return null
+  const sourceSize = canvasNodeSize(instance, source.id)
+  const targetSize = canvasNodeSize(instance, target.id)
   return {
-    x: (source.position.x + target.position.x + NODE_INITIAL_WIDTH) / 2,
-    y: (source.position.y + target.position.y + NODE_INITIAL_HEIGHT) / 2,
+    x: (source.position.x + sourceSize.width / 2 + target.position.x + targetSize.width / 2) / 2,
+    y: (source.position.y + sourceSize.height / 2 + target.position.y + targetSize.height / 2) / 2,
+  }
+}
+
+function canvasNodeSize(
+  instance: SelectionViewport,
+  id: string,
+): { width: number; height: number } {
+  const node = instance.getNode(id) ?? {}
+  return {
+    width: node.measured?.width ?? node.width ?? NODE_INITIAL_WIDTH,
+    height: node.measured?.height ?? node.height ?? NODE_INITIAL_HEIGHT,
   }
 }
 function editorUserId(store: { user: { id: string } | null }): string {
