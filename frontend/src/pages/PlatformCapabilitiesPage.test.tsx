@@ -95,6 +95,28 @@ const runnerPool: RunnerPool = {
 }
 
 describe('PlatformCapabilitiesPage', () => {
+  it('reports failed inventory reads without inventing zero capability counts', async () => {
+    installHandlers({ capabilitySdk: true })
+    server.use(
+      http.get('/api/v1/capabilities', () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'UNAVAILABLE',
+              message: '能力目录读取失败',
+              trace_id: 'capability-trace',
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText(/能力目录读取失败/)).toBeInTheDocument()
+    expect(screen.getAllByText('未提供').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+  })
+
   beforeEach(() => {
     authenticateTestUser(user)
   })

@@ -54,7 +54,7 @@ function blockedRelease(projectId: string, decision?: ReleaseDecision): Priority
           .map((reason) => reason.message)
           .join('；') || '查看冻结判断中的阻断证据',
       scope: `最新判断 ${decision.id} · 候选 ${decision.candidate_ref} · ${decision.created_at}`,
-      href: projectPath(projectId, 'release'),
+      href: `${projectPath(projectId, 'release')}?${new URLSearchParams({ decision: decision.id })}`,
       action: '打开发布门禁',
     },
   ]
@@ -74,7 +74,7 @@ function failureClusters(projectId: string, risk?: ReleaseRiskDetail): PriorityI
       scope: `风险快照 ${risk.id} · ${risk.window_started_at} 至 ${risk.window_ended_at}`,
       href: executionId
         ? reportExecutionPath(projectId, { executionId })
-        : projectPath(projectId, 'quality'),
+        : `${projectPath(projectId, 'quality')}?${new URLSearchParams({ risk: risk.id })}`,
       action: executionId ? '查看样本执行报告' : '打开质量中心',
     }
   })
@@ -115,7 +115,7 @@ function coverageGaps(projectId: string, impact?: ImpactRunSummary): PriorityIss
       title: `${impact.title}有 ${impact.summary.gap_count} 处测试缺口`,
       description: `覆盖 ${impact.summary.coverage_percent}% · ${impact.change_count} 项变更`,
       scope: `最新影响分析 ${impact.id} · 来源 ${impact.source_ref}`,
-      href: projectPath(projectId, 'impact'),
+      href: `${projectPath(projectId, 'impact')}?${new URLSearchParams({ run: impact.id })}`,
       action: '打开影响分析',
     },
   ]

@@ -44,6 +44,56 @@ const suggestion: AISuggestion = {
 }
 
 describe('AIAssistantPage', () => {
+  it('keeps pending suggestions readable and disables reviewer and security writes for viewers', async () => {
+    let writes = 0
+    server.use(
+      http.get('/api/v1/ai/status', () =>
+        HttpResponse.json({ enabled: true, model: 'review-model', sample_sharing_enabled: false }),
+      ),
+      http.get('/api/v1/ai/jobs', () =>
+        HttpResponse.json({ items: [job], total: 1, page: 1, page_size: 50 }),
+      ),
+      http.get(`/api/v1/ai/jobs/${job.id}/suggestions`, () => HttpResponse.json([suggestion])),
+      http.post('/api/v1/ai/*', () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+      http.put('/api/v1/ai/*', () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage('viewer')
+    expect(await screen.findByText(suggestion.title)).toBeVisible()
+    expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
+    expect(screen.getByRole('switch', { name: '允许提交脱敏样本' })).toBeDisabled()
+    for (const name of [/接受/, /拒绝/]) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      await userEvent.click(button)
+    }
+    expect(writes).toBe(0)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not turn a failed status request into an unopened-feature claim', async () => {
+    server.use(
+      http.get('/api/v1/ai/status', () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '状态服务暂不可用', trace_id: 'status-trace' } },
+          { status: 503 },
+        ),
+      ),
+      http.get('/api/v1/ai/jobs', () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText('AI 工作区加载失败')).toBeVisible()
+    expect(screen.queryByText('AI 助手当前关闭')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
+  })
+
   it('shows a safe disabled state without blocking other product areas', async () => {
     server.use(
       http.get('/api/v1/ai/status', () =>
@@ -208,8 +258,15 @@ describe('AIAssistantPage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(role: 'owner' | 'viewer' = 'owner') {
   server.use(
+    http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+      HttpResponse.json({
+        effective_role: role,
+        capabilities: role === 'owner' ? ['read', 'edit', 'execute', 'manage_security'] : ['read'],
+        matrix: {},
+      }),
+    ),
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
     ),

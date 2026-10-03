@@ -16,10 +16,11 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
-
 import type { AIJobInput, AISuggestion } from '../features/ai/ai-service'
 import { useAIReview } from '../features/ai/use-ai-review'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { apiErrorMessage } from '../lib/api'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
 
 type JobForm = {
   job_type: AIJobInput['job_type']
@@ -34,23 +35,31 @@ type ReviewDraft = {
 }
 
 export default function AIAssistantPage() {
+  const { projectId } = useProjectContext()
+  return <AIReviewWorkspace key={projectId ?? 'none'} />
+}
+
+function AIReviewWorkspace() {
   const state = useAIReview()
-  const [createOpen, setCreateOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
   const review = useSuggestionReview(state)
   const aiStatus = state.status.data
   return (
     <>
       <AIPageHeader
-        canCreate={Boolean(state.projectId && aiStatus?.enabled)}
+        canCreate={Boolean(state.canEdit && aiStatus?.enabled)}
         onCreate={() => setCreateOpen(true)}
       />
-      <AIDisabledAlert loading={state.status.isLoading} enabled={aiStatus?.enabled ?? false} />
+      <AIErrorAlert state={state} />
+      {!state.status.isError ? (
+        <AIDisabledAlert loading={state.status.isLoading} enabled={aiStatus?.enabled ?? false} />
+      ) : null}
       <AIPolicyCard state={state} />
       <AIWorkspace state={state} onReview={review.open} />
       <CreateAIJobDialog
         open={createOpen}
         submitting={state.creating}
-        sampleEnabled={aiStatus?.sample_sharing_enabled ?? false}
+        sampleEnabled={Boolean(aiStatus?.sample_sharing_enabled && state.canManageSecurity)}
         onClose={() => setCreateOpen(false)}
         onCreate={async (input) => {
           await state.createJob(input)
@@ -63,6 +72,29 @@ export default function AIAssistantPage() {
 }
 
 type AIReviewState = ReturnType<typeof useAIReview>
+
+function AIErrorAlert({ state }: { state: AIReviewState }) {
+  const queries = [state.status, state.jobs, state.suggestions, state.permissions]
+  const error = queries.find((query) => query.isError)?.error
+  if (!error) return null
+  return (
+    <Alert
+      type="error"
+      showIcon
+      title="AI 工作区加载失败"
+      description={apiErrorMessage(error)}
+      action={
+        <Button
+          onClick={() => {
+            queries.filter((query) => query.isError).forEach((query) => void query.refetch())
+          }}
+        >
+          重试
+        </Button>
+      }
+    />
+  )
+}
 
 function AIPageHeader({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
   return (
@@ -107,7 +139,7 @@ function AIPolicyCard({ state }: { state: AIReviewState }) {
           aria-label="允许提交脱敏样本"
           checked={aiStatus?.sample_sharing_enabled ?? false}
           loading={state.updatingSettings}
-          disabled={!enabled}
+          disabled={!enabled || !state.canManageSecurity}
           onChange={(checked) => state.updateSampleSharing(checked)}
         />
       </Space>
@@ -191,7 +223,11 @@ function AISuggestionsCard({
             title: '操作',
             width: 150,
             render: (_, suggestion: AISuggestion) => (
-              <ReviewActions suggestion={suggestion} onReview={onReview} />
+              <ReviewActions
+                suggestion={suggestion}
+                readOnly={!state.canEdit}
+                onReview={onReview}
+              />
             ),
           },
         ]}
@@ -202,12 +238,14 @@ function AISuggestionsCard({
 
 function ReviewActions({
   suggestion,
+  readOnly,
   onReview,
 }: {
   suggestion: AISuggestion
+  readOnly: boolean
   onReview: (suggestion: AISuggestion, decision: 'accept' | 'reject') => void
 }) {
-  const disabled = suggestion.review_status !== 'pending'
+  const disabled = readOnly || suggestion.review_status !== 'pending'
   return (
     <Space>
       <Button
@@ -245,6 +283,7 @@ function ReviewDialog({
       title={review.draft?.decision === 'accept' ? '接受并生成草稿' : '拒绝建议'}
       open={Boolean(review.draft)}
       confirmLoading={state.reviewing}
+      okButtonProps={{ disabled: !state.canEdit }}
       onCancel={review.close}
       onOk={() => void review.submit()}
     >
@@ -270,9 +309,17 @@ function ReviewDialog({
 
 function useSuggestionReview(state: AIReviewState) {
   const { message } = App.useApp()
-  const [draft, setDraft] = useState<ReviewDraft | null>(null)
-  const [editedContent, setEditedContent] = useState('')
-  const [note, setNote] = useState('')
+  const [draft, setDraft] = useRouteScopedState<ReviewDraft | null>(
+    state.projectId,
+    state.selectedJobId,
+    null,
+  )
+  const [editedContent, setEditedContent] = useRouteScopedState(
+    state.projectId,
+    state.selectedJobId,
+    '',
+  )
+  const [note, setNote] = useRouteScopedState(state.projectId, state.selectedJobId, '')
 
   function open(suggestion: AISuggestion, decision: 'accept' | 'reject') {
     setDraft({ suggestion, decision })

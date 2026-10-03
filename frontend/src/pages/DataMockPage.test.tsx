@@ -13,6 +13,33 @@ import { server } from '../test/server'
 const timestamp = '2026-08-10T00:00:00Z'
 
 describe('DataMockPage', () => {
+  it('reports credential read failures and retries without exposing secret data', async () => {
+    let reads = 0
+    server.use(
+      http.get('/api/v1/credentials', () => {
+        reads += 1
+        if (reads === 1)
+          return HttpResponse.json(
+            {
+              error: {
+                code: 'UNAVAILABLE',
+                message: '凭据元数据读取失败',
+                trace_id: 'credential-trace',
+              },
+            },
+            { status: 503 },
+          )
+        return HttpResponse.json([credential({})])
+      }),
+    )
+    renderCredentialPanel()
+    expect(await screen.findByText(/凭据元数据读取失败/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('只读数据库')).toBeInTheDocument()
+    expect(reads).toBe(2)
+    expect(screen.queryByText(/凭据元数据读取失败/)).not.toBeInTheDocument()
+  })
+
   it('creates a write-only credential', async () => {
     const credentials: Credential[] = []
     installBaseHandlers(credentials)

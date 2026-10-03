@@ -29,6 +29,7 @@ import type {
   TestDesignDocument,
 } from '../features/test-engineering/test-engineering-service'
 import { useTestEngineering } from '../features/test-engineering/use-test-engineering'
+import { useProjectContext } from '../features/projects/use-project-context'
 
 type GenerationForm = {
   title: string
@@ -38,6 +39,11 @@ type GenerationForm = {
 }
 
 export default function TestEngineeringPage() {
+  const { projectId } = useProjectContext()
+  return <TestEngineeringWorkspace key={projectId ?? 'none'} />
+}
+
+function TestEngineeringWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useTestEngineering(searchParams.get('proposal'))
   const [form] = Form.useForm<GenerationForm>()
@@ -107,6 +113,7 @@ function GeneratedDesign({
       scenarioIds={scenarioIds}
       onScenarioIdsChange={onScenarioIdsChange}
       proposal={state.proposal}
+      readOnly={!state.canEdit}
       acting={state.acting}
       onReview={state.reviewProposal}
       onApply={state.applyProposal}
@@ -195,7 +202,7 @@ function GenerationTargetCard({
             type="primary"
             htmlType="submit"
             loading={state.acting}
-            disabled={!state.generation || Boolean(state.proposal)}
+            disabled={!state.canEdit || !state.generation || Boolean(state.proposal)}
           >
             创建待审核 Draft
           </Button>
@@ -254,6 +261,7 @@ function required(value: string | null | undefined): string {
 }
 
 function DesignReview({
+  readOnly,
   design,
   contract,
   contractCompleteness,
@@ -265,6 +273,7 @@ function DesignReview({
   onReview,
   onApply,
 }: {
+  readOnly: boolean
   design: TestDesignDocument
   contract?: OperationContract
   contractCompleteness?: string
@@ -282,6 +291,7 @@ function DesignReview({
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <IntentReviewCard
+        readOnly={readOnly}
         design={design}
         contract={contract}
         contractCompleteness={contractCompleteness}
@@ -341,6 +351,7 @@ function DesignReview({
 }
 
 function IntentReviewCard({
+  readOnly,
   design,
   contract,
   contractCompleteness,
@@ -350,6 +361,7 @@ function IntentReviewCard({
   onReview,
   onApply,
 }: {
+  readOnly: boolean
   design: TestDesignDocument
   contract?: OperationContract
   contractCompleteness?: string
@@ -392,7 +404,13 @@ function IntentReviewCard({
       {design.warnings.map((warning) => (
         <Alert key={warning} type="warning" showIcon message={warning} />
       ))}
-      <ProposalActions proposal={proposal} acting={acting} onReview={onReview} onApply={onApply} />
+      <ProposalActions
+        readOnly={readOnly}
+        proposal={proposal}
+        acting={acting}
+        onReview={onReview}
+        onApply={onApply}
+      />
     </Card>
   )
 }
@@ -471,11 +489,13 @@ function stateCapability(design: TestDesignDocument): string {
 }
 
 function ProposalActions({
+  readOnly,
   proposal,
   acting,
   onReview,
   onApply,
 }: {
+  readOnly: boolean
   proposal: ReturnType<typeof useTestEngineering>['proposal']
   acting: boolean
   onReview: (accept: boolean) => Promise<boolean>
@@ -486,16 +506,21 @@ function ProposalActions({
     <Space wrap style={{ marginTop: 16 }}>
       {proposal.review_status === 'pending' ? (
         <>
-          <Button type="primary" loading={acting} onClick={() => void onReview(true)}>
+          <Button
+            type="primary"
+            disabled={readOnly}
+            loading={acting}
+            onClick={() => void onReview(true)}
+          >
             接受 Draft
           </Button>
-          <Button danger loading={acting} onClick={() => void onReview(false)}>
+          <Button danger disabled={readOnly} loading={acting} onClick={() => void onReview(false)}>
             拒绝 Draft
           </Button>
         </>
       ) : null}
       {proposal.review_status === 'accepted' && !proposal.applied ? (
-        <Button type="primary" loading={acting} onClick={() => void onApply()}>
+        <Button type="primary" disabled={readOnly} loading={acting} onClick={() => void onApply()}>
           物化为 Workflow / TestCase
         </Button>
       ) : null}

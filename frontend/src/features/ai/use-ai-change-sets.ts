@@ -5,7 +5,10 @@ import { apiErrorMessage } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { listImpactRuns } from '../impact/impact-service'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listReleaseRisks } from '../quality/quality-service'
+import { getV3FeatureFlags } from '../capabilities/capability-service'
+import { getAIStatus } from './ai-service'
 import {
   createAIChangeSet,
   getAIChangeSet,
@@ -18,6 +21,8 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
+  const { flags, status, impacts, risks } = useAIChangeSources(projectId)
   const [selection, setSelection] = useRouteScopedSelection(projectId, initialChangeSetId)
   const changeSets = useQuery({
     queryKey: ['ai-change-sets', projectId],
@@ -30,19 +35,13 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   const activeId = selection ?? currentItems.at(0)?.id ?? null
   const detail = useQuery({
     queryKey: ['ai-change-set', projectId, activeId],
-    queryFn: () => getAIChangeSet(required(activeId)),
+    queryFn: async () => {
+      const result = await getAIChangeSet(required(activeId))
+      if (result.project_id !== projectId) throw new Error('该变更集不属于当前项目')
+      return result
+    },
     enabled: Boolean(projectId && activeId),
     refetchInterval: (query) => (query.state.data?.status === 'generating' ? 1_000 : false),
-  })
-  const impacts = useQuery({
-    queryKey: ['impact-runs', projectId],
-    queryFn: () => listImpactRuns(required(projectId)),
-    enabled: Boolean(projectId),
-  })
-  const risks = useQuery({
-    queryKey: ['release-risks', projectId],
-    queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: Boolean(projectId),
   })
   const create = useMutation({ mutationFn: createAIChangeSet })
   const review = useMutation({
@@ -60,6 +59,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   })
 
   async function addChangeSet(input: Omit<AIChangeSetInput, 'project_id'>) {
+    if (!canEdit || !status.data?.enabled) return false
     try {
       const created = await create.mutateAsync({ ...input, project_id: required(projectId) })
       setSelection(created.id)
@@ -78,6 +78,7 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
     content: Record<string, unknown> | undefined,
     note: string,
   ) {
+    if (!canEdit) return false
     try {
       await review.mutateAsync({ itemId, decision, content, note })
       await Promise.all([
@@ -94,6 +95,11 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
 
   return {
     projectId,
+    canEdit,
+    canCreate: canEdit && status.data?.enabled === true,
+    permissions,
+    flags,
+    status,
     changeSets,
     detail,
     impacts,
@@ -105,6 +111,26 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
     creating: create.isPending,
     reviewing: review.isPending,
   }
+}
+
+function useAIChangeSources(projectId: string | null) {
+  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
+  const status = useQuery({
+    queryKey: ['ai-status', projectId],
+    queryFn: () => getAIStatus(required(projectId)),
+    enabled: Boolean(projectId),
+  })
+  const impacts = useQuery({
+    queryKey: ['impact-runs', projectId],
+    queryFn: () => listImpactRuns(required(projectId)),
+    enabled: Boolean(projectId && flags.data?.impact_engine),
+  })
+  const risks = useQuery({
+    queryKey: ['release-risks', projectId],
+    queryFn: () => listReleaseRisks(required(projectId)),
+    enabled: Boolean(projectId && flags.data?.quality_intelligence),
+  })
+  return { flags, status, impacts, risks }
 }
 
 function required(value: string | null): string {

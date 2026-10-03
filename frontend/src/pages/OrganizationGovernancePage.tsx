@@ -789,10 +789,10 @@ function GovernanceTab({
 
 function RunnerGovernanceStats({ runner }: { runner?: RunnerGovernanceData }) {
   const items = [
-    ['Runner Pool', runner?.pool_count ?? 0],
-    ['Runner', runner?.runner_count ?? 0],
-    ['当前并发', runner?.current_load ?? 0],
-    ['Runner 容量', runner?.capacity ?? 0],
+    ['Runner Pool', runner?.pool_count ?? '未提供'],
+    ['Runner', runner?.runner_count ?? '未提供'],
+    ['当前并发', runner?.current_load ?? '未提供'],
+    ['Runner 容量', runner?.capacity ?? '未提供'],
   ] as const
   return (
     <Row gutter={16}>

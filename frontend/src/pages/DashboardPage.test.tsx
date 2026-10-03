@@ -224,6 +224,14 @@ describe('DashboardPage', () => {
       'href',
       `/projects/${project.id}/reports?execution=execution-1`,
     )
+    expect(within(queue).getByRole('link', { name: '打开发布门禁' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/release?decision=decision-1`,
+    )
+    expect(within(queue).getByRole('link', { name: '打开影响分析' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/impact?run=impact-1`,
+    )
     const riskSummary = screen.getByRole('region', { name: '发布风险摘要' })
     expect(
       riskSummary.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING,

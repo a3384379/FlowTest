@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 
 import { getV3FeatureFlags, type V3FeatureFlags } from '../capabilities/capability-service'
 import { listDeploymentChecks } from '../contracts/contract-hub-service'
@@ -7,11 +8,13 @@ import { listFabricTasks } from '../execution-fabric/execution-fabric-service'
 import { listImpactRuns } from '../impact/impact-service'
 import { listPerformanceRuns } from '../performance/performance-service'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listQualityGates, listQualityRuns, listReleaseRisks } from '../quality/quality-service'
 import { apiErrorMessage } from '../../lib/api'
 import {
   createReleaseDecision,
   createReleasePolicy,
+  getReleaseDecision,
   listReleaseDecisions,
   listReleasePolicies,
   type ReleaseDecisionInput,
@@ -22,6 +25,9 @@ export function useReleaseGate() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
+  const { canEdit } = useProjectCapabilities()
+  const [params, setParams] = useSearchParams()
+  const decisionId = params.get('decision')
   const enabled = Boolean(projectId)
   const featureFlags = useQuery({
     queryKey: ['v3-feature-flags'],
@@ -38,6 +44,18 @@ export function useReleaseGate() {
     queryFn: () => listReleaseDecisions(required(projectId)),
     enabled,
   })
+  const selectedDecision = useQuery({
+    queryKey: ['release-decision', projectId, decisionId],
+    queryFn: () => getReleaseDecision(required(projectId), required(decisionId)),
+    enabled: Boolean(projectId && decisionId),
+  })
+
+  function selectDecision(id: string | null) {
+    const next = new URLSearchParams(params)
+    if (id) next.set('decision', id)
+    else next.delete('decision')
+    setParams(next)
+  }
   const qualityGates = useQuery({
     queryKey: ['quality-gates', projectId],
     queryFn: () => listQualityGates(required(projectId)),
@@ -81,6 +99,7 @@ export function useReleaseGate() {
   })
 
   async function addPolicy(input: ReleasePolicyInput): Promise<boolean> {
+    if (!canEdit) return false
     try {
       await createPolicy.mutateAsync(input)
       await queryClient.invalidateQueries({ queryKey: ['release-policies', projectId] })
@@ -93,6 +112,7 @@ export function useReleaseGate() {
   }
 
   async function evaluate(input: ReleaseDecisionInput): Promise<boolean> {
+    if (!canEdit) return false
     try {
       const decision = await createDecision.mutateAsync(input)
       await queryClient.invalidateQueries({ queryKey: ['release-decisions', projectId] })
@@ -105,6 +125,10 @@ export function useReleaseGate() {
   }
 
   return {
+    canEdit,
+    decisionId,
+    selectedDecision,
+    selectDecision,
     projectId,
     policies,
     decisions,

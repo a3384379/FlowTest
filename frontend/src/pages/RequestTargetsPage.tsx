@@ -41,6 +41,7 @@ import {
 import { listSecrets } from '../features/projects/asset-service'
 import { useEnvironmentSelection } from '../features/projects/environment-selection'
 import { useProjectContext } from '../features/projects/use-project-context'
+import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
 import {
   listApis,
   listEnvironments,
@@ -68,6 +69,12 @@ type ImpactEditTarget =
 
 export default function RequestTargetsPage() {
   const { projectId } = useProjectContext()
+  return <RequestTargetsWorkspace key={projectId ?? 'none'} />
+}
+
+function RequestTargetsWorkspace() {
+  const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
   const [serviceForm] = Form.useForm<ServiceForm>()
   const [endpointForm] = Form.useForm<EndpointForm>()
   const [serviceEditForm] = Form.useForm<ServiceEditForm>()
@@ -116,7 +123,7 @@ export default function RequestTargetsPage() {
   const apiItems = pageItems(apis.data)
 
   const createService = useMutation({
-    mutationFn: (input: ServiceForm) => createRequestService(required(projectId), input),
+    mutationFn: (input: ServiceForm) => createRequestService(editable(projectId, canEdit), input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['request-target-services', projectId] })
       serviceForm.resetFields()
@@ -125,7 +132,7 @@ export default function RequestTargetsPage() {
   })
   const createEndpoint = useMutation({
     mutationFn: (input: EndpointForm) =>
-      createServiceEndpoint(required(projectId), required(environmentId), input),
+      createServiceEndpoint(editable(projectId, canEdit), required(environmentId), input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: ['request-target-endpoints', projectId, environmentId],
@@ -137,7 +144,7 @@ export default function RequestTargetsPage() {
   const updateDefault = useMutation({
     mutationFn: (serviceId: string | null) =>
       setEnvironmentDefaultService(
-        required(projectId),
+        editable(projectId, canEdit),
         selectedEnvironment(required(environmentId), environments.data),
         serviceId,
       ),
@@ -150,7 +157,7 @@ export default function RequestTargetsPage() {
   })
   const updateApiService = useMutation({
     mutationFn: ({ apiId, serviceId }: { apiId: string; serviceId: string | null }) =>
-      updateApiDefinition(required(projectId), apiId, { service_id: serviceId }),
+      updateApiDefinition(editable(projectId, canEdit), apiId, { service_id: serviceId }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['request-target-apis', projectId] })
       messageApi.success('API 默认 Service 已更新')
@@ -168,7 +175,7 @@ export default function RequestTargetsPage() {
   })
   const updateService = useMutation({
     mutationFn: ({ serviceId, input }: { serviceId: string; input: ServiceEditForm }) =>
-      updateRequestService(required(projectId), serviceId, input),
+      updateRequestService(editable(projectId, canEdit), serviceId, input),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['request-target-services', projectId] })
       closeEdit(setEditingTarget, setImpactPreview)
@@ -178,7 +185,7 @@ export default function RequestTargetsPage() {
   })
   const updateEndpoint = useMutation({
     mutationFn: ({ endpointId, input }: { endpointId: string; input: EndpointEditForm }) =>
-      updateServiceEndpoint(required(projectId), endpointId, endpointEditPayload(input)),
+      updateServiceEndpoint(editable(projectId, canEdit), endpointId, endpointEditPayload(input)),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['request-target-endpoints', projectId] })
       closeEdit(setEditingTarget, setImpactPreview)
@@ -196,8 +203,14 @@ export default function RequestTargetsPage() {
     onError: (reason) => messageApi.error(apiErrorMessage(reason)),
   })
 
-  const error =
-    environments.error ?? services.error ?? endpoints.error ?? apis.error ?? secrets.error
+  const error = [
+    permissions.error,
+    environments.error,
+    services.error,
+    endpoints.error,
+    apis.error,
+    secrets.error,
+  ].find(Boolean)
   const selected = environmentItems.find((item) => item.id === environmentId)
   const serviceOptions = useMemo(() => toServiceOptions(serviceItems), [serviceItems])
 
@@ -230,6 +243,7 @@ export default function RequestTargetsPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={9}>
           <ServiceCard
+            readOnly={!canEdit}
             services={serviceItems}
             loading={services.isLoading}
             form={serviceForm}
@@ -241,6 +255,7 @@ export default function RequestTargetsPage() {
         </Col>
         <Col xs={24} xl={15}>
           <EnvironmentEndpointCard
+            readOnly={!canEdit}
             environments={environments.data ?? []}
             selected={selected}
             environmentId={environmentId}
@@ -267,12 +282,14 @@ export default function RequestTargetsPage() {
         </Col>
       </Row>
       <ApiServiceCard
+        readOnly={!canEdit}
         apis={apiItems}
         loading={apis.isLoading}
         serviceOptions={serviceOptions}
         onChange={(apiId, serviceId) => updateApiService.mutate({ apiId, serviceId })}
       />
       <RequestTargetEditModal
+        readOnly={!canEdit}
         target={editingTarget}
         impact={impactPreview}
         services={serviceItems}
@@ -297,6 +314,7 @@ export default function RequestTargetsPage() {
 }
 
 function ServiceCard({
+  readOnly,
   services,
   loading,
   form,
@@ -305,6 +323,7 @@ function ServiceCard({
   onEdit,
   editLoading,
 }: {
+  readOnly: boolean
   services: RequestService[]
   loading: boolean
   form: ReturnType<typeof Form.useForm<ServiceForm>>[0]
@@ -315,7 +334,7 @@ function ServiceCard({
 }) {
   return (
     <Card title="Service" loading={loading}>
-      <Form<ServiceForm> form={form} layout="vertical" onFinish={onFinish}>
+      <Form<ServiceForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
         <Form.Item name="service_key" label="Service Key" rules={[{ required: true }]}>
           <Input placeholder="orders" />
         </Form.Item>
@@ -367,6 +386,7 @@ function ServiceCard({
 }
 
 function EnvironmentEndpointCard({
+  readOnly,
   environments,
   selected,
   environmentId,
@@ -390,6 +410,7 @@ function EnvironmentEndpointCard({
   onCheckConnectivity,
   actionLoading,
 }: {
+  readOnly: boolean
   environments: Environment[]
   selected: Environment | undefined
   environmentId: string | null
@@ -441,6 +462,7 @@ function EnvironmentEndpointCard({
               options={serviceOptions}
               onChange={(value?: string) => onDefaultChange(value ?? null)}
               loading={defaultSubmitting}
+              disabled={readOnly}
             />
           </Space>
         ) : environmentSelectionInvalid ? (
@@ -457,7 +479,7 @@ function EnvironmentEndpointCard({
           form={endpointForm}
           layout="inline"
           onFinish={onEndpointFinish}
-          disabled={!environmentId}
+          disabled={!environmentId || readOnly}
         >
           <Form.Item name="service_id" rules={[{ required: true, message: '请选择 Service' }]}>
             <Select
@@ -568,11 +590,13 @@ function EnvironmentEndpointCard({
 }
 
 function ApiServiceCard({
+  readOnly,
   apis,
   loading,
   serviceOptions,
   onChange,
 }: {
+  readOnly: boolean
   apis: ApiDefinition[]
   loading: boolean
   serviceOptions: Array<{ value: string; label: string }>
@@ -596,6 +620,7 @@ function ApiServiceCard({
               <Select
                 aria-label={`${item.name} 默认 Service`}
                 allowClear
+                disabled={readOnly}
                 style={{ minWidth: 260 }}
                 value={value ?? undefined}
                 options={serviceOptions}
@@ -610,6 +635,7 @@ function ApiServiceCard({
 }
 
 function RequestTargetEditModal({
+  readOnly,
   target,
   impact,
   services,
@@ -621,6 +647,7 @@ function RequestTargetEditModal({
   onServiceFinish,
   onEndpointFinish,
 }: {
+  readOnly: boolean
   target: ImpactEditTarget | undefined
   impact: ServiceTargetImpactPreview | undefined
   services: RequestService[]
@@ -642,15 +669,17 @@ function RequestTargetEditModal({
       okText="保存变更"
       cancelText="取消"
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       onCancel={onCancel}
       onOk={() => activeForm.submit()}
       destroyOnHidden
     >
       <ImpactPreviewPanel impact={impact} />
       {isService ? (
-        <ServiceEditFields form={serviceForm} onFinish={onServiceFinish} />
+        <ServiceEditFields readOnly={readOnly} form={serviceForm} onFinish={onServiceFinish} />
       ) : (
         <EndpointEditFields
+          readOnly={readOnly}
           form={endpointForm}
           endpoint={target?.kind === 'endpoint' ? target.endpoint : undefined}
           services={services}
@@ -694,14 +723,16 @@ function ImpactPreviewPanel({ impact }: { impact: ServiceTargetImpactPreview | u
 }
 
 function ServiceEditFields({
+  readOnly,
   form,
   onFinish,
 }: {
+  readOnly: boolean
   form: ReturnType<typeof Form.useForm<ServiceEditForm>>[0]
   onFinish: (values: ServiceEditForm) => void
 }) {
   return (
-    <Form<ServiceEditForm> form={form} layout="vertical" onFinish={onFinish}>
+    <Form<ServiceEditForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
       <Row gutter={16}>
         <Col span={12}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
@@ -733,12 +764,14 @@ function ServiceEditFields({
 }
 
 function EndpointEditFields({
+  readOnly,
   form,
   endpoint,
   services,
   secrets,
   onFinish,
 }: {
+  readOnly: boolean
   form: ReturnType<typeof Form.useForm<EndpointEditForm>>[0]
   endpoint: ServiceEndpoint | undefined
   services: RequestService[]
@@ -747,7 +780,7 @@ function EndpointEditFields({
 }) {
   const service = services.find((item) => item.id === endpoint?.service_id)
   return (
-    <Form<EndpointEditForm> form={form} layout="vertical" onFinish={onFinish}>
+    <Form<EndpointEditForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
       <Descriptions size="small" column={2}>
         <Descriptions.Item label="Service">
           {service ? `${service.name} · ${service.service_key}` : '-'}
@@ -911,6 +944,11 @@ function closeEdit(
 function required(value: string | null | undefined): string {
   if (!value) throw new Error('项目或环境尚未选择')
   return value
+}
+
+function editable(projectId: string | null, canEdit: boolean): string {
+  if (!canEdit) throw new Error('当前项目只读')
+  return required(projectId)
 }
 
 function selectedEnvironment(

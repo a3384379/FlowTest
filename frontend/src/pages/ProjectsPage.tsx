@@ -20,6 +20,7 @@ import {
   type FormInstance,
 } from 'antd'
 import { useEffect } from 'react'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 
 import AccessManagementPanel from '../features/projects/AccessManagementPanel'
 import AssetManagementPanel from '../features/projects/AssetManagementPanel'
@@ -66,6 +67,11 @@ const roleLabels = {
 type PolicyForm = { enabled: boolean; allowed_hosts: string; allowed_private_cidrs: string }
 
 export default function ProjectsPage() {
+  const { projectId } = useProjectContext()
+  return <ProjectGovernanceWorkspace key={projectId ?? 'none'} />
+}
+
+function ProjectGovernanceWorkspace() {
   const state = useProjectsPageState()
   if (!state.projectsLoading && !state.projectId) {
     return <Empty description="暂无可访问项目" />
@@ -103,7 +109,9 @@ function useProjectsPageState() {
     queryFn: () => getProjectRedactionPolicy(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const canManageSecurity = hasCapability(permission.data, 'manage_security')
+  const canManageSecurity =
+    hasCapability(permission.data, 'manage_security') &&
+    governanceReadComplete([policy, outbound, retention, redaction])
   const canManageMembers = hasCapability(permission.data, 'manage_members')
   const canEdit = hasCapability(permission.data, 'edit')
   const canViewAudit = hasCapability(permission.data, 'view_audit')
@@ -163,6 +171,7 @@ function useProjectsPageState() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   return {
+    queries: [projects, permission, policy, outbound, retention, redaction, audit],
     projectId,
     projects: projects.data?.items ?? [],
     projectsLoading: projects.isLoading,
@@ -196,6 +205,10 @@ function useProjectsPageState() {
 
 type ProjectsPageState = ReturnType<typeof useProjectsPageState>
 
+function governanceReadComplete(queries: readonly { isSuccess: boolean }[]): boolean {
+  return queries.every((query) => query.isSuccess)
+}
+
 function ProjectsView({ state }: { state: ProjectsPageState }) {
   return (
     <>
@@ -215,6 +228,7 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           options={state.projects.map((item) => ({ value: item.id, label: item.name }))}
         />
       </div>
+      <QueryFailureNotice queries={state.queries} />
       <Row gutter={[16, 16]}>
         <PermissionPanel data={state.permission} loading={state.permissionLoading} />
         <SecurityPolicyPanel

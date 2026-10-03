@@ -1,5 +1,6 @@
 import { analyzeGraph, editorNode, restoreEditedNode } from './editor/graph-analysis'
 import { getApiDetail } from '../features/api-console/api-service'
+import WorkflowResourceSelect from './WorkflowResourceSelect'
 import WorkflowJsonInput from './WorkflowJsonInput'
 import WorkflowControlFields from './WorkflowControlFields'
 import MappingEditor from './WorkflowMappingEditor'
@@ -517,6 +518,7 @@ function NodeTypeFields({
   if (node.type === 'subflow' || node.type === 'for_each') {
     return (
       <SubflowFields
+        projectId={projectId}
         node={node}
         definition={definition}
         workflows={workflows}
@@ -529,12 +531,14 @@ function NodeTypeFields({
 }
 
 function SubflowFields({
+  projectId,
   node,
   definition,
   workflows,
   editable,
   onUpdate,
 }: {
+  projectId?: string | null
   node: WorkflowNode
   definition: WorkflowDefinition
   workflows: Workflow[]
@@ -544,24 +548,20 @@ function SubflowFields({
   return (
     <>
       <Field label="已发布子流程">
-        <Select
-          showSearch
-          optionFilterProp="label"
+        <WorkflowResourceSelect
+          projectId={projectId}
+          label="已发布子流程"
           disabled={!editable}
           value={stringConfig(node, 'workflow_id') || undefined}
-          options={workflows.map((workflow) => ({
-            value: workflow.id,
-            label: `${workflow.name} · v${workflow.current_version}`,
-          }))}
-          onChange={(value) => {
-            const selected = workflows.find((workflow) => workflow.id === value)
+          workflows={workflows}
+          onChange={(selected) =>
             onUpdate(
               updateNodeConfigs(node, {
-                workflow_id: value,
-                workflow_version: selected?.current_version ?? 1,
+                workflow_id: selected.id,
+                workflow_version: selected.current_version,
               }),
             )
-          }}
+          }
         />
       </Field>
       <Field label="固定版本">

@@ -321,10 +321,62 @@ describe('QualityCenterPage', () => {
     await browser.click(screen.getByRole('button', { name: 'OK' }))
     await waitFor(() => expect(created).toBe(1))
   })
+  it('opens a frozen risk outside the list and preserves its evidence window', async () => {
+    const old = { ...risk, id: 'old-risk', score: 91, algorithm_version: 'frozen-algorithm-v1' }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/quality-gates`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () =>
+        HttpResponse.json({ items: [risk], total: 1 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks/old-risk`, () =>
+        HttpResponse.json(old),
+      ),
+    )
+    renderPage(`/projects/${project.id}/quality?risk=old-risk`)
+    expect(await screen.findByText(old.algorithm_version)).toBeVisible()
+    expect(screen.getByText(`${risk.window_started_at} 至 ${risk.window_ended_at}`)).toBeVisible()
+  })
+
+  it('does not read unopened risk or impact features for a linked snapshot', async () => {
+    let reads = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/quality-gates`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
+        HttpResponse.json({ items: [], total: 0 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks*`, () => {
+        reads += 1
+        return HttpResponse.json(risk)
+      }),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, () => {
+        reads += 1
+        return HttpResponse.json({ items: [], total: 0 })
+      }),
+    )
+    renderPage(`/projects/${project.id}/quality?risk=old-risk`, false)
+    expect(await screen.findByText('发布风险分析尚未开放')).toBeVisible()
+    expect(screen.getByRole('button', { name: '分析发布风险' })).toBeDisabled()
+    expect(reads).toBe(0)
+  })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string, riskEnabled = true) {
   server.use(
+    http.get('/api/v1/v3/features', () =>
+      HttpResponse.json({ quality_intelligence: riskEnabled, impact_engine: riskEnabled }),
+    ),
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
     ),
@@ -335,7 +387,7 @@ function renderPage() {
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="quality">
+        <ProjectTestProvider section="quality" initialEntry={initialEntry}>
           <QualityCenterPage />
         </ProjectTestProvider>
       </QueryClientProvider>

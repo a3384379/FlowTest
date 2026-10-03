@@ -65,6 +65,61 @@ describe('RequestTargetsPage', () => {
     useAuthStore.setState({ user: null })
   })
 
+  it('allows viewers to review target impact while keeping forms and bindings read-only', async () => {
+    let writes = 0
+    server.use(
+      projectHandlers(),
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'], matrix: {} }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([targetEnvironment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([service])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
+      http.get(
+        `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
+        () => HttpResponse.json([endpoint]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services/${service.id}/impact-preview`, () =>
+        HttpResponse.json({
+          strategy: 'request_target_dependency_v1',
+          service_id: service.id,
+          service_key: service.service_key,
+          affected_apis: [],
+          affected_workflows: [],
+          affected_test_plans: [],
+          affected_scheduled_runs: [],
+          affected_release_gates: [],
+        }),
+      ),
+      http.post('/api/v1/projects/:projectId/*', () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+      http.patch('/api/v1/projects/:projectId/*', () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText(service.name)).toBeVisible()
+    expect(screen.getByPlaceholderText('orders')).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '环境默认 Service' })).toBeDisabled()
+    expect(
+      screen.getByRole('combobox', { name: `${apiDefinition.name} 默认 Service` }),
+    ).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '目标环境' })).not.toBeDisabled()
+    await userEvent.click(screen.getAllByRole('button', { name: /影响预览/ })[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Service 影响预览 / 编辑')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '保存变更' })).toBeDisabled()
+    expect(writes).toBe(0)
+  })
+
   it('manages services, endpoint variants, environment defaults, and API bindings', async () => {
     let services = [service]
     let environments = [targetEnvironment]

@@ -15,10 +15,45 @@ import {
 
 export type TestPlanTargetType = 'workflow' | 'case' | 'suite'
 
+export type TestPlanTargetAsset = Pick<Workflow, 'id' | 'project_id' | 'name'> & {
+  current_version: number | null
+}
+
+const targetCatalogs: Readonly<Record<TestPlanTargetType, string>> = {
+  workflow: 'workflows',
+  case: 'test-cases',
+  suite: 'test-suites',
+}
+
+export async function listPlanTargetAssets(
+  projectId: string,
+  type: TestPlanTargetType,
+  page: number,
+  search: string,
+): Promise<Page<TestPlanTargetAsset>> {
+  return (
+    await apiClient.get<Page<TestPlanTargetAsset>>(
+      `/projects/${projectId}/${targetCatalogs[type]}`,
+      { params: { page, page_size: 20, search: search || undefined } },
+    )
+  ).data
+}
+
+export async function getPlanTargetAsset(
+  projectId: string,
+  type: TestPlanTargetType,
+  id: string,
+): Promise<TestPlanTargetAsset> {
+  return (
+    await apiClient.get<TestPlanTargetAsset>(`/projects/${projectId}/${targetCatalogs[type]}/${id}`)
+  ).data
+}
+
 export type CreateTestPlanInput = {
   name: string
   targetType: TestPlanTargetType
   targetId: string
+  targetVersion?: number
   environmentId: string | null
   intervalSeconds: number | null
   cronExpression: string | null
@@ -86,6 +121,7 @@ export async function createTestPlan(
       {
         target_type: input.targetType,
         target_id: input.targetId,
+        target_version: input.targetVersion,
         environment_id: input.environmentId,
         max_retries: input.maxRetries,
       },
@@ -107,9 +143,9 @@ export async function runTestPlan(
   return response.data
 }
 
-export async function listTestPlanRuns(projectId: string): Promise<Page<TestPlanRun>> {
+export async function listTestPlanRuns(projectId: string, page = 1): Promise<Page<TestPlanRun>> {
   const response = await apiClient.get<Page<TestPlanRun>>(`/projects/${projectId}/test-plan-runs`, {
-    params: { page: 1, page_size: 50 },
+    params: { page, page_size: 20 },
   })
   return response.data
 }

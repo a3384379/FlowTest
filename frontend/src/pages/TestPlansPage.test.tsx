@@ -117,6 +117,50 @@ const testSuite: TestSuite = {
 }
 
 describe('TestPlansPage', () => {
+  it('allows viewers to inspect queues without querying owner credentials or writing assets', async () => {
+    let forbiddenRequests = 0
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflows`, () =>
+        HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([environment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-cases`, () =>
+        HttpResponse.json({ items: [testCase], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-suites`, () =>
+        HttpResponse.json({ items: [testSuite], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-plans`, () =>
+        HttpResponse.json({ items: [plan], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
+        HttpResponse.json({ items: [queuedRun], total: 1, page: 1, page_size: 50 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/service-tokens`, () => {
+        forbiddenRequests += 1
+        return HttpResponse.json([])
+      }),
+      http.post('/api/v1/projects/:projectId/*', () => {
+        forbiddenRequests += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage('viewer')
+    expect(await screen.findByText('每日回归')).toBeVisible()
+    for (const name of [/新建计划/, /生成 CI Token/, /运行/, /取消/]) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      await userEvent.click(button)
+    }
+    expect(screen.queryByText('CI 凭据')).not.toBeInTheDocument()
+    expect(forbiddenRequests).toBe(0)
+  })
+
   it('creates, queues and cancels plans, and reveals one-time credentials', async () => {
     const requests = { created: 0, run: 0, cancelled: 0, token: 0 }
     server.use(
@@ -174,7 +218,12 @@ describe('TestPlansPage', () => {
           schedule_cron: string | null
           schedule_timezone: string
           queue_priority: number
-          items: Array<{ target_type: string; target_id: string; environment_id: string | null }>
+          items: Array<{
+            target_type: string
+            target_id: string
+            target_version: number
+            environment_id: string | null
+          }>
         }
         if (requests.created === 0) {
           expect(body.schedule_interval_seconds).toBe(1800)
@@ -189,6 +238,7 @@ describe('TestPlansPage', () => {
         expect(body.items[0]).toMatchObject({
           target_type: 'suite',
           target_id: testSuite.id,
+          target_version: 1,
           environment_id: null,
         })
         requests.created += 1
@@ -221,7 +271,7 @@ describe('TestPlansPage', () => {
     await browser.click(screen.getByRole('button', { name: /新建计划/ }))
     await browser.type(screen.getByLabelText('计划名称'), '部署回归')
     await chooseSelect(browser, '执行目标', '测试套件')
-    await chooseSelect(browser, '测试套件', testSuite.name)
+    await chooseSelect(browser, '测试套件', `${testSuite.name} · v${testSuite.current_version}`)
     await chooseSelect(browser, '调度方式', '固定间隔')
     await browser.type(screen.getByLabelText('定时间隔（分钟）'), '30')
     await browser.click(screen.getByRole('button', { name: 'OK' }))
@@ -232,7 +282,7 @@ describe('TestPlansPage', () => {
     await browser.click(screen.getByRole('button', { name: /新建计划/ }))
     await browser.type(screen.getByLabelText('计划名称'), 'Cron 部署回归')
     await chooseSelect(browser, '执行目标', '测试套件')
-    await chooseSelect(browser, '测试套件', testSuite.name)
+    await chooseSelect(browser, '测试套件', `${testSuite.name} · v${testSuite.current_version}`)
     await chooseSelect(browser, '调度方式', 'Cron')
     await browser.type(screen.getByLabelText('Cron 表达式'), '0 9 * * 1-5')
     await browser.clear(screen.getByLabelText('队列优先级（0 最低，9 最高）'))
@@ -248,7 +298,19 @@ describe('TestPlansPage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(role: 'owner' | 'viewer' = 'owner') {
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+      HttpResponse.json({
+        effective_role: role,
+        capabilities:
+          role === 'owner'
+            ? ['read', 'edit', 'execute', 'manage_members', 'manage_security']
+            : ['read'],
+        matrix: {},
+      }),
+    ),
+  )
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })

@@ -525,7 +525,7 @@ describe('ProtocolWorkbenchPage', () => {
 
     expect(await screen.findByText('自定义 GraphQL')).toBeVisible()
     expect(screen.getAllByText('custom_schema').length).toBeGreaterThan(0)
-    expect(screen.getByText('0 类型')).toBeVisible()
+    expect(screen.getByText('未提供 类型')).toBeVisible()
   })
 })
 

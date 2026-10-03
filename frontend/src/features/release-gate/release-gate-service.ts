@@ -175,6 +175,15 @@ export async function createReleasePolicy(
     .data
 }
 
+export async function getReleaseDecision(
+  projectId: string,
+  decisionId: string,
+): Promise<ReleaseDecision> {
+  return (
+    await apiClient.get<ReleaseDecision>(`/projects/${projectId}/release-decisions/${decisionId}`)
+  ).data
+}
+
 export async function listReleaseDecisions(projectId: string): Promise<Page<ReleaseDecision>> {
   return (
     await apiClient.get<Page<ReleaseDecision>>(`/projects/${projectId}/release-decisions`, {

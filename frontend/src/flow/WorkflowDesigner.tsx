@@ -116,6 +116,7 @@ import type {
   WorkflowNodeExecution,
 } from '../lib/api'
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
+import WorkflowResourceSelect from './WorkflowResourceSelect'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import WorkflowRunInspector from './WorkflowRunInspector'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
@@ -319,7 +320,8 @@ function WorkflowDesignerReady({
   const [websocketSelection, setWebsocketSelection] = useState<string | undefined>(
     firstResourceId(websocketSources),
   )
-  const publishedWorkflows = workflows.filter((workflow) => workflow.current_version)
+  const [subflowOverride, setSubflowOverride] = useState<Workflow | undefined>()
+  const publishedWorkflows = mergePublishedWorkflows(workflows, subflowOverride, projectId)
   const [subflowSelection, setSubflowSelection] = useState<string | undefined>(
     firstResourceId(publishedWorkflows),
   )
@@ -827,7 +829,10 @@ function WorkflowDesignerReady({
           onGrpcSelection={setGrpcSelection}
           onKafkaSelection={setKafkaSelection}
           onWebsocketSelection={setWebsocketSelection}
-          onSubflowSelection={setSubflowSelection}
+          onSubflowSelection={(workflow) => {
+            setSubflowOverride(workflow)
+            setSubflowSelection(workflow.id)
+          }}
           onAddApi={addSelectedApi}
           onAddGraphql={() => addSelectedProtocol('graphql')}
           onAddGrpc={() => addSelectedProtocol('grpc')}
@@ -1445,7 +1450,7 @@ function DesignerToolbar({
   onGrpcSelection: (value: string) => void
   onKafkaSelection: (value: string) => void
   onWebsocketSelection: (value: string) => void
-  onSubflowSelection: (value: string) => void
+  onSubflowSelection: (workflow: Workflow) => void
   onAddApi: () => void
   onAddGraphql: () => void
   onAddGrpc: () => void
@@ -1699,7 +1704,7 @@ type NodeLibraryInput = {
   onGrpcSelection: (value: string) => void
   onKafkaSelection: (value: string) => void
   onWebsocketSelection: (value: string) => void
-  onSubflowSelection: (value: string) => void
+  onSubflowSelection: (workflow: Workflow) => void
   onAddApi: () => void
   onAddGraphql: () => void
   onAddGrpc: () => void
@@ -1742,14 +1747,15 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
       onChange={onChange}
     />
   )
-  const subflowControl = select(
-    '待添加子流程',
-    input.subflowSelection,
-    input.subflows.map((workflow) => ({
-      label: `${workflow.name} · v${workflow.current_version}`,
-      value: workflow.id,
-    })),
-    input.onSubflowSelection,
+  const subflowControl = (
+    <WorkflowResourceSelect
+      label="待添加子流程"
+      projectId={input.projectId}
+      value={input.subflowSelection}
+      workflows={input.subflows}
+      disabled={!input.editable}
+      onChange={input.onSubflowSelection}
+    />
   )
   return [
     item('delay', () => input.onAddNode('delay'), reason(true, '')),
@@ -2864,4 +2870,14 @@ function datasetIssue(definition: WorkflowDefinition, artifacts: Artifact[]): st
 }
 function showInspector(selection: WorkflowSelection, focused: boolean): boolean {
   return hasSelection(selection) && !focused
+}
+
+function mergePublishedWorkflows(
+  workflows: Workflow[],
+  override: Workflow | undefined,
+  projectId?: string | null,
+) {
+  const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]))
+  if (override && override.project_id === projectId) byId.set(override.id, override)
+  return [...byId.values()].filter((workflow) => (workflow.current_version ?? 0) > 0)
 }

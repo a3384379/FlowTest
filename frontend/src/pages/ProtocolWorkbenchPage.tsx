@@ -786,6 +786,6 @@ function sourceFormatLabel(value: string) {
 }
 function summaryCount(asset: SchemaArtifact) {
   return asset.protocol === 'graphql'
-    ? `${String(asset.summary.type_count ?? 0)} 类型`
-    : `${String(asset.summary.service_count ?? 0)} 服务`
+    ? `${String(asset.summary.type_count ?? '未提供')} 类型`
+    : `${String(asset.summary.service_count ?? '未提供')} 服务`
 }

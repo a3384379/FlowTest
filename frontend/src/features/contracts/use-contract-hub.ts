@@ -3,6 +3,8 @@ import { App } from 'antd'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 import {
   createContractService,
   getCompatibilityMatrix,
@@ -22,7 +24,9 @@ export function useContractHub(providerServiceId: string | null) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const enabled = Boolean(projectId)
+  const { canEdit, permissions } = useProjectCapabilities()
+  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
+  const enabled = Boolean(projectId && flags.data?.contract_hub)
   const services = useQuery({
     queryKey: ['contract-services', projectId],
     queryFn: () => listContractServices(required(projectId)),
@@ -82,6 +86,7 @@ export function useContractHub(providerServiceId: string | null) {
   })
 
   async function withFeedback<T>(action: () => Promise<T>, successText: string): Promise<boolean> {
+    if (!canEdit || !enabled) return false
     try {
       await action()
       await refresh()
@@ -105,6 +110,9 @@ export function useContractHub(providerServiceId: string | null) {
 
   return {
     projectId,
+    canEdit: canEdit && enabled,
+    flags,
+    permissions,
     services,
     pacts,
     openapiRuns,

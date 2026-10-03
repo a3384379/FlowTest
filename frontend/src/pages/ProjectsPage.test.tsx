@@ -11,6 +11,30 @@ import ProjectTestProvider from '../test/ProjectTestProvider'
 import ProjectsPage from './ProjectsPage'
 
 describe('ProjectsPage', () => {
+  it('shows failed governance reads and prevents submitting unloaded policy defaults', async () => {
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/*`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'UNAVAILABLE',
+              message: '项目治理数据暂不可用',
+              trace_id: 'governance-trace',
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText(/项目治理数据暂不可用/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /保存安全策略/ })).toBeDisabled()
+  })
+
   it('shows the permission matrix, updates network policy and renders audit trace', async () => {
     const saved = vi.fn()
     const savedRetention = vi.fn()

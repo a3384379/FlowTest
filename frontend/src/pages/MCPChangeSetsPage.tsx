@@ -8,19 +8,34 @@ import {
   getMCPChangeSet,
   reviewMCPChangeItem,
   type MCPChangeItem,
+  type MCPChangeSet,
 } from '../features/mcp/mcp-change-set-service'
 import ControlBlockGraphPreview from '../features/mcp/ControlBlockGraphPreview'
 import ControlWorkflowGraphPreview from '../features/mcp/ControlWorkflowGraphPreview'
 import { apiErrorMessage, type WorkflowDefinition } from '../lib/api'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
 
 export default function MCPChangeSetsPage() {
+  const { projectId } = useProjectContext()
+  return <MCPChangeSetWorkspace key={projectId ?? 'none'} />
+}
+
+function MCPChangeSetWorkspace() {
+  const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
   const [searchParams] = useSearchParams()
   const focusId = searchParams.get('focus')
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const changeSet = useQuery({
-    queryKey: ['mcp-change-set', focusId],
-    queryFn: () => getMCPChangeSet(required(focusId)),
+    queryKey: ['mcp-change-set', projectId, focusId],
+    queryFn: async () => {
+      const result = await getMCPChangeSet(required(focusId))
+      if (result.data.project_id !== projectId)
+        throw new Error('该变更集不属于当前项目，请核对项目和 ChangeSet ID。')
+      return result
+    },
     enabled: Boolean(focusId),
   })
   const approve = useMutation({
@@ -37,10 +52,11 @@ export default function MCPChangeSetsPage() {
   })
 
   async function refresh(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ['mcp-change-set', focusId] })
+    await queryClient.invalidateQueries({ queryKey: ['mcp-change-set', projectId, focusId] })
   }
 
   async function approveChangeSet(): Promise<void> {
+    if (!editable) return
     try {
       await approve.mutateAsync()
       await refresh()
@@ -51,6 +67,7 @@ export default function MCPChangeSetsPage() {
   }
 
   async function reviewItem(itemId: string, decision: 'accept' | 'reject'): Promise<void> {
+    if (!editable) return
     try {
       await review.mutateAsync({ itemId, decision })
       await refresh()
@@ -66,6 +83,7 @@ export default function MCPChangeSetsPage() {
   }
 
   const data = changeSet.data?.data
+  const editable = canEdit && Boolean(data)
   return (
     <Flex vertical gap={16}>
       <div className="page-heading">
@@ -80,7 +98,15 @@ export default function MCPChangeSetsPage() {
         <Alert showIcon type="info" title="请从资源发现结果打开一个 MCP 变更集。" />
       ) : null}
       {changeSet.isError ? (
-        <Alert showIcon type="error" title={apiErrorMessage(changeSet.error)} />
+        <Alert
+          showIcon
+          type="error"
+          title={apiErrorMessage(changeSet.error)}
+          action={<Button onClick={() => void changeSet.refetch()}>重试</Button>}
+        />
+      ) : null}
+      {permissions.isError ? (
+        <Alert showIcon type="error" title={apiErrorMessage(permissions.error)} />
       ) : null}
       <Card
         loading={changeSet.isLoading}
@@ -88,81 +114,134 @@ export default function MCPChangeSetsPage() {
         extra={data ? <Tag>{data.status}</Tag> : null}
       >
         {data ? (
-          <Flex vertical gap={12}>
-            <Space wrap>
-              <Tag color="blue">{data.governance.risk_level}</Tag>
-              <Typography.Text code>{data.id}</Typography.Text>
-            </Space>
-            {data.governance.manual_approval_required && !data.approval ? (
-              <Alert
-                showIcon
-                type="warning"
-                title="高风险变更必须先人工批准"
-                action={
-                  <Button
-                    icon={<AuditOutlined />}
-                    loading={approve.isPending}
-                    onClick={() => void approveChangeSet()}
-                  >
-                    批准变更集
-                  </Button>
-                }
-              />
-            ) : null}
-            {data.items.map((item) => (
-              <Card
-                key={item.id}
-                size="small"
-                title={
-                  <Space wrap>
-                    <Tag>{item.item_type}</Tag>
-                    <Typography.Text strong>{item.title}</Typography.Text>
-                  </Space>
-                }
-                extra={
-                  item.review_status === 'pending' ? (
-                    <Space>
-                      <Button
-                        disabled={review.isPending}
-                        onClick={() => void reviewItem(item.id, 'reject')}
-                      >
-                        拒绝
-                      </Button>
-                      <Button
-                        type="primary"
-                        disabled={
-                          review.isPending ||
-                          (data.governance.manual_approval_required && !data.approval)
-                        }
-                        onClick={() => void reviewItem(item.id, 'accept')}
-                      >
-                        接受并物化
-                      </Button>
-                    </Space>
-                  ) : (
-                    <Tag color={item.review_status === 'accepted' ? 'success' : 'default'}>
-                      {item.review_status === 'accepted' ? '已接受' : '已拒绝'}
-                    </Tag>
-                  )
-                }
-              >
-                {item.item_type === 'workflow' ? (
-                  <WorkflowReviewSummary
-                    item={item}
-                    changeSetId={data.id}
-                    projectId={data.project_id}
-                    workflowId={data.workflow_id ?? item.target_resource_id ?? null}
-                    baseRevision={data.base_revision ?? null}
-                  />
-                ) : null}
-                <pre className="code-preview">{JSON.stringify(item.proposed_content, null, 2)}</pre>
-              </Card>
-            ))}
-          </Flex>
+          <MCPReviewContent
+            data={data}
+            editable={editable}
+            approvePending={approve.isPending}
+            reviewPending={review.isPending}
+            onApprove={approveChangeSet}
+            onReview={reviewItem}
+          />
         ) : null}
       </Card>
     </Flex>
   )
+}
+
+type MCPReviewActions = {
+  data: MCPChangeSet
+  editable: boolean
+  reviewPending: boolean
+  onReview: (id: string, decision: 'accept' | 'reject') => Promise<void>
+}
+
+function MCPReviewContent({
+  data,
+  editable,
+  approvePending,
+  reviewPending,
+  onApprove,
+  onReview,
+}: MCPReviewActions & {
+  approvePending: boolean
+  onApprove: () => Promise<void>
+}) {
+  return (
+    <Flex vertical gap={12}>
+      <Space wrap>
+        <Tag color="blue">{data.governance.risk_level}</Tag>
+        <Typography.Text code>{data.id}</Typography.Text>
+      </Space>
+      {data.governance.manual_approval_required && !data.approval ? (
+        <Alert
+          showIcon
+          type="warning"
+          title="高风险变更必须先人工批准"
+          action={
+            <Button
+              aria-label="批准变更集"
+              disabled={!editable}
+              icon={<AuditOutlined />}
+              loading={approvePending}
+              onClick={() => void onApprove()}
+            >
+              批准变更集
+            </Button>
+          }
+        />
+      ) : null}
+      {data.items.map((item) => (
+        <MCPChangeItemCard
+          key={item.id}
+          item={item}
+          data={data}
+          editable={editable}
+          reviewPending={reviewPending}
+          onReview={onReview}
+        />
+      ))}
+    </Flex>
+  )
+}
+
+function MCPChangeItemCard({
+  item,
+  data,
+  editable,
+  reviewPending,
+  onReview,
+}: MCPReviewActions & { item: MCPChangeItem }) {
+  return (
+    <Card
+      key={item.id}
+      size="small"
+      title={
+        <Space wrap>
+          <Tag>{item.item_type}</Tag>
+          <Typography.Text strong>{item.title}</Typography.Text>
+        </Space>
+      }
+      extra={
+        item.review_status === 'pending' ? (
+          <Space>
+            <Button
+              aria-label="拒绝"
+              disabled={!editable || reviewPending}
+              onClick={() => void onReview(item.id, 'reject')}
+            >
+              拒绝
+            </Button>
+            <Button
+              type="primary"
+              disabled={materializationDisabled(editable, reviewPending, data)}
+              onClick={() => void onReview(item.id, 'accept')}
+            >
+              接受并物化
+            </Button>
+          </Space>
+        ) : (
+          <Tag color={item.review_status === 'accepted' ? 'success' : 'default'}>
+            {item.review_status === 'accepted' ? '已接受' : '已拒绝'}
+          </Tag>
+        )
+      }
+    >
+      {item.item_type === 'workflow' ? (
+        <WorkflowReviewSummary
+          item={item}
+          changeSetId={data.id}
+          projectId={data.project_id}
+          workflowId={data.workflow_id ?? item.target_resource_id ?? null}
+          baseRevision={data.base_revision ?? null}
+        />
+      ) : null}
+      <pre className="code-preview">{JSON.stringify(item.proposed_content, null, 2)}</pre>
+    </Card>
+  )
+}
+
+function materializationDisabled(editable: boolean, pending: boolean, data: MCPChangeSet): boolean {
+  return !editable || pending || (data.governance.manual_approval_required && !data.approval)
 }
 
 function WorkflowReviewSummary({

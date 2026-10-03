@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -153,6 +153,32 @@ const baseRun: ChangeRegressionRun = {
 }
 
 describe('ChangeRegressionPage', () => {
+  it('preserves regression evidence while disabling viewer approval and creation', async () => {
+    let current = structuredClone(baseRun)
+    installHandlers(
+      () => current,
+      (next) => {
+        current = next
+      },
+    )
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'viewer',
+          capabilities: ['read'],
+          matrix: {},
+        }),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText('订单变更回归')).toBeInTheDocument()
+    const approve = await screen.findByRole('button', { name: '人工批准' })
+    expect(approve).toBeDisabled()
+    fireEvent.click(approve)
+    expect(current.status).toBe('review_required')
+    expect(screen.getByRole('button', { name: '分析并创建链路' })).toBeDisabled()
+  })
+
   it('runs the review, approval, execution and release-gate actions', async () => {
     let currentRun = structuredClone(baseRun)
     installHandlers(
@@ -226,6 +252,7 @@ describe('ChangeRegressionPage', () => {
     const browser = userEvent.setup()
 
     await screen.findByText('请选择或创建一条链路。')
+    await waitFor(() => expect(screen.getByLabelText('链路名称')).toBeEnabled())
     await browser.type(screen.getByLabelText('链路名称'), '新建订单链路')
     await browser.type(screen.getByLabelText('候选版本'), 'commit:new123')
     await browser.click(screen.getByLabelText('回归测试计划'))
