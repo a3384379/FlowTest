@@ -115,6 +115,36 @@ describe('workflow execution events', () => {
     expect(constructor).not.toHaveBeenCalled()
   })
 
+  it('ignores socket messages after cleanup or after a reconnect replaced the socket', async () => {
+    vi.useFakeTimers()
+    const sockets: FakeWebSocket[] = []
+    vi.stubGlobal(
+      'WebSocket',
+      class extends FakeWebSocket {
+        constructor(url: string, protocols: string[]) {
+          super(url, protocols)
+          sockets.push(this)
+        }
+      },
+    )
+    const handler = vi.fn()
+    const gap = vi.fn()
+    const { unmount } = renderHook(() =>
+      useExecutionEvents('execution-id', 'token', handler, async () => {}, gap),
+    )
+    await act(async () => {})
+    act(() => sockets[0].disconnect(1006))
+    await act(async () => vi.advanceTimersByTime(500))
+    act(() => sockets[0].emit(eventMessage(900)))
+    expect(handler).not.toHaveBeenCalled()
+    expect(gap).not.toHaveBeenCalled()
+    act(() => sockets[1].emit(eventMessage(1)))
+    expect(handler).toHaveBeenCalledOnce()
+    unmount()
+    act(() => sockets[1].emit(eventMessage(2)))
+    expect(handler).toHaveBeenCalledOnce()
+  })
+
   it('reconciles a sequence gap before accepting a replay beyond retained history', async () => {
     vi.useFakeTimers()
     const sockets: FakeWebSocket[] = []

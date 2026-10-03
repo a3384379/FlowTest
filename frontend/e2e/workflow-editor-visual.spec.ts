@@ -4,7 +4,13 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 
-import { clickEdge, closeInspector, publishAndRun, seedEditor } from './support/workflow-editor'
+import {
+  clickEdge,
+  closeInspector,
+  publishAndRun,
+  seedEditor,
+  settleCanvas as settleViewport,
+} from './support/workflow-editor'
 
 const matrixRoot = resolve(
   process.cwd(),
@@ -174,37 +180,6 @@ function visualFixtureMasks(page: Page, name: string): Locator[] {
       ),
     )
   return masks
-}
-async function settleViewport(page: Page): Promise<void> {
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        Array.from(document.querySelectorAll('.react-flow__node')).every((node) => {
-          const body = node.querySelector('.flow-node')
-          if (!body) return true
-          return (
-            Math.abs(node.getBoundingClientRect().height - body.getBoundingClientRect().height) < 1
-          )
-        }),
-      ),
-    )
-    .toBe(true)
-  await page.evaluate(async () => {
-    let previous = ''
-    let stableFrames = 0
-    while (stableFrames < 10) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-      const current = JSON.stringify({
-        viewport: document.querySelector('.react-flow__viewport')?.getAttribute('style'),
-        nodes: Array.from(document.querySelectorAll('.react-flow__node'), (element) => {
-          const { x, y, width, height } = element.getBoundingClientRect()
-          return { x, y, width, height }
-        }),
-      })
-      stableFrames = current === previous ? stableFrames + 1 : 0
-      previous = current
-    }
-  })
 }
 async function fitCanvas(page: Page): Promise<void> {
   const fit = page.getByRole('button', { name: /适应画布/ })

@@ -38,6 +38,7 @@ export function useExecutionEvents(
     }
 
     function handleMessage(message: MessageEvent<string>, current: WebSocket) {
+      if (!active || current !== socket) return
       const event = parseExecutionEvent(message.data)
       if (!event || event.execution_id !== executionId || event.sequence <= latestSequence) return
       if (event.sequence > latestSequence + 1) {
@@ -69,11 +70,12 @@ export function useExecutionEvents(
       ])
       socket = current
       current.onopen = () => {
+        if (!active || current !== socket) return
         retryAttempt = 0
       }
       current.onmessage = (message) => handleMessage(message, current)
       current.onclose = (event) => {
-        if (!active) return
+        if (!active || current !== socket) return
         if (!shouldRetryClose(event.code)) {
           void reconcile.current?.(executionId!)?.catch(() => {
             if (active && event.code === 1000) scheduleReconnect()

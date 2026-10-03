@@ -10,7 +10,13 @@ import { DraftSessionProvider } from '../drafts/DraftSessionProvider'
 import { useWorkflows } from './use-workflows'
 import { useAuthStore } from '../auth/auth-store'
 import { authenticateTestUser } from '../../test/auth'
-import { workflow, user as actor } from '../../test/fixtures'
+import {
+  environment,
+  workflow,
+  workflowVersion,
+  workflowRunningExecution,
+  user as actor,
+} from '../../test/fixtures'
 
 vi.mock('../projects/use-project-context', () => ({
   useProjectContext: () => ({
@@ -29,7 +35,7 @@ vi.mock('./workflow-service', () => ({
   getWorkflow: vi.fn(async (_project: string, id: string) =>
     id === workflow.id ? workflow : secondWorkflow,
   ),
-  listEnvironments: async () => [],
+  listEnvironments: async () => [environment],
   listApis: async () => ({ items: [] }),
   listArtifacts: async () => ({ items: [] }),
   listWorkflowExecutions: async () => ({ items: [] }),
@@ -68,6 +74,9 @@ function Editor() {
   const [closeResult, setCloseResult] = useState('等待关闭')
   return (
     <>
+      <output data-testid="published-version">
+        {state.selectedWorkflow?.current_version ?? '未发布'}
+      </output>
       <span>{closeResult}</span>
       <button onClick={() => state.setDraftDefinition({ ...state.draftDefinition, edges: [] })}>
         构造未完成图
@@ -135,7 +144,7 @@ function Editor() {
     </>
   )
 }
-function setup() {
+function setup(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   const router = createMemoryRouter(
     [
       {
@@ -152,9 +161,7 @@ function setup() {
   render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <AntdApp>
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-        >
+        <QueryClientProvider client={client}>
           <RouterProvider router={router} />
         </QueryClientProvider>
       </AntdApp>
@@ -169,7 +176,10 @@ beforeEach(() => {
   vi.mocked(listWorkflows)
     .mockReset()
     .mockResolvedValue({ items: [workflow, secondWorkflow], total: 2, page: 1, page_size: 100 })
-  vi.mocked(getWorkflow).mockClear()
+  vi.mocked(getWorkflow)
+    .mockReset()
+    .mockImplementation(async (_project, id) => (id === workflow.id ? workflow : secondWorkflow))
+  vi.mocked(executeWorkflow).mockReset()
 })
 
 it('saves an off-page workflow draft by its exact object before permitting a close', async () => {
@@ -254,6 +264,27 @@ it('LIFE04 ignores a save completion after the draft was discarded', async () =>
   expect(readWorkflowDraft(key)).toBeNull()
   expect(screen.getByLabelText('草稿名称')).toHaveValue('开始')
 })
+it('preserves a new draft created while the saved object cache is synchronizing', async () => {
+  const complete = pendingSave()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const key = setup(client)
+  await editAndSave()
+  let release!: () => void
+  const synchronization = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const cancellation = vi
+    .spyOn(client, 'cancelQueries')
+    .mockImplementationOnce(() => synchronization)
+  await act(async () => complete({ ...workflow, draft_revision: 2 }))
+  await waitFor(() => expect(cancellation).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('button', { name: '丢弃' }))
+  fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: '丢弃后创建的新稿' } })
+  await act(async () => release())
+  expect(readWorkflowDraft(key)?.content.nodes[0].name).toBe('丢弃后创建的新稿')
+  expect(screen.getByLabelText('草稿名称')).toHaveValue('丢弃后创建的新稿')
+  cancellation.mockRestore()
+})
 it('LIFE05 preserves the local draft and its base revision on conflict', async () => {
   vi.mocked(updateWorkflowDraft).mockRejectedValue({
     response: {
@@ -323,3 +354,113 @@ it.each(['暂存配置', '构造未完成图'])(
     expect(updateWorkflowDraft).not.toHaveBeenCalled()
   },
 )
+
+async function openOffPageWorkflow() {
+  await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '切换流程' }))
+  await waitFor(() => expect(screen.getByLabelText('草稿名称')).toHaveValue('另一个流程'))
+}
+function offPageCatalog() {
+  vi.mocked(listWorkflows).mockResolvedValue({
+    items: [workflow],
+    total: 126,
+    page: 1,
+    page_size: 100,
+  })
+}
+
+it('keeps an off-page saved graph and uses its returned revision for a second save', async () => {
+  offPageCatalog()
+  vi.mocked(updateWorkflowDraft).mockImplementation(
+    async (_project, target, definition, revision) => ({
+      ...target,
+      draft_revision: revision! + 1,
+      draft_definition: definition,
+    }),
+  )
+  setup()
+  await openOffPageWorkflow()
+  for (const [name, revision] of [
+    ['页外保存第一稿', 1],
+    ['页外保存第二稿', 2],
+  ] as const) {
+    fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: name } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updateWorkflowDraft).toHaveBeenCalledTimes(revision))
+    await waitFor(() =>
+      expect(readWorkflowDraft(workflowDraftKey(actor.id, 'one', secondWorkflow.id))).toBeNull(),
+    )
+    expect(screen.getByLabelText('草稿名称')).toHaveValue(name)
+    expect(vi.mocked(updateWorkflowDraft).mock.calls[revision - 1][3]).toBe(revision)
+  }
+})
+
+it.each([null, 1])(
+  'runs an off-page workflow with the newly published version after v%s',
+  async (currentVersion) => {
+    offPageCatalog()
+    let serverWorkflow = { ...secondWorkflow, current_version: currentVersion }
+    vi.mocked(getWorkflow).mockImplementation(async () => serverWorkflow)
+    const nextVersion = (currentVersion ?? 0) + 1
+    vi.mocked(publishWorkflow).mockImplementation(async () => {
+      serverWorkflow = { ...serverWorkflow, current_version: nextVersion }
+      return { ...workflowVersion, workflow_id: secondWorkflow.id, version: nextVersion }
+    })
+    vi.mocked(executeWorkflow).mockResolvedValue({
+      ...workflowRunningExecution,
+      project_id: 'one',
+      workflow_id: secondWorkflow.id,
+    })
+    setup()
+    await openOffPageWorkflow()
+    fireEvent.click(screen.getByRole('button', { name: '发布' }))
+    const dialog = await screen.findByRole('dialog', { hidden: true })
+    fireEvent.click(within(dialog).getByRole('button', { name: '发布服务器草稿', hidden: true }))
+    await waitFor(() =>
+      expect(screen.getByTestId('published-version')).toHaveTextContent(String(nextVersion)),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '运行' }))
+    await waitFor(() =>
+      expect(executeWorkflow).toHaveBeenCalledWith(
+        'one',
+        secondWorkflow.id,
+        expect.any(String),
+        nextVersion,
+      ),
+    )
+  },
+)
+
+it('does not let an old in-flight detail response overwrite an off-page save', async () => {
+  offPageCatalog()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  setup(client)
+  await openOffPageWorkflow()
+  let complete!: (value: typeof secondWorkflow) => void
+  const oldDetail = new Promise<typeof secondWorkflow>((resolve) => {
+    complete = resolve
+  })
+  vi.mocked(getWorkflow).mockReturnValueOnce(oldDetail)
+  let refresh!: Promise<void>
+  act(() => {
+    refresh = client.refetchQueries({ queryKey: ['workflow', 'one', secondWorkflow.id] })
+  })
+  vi.mocked(updateWorkflowDraft).mockImplementation(async (_project, target, definition) => ({
+    ...target,
+    draft_revision: 2,
+    draft_definition: definition,
+  }))
+  fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: '已保存的新图' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() =>
+    expect(readWorkflowDraft(workflowDraftKey(actor.id, 'one', secondWorkflow.id))).toBeNull(),
+  )
+  await act(async () => {
+    complete(secondWorkflow)
+    await refresh
+  })
+  expect(screen.getByLabelText('草稿名称')).toHaveValue('已保存的新图')
+  expect(client.getQueryData(['workflow', 'one', secondWorkflow.id])).toMatchObject({
+    draft_revision: 2,
+  })
+})

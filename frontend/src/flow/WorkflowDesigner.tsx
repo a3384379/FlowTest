@@ -338,6 +338,8 @@ function WorkflowDesignerReady({
       runtimeByNode.get(node.id),
     ),
     measured: dimensions.get(node.id),
+    // Release the estimate after measurement so runtime content can resize the node.
+    initialHeight: dimensions.has(node.id) ? undefined : NODE_INITIAL_HEIGHT,
     selected: editor.selection?.kind === 'node' && editor.selection.id === node.id,
     position: editor.positions.get(node.id) ?? node.position,
     data: {
@@ -2260,7 +2262,6 @@ function toCanvasNode(
     type: 'workflowNode',
     position: node.position,
     initialWidth: NODE_INITIAL_WIDTH,
-    initialHeight: NODE_INITIAL_HEIGHT,
     data: {
       label: node.name,
       nodeType: resolveEffectiveNodeType(node),

@@ -1,6 +1,6 @@
 id,category,test,steps,expected,status,evidence,notes
 V5-001,视觉与主题,主工作区,1440/1280打开编辑器，系统分别设浅色和深色,始终冰蓝白，无黑色画布/面板,已验证,05-workflow-dark-os-1600.png; 04-workflow-1280.png,本地前端验证；不代表远程 CI 或完整发布验收。
-V5-002,视觉与主题,主图一致性,对照主图01检查节点/工具条/检查器,保留质感与比例，不退成灰线框,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
+V5-002,视觉与主题,主图一致性,对照主图01检查节点/工具条/检查器,保留质感与比例，不退成灰线框,部分定向验证通过；待综合验收,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log;audit-followup.md,新增1280/1440实际核心场景及6张macOS像素基线；Linux原27基线保留。见audit-followup.md；新Linux核心像素及整站主图比对待独立验收。
 V5-003,视觉与主题,全局导航,打开常用模块和全部模块,浅色导航、文字可见、原入口和权限仍在,已验证,20-module-directory.png,本地前端验证；不代表远程 CI 或完整发布验收。
 V5-004,视觉与主题,弹出层,逐一打开Tooltip/Popover/Modal/Toast,白/浅蓝底，无默认黑底,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-005,视觉与主题,代码区,请求/响应/历史JSON/diff,浅色语法主题、选中文本可读,已验证,06-api-workbench-1440.png; 07-workflow-history-evidence-1440.png,本地前端验证；不代表远程 CI 或完整发布验收。
@@ -15,22 +15,22 @@ V5-013,流程编辑与草稿,真实端口,对照schema检查handle,无按装饰�
 V5-014,流程编辑与草稿,拖放添加,鼠标与键盘按已有方式添加,真实图新增正确类型,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-015,流程编辑与草稿,复制粘贴,跨选择集复制节点和引用,ID与引用规则按原逻辑,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-016,流程编辑与草稿,撤销重做,添加/移动/删节点/改连线,状态和历史栈一致,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
-V5-017,流程编辑与草稿,连线操作,插入节点、重连、非法连接,原校验与行为保持,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
+V5-017,流程编辑与草稿,连线操作,插入节点、重连、非法连接,原校验与行为保持,部分定向验证通过；待综合验收,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log;audit-followup.md,新增画布稳定后实际命中检查；测量完成后释放初始高度估计。连线真实创建/重连/映射/删除/撤销按无重试重复验证。见audit-followup.md。
 V5-018,流程编辑与草稿,自动布局,手动触发并切换主题,只在显式触发时改坐标,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-019,流程编辑与草稿,节点apply,修改未应用，再apply,图只在apply后dirty,已验证,frontend/src/flow/WorkflowNodeEditSession.test.tsx,本地前端验证；不代表远程 CI 或完整发布验收。
 V5-020,流程编辑与草稿,未应用切节点,修改后选其他节点,应用/丢弃/取消可用，不丢输入,已验证,22-node-switch-confirmation.png; frontend/src/flow/WorkflowDesigner.test.tsx; qa-association-settings-result.log,本轮应用/取消浏览器验证；丢弃有组件回归；保留节点输入与图草稿边界。
-V5-021,流程编辑与草稿,保存成功,apply后发起保存,只确认提交版本，显示真实状态,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
+V5-021,流程编辑与草稿,保存成功,apply后发起保存,只确认提交版本，显示真实状态,部分定向验证通过；待综合验收,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log;audit-followup.md,页外流程保存同步精确详情及列表；连续保存使用最新修订号。见workflow-save-concurrency.test.tsx及audit-followup.md。
 V5-022,流程编辑与草稿,保存失败,模拟超时/错误,保留dirty与数据，可重试,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
-V5-023,流程编辑与草稿,保存竞态,保存r12期间编辑到r13,r12成功不能清掉r13 dirty,已验证,frontend/src/features/workflows/workflow-save-concurrency.test.tsx,前端并发保存回归通过；未执行后端/真实网络保存。
+V5-023,流程编辑与草稿,保存竞态,保存r12期间编辑到r13,r12成功不能清掉r13 dirty,已验证,frontend/src/features/workflows/workflow-save-concurrency.test.tsx;audit-followup.md,保存期间编辑与缓存同步期间丢弃后的新稿均保留；不清除新的草稿代次。见workflow-save-concurrency.test.tsx及audit-followup.md。
 V5-024,流程编辑与草稿,关tab/切项目,两层dirty均存在时离开,未应用和未保存均受保护,定向验证通过；待综合验收,frontend/src/pages/WorkflowsPage.test.tsx;frontend/src/features/workflows/workflow-save-concurrency.test.tsx;frontend/src/features/navigation/WorkspaceObjectTabs.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
-V5-025,流程编辑与草稿,session隔离,不同用户/项目与旧tab恢复,不串草稿，不因主题清空存储,定向验证通过；待综合验收,frontend/src/features/navigation/workspace-tab-store.test.ts;frontend/src/lib/use-route-scoped-state.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
+V5-025,流程编辑与草稿,session隔离,不同用户/项目与旧tab恢复,不串草稿，不因主题清空存储,定向验证通过；待综合验收,frontend/src/features/navigation/workspace-tab-store.test.ts;frontend/src/lib/use-route-scoped-state.test.tsx;audit-followup.md,新增用户/项目/流程/运行代次隔离；迟到开始/终态/事件/重连/重跑不污染当前对象。深链接恢复与手动切换清理分别验证。见audit-followup.md。
 V5-026,流程编辑与草稿,快捷键上下文,输入框/代码/弹窗中按快捷键,不误删图、不拦截文本操作,已验证,frontend/src/flow/editor/use-canvas-hotkeys.test.tsx,本地前端验证；不代表远程 CI 或完整发布验收。
 V5-027,控制流与数据关系,数据来源,选择可解析变量节点,来源名/路径/作用域正确,定向验证通过；待综合验收,frontend/src/flow/WorkflowNodeRelations.test.tsx;frontend/src/flow/editor/node-presentation.test.ts,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
 V5-028,控制流与数据关系,无法解析引用,复杂表达式,显示未解析，不猜上游,定向验证通过；待综合验收,frontend/src/flow/editor/node-presentation.test.ts,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
 V5-029,控制流与数据关系,依赖线,切换依赖可视化后保存,执行edge集合不变,已验证,qa-reference-preservation-final-result.log; frontend/src/flow/editor/node-presentation.test.ts,本地前端验证；不代表远程 CI 或完整发布验收。
-V5-030,控制流与数据关系,if/switch,真假/default/表达式错误,分支语义与原模型一致,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
+V5-030,控制流与数据关系,if/switch,真假/default/表达式错误,分支语义与原模型一致,部分定向验证通过；待综合验收,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log;audit-followup.md,实际If命中真分支并执行内联请求；switch/default/所有表达式错误仍需独立综合验收。见核心浏览器场景及audit-followup.md。
 V5-031,控制流与数据关系,foreach/repeat,不同项/次数的嵌套执行,作用域正确，不变并行,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
-V5-032,控制流与数据关系,while/do-while/until,首轮条件与退出条件不同,先后判断保持准确,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
+V5-032,控制流与数据关系,while/do-while/until,首轮条件与退出条件不同,先后判断保持准确,部分定向验证通过；待综合验收,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log;audit-followup.md,实际Until计数到2退出且持久化两轮记录；循环体入口/出口/实例证据分别截图。while/do-while全部场景不据此判定通过。见audit-followup.md。
 V5-033,控制流与数据关系,循环上限,非法输入与耗尽运行,单位/上限/失败策略不丢失,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-034,控制流与数据关系,parallel,一分支完成、一分支失败,原join策略决定整体状态,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-035,控制流与数据关系,try/return/fail,正常/异常/返回路径,不吞异常、不改终止范围,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
@@ -38,11 +38,11 @@ V5-036,控制流与数据关系,SQL/Redis,UI配置与请求尝试写入,现有�
 V5-037,运行与证据,运行对象,执行草稿或发布版本,显示真实执行对象与环境,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-038,运行与证据,历史冻结,修改当前草稿后看旧run,旧预期/版本不变,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;backend/tests/test_workflows_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/pages/WorkflowsPage.test.tsx;frontend/e2e/workflow-editor-visual.spec.ts,旧快照不读取当前草稿；未带focus的目录打开快照后保留记录所属流程及历史列表。公开回归与隔离API/Worker合成流程验证，不代表全部真实环境验收。
 V5-039,运行与证据,节点证据,选择不同node/attempt,请求与结果属于正确节点,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/flow/WorkflowRunInspector.test.tsx;frontend/src/pages/ReportsPage.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
-V5-040,运行与证据,循环证据,切item/index/嵌套路径,不串循环项,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/flow/WorkflowRunInspector.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
+V5-040,运行与证据,循环证据,切item/index/嵌套路径,不串循环项,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/flow/WorkflowRunInspector.test.tsx;audit-followup.md,实际Until两轮记录及指定轮次的嵌套请求实例恢复通过；手动历史/草稿切换清除旧实例定位。见audit-followup.md。
 V5-041,运行与证据,并行证据,切不同分支/子流程,不串branch/subflow,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/flow/WorkflowRunInspector.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
-V5-042,运行与证据,选择竞态,慢请求A后快速选择B,A回包不覆盖B,定向验证通过；待综合验收,frontend/src/features/api-console/use-api-executions.test.tsx;frontend/src/features/test-engineering/use-test-engineering.test.tsx;frontend/src/lib/use-route-scoped-state.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
-V5-043,运行与证据,HTTP与断言,HTTP200且断言失败,分别显示，运行不能假通过,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/pages/ApiConsolePage.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
-V5-044,运行与证据,缺字段,检查点/响应未提供,显示未提供而非0或通过,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/features/evidence/AssertionEvidence.test.tsx;frontend/src/pages/PerformanceLabPage.test.tsx,本轮修复见 completeness-remediation.md；测试仅证明覆盖的公开行为。真实角色/网络与整项发布验收未据此判定通过。
+V5-042,运行与证据,选择竞态,慢请求A后快速选择B,A回包不覆盖B,定向验证通过；待综合验收,frontend/src/features/api-console/use-api-executions.test.tsx;frontend/src/features/test-engineering/use-test-engineering.test.tsx;frontend/src/lib/use-route-scoped-state.test.tsx;audit-followup.md,新增流程A/B、同流程乱序运行及用户/项目/卸载边界；迟到轮询/事件/重连/重跑不覆盖新运行。见workflow-execution-concurrency.test.tsx及audit-followup.md。
+V5-043,运行与证据,HTTP与断言,HTTP200且断言失败,分别显示，运行不能假通过,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/pages/ApiConsolePage.test.tsx;audit-followup.md,实际API/Worker返回HTTP200且独立断言期望201失败；检查器展示期望/实际/差值-1/单位未提供/证据来源。见核心浏览器场景及audit-followup.md。
+V5-044,运行与证据,缺字段,检查点/响应未提供,显示未提供而非0或通过,定向验证通过；待综合验收,backend/tests/test_reporting_api.py;frontend/src/features/evidence/AssertionEvidence.test.tsx;frontend/src/pages/PerformanceLabPage.test.tsx;audit-followup.md,兼容明确assert节点的冻结输出；标准证据优先；无证据仍显示未提供且不根据状态猜测数值。见AssertionEvidence.test.tsx及audit-followup.md。
 V5-045,运行与证据,重跑资格,不支持或权限不足的重跑,给原因，不发请求,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-046,运行与证据,只读回看,打开历史/证据tabs,不触发有副作用请求,已验证,qa-association-frozen-complete-result.log; qa-association-attempt-result.log,历史/设置只读、来源导航及双向证据跳转实测零后端资产写入或目标请求；浏览器使用隔离契约夹具。
 V5-047,运行与证据,网络中断,运行中断网/恢复,状态待确认，不宣称完成,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
@@ -77,5 +77,5 @@ V5-075,质量与交付,减弱动效,系统减少动效,非必要动画取消，�
 V5-076,质量与交付,图规模,同环境小/中/大图前后对照,不凭空宣称性能提升,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。
 V5-077,质量与交付,工作区保护,对比修改前后status/diff,不覆盖原有修改/编码,已验证,git-status-delivery.log; git-diff-delivery.patch,原工作区基线干净，改动仅在独立工作树；同步最新主干并保留其修改，无 reset/clean。浏览器服务仅使用本任务独立数据库。
 V5-078,质量与交付,当前版本,核对lockfile与baseline差异,不为适配设计升级全部依赖,已验证,backend/uv.lock; frontend/package.json; frontend/pnpm-lock.yaml; backend/Dockerfile; frontend/Dockerfile; mock-target/Dockerfile; implementation.md,未为设计升级全部依赖；安全依赖与运行库及固定夹具修复独立提交于 PR #126，执行受控 Bootstrap 后同步主干。工具链与扫描规则保持，UI 普通门禁按最终新 Head 确认。
-V5-079,质量与交付,真实测试,检查测试日志与截图来源,未测不写通过，不用原型替代,本地完整检查通过；待综合验收,completeness-remediation.md;audit/completeness-final-full-check.log;audit/completeness-followup-frontend-coverage.log,本轮 make check 退出0：后端1723通过/11跳过，90.73%；后续关联及测试定位修复后前端126文件/768项通过，四项覆盖率均达80%，格式/Lint/类型/构建通过。远程门禁绑定本轮最新提交；真实环境验收未据此判定通过。
+V5-079,质量与交付,真实测试,检查测试日志与截图来源,未测不写通过，不用原型替代,本地完整检查通过；待综合验收,completeness-remediation.md;audit/completeness-final-full-check.log;audit/completeness-followup-frontend-coverage.log;audit-followup.md,新增审计修复的前端全量787项通过及实际API/Worker核心场景；源提交/源码哈希/平台分别记录。Linux新核心像素与全角色/大图综合验收未执行。见audit-followup.md。
 V5-080,质量与交付,回滚,回退本次主题/组件挂接,不清数据库/草稿/session,已映射,source-inventory.csv / modules.csv / nodes.csv；logs/frontend-delivery-tests.log,本次范围为前端呈现与既有回归。该项完整条件未在真实环境逐项执行，待发布验收。

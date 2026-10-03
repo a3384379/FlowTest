@@ -96,6 +96,7 @@ export default function WorkflowsPage() {
       next.set('execution', executionId)
       next.delete('node')
       next.delete('attempt')
+      clearExecutionEvidence(next)
       setSearchParams(next)
     },
     showDraft: () => {
@@ -103,6 +104,7 @@ export default function WorkflowsPage() {
       next.delete('execution')
       next.delete('node')
       next.delete('attempt')
+      clearExecutionEvidence(next)
       setSearchParams(next)
       if (!searchParams.has('execution')) workflows.showDraft()
     },

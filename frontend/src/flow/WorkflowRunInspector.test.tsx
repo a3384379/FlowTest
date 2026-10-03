@@ -9,6 +9,40 @@ import type { WorkflowNodeExecution } from '../lib/api'
 import { server } from '../test/server'
 
 describe('WorkflowRunInspector', () => {
+  it('shows actual and expected values from a failed standalone assertion node', () => {
+    const execution: WorkflowNodeExecution = {
+      ...apiNodeExecution(),
+      node_id: 'assert-status',
+      node_type: 'assert',
+      name: '状态码断言',
+      output: { passed: false, actual: 200, expected: 201, operator: 'equals' },
+      result: null,
+      error_code: 'WORKFLOW_ASSERTION_FAILED',
+      error_message: '状态码不匹配',
+    }
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        node={{
+          id: execution.node_id,
+          name: execution.name,
+          type: 'assert',
+          position: { x: 0, y: 0 },
+          config: {},
+        }}
+        definition={workflowDefinition}
+        execution={execution}
+        nodes={[execution]}
+        context={{}}
+      />,
+    )
+    const evidence = within(screen.getByLabelText('断言证据'))
+    expect(evidence.getByText('200')).toBeVisible()
+    expect(evidence.getByText('201')).toBeVisible()
+    expect(evidence.getByText('差值（实际 − 期望）：-1 · 单位：未提供')).toBeVisible()
+    expect(evidence.getByText('证据来源：状态码断言 (assert-status)')).toBeVisible()
+    expect(screen.queryByText('未提供断言证据')).not.toBeInTheDocument()
+  })
   it('opens the linked attempt and reports a later attempt selection', async () => {
     const browser = userEvent.setup()
     const execution = apiNodeExecution()

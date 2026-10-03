@@ -14,7 +14,7 @@ import {
 import { useEffect, useState } from 'react'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
 import AssertionEvidence from '../features/evidence/AssertionEvidence'
-import { reportAssertionEvidence } from '../features/evidence/assertion-model'
+import { workflowAssertionEvidence } from '../features/evidence/assertion-model'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowNodeRelations from './WorkflowNodeRelations'
 
@@ -113,6 +113,7 @@ function RuntimeNodeDetail({
   )
   const observation = selectedObservation(observations, attempt)
   const input = upstreamOutputs(node.id, definition, nodes)
+  const assertions = workflowAssertionEvidence(execution)
   return (
     <aside className="workflow-inspector workflow-run-inspector">
       <Space className="workflow-inspector-heading" wrap>
@@ -120,11 +121,8 @@ function RuntimeNodeDetail({
         <SnapshotTag mode={mode} />
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
-      {execution?.result?.assertions.length ? (
-        <AssertionEvidence
-          items={execution.result.assertions}
-          source={`${execution.name} (${execution.node_id})`}
-        />
+      {assertions.length > 0 && execution ? (
+        <AssertionEvidence items={assertions} source={`${execution.name} (${execution.node_id})`} />
       ) : null}
       <ExecutionError execution={execution} />
       <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
@@ -781,7 +779,7 @@ export function WorkflowCheckpointEvidence({
     observations,
   )
   const observation = selectedObservation(observations, attempt)
-  const assertions = reportAssertionEvidence(checkpoint.result.assertions, checkpoint.node_name)
+  const assertions = workflowAssertionEvidence({ ...checkpoint, name: checkpoint.node_name })
   return (
     <section aria-label="实例执行证据">
       <Typography.Paragraph>
@@ -1023,7 +1021,9 @@ function DiagnosticsDetail({ execution }: { execution: WorkflowNodeExecution | u
     <>
       <Typography.Text strong>断言</Typography.Text>
       <Typography.Paragraph type="secondary">
-        {execution?.result?.assertions.length ? '期望值和实际值见上方断言证据。' : '未提供断言证据'}
+        {workflowAssertionEvidence(execution).length
+          ? '期望值和实际值见上方断言证据。'
+          : '未提供断言证据'}
       </Typography.Paragraph>
       <Payload title="指标" value={execution?.result?.metrics ?? []} />
     </>
