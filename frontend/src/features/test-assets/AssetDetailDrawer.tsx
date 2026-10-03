@@ -71,25 +71,35 @@ export default function AssetDetailDrawer(props: AssetDetailProps) {
     >
       {asset.isPending && <Spin aria-label="读取资产详情" />}
       {asset.error && <AssetQueryError error={asset.error} onRetry={() => void asset.refetch()} />}
-      {asset.data && (
-        <>
-          <Typography.Title level={4}>{asset.data.name}</Typography.Title>
-          <Typography.Paragraph type="secondary">
-            {asset.data.description || '暂无说明'}
-          </Typography.Paragraph>
-          <Space wrap>
-            {asset.data.tags.map((tag) => (
-              <Tag key={tag}>{tag}</Tag>
-            ))}
-          </Space>
-          {props.kind === 'case' ? (
-            <CaseDetail {...props} asset={asset.data as TestCase} />
-          ) : (
-            <SuiteDetail {...props} asset={asset.data as TestSuite} />
-          )}
-        </>
-      )}
+      {asset.data && <AssetDetailBody {...props} asset={asset.data} />}
     </Drawer>
+  )
+}
+
+function AssetDetailBody(props: AssetDetailProps & { asset: TestCase | TestSuite }) {
+  const { asset } = props
+  const capabilities = {
+    canEdit: props.canEdit && !asset.archived_at,
+    canExecute: props.canExecute && !asset.archived_at,
+  }
+  return (
+    <>
+      <Typography.Title level={4}>{asset.name}</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        {asset.description || '暂无说明'}
+      </Typography.Paragraph>
+      {asset.archived_at && <Alert type="info" title="此资产已删除，历史版本与执行证据仍可查看" />}
+      <Space wrap>
+        {asset.tags.map((tag) => (
+          <Tag key={tag}>{tag}</Tag>
+        ))}
+      </Space>
+      {props.kind === 'case' ? (
+        <CaseDetail {...props} {...capabilities} asset={asset as TestCase} />
+      ) : (
+        <SuiteDetail {...props} {...capabilities} asset={asset as TestSuite} />
+      )}
+    </>
   )
 }
 
@@ -98,6 +108,7 @@ function CaseDetail(props: AssetDetailProps & { asset: TestCase }) {
     queryKey: ['test-case-versions', props.projectId, props.id],
     queryFn: () => listTestCaseVersions(props.projectId, props.id),
   })
+  const availableVersions = versions.data ?? []
   const selected = props.version ?? props.asset.current_version ?? 'draft'
   const published = versions.data?.find((version) => version.version === selected)
   const definition = selected === 'draft' ? props.asset.draft_definition : published?.definition
@@ -107,7 +118,7 @@ function CaseDetail(props: AssetDetailProps & { asset: TestCase }) {
         {...props}
         asset={props.asset}
         selected={selected}
-        versions={versions.data ?? []}
+        versions={availableVersions}
         published={Boolean(published)}
         onEdit={() => props.onEditCase(props.asset)}
       />
@@ -136,7 +147,16 @@ function CaseDetail(props: AssetDetailProps & { asset: TestCase }) {
               />
             ),
           },
-          { key: 'runs', label: '执行与报告', children: <AssetRunEvidence {...props} /> },
+          {
+            key: 'runs',
+            label: '执行与报告',
+            children: (
+              <AssetRunEvidence
+                {...props}
+                versions={availableVersions.map((item) => item.version)}
+              />
+            ),
+          },
           { key: 'plans', label: '关联计划', children: <RelatedPlans {...props} /> },
         ]}
       />
@@ -149,6 +169,7 @@ function SuiteDetail(props: AssetDetailProps & { asset: TestSuite }) {
     queryKey: ['test-suite-versions', props.projectId, props.id],
     queryFn: () => listTestSuiteVersions(props.projectId, props.id),
   })
+  const availableVersions = versions.data ?? []
   const selected = props.version ?? props.asset.current_version ?? 'draft'
   const published = versions.data?.find((version) => version.version === selected)
   const definition = selected === 'draft' ? props.asset.draft_definition : published?.definition
@@ -158,7 +179,7 @@ function SuiteDetail(props: AssetDetailProps & { asset: TestSuite }) {
         {...props}
         asset={props.asset}
         selected={selected}
-        versions={versions.data ?? []}
+        versions={availableVersions}
         published={Boolean(published)}
         onEdit={() => props.onEditSuite(props.asset)}
       />
@@ -181,7 +202,16 @@ function SuiteDetail(props: AssetDetailProps & { asset: TestSuite }) {
               />
             ),
           },
-          { key: 'runs', label: '执行与报告', children: <AssetRunEvidence {...props} /> },
+          {
+            key: 'runs',
+            label: '执行与报告',
+            children: (
+              <AssetRunEvidence
+                {...props}
+                versions={availableVersions.map((item) => item.version)}
+              />
+            ),
+          },
           { key: 'plans', label: '关联计划', children: <RelatedPlans {...props} /> },
         ]}
       />

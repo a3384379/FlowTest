@@ -4,6 +4,7 @@ import { App } from 'antd'
 import { apiErrorMessage } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import {
   addProjectKnownTestToCurrentPlan,
   approveChangeRegression,
@@ -24,6 +25,7 @@ export function useChangeRegression(initialRunId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
   const [selectedRunId, setSelectedRunId] = useRouteScopedSelection(projectId, initialRunId ?? null)
   const enabled = Boolean(projectId)
   const runs = useQuery({
@@ -117,6 +119,7 @@ export function useChangeRegression(initialRunId?: string) {
   }
 
   async function createRun(input: ChangeRegressionInput): Promise<boolean> {
+    if (!canEdit) return false
     try {
       const created = await create.mutateAsync(input)
       setSelectedRunId(created.id)
@@ -134,6 +137,7 @@ export function useChangeRegression(initialRunId?: string) {
     itemId: string
     decision: 'accept' | 'reject'
   }): Promise<boolean> {
+    if (!canEdit) return false
     try {
       await review.mutateAsync(input)
       await refresh()
@@ -146,6 +150,7 @@ export function useChangeRegression(initialRunId?: string) {
   }
 
   async function runAction(action: () => Promise<unknown>, success: string): Promise<boolean> {
+    if (!canEdit) return false
     try {
       await action()
       await refresh()
@@ -159,6 +164,8 @@ export function useChangeRegression(initialRunId?: string) {
 
   return {
     projectId,
+    canEdit,
+    permissions,
     runs,
     plans,
     policies,

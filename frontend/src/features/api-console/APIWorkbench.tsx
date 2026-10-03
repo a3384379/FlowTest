@@ -33,6 +33,7 @@ import type { ApiVersionInput } from './api-service'
 import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 type APIWorkbenchProps = {
+  editable?: boolean
   detail?: ApiDetail
   loading: boolean
   saving: boolean
@@ -107,6 +108,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
             size="small"
             icon={<EditOutlined />}
             aria-label="重命名接口"
+            disabled={props.editable === false}
             onClick={props.onRename}
           />
         </Space>
@@ -119,7 +121,12 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
           >
             预览最终请求
           </Button>
-          <Button icon={<SaveOutlined />} loading={props.saving} onClick={() => form.submit()}>
+          <Button
+            disabled={props.editable === false}
+            icon={<SaveOutlined />}
+            loading={props.saving}
+            onClick={() => form.submit()}
+          >
             保存新版本
           </Button>
         </Space>
@@ -127,6 +134,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
     >
       <Form
         form={form}
+        disabled={props.editable === false}
         layout="vertical"
         onValuesChange={draft.onValuesChange}
         onFinish={draft.onFinish}

@@ -100,11 +100,33 @@ export type PerformanceScenarioInput = {
 
 export async function listPerformanceScenarios(
   projectId: string,
+  page = 1,
 ): Promise<Page<PerformanceScenario>> {
   return (
     await apiClient.get<Page<PerformanceScenario>>(`/projects/${projectId}/performance-scenarios`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20 },
     })
+  ).data
+}
+
+export async function getPerformanceScenario(projectId: string, scenarioId: string) {
+  return (
+    await apiClient.get<PerformanceScenario>(
+      `/projects/${projectId}/performance-scenarios/${scenarioId}`,
+    )
+  ).data
+}
+
+export async function createPerformanceScenarioVersion(
+  projectId: string,
+  scenarioId: string,
+  input: { description: string; definition: PerformanceDefinition },
+) {
+  return (
+    await apiClient.post<PerformanceScenario>(
+      `/projects/${projectId}/performance-scenarios/${scenarioId}/versions`,
+      input,
+    )
   ).data
 }
 
@@ -139,12 +161,37 @@ export async function runPerformanceScenario(
   ).data
 }
 
-export async function listPerformanceRuns(projectId: string): Promise<Page<PerformanceRun>> {
+export async function listPerformanceRuns(
+  projectId: string,
+  page = 1,
+): Promise<Page<PerformanceRun>> {
   return (
     await apiClient.get<Page<PerformanceRun>>(`/projects/${projectId}/performance-runs`, {
-      params: { page: 1, page_size: 50 },
+      params: { page, page_size: 20 },
     })
   ).data
+}
+
+export async function downloadPerformanceMetrics(
+  projectId: string,
+  run: PerformanceRun,
+): Promise<void> {
+  if (run.project_id !== projectId || !run.raw_metrics_artifact_id) {
+    throw new Error('当前运行没有可下载的原始指标')
+  }
+  const response = await apiClient.get<Blob>(
+    `/projects/${projectId}/files/${run.raw_metrics_artifact_id}`,
+    { responseType: 'blob' },
+  )
+  const url = URL.createObjectURL(response.data)
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `performance-${run.id}.ndjson`
+    link.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 export async function getPerformanceRun(projectId: string, runId: string): Promise<PerformanceRun> {

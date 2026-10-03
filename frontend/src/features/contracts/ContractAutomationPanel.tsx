@@ -24,8 +24,14 @@ import {
 } from 'antd'
 import { useMemo, useState } from 'react'
 
-import type { ContractRun, GeneratedContractCase, Page } from '../../lib/api'
+import {
+  apiErrorMessage,
+  type ContractRun,
+  type GeneratedContractCase,
+  type Page,
+} from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import {
   createContractRun,
   listContractRuns,
@@ -34,8 +40,14 @@ import {
 } from './contract-service'
 
 export default function ContractAutomationPanel() {
+  const { projectId } = useProjectContext()
+  return <ContractAutomationWorkspace key={projectId ?? 'none'} />
+}
+
+function ContractAutomationWorkspace() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
   const [file, setFile] = useState<File | null>(null)
   const [baselineRunId, setBaselineRunId] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
@@ -57,7 +69,10 @@ export default function ContractAutomationPanel() {
     [runItems, selectedRunId],
   )
   const createRun = useMutation({
-    mutationFn: () => createContractRun(projectId!, file!, baselineRunId),
+    mutationFn: () => {
+      if (!canEdit) throw new Error('当前项目为只读')
+      return createContractRun(projectId!, file!, baselineRunId)
+    },
     onSuccess: async (created) => {
       setFile(null)
       setSelectedRunId(created.id)
@@ -71,14 +86,16 @@ export default function ContractAutomationPanel() {
       name?: string
       definition?: Record<string, unknown>
       note: string
-    }) =>
-      reviewGeneratedContractCase(
+    }) => {
+      if (!canEdit) throw new Error('当前项目为只读')
+      return reviewGeneratedContractCase(
         projectId!,
         input.item.contract_run_id,
         input.item.id,
         input.decision,
         { name: input.name, definition: input.definition, note: input.note },
-      ),
+      )
+    },
     onSuccess: async () => {
       setEditor(null)
       await queryClient.invalidateQueries({
@@ -86,10 +103,14 @@ export default function ContractAutomationPanel() {
       })
     },
   })
+  const errors = [permissions.error, runs.error, cases.error, createRun.error, review.error]
+  const error = errors.find(Boolean)
 
   return (
     <Space direction="vertical" size="large" className="contract-panel">
+      {error ? <Alert showIcon type="error" title={apiErrorMessage(error)} /> : null}
       <ContractUploadCard
+        readOnly={!canEdit}
         file={file}
         baselineRunId={baselineRunId}
         runs={runItems}
@@ -107,6 +128,7 @@ export default function ContractAutomationPanel() {
       {selectedRun && <ContractSummary run={selectedRun} />}
       {selectedRun && (
         <GeneratedCaseTable
+          readOnly={!canEdit}
           items={caseItems}
           loading={cases.isLoading}
           onAccept={setEditor}
@@ -115,6 +137,7 @@ export default function ContractAutomationPanel() {
       )}
       {editor && (
         <CaseReviewDialog
+          readOnly={!canEdit}
           item={editor}
           submitting={review.isPending}
           onClose={() => setEditor(null)}
@@ -134,6 +157,7 @@ function findSelectedRun(items: ContractRun[], selectedRunId: string | null): Co
 }
 
 export function ContractUploadCard({
+  readOnly = false,
   file,
   baselineRunId,
   runs,
@@ -142,6 +166,7 @@ export function ContractUploadCard({
   onBaseline,
   onSubmit,
 }: {
+  readOnly?: boolean
   file: File | null
   baselineRunId: string | null
   runs: ContractRun[]
@@ -180,7 +205,7 @@ export function ContractUploadCard({
         <Button
           type="primary"
           icon={<FileSearchOutlined />}
-          disabled={!file}
+          disabled={readOnly || !file}
           loading={uploading}
           onClick={onSubmit}
         >
@@ -276,11 +301,13 @@ export function ContractSummary({ run }: { run: ContractRun }) {
 }
 
 export function GeneratedCaseTable({
+  readOnly = false,
   items,
   loading,
   onAccept,
   onReject,
 }: {
+  readOnly?: boolean
   items: GeneratedContractCase[]
   loading: boolean
   onAccept: (item: GeneratedContractCase) => void
@@ -317,7 +344,7 @@ export function GeneratedCaseTable({
                   size="small"
                   type="primary"
                   icon={<CheckOutlined />}
-                  disabled={item.review_status !== 'pending'}
+                  disabled={readOnly || item.review_status !== 'pending'}
                   onClick={() => onAccept(item)}
                 >
                   编辑并接受
@@ -326,7 +353,7 @@ export function GeneratedCaseTable({
                   size="small"
                   danger
                   icon={<CloseOutlined />}
-                  disabled={item.review_status !== 'pending'}
+                  disabled={readOnly || item.review_status !== 'pending'}
                   onClick={() => onReject(item)}
                 >
                   拒绝
@@ -341,11 +368,13 @@ export function GeneratedCaseTable({
 }
 
 export function CaseReviewDialog({
+  readOnly = false,
   item,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly?: boolean
   item: GeneratedContractCase
   submitting: boolean
   onClose: () => void
@@ -359,6 +388,7 @@ export function CaseReviewDialog({
       okText="接受草稿"
       cancelText="取消"
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       onCancel={onClose}
       onOk={() =>
         void form.validateFields().then((values) =>
@@ -371,6 +401,7 @@ export function CaseReviewDialog({
       }
     >
       <Form
+        disabled={readOnly}
         form={form}
         layout="vertical"
         initialValues={{

@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 import {
   createImpactMapping,
   createImpactRun,
@@ -25,8 +28,21 @@ export function useImpactAnalysis() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
-  const enabled = Boolean(projectId)
+  const currentProject = useRef(projectId)
+  useEffect(() => {
+    currentProject.current = projectId
+  }, [projectId])
+  const { canEdit, permissions } = useProjectCapabilities()
+  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
+  const [params, setParams] = useSearchParams()
+  const selectedRunId = params.get('run')
+  function setSelectedRunId(id: string | null) {
+    const next = new URLSearchParams(params)
+    if (id) next.set('run', id)
+    else next.delete('run')
+    setParams(next)
+  }
+  const enabled = Boolean(projectId && flags.data?.impact_engine)
   const mappings = useQuery({
     queryKey: ['impact-mappings', projectId],
     queryFn: () => listImpactMappings(required(projectId)),
@@ -59,6 +75,7 @@ export function useImpactAnalysis() {
   })
 
   async function registerMapping(input: MappingInput): Promise<boolean> {
+    if (!canEdit || !enabled) return false
     return withFeedback(async () => {
       await createMapping.mutateAsync(input)
       await invalidate('impact-mappings')
@@ -66,6 +83,7 @@ export function useImpactAnalysis() {
   }
 
   async function deleteMapping(mappingId: string): Promise<void> {
+    if (!canEdit || !enabled) return
     await withFeedback(async () => {
       await removeMapping.mutateAsync(mappingId)
       await invalidate('impact-mappings')
@@ -73,9 +91,10 @@ export function useImpactAnalysis() {
   }
 
   async function analyze(input: ImpactRunInput): Promise<boolean> {
+    if (!canEdit || !enabled) return false
     return withFeedback(async () => {
       const created = await createRun.mutateAsync(input)
-      setSelectedRunId(created.id)
+      if (currentProject.current === projectId) setSelectedRunId(created.id)
       queryClient.setQueryData(['impact-run', projectId, created.id], created)
       await invalidate('impact-runs')
     }, '影响分析完成，推荐集合与覆盖证据已保存')
@@ -97,6 +116,9 @@ export function useImpactAnalysis() {
   }
 
   return {
+    canEdit: canEdit && enabled,
+    flags,
+    permissions,
     projectId,
     mappings,
     catalog,

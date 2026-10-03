@@ -3,11 +3,12 @@ import { apiClient } from '../../lib/api'
 import {
   createAssetPlan,
   getAsset,
-  getAssetRun,
   listAssetPlans,
   listAssetWorkflows,
   listCaseCatalog,
-  listRecentAssetRuns,
+  listCaseRunHistory,
+  listSuiteRunHistory,
+  listLatestSuiteRuns,
   listSuiteCatalog,
 } from './asset-workspace-service'
 
@@ -44,17 +45,24 @@ describe('asset workspace service', () => {
     )
   })
 
-  it('keeps every read project-scoped and limits the declared execution range to 20 runs', async () => {
+  it('queries asset-owned history by version and page instead of a project-wide recent window', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue({ data: {} })
     await getAsset('project-1', 'case', 'case-1')
     await getAsset('project-1', 'suite', 'suite-1')
-    await getAssetRun('project-1', 'run-1')
-    await listRecentAssetRuns('project-1')
+    await listCaseRunHistory('project-1', 'case-1', 3, 1)
+    await listSuiteRunHistory('project-1', 'suite-1', 2)
+    await listLatestSuiteRuns('project-1', ['suite-1'])
     expect(get).toHaveBeenCalledWith('/projects/project-1/test-cases/case-1')
     expect(get).toHaveBeenCalledWith('/projects/project-1/test-suites/suite-1')
-    expect(get).toHaveBeenCalledWith('/projects/project-1/test-plan-runs/run-1')
-    expect(get).toHaveBeenCalledWith('/projects/project-1/test-plan-runs', {
-      params: { page: 1, page_size: 20 },
+    expect(get).toHaveBeenCalledWith('/projects/project-1/test-cases/case-1/runs', {
+      params: { page: 3, page_size: 20, version: 1 },
+    })
+    expect(get).toHaveBeenCalledWith('/projects/project-1/test-suites/suite-1/runs', {
+      params: { page: 2, page_size: 20, version: undefined },
+    })
+    expect(get).toHaveBeenCalledWith('/projects/project-1/test-suites/runs/latest', {
+      params: { suite_ids: ['suite-1'] },
+      paramsSerializer: { indexes: null },
     })
   })
 

@@ -1,6 +1,20 @@
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, KeyOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd'
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Form,
+  Input,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+} from 'antd'
 import { useEffect, useRef, useState } from 'react'
 
 import {
@@ -110,16 +124,96 @@ function useAssetManagement(projectId: string) {
 
 type AssetState = ReturnType<typeof useAssetManagement>
 
-function FolderManagement({ state, canEdit }: { state: AssetState; canEdit: boolean }) {
+type FolderManagementState = Pick<
+  AssetState,
+  'projectId' | 'folders' | 'foldersLoading' | 'pending' | 'run' | 'runAsync'
+>
+
+export function FolderManagementPanel({
+  projectId,
+  canEdit,
+  onRemoved,
+}: {
+  projectId: string
+  canEdit: boolean
+  onRemoved?: (ids: string[]) => void
+}) {
+  const { message } = App.useApp()
+  const client = useQueryClient()
+  const folders = useQuery({
+    queryKey: ['folders', projectId],
+    queryFn: () => listFolders(projectId),
+  })
+  const mutation = useMutation({
+    mutationFn: (operation: () => Promise<unknown>) => operation(),
+    onSuccess: async () => {
+      await Promise.all(
+        [
+          'folders',
+          'test-cases',
+          'test-suites',
+          'test-case-options',
+          'asset-directory-counts',
+          'apis',
+          'workflows',
+          'project-audit',
+        ].map((key) => client.invalidateQueries({ queryKey: [key, projectId] })),
+      )
+      void message.success('目录已更新')
+    },
+    onError: (error) => void message.error(apiErrorMessage(error)),
+  })
+  const state: FolderManagementState = {
+    projectId,
+    folders: folders.data ?? [],
+    foldersLoading: folders.isPending,
+    pending: mutation.isPending,
+    run: mutation.mutate,
+    runAsync: mutation.mutateAsync,
+  }
+  return (
+    <>
+      <Typography.Paragraph type="secondary">
+        目录由当前项目的接口、流程和测试资产共同使用。删除目录后，关联资产归为未分类，历史版本和报告保留。
+      </Typography.Paragraph>
+      {folders.error && (
+        <Alert
+          type="error"
+          title="目录读取失败"
+          description={apiErrorMessage(folders.error)}
+          action={<Button onClick={() => void folders.refetch()}>重新加载目录</Button>}
+        />
+      )}
+      <FolderManagement state={state} canEdit={canEdit} onRemoved={onRemoved} />
+    </>
+  )
+}
+
+function FolderManagement({
+  state,
+  canEdit,
+  onRemoved,
+}: {
+  state: FolderManagementState
+  canEdit: boolean
+  onRemoved?: (ids: string[]) => void
+}) {
   const [editing, setEditing] = useState<Folder | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [form] = Form.useForm<{ name: string; parent_id: string | null }>()
-  function save(values: { name: string; parent_id: string | null }) {
+  const blockedParentIds = editing ? folderSubtreeIds(editing.id, state.folders) : []
+  async function save(values: { name: string; parent_id: string | null }) {
     const operation = editing
       ? () => updateFolder(state.projectId, editing.id, values)
       : () => createFolder(state.projectId, values)
-    state.run(operation)
-    setEditing(null)
-    form.resetFields()
+    setSaveError(null)
+    try {
+      await state.runAsync(operation)
+      setEditing(null)
+      form.resetFields()
+    } catch (error) {
+      setSaveError(apiErrorMessage(error))
+    }
   }
   function beginEditing(folder: Folder) {
     form.setFieldsValue({ name: folder.name, parent_id: folder.parent_id })
@@ -133,18 +227,25 @@ function FolderManagement({ state, canEdit }: { state: AssetState; canEdit: bool
     <Space orientation="vertical" className="full-width">
       {canEdit && (
         <Form form={form} layout="inline" initialValues={{ parent_id: null }} onFinish={save}>
-          <Form.Item name="name" rules={[{ required: true, message: '请输入目录名' }]}>
-            <Input placeholder="目录名称" />
+          <Form.Item
+            name="name"
+            rules={[
+              { required: true, message: '请输入目录名' },
+              { max: 160, message: '目录名称最多 160 个字符' },
+            ]}
+          >
+            <Input aria-label="目录名称" placeholder="目录名称" />
           </Form.Item>
           <Form.Item name="parent_id">
             <Select
               allowClear
+              aria-label="父目录"
               placeholder="根目录"
               className="management-select"
               options={state.folders.map((folder) => ({
                 value: folder.id,
                 label: folder.name,
-                disabled: folder.id === editing?.id,
+                disabled: blockedParentIds.includes(folder.id),
               }))}
             />
           </Form.Item>
@@ -159,6 +260,7 @@ function FolderManagement({ state, canEdit }: { state: AssetState; canEdit: bool
           {editing && <Button onClick={cancelEditing}>取消</Button>}
         </Form>
       )}
+      {saveError && <Alert type="error" title="目录保存失败" description={saveError} />}
       <Table
         rowKey="id"
         size="small"
@@ -185,18 +287,75 @@ function FolderManagement({ state, canEdit }: { state: AssetState; canEdit: bool
                     aria-label="编辑目录"
                     onClick={() => beginEditing(folder)}
                   />
-                  <Popconfirm
-                    title="删除目录会级联删除子目录，确认继续？"
-                    onConfirm={() => state.run(() => deleteFolder(state.projectId, folder.id))}
-                  >
-                    <Button type="text" danger icon={<DeleteOutlined />} aria-label="删除目录" />
-                  </Popconfirm>
+                  <FolderDeleteAction state={state} folder={folder} onRemoved={onRemoved} />
                 </Space>
               ) : null,
           },
         ]}
       />
     </Space>
+  )
+}
+
+function folderSubtreeIds(rootId: string, folders: Folder[]): string[] {
+  const selected = new Set([rootId])
+  const pending = [rootId]
+  for (let index = 0; index < pending.length; index++) {
+    for (const folder of folders) {
+      if (folder.parent_id === pending[index] && !selected.has(folder.id)) {
+        selected.add(folder.id)
+        pending.push(folder.id)
+      }
+    }
+  }
+  return pending
+}
+
+function FolderDeleteAction({
+  state,
+  folder,
+  onRemoved,
+}: {
+  state: FolderManagementState
+  folder: Folder
+  onRemoved?: (ids: string[]) => void
+}) {
+  const ids = folderSubtreeIds(folder.id, state.folders)
+  return (
+    <Popconfirm
+      title={`删除目录「${folder.name}」及 ${ids.length - 1} 个子目录？`}
+      description={
+        <div>
+          关联接口、流程和测试资产将归为未分类。
+          <ul>
+            {state.folders
+              .filter((item) => ids.includes(item.id))
+              .map((item) => (
+                <li key={item.id}>
+                  {item.name} · {item.id}
+                </li>
+              ))}
+          </ul>
+        </div>
+      }
+      okText="确认删除目录"
+      cancelText="取消"
+      disabled={state.pending}
+      onConfirm={() =>
+        state.run(async () => {
+          await deleteFolder(state.projectId, folder.id)
+          onRemoved?.(ids)
+        })
+      }
+    >
+      <Button
+        type="text"
+        danger
+        disabled={state.pending}
+        icon={<DeleteOutlined />}
+        aria-label={`删除目录 ${folder.name}`}
+      />
+    </Popconfirm>
   )
 }
 

@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
+import { useSearchParams } from 'react-router-dom'
+import { useEffect, useRef } from 'react'
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listImpactRuns } from '../impact/impact-service'
 import {
   createQualityGate,
@@ -22,6 +26,19 @@ export function useQualityCenter() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
+  const currentProject = useRef(projectId)
+  useEffect(() => {
+    currentProject.current = projectId
+  }, [projectId])
+  const { canEdit } = useProjectCapabilities()
+  const [params, setParams] = useSearchParams()
+  const linkedRiskId = params.get('risk')
+  const featureFlags = useQuery({
+    queryKey: ['v3-feature-flags'],
+    queryFn: getV3FeatureFlags,
+    enabled: Boolean(projectId),
+  })
+  const riskEnabled = Boolean(featureFlags.data?.quality_intelligence)
   const gates = useQuery({
     queryKey: ['quality-gates', projectId],
     queryFn: () => listQualityGates(required(projectId)),
@@ -40,18 +57,18 @@ export function useQualityCenter() {
   const risks = useQuery({
     queryKey: ['release-risks', projectId],
     queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId && riskEnabled),
   })
   const impactRuns = useQuery({
     queryKey: ['impact-runs', projectId],
     queryFn: () => listImpactRuns(required(projectId)),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId && featureFlags.data?.impact_engine),
   })
-  const activeRiskId = risks.data?.items.at(0)?.id
+  const activeRiskId = linkedRiskId ?? risks.data?.items.at(0)?.id
   const risk = useQuery({
     queryKey: ['release-risk', projectId, activeRiskId],
     queryFn: () => getReleaseRisk(required(projectId), required(activeRiskId ?? null)),
-    enabled: Boolean(projectId && activeRiskId),
+    enabled: Boolean(projectId && activeRiskId && riskEnabled),
   })
   const createGate = useMutation({
     mutationFn: (input: QualityGateInput) => createQualityGate(required(projectId), input),
@@ -65,8 +82,12 @@ export function useQualityCenter() {
   })
 
   async function addRisk(input: ReleaseRiskInput) {
+    if (!canEdit || !riskEnabled) return false
     try {
-      await analyzeRisk.mutateAsync(input)
+      const created = await analyzeRisk.mutateAsync(input)
+      const next = new URLSearchParams(params)
+      next.set('risk', created.id)
+      if (currentProject.current === projectId) setParams(next)
       await queryClient.invalidateQueries({ queryKey: ['release-risks', projectId] })
       void message.success('发布风险分析已完成')
       return true
@@ -77,6 +98,7 @@ export function useQualityCenter() {
   }
 
   async function addGate(input: QualityGateInput) {
+    if (!canEdit) return false
     try {
       await createGate.mutateAsync(input)
       await queryClient.invalidateQueries({ queryKey: ['quality-gates', projectId] })
@@ -89,6 +111,7 @@ export function useQualityCenter() {
   }
 
   async function toggleQuarantine(recordId: string, value: boolean) {
+    if (!canEdit) return
     try {
       await quarantine.mutateAsync({ recordId, value })
       await queryClient.invalidateQueries({ queryKey: ['flaky-tests', projectId] })
@@ -113,6 +136,10 @@ export function useQualityCenter() {
   }
 
   return {
+    featureFlags,
+    riskEnabled,
+    canEdit,
+    linkedRiskId,
     projectId,
     gates,
     flaky,

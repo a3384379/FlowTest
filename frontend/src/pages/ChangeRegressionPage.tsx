@@ -28,11 +28,18 @@ import type {
   SemanticCoverageScope,
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { apiErrorMessage } from '../lib/api'
 import RegressionMaintenancePanel from '../features/change-regression/RegressionMaintenancePanel'
 
 const { TextArea } = Input
 
 export default function ChangeRegressionPage() {
+  const { projectId } = useProjectContext()
+  return <ChangeRegressionWorkspace key={projectId ?? 'none'} />
+}
+
+function ChangeRegressionWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useChangeRegression(searchParams.get('run') ?? undefined)
   const [form] = Form.useForm()
@@ -80,7 +87,9 @@ export default function ChangeRegressionPage() {
           message="低置信度缺失测试只生成 Draft；必须完成逐项 Review 和人工批准后才能执行。"
         />
         <Card title="创建变更回归链路">
+          <RegressionQueryStatus state={state} />
           <Form
+            disabled={!state.canEdit}
             form={form}
             layout="vertical"
             onFinish={submit}
@@ -182,6 +191,25 @@ export default function ChangeRegressionPage() {
   )
 }
 
+function RegressionQueryStatus({ state }: { state: ReturnType<typeof useChangeRegression> }) {
+  const failed = [state.permissions, state.runs, state.plans, state.policies, state.detail].filter(
+    (query) => query.isError,
+  )
+  if (!failed.length) return null
+  return (
+    <Alert
+      showIcon
+      type="error"
+      message={apiErrorMessage(failed[0].error)}
+      action={
+        <Button onClick={() => void Promise.all(failed.map((query) => query.refetch()))}>
+          重试
+        </Button>
+      }
+    />
+  )
+}
+
 function RunDetail({
   run,
   state,
@@ -193,8 +221,6 @@ function RunDetail({
     title: stageLabel(stage.stage),
     description: stage.status,
   }))
-  const pending = run.missing_tests.filter((item) => item.review_status === 'pending')
-  const planGateOpen = Boolean(run.selection_summary.unresolved_current_plan_gap_count)
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
       <Descriptions size="small" column={2} bordered>
@@ -211,7 +237,7 @@ function RunDetail({
           {run.release_decision_id ?? '尚未评估'}
         </Descriptions.Item>
       </Descriptions>
-      <RegressionMaintenancePanel key={run.id} run={run} />
+      <RegressionMaintenancePanel key={run.id} run={run} readOnly={!state.canEdit} />
       <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
@@ -244,6 +270,7 @@ function RunDetail({
                   item.review_status === 'pending' ? (
                     <Space>
                       <Button
+                        disabled={!state.canEdit}
                         size="small"
                         onClick={() =>
                           void state.reviewItem({
@@ -256,6 +283,7 @@ function RunDetail({
                         接受
                       </Button>
                       <Button
+                        disabled={!state.canEdit}
                         size="small"
                         danger
                         onClick={() =>
@@ -275,39 +303,54 @@ function RunDetail({
           />
         </>
       )}
-      <Space wrap>
-        {run.status === 'review_required' && pending.length === 0 && (
-          <Button
-            type="primary"
-            loading={state.acting}
-            disabled={planGateOpen}
-            onClick={() => void state.approve(run.id)}
-          >
-            人工批准
-          </Button>
-        )}
-        {run.status === 'approved' && (
-          <Button
-            type="primary"
-            loading={state.acting}
-            disabled={planGateOpen}
-            onClick={() => void state.execute(run.id)}
-          >
-            执行回归
-          </Button>
-        )}
-        {run.status === 'evidence_ready' && (
-          <Button
-            type="primary"
-            loading={state.acting}
-            onClick={() => void state.evaluateRelease(run.id)}
-          >
-            评估 Release Gate
-          </Button>
-        )}
-      </Space>
+      <RunActions run={run} state={state} />
       {Object.keys(run.failure_triage).length > 0 && (
         <FailureTriagePanel value={run.failure_triage} />
+      )}
+    </Space>
+  )
+}
+
+function RunActions({
+  run,
+  state,
+}: {
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+}) {
+  const pending = run.missing_tests.filter((item) => item.review_status === 'pending')
+  const planGateOpen = Boolean(run.selection_summary.unresolved_current_plan_gap_count)
+  return (
+    <Space wrap>
+      {run.status === 'review_required' && pending.length === 0 && (
+        <Button
+          type="primary"
+          loading={state.acting}
+          disabled={!state.canEdit || planGateOpen}
+          onClick={() => void state.approve(run.id)}
+        >
+          人工批准
+        </Button>
+      )}
+      {run.status === 'approved' && (
+        <Button
+          type="primary"
+          loading={state.acting}
+          disabled={!state.canEdit || planGateOpen}
+          onClick={() => void state.execute(run.id)}
+        >
+          执行回归
+        </Button>
+      )}
+      {run.status === 'evidence_ready' && (
+        <Button
+          type="primary"
+          loading={state.acting}
+          onClick={() => void state.evaluateRelease(run.id)}
+          disabled={!state.canEdit}
+        >
+          评估 Release Gate
+        </Button>
       )}
     </Space>
   )
@@ -465,7 +508,12 @@ function CoverageDimensionsPanel({
                     <Button
                       size="small"
                       loading={state.acting}
-                      disabled={!input.apiDefinitionId || !Number.isInteger(version) || version < 1}
+                      disabled={
+                        !state.canEdit ||
+                        !input.apiDefinitionId ||
+                        !Number.isInteger(version) ||
+                        version < 1
+                      }
                       onClick={() =>
                         void state.selectOperation({
                           runId: run.id,
@@ -496,7 +544,7 @@ function SemanticPlanGatePanel({
   state: ReturnType<typeof useChangeRegression>
 }) {
   const gaps = currentPlanGaps(run)
-  const unresolved = Number(run.selection_summary.unresolved_current_plan_gap_count)
+  const unresolved = run.selection_summary.unresolved_current_plan_gap_count
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [expiries, setExpiries] = useState<Record<string, string>>({})
   const environmentId = currentPlanEnvironmentId(run, state)
@@ -506,9 +554,9 @@ function SemanticPlanGatePanel({
     <Card
       size="small"
       title="Current TestPlan Semantic Gate"
-      extra={<CoverageStatus value={unresolved > 0 ? 'MISSING' : 'COVERED'} />}
+      extra={<CoverageStatus value={semanticGateStatus(unresolved)} />}
     >
-      {unresolved > 0 ? (
+      {typeof unresolved === 'number' && unresolved > 0 ? (
         <Alert
           type="error"
           showIcon
@@ -519,18 +567,18 @@ function SemanticPlanGatePanel({
       ) : null}
       <Descriptions size="small" bordered column={5} style={{ marginBottom: 12 }}>
         <Descriptions.Item label="Asset Mapping">
-          {run.selection_summary.asset_mapping_gap_count ?? 0}
+          {run.selection_summary.asset_mapping_gap_count ?? '未提供'}
         </Descriptions.Item>
         <Descriptions.Item label="Project Gap">
-          {run.selection_summary.project_semantic_gap_count ?? 0}
+          {run.selection_summary.project_semantic_gap_count ?? '未提供'}
         </Descriptions.Item>
         <Descriptions.Item label="Current Plan Gap">
-          {run.selection_summary.current_test_plan_semantic_gap_count ?? 0}
+          {run.selection_summary.current_test_plan_semantic_gap_count ?? '未提供'}
         </Descriptions.Item>
         <Descriptions.Item label="Waived">
-          {run.selection_summary.waived_current_plan_gap_count ?? 0}
+          {run.selection_summary.waived_current_plan_gap_count ?? '未提供'}
         </Descriptions.Item>
-        <Descriptions.Item label="Unresolved">{unresolved}</Descriptions.Item>
+        <Descriptions.Item label="Unresolved">{unresolved ?? '未提供'}</Descriptions.Item>
       </Descriptions>
       <SemanticCoverageBasis run={run} />
       <Space orientation="vertical" style={{ width: '100%' }} size={12}>
@@ -719,7 +767,9 @@ function SemanticGapExistingAsset({
   return (
     <Button
       size="small"
-      disabled={gap.coverage_status === 'COVERED' || gap.coverage_status === 'WAIVED'}
+      disabled={
+        !state.canEdit || gap.coverage_status === 'COVERED' || gap.coverage_status === 'WAIVED'
+      }
       onClick={() =>
         void state.addToPlan({
           runId: run.id,
@@ -808,7 +858,7 @@ function SemanticGapWaiverAction({
       size="small"
       danger
       style={{ marginTop: 12 }}
-      disabled={reason.trim().length < 10}
+      disabled={!state.canEdit || reason.trim().length < 10}
       onClick={() =>
         void state.waiveGap({
           runId: run.id,
@@ -982,4 +1032,9 @@ function stageLabel(stage: string): string {
     failure_triage: 'Failure Triage',
   }
   return labels[stage] ?? stage
+}
+
+function semanticGateStatus(unresolved: number | undefined) {
+  if (typeof unresolved !== 'number') return 'UNKNOWN'
+  return unresolved > 0 ? 'MISSING' : 'COVERED'
 }

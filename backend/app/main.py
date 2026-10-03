@@ -22,6 +22,7 @@ from app.core.redaction import (
 from app.core.storage import ensure_storage_bucket, object_storage
 from app.domain.runtime_profiles import RuntimeProfile
 from app.engine.events import ExecutionEventBus
+from app.http.test_asset_packages import install_package_openapi
 from app.middleware.metrics import MetricsMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.trace import TraceIdMiddleware
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     application.add_middleware(TraceIdMiddleware)
     register_exception_handlers(application)
     application.include_router(api_router, prefix=settings.api_v1_prefix)
+    install_package_openapi(application)
     _mount_frontend(application)
     return application
 

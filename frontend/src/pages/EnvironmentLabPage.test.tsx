@@ -218,6 +218,81 @@ describe('EnvironmentLabPage', () => {
     await userEvent.setup().click(screen.getAllByRole('button', { name: 'Expand row' })[1])
     expect(await screen.findByText(/ENVIRONMENT_HEALTH_CHECK_FAILED/)).toBeVisible()
   })
+  it('opens an off-page instance with lifecycle and cleanup evidence without claiming ongoing health', async () => {
+    const failed = {
+      ...instance,
+      status: 'failed',
+      cleanup_status: 'failed',
+      cleanup_attempts: 3,
+      cleanup_error_code: 'CLEANUP_RETRY_REQUIRED',
+    }
+    installHandlers({ instances: [], templates: [] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environment-instances/${instance.id}`, () =>
+        HttpResponse.json(failed),
+      ),
+    )
+    renderPage(`/projects/${project.id}/environments?instance=${instance.id}`)
+    expect(await screen.findByText(instance.id)).toBeVisible()
+    expect(screen.getByText('CLEANUP_RETRY_REQUIRED')).toBeVisible()
+    expect(screen.getByText(/未提供持续服务健康采样/)).toBeVisible()
+    await userEvent.setup().click(screen.getByRole('tab', { name: '签名配置与资源' }))
+    expect(await screen.findByText(/当前模板页未提供此实例绑定的版本/)).toBeVisible()
+  })
+
+  it('preserves all services and seed configuration when creating a signed version', async () => {
+    const full = {
+      ...template.manifest,
+      services: [
+        ...template.manifest.services,
+        { ...template.manifest.services[0], name: 'second-service', depends_on: ['web'] },
+      ],
+      seeds: [{ profile: 'http_get_v1' as const, service: 'second-service', path: '/seed-all' }],
+    }
+    let payload: unknown
+    installHandlers({ templates: [{ ...template, manifest: full }] })
+    server.use(
+      http.post(
+        `/api/v1/environment-templates/${template.template_id}/versions`,
+        async ({ request }) => {
+          payload = await request.json()
+          return HttpResponse.json({ ...template, version: 2 }, { status: 201 })
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '新建版本' }))
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(payload).toEqual({ manifest: full }))
+  })
+
+  it('keeps server pagination and mutation permissions separate from read-only evidence', async () => {
+    useAuthStore.setState({ user: { ...user, is_system_admin: false } })
+    const pages: number[] = []
+    installHandlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environment-instances`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        pages.push(page)
+        return HttpResponse.json({
+          items: [{ ...instance, id: `instance-${page}` }],
+          total: 126,
+          page,
+          page_size: 20,
+        })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('instance')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Provision' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /清理/ })).toBeDisabled()
+    await userEvent.setup().click(screen.getAllByTitle('Next Page')[1])
+    await waitFor(() => expect(pages).toEqual([1, 2]))
+  })
 })
 
 function installHandlers({
@@ -240,14 +315,14 @@ function installHandlers({
   )
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="environments">
+        <ProjectTestProvider section="environments" initialEntry={initialEntry}>
           <EnvironmentLabPage />
         </ProjectTestProvider>
       </QueryClientProvider>

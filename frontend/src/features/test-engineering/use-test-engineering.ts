@@ -3,6 +3,7 @@ import { App } from 'antd'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   applyTestDesignProposal,
@@ -12,12 +13,19 @@ import {
   listTestEngineeringEnvironments,
   proposeTestDesign,
   reviewTestDesignProposal,
+  type TestEngineeringGeneration,
   type TestEngineeringProposal,
 } from './test-engineering-service'
 
 export function useTestEngineering(initialProposalId: string | null = null) {
   const { message } = App.useApp()
   const { projectId } = useProjectContext()
+  const { canEdit } = useProjectCapabilities()
+  const [generation, setGeneration] = useRouteScopedState<TestEngineeringGeneration | null>(
+    projectId,
+    initialProposalId,
+    null,
+  )
   const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null>(
     projectId,
     initialProposalId,
@@ -40,8 +48,8 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     enabled: Boolean(projectId && initialProposalId),
   })
   const generate = useMutation({
-    mutationFn: (apiDefinitionId: string) =>
-      generateTestDesign(required(projectId), apiDefinitionId),
+    mutationFn: ({ project, apiDefinitionId }: { project: string; apiDefinitionId: string }) =>
+      generateTestDesign(project, apiDefinitionId),
   })
   const propose = useMutation({
     mutationFn: (input: {
@@ -62,7 +70,7 @@ export function useTestEngineering(initialProposalId: string | null = null) {
 
   async function generateDesign(apiDefinitionId: string): Promise<boolean> {
     try {
-      await generate.mutateAsync(apiDefinitionId)
+      setGeneration(await generate.mutateAsync({ project: required(projectId), apiDefinitionId }))
       setProposal(null)
       return true
     } catch (error) {
@@ -78,6 +86,7 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     endpoint_variant?: string
     scenario_ids: string[]
   }): Promise<boolean> {
+    if (!canEdit || !projectId) return false
     try {
       setProposal(await propose.mutateAsync(input))
       void message.success('Test Design Draft 已创建，等待人工审核')
@@ -90,7 +99,7 @@ export function useTestEngineering(initialProposalId: string | null = null) {
 
   async function reviewProposal(accept: boolean): Promise<boolean> {
     const currentProposal = proposal ?? linkedProposal.data
-    if (!currentProposal) return false
+    if (!canEdit || !currentProposal) return false
     try {
       setProposal(await review.mutateAsync({ changeSetId: currentProposal.change_set_id, accept }))
       void message.success(accept ? 'Proposal 已接受' : 'Proposal 已拒绝')
@@ -103,7 +112,7 @@ export function useTestEngineering(initialProposalId: string | null = null) {
 
   async function applyProposal(): Promise<boolean> {
     const currentProposal = proposal ?? linkedProposal.data
-    if (!currentProposal) return false
+    if (!canEdit || !currentProposal) return false
     try {
       const result = await apply.mutateAsync(currentProposal.change_set_id)
       setProposal({ ...currentProposal, applied: true })
@@ -119,9 +128,10 @@ export function useTestEngineering(initialProposalId: string | null = null) {
 
   return {
     projectId,
+    canEdit,
     apis,
     environments,
-    generation: generate.data ?? null,
+    generation,
     proposal: proposal ?? linkedProposal.data ?? null,
     generateDesign,
     createProposal,

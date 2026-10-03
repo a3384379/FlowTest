@@ -16,6 +16,7 @@ import {
   listReportExecutions,
   setNotificationWebhookEnabled,
   type CreateNotificationWebhookInput,
+  type ReportStatusFilter,
 } from './report-service'
 
 export function useReports(initialExecutionId?: string) {
@@ -29,9 +30,14 @@ export function useReports(initialExecutionId?: string) {
   const [webhookOpen, setWebhookOpen] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
   const [page, setPage] = useRouteScopedState(projectId, 'report-list', 1)
+  const [statusFilter, setStatusFilter] = useRouteScopedState<ReportStatusFilter>(
+    projectId,
+    'report-status-filter',
+    'all',
+  )
   const reports = useQuery({
-    queryKey: ['reports', projectId, page],
-    queryFn: () => listReportExecutions(required(projectId), page),
+    queryKey: ['reports', projectId, page, statusFilter],
+    queryFn: () => listReportExecutions(required(projectId), page, statusFilter),
     enabled: Boolean(projectId),
     refetchInterval: (query) =>
       query.state.data?.items.some((item) => item.status === 'running') ? 1000 : false,
@@ -111,6 +117,11 @@ export function useReports(initialExecutionId?: string) {
     reports,
     page,
     setPage,
+    statusFilter,
+    setStatusFilter: (status: ReportStatusFilter) => {
+      setStatusFilter(status)
+      setPage(1)
+    },
     trend,
     detail,
     selectedExecutionId,

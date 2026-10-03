@@ -22,6 +22,8 @@ import {
 import { useMemo, useState } from 'react'
 
 import { useAuthStore } from '../features/auth/auth-store'
+import { getV3FeatureFlags } from '../features/capabilities/capability-service'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 import {
   changeRunnerState,
   createFabricPool,
@@ -49,6 +51,14 @@ export default function ExecutionFabricPage() {
   if (!isSystemAdmin) {
     return <Alert showIcon type="error" title="仅系统管理员可管理分布式执行面" />
   }
+  return <ExecutionFabricFeatureBoundary />
+}
+
+function ExecutionFabricFeatureBoundary() {
+  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
+  if (flags.isError) return <QueryFailureNotice queries={[flags]} />
+  if (flags.isPending) return <Alert showIcon type="info" title="正在读取执行面功能状态" />
+  if (!flags.data?.runner_fabric) return <Alert showIcon type="info" title="分布式执行面尚未启用" />
   return <ExecutionFabricWorkspace />
 }
 
@@ -165,13 +175,21 @@ function ExecutionFabricWorkspace() {
 }
 
 function FabricOverview({ value }: { value?: RunnerFabricOverview }) {
-  const overview = value ?? emptyOverview
+  const overview = value
   const items = [
-    ['在线 Worker', overview.runners_online, <CloudServerOutlined key="worker" />],
-    ['离线 Worker', overview.runners_offline, undefined],
-    ['Drain 中', overview.runners_draining, undefined],
-    ['排队任务', overview.queued_tasks, undefined],
-    ['活跃 Lease', overview.active_leases, <SafetyCertificateOutlined key="lease" />],
+    [
+      '在线 Worker',
+      displayFabricCount(overview?.runners_online),
+      <CloudServerOutlined key="worker" />,
+    ],
+    ['离线 Worker', displayFabricCount(overview?.runners_offline), undefined],
+    ['Drain 中', displayFabricCount(overview?.runners_draining), undefined],
+    ['排队任务', displayFabricCount(overview?.queued_tasks), undefined],
+    [
+      '活跃 Lease',
+      displayFabricCount(overview?.active_leases),
+      <SafetyCertificateOutlined key="lease" />,
+    ],
   ] as const
   return (
     <Row gutter={16} className="execution-fabric-overview">
@@ -430,16 +448,7 @@ function RegistrationDialog({
 const runnerTypeOptions = ['general', 'data', 'protocol', 'performance', 'environment'].map(
   (value) => ({ value, label: runnerTypeLabel(value) }),
 )
-const emptyOverview: RunnerFabricOverview = {
-  pools: 0,
-  runners_online: 0,
-  runners_offline: 0,
-  runners_draining: 0,
-  queued_tasks: 0,
-  active_leases: 0,
-  completed_tasks: 0,
-  failed_tasks: 0,
-}
+
 const runtimeOptions = [
   { value: 'docker', label: 'Docker Compose' },
   { value: 'kubernetes', label: 'Kubernetes' },
@@ -500,4 +509,8 @@ function eventLabel(value: string): string {
   if (value.includes('acquired')) return '已接管'
   if (value.includes('completed')) return '唯一终态'
   return '有效'
+}
+
+function displayFabricCount(value: number | undefined) {
+  return value ?? '未提供'
 }

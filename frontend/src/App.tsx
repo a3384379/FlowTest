@@ -11,12 +11,11 @@ import {
   Select,
   Space,
   Spin,
-  Tabs,
   Tag,
   Typography,
 } from 'antd'
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect } from 'react'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
 
 import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
@@ -31,6 +30,7 @@ import {
 import { useProjectContext } from './features/projects/use-project-context'
 import { groupForSection, sectionLabels } from './features/navigation/navigation-config'
 import ShellSidebar from './features/navigation/ShellSidebar'
+import WorkspaceObjectTabs from './features/navigation/WorkspaceObjectTabs'
 import GlobalSearch from './features/search/GlobalSearch'
 import AppearanceSettings from './theme/AppearanceSettings'
 
@@ -190,8 +190,6 @@ function AuthenticatedShell() {
             visible={Boolean(projectId && !isGlobalAdministration)}
             userId={authenticatedUserId(user)}
             projectId={projectId}
-            activeSection={section}
-            pathFor={pathFor}
           />
           <AuthenticatedContent
             hasNoProjects={hasNoProjects}
@@ -212,84 +210,15 @@ function ProjectWorkspaceTabs(props: {
   visible: boolean
   userId: string
   projectId: string | null
-  activeSection: ProjectSection
-  pathFor: (section: ProjectSection) => string
 }) {
   if (!props.visible || !props.projectId) return null
   return (
-    <WorkspaceTabs
+    <WorkspaceObjectTabs
       key={`${props.userId}:${props.projectId}`}
-      {...props}
+      userId={props.userId}
       projectId={props.projectId}
     />
   )
-}
-
-function WorkspaceTabs({
-  userId,
-  projectId,
-  activeSection,
-  pathFor,
-}: {
-  userId: string
-  projectId: string
-  activeSection: ProjectSection
-  pathFor: (section: ProjectSection) => string
-}) {
-  const navigate = useNavigate()
-  const storageKey = `flowtest:workspace-tabs:v1:${userId}:${projectId}`
-  const [sections, setSections] = useState<ProjectSection[]>(() => readWorkspaceTabs(storageKey))
-
-  useEffect(() => {
-    queueMicrotask(() =>
-      setSections((current) => {
-        const next = current.includes(activeSection) ? current : [...current, activeSection]
-        writeWorkspaceTabs(storageKey, next)
-        return next
-      }),
-    )
-  }, [activeSection, storageKey])
-
-  function close(section: ProjectSection) {
-    setSections((current) => {
-      const next = current.filter((item) => item !== section)
-      writeWorkspaceTabs(storageKey, next)
-      if (section === activeSection) navigate(pathFor(next.at(-1) ?? 'dashboard'))
-      return next
-    })
-  }
-
-  return (
-    <Tabs
-      className="workspace-navigation-tabs"
-      type="editable-card"
-      hideAdd
-      activeKey={activeSection}
-      items={sections.map((item) => ({ key: item, label: sectionLabels[item] }))}
-      onChange={(item) => navigate(pathFor(item as ProjectSection))}
-      onEdit={(item, action) => action === 'remove' && close(item as ProjectSection)}
-    />
-  )
-}
-
-function writeWorkspaceTabs(storageKey: string, sections: ProjectSection[]): void {
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(sections))
-  } catch {
-    // Navigation remains usable for the current session.
-  }
-}
-
-function readWorkspaceTabs(storageKey: string): ProjectSection[] {
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(storageKey) ?? '[]')
-    if (!Array.isArray(value)) return []
-    return value.filter(
-      (item): item is ProjectSection => typeof item === 'string' && item in sectionLabels,
-    )
-  } catch {
-    return []
-  }
 }
 
 function AuthenticatedContent({

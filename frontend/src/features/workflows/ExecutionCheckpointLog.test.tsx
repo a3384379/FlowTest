@@ -68,7 +68,7 @@ describe('ExecutionCheckpointLog', () => {
     await waitFor(() => expect(pages).toEqual([1, 2]))
     fireEvent.click(screen.getByRole('button', { name: '查看记录' }))
     const dialog = await screen.findByRole('dialog', { name: '执行记录详情' })
-    expect(await within(dialog).findByText('输出与结果')).toBeInTheDocument()
+    expect(await within(dialog).findByText('实例输出')).toBeInTheDocument()
     expect(within(dialog).getByText(/"id": 7/)).toBeInTheDocument()
     expect(detailReads).toBe(1)
   })

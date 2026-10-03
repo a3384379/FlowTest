@@ -26,7 +26,8 @@ import {
   message,
 } from 'antd'
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 
 import { getV3FeatureFlags } from '../features/capabilities/capability-service'
 import { listCredentials } from '../features/data-sources/data-source-service'
@@ -85,7 +86,13 @@ export default function ProtocolWorkbenchPage() {
 }
 
 function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
-  const [mode, setMode] = useState<ProtocolMode>('graphql')
+  const [params, setParams] = useSearchParams()
+  const mode = protocolRouteMode(params.get('mode'))
+  const setMode = (next: ProtocolMode) => {
+    const updated = new URLSearchParams(params)
+    updated.set('mode', next)
+    setParams(updated, { replace: true })
+  }
   const [selection, setSelection] = useState<{ mode: SchemaProtocolMode; id: string } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const schemaMode: SchemaProtocolMode = mode === 'grpc' ? 'grpc' : 'graphql'
@@ -100,6 +107,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
   return (
     <div className="protocol-page">
       <ProtocolHeading onImport={eventMode ? undefined : () => setImportOpen(true)} />
+      <WorkflowResourceReturn projectId={projectId} />
       {!eventMode && <ProtocolFeatureAlert enabled={inventory.enabled} />}
       <ProtocolSummary graphql={inventory.graphqlTotal} grpc={inventory.grpcTotal} />
       <Card className="protocol-workspace">
@@ -148,6 +156,10 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
       />
     </div>
   )
+}
+
+function protocolRouteMode(value: string | null): ProtocolMode {
+  return value === 'grpc' || value === 'kafka' || value === 'websocket' ? value : 'graphql'
 }
 
 function useProtocolInventory(projectId: string, mode: SchemaProtocolMode) {
@@ -774,6 +786,6 @@ function sourceFormatLabel(value: string) {
 }
 function summaryCount(asset: SchemaArtifact) {
   return asset.protocol === 'graphql'
-    ? `${String(asset.summary.type_count ?? 0)} 类型`
-    : `${String(asset.summary.service_count ?? 0)} 服务`
+    ? `${String(asset.summary.type_count ?? '未提供')} 类型`
+    : `${String(asset.summary.service_count ?? '未提供')} 服务`
 }

@@ -21,6 +21,7 @@ from app.models.workflows import Workflow
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.test_assets import (
+    AssetDirectoryCountsResponse,
     PublishedTestCaseDefinition,
     PublishedTestSuiteDefinition,
     PublishedTestSuiteItem,
@@ -29,6 +30,7 @@ from app.schemas.test_assets import (
 )
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.test_asset_state import ensure_test_asset_active
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +106,17 @@ class TestCaseService:
         is_template: bool | None,
         page: int,
         page_size: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestCase], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        if folder_id is not None and unfiled:
+            raise AppError(
+                code="INVALID_ASSET_FOLDER_FILTER",
+                message="目录与未分类筛选不能同时使用",
+                status_code=422,
+            )
+        await _validate_folder(self._session, project_id, folder_id)
         return await self._assets.list_cases(
             project_id=project_id,
             search=search.strip() if search else None,
@@ -113,6 +124,16 @@ class TestCaseService:
             is_template=is_template,
             offset=(page - 1) * page_size,
             limit=page_size,
+            folder_id=folder_id,
+            unfiled=unfiled,
+        )
+
+    async def directory_counts(
+        self, *, actor: User, project_id: UUID, search: str | None, tag: str | None
+    ) -> AssetDirectoryCountsResponse:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._assets.directory_counts(
+            project_id=project_id, search=search.strip() if search else None, tag=tag
         )
 
     async def get(self, *, actor: User, project_id: UUID, case_id: UUID) -> TestCase:
@@ -282,7 +303,9 @@ class TestCaseService:
     ) -> int:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await _validate_folder(self._session, project_id, folder_id)
-        cases = [await self._get_project_case(project_id, case_id) for case_id in case_ids]
+        cases = [
+            await self._get_project_case_for_update(project_id, case_id) for case_id in case_ids
+        ]
         for model in cases:
             model.folder_id = folder_id
         self._audit.record(
@@ -355,6 +378,7 @@ class TestCaseService:
         model = await self._assets.get_case_for_update(case_id)
         if model is None or model.project_id != project_id:
             raise AppError(code="TEST_CASE_NOT_FOUND", message="测试用例不存在", status_code=404)
+        ensure_test_asset_active(model.archived_at)
         return model
 
     async def _get_version(self, case_id: UUID, version: int) -> TestCaseVersion:
@@ -414,6 +438,7 @@ class TestSuiteService:
         folder_id: UUID | None,
         tags: list[str],
         definition: TestSuiteDefinitionInput,
+        commit: bool = True,
     ) -> TestSuite:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         normalized_name = name.strip()
@@ -433,8 +458,9 @@ class TestSuiteService:
         self._assets.add(model)
         await self._session.flush()
         self._record(actor, model, "test_suite.created")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
         return model
 
     async def list_suites(
@@ -446,14 +472,25 @@ class TestSuiteService:
         tag: str | None,
         page: int,
         page_size: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestSuite], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        if folder_id is not None and unfiled:
+            raise AppError(
+                code="INVALID_ASSET_FOLDER_FILTER",
+                message="目录与未分类筛选不能同时使用",
+                status_code=422,
+            )
+        await _validate_folder(self._session, project_id, folder_id)
         return await self._assets.list_suites(
             project_id=project_id,
             search=search.strip() if search else None,
             tag=tag,
             offset=(page - 1) * page_size,
             limit=page_size,
+            folder_id=folder_id,
+            unfiled=unfiled,
         )
 
     async def get(self, *, actor: User, project_id: UUID, suite_id: UUID) -> TestSuite:
@@ -472,9 +509,10 @@ class TestSuiteService:
         change_folder: bool,
         tags: list[str] | None,
         definition: TestSuiteDefinitionInput | None,
+        commit: bool = True,
     ) -> TestSuite:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        model = await self._get_project_suite(project_id, suite_id)
+        model = await self._get_project_suite_for_update(project_id, suite_id)
         if name is not None:
             normalized_name = name.strip()
             await self._ensure_unique_name(project_id, normalized_name, excluding_id=model.id)
@@ -490,8 +528,11 @@ class TestSuiteService:
             await self._validate_definition(project_id, definition, require_published=False)
             model.draft_definition = _json_definition(definition)
         self._record(actor, model, "test_suite.updated")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
+        else:
+            await self._session.flush()
         return model
 
     async def publish(
@@ -501,6 +542,7 @@ class TestSuiteService:
         project_id: UUID,
         suite_id: UUID,
         change_note: str,
+        commit: bool = True,
     ) -> TestSuiteVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         suite = await self._get_project_suite_for_update(project_id, suite_id)
@@ -536,8 +578,11 @@ class TestSuiteService:
             "test_suite.published",
             details={"version": version_number, "item_count": len(published.items)},
         )
-        await self._session.commit()
-        await self._session.refresh(version)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(version)
+        else:
+            await self._session.flush()
         return version
 
     async def list_versions(
@@ -591,7 +636,9 @@ class TestSuiteService:
     ) -> int:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await _validate_folder(self._session, project_id, folder_id)
-        suites = [await self._get_project_suite(project_id, suite_id) for suite_id in suite_ids]
+        suites = [
+            await self._get_project_suite_for_update(project_id, suite_id) for suite_id in suite_ids
+        ]
         for model in suites:
             model.folder_id = folder_id
         self._audit.record(
@@ -620,11 +667,12 @@ class TestSuiteService:
                 status_code=422,
             )
         for item in definition.items:
-            case = await self._assets.get_case(item.test_case_id)
+            case = await self._assets.get_case_for_update(item.test_case_id)
             if case is None or case.project_id != project_id:
                 raise AppError(
                     code="TEST_CASE_NOT_FOUND", message="测试用例不存在", status_code=404
                 )
+            ensure_test_asset_active(case.archived_at)
             version = item.test_case_version or case.current_version
             if require_published and (
                 version is None or await self._assets.find_case_version(case.id, version) is None
@@ -675,6 +723,7 @@ class TestSuiteService:
         model = await self._assets.get_suite_for_update(suite_id)
         if model is None or model.project_id != project_id:
             raise AppError(code="TEST_SUITE_NOT_FOUND", message="测试套件不存在", status_code=404)
+        ensure_test_asset_active(model.archived_at)
         return model
 
     async def _get_version(self, suite_id: UUID, version: int) -> TestSuiteVersion:

@@ -60,6 +60,24 @@ async def create_performance_scenario(
     return PerformanceScenarioResponse.model_validate(scenario)
 
 
+@router.get(
+    "/projects/{project_id}/performance-scenarios/{scenario_id}",
+    response_model=PerformanceScenarioResponse,
+)
+async def get_performance_scenario(
+    project_id: UUID,
+    scenario_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PerformanceScenarioResponse:
+    scenario = await PerformanceScenarioService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        scenario_id=scenario_id,
+    )
+    return PerformanceScenarioResponse.model_validate(scenario)
+
+
 @router.post(
     "/projects/{project_id}/performance-scenarios/{scenario_id}/versions",
     response_model=PerformanceScenarioResponse,

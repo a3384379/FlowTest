@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -5,7 +6,9 @@ from sqlalchemy import (
     JSON,
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -21,6 +24,7 @@ class TestCase(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "test_cases"
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_test_cases_project_name"),
+        Index("ix_test_cases_project_folder_active", "project_id", "archived_at", "folder_id"),
         CheckConstraint(
             "current_version IS NULL OR current_version >= 1",
             name="test_case_current_version",
@@ -41,6 +45,7 @@ class TestCase(UuidPrimaryKeyMixin, TimestampMixin, Base):
     )
     draft_definition: Mapped[dict[str, Any]] = mapped_column(JSON)
     current_version: Mapped[int | None] = mapped_column(Integer)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
 
     @property
@@ -69,6 +74,7 @@ class TestSuite(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "test_suites"
     __table_args__ = (
         UniqueConstraint("project_id", "name", name="uq_test_suites_project_name"),
+        Index("ix_test_suites_project_folder_active", "project_id", "archived_at", "folder_id"),
         CheckConstraint(
             "current_version IS NULL OR current_version >= 1",
             name="test_suite_current_version",
@@ -86,7 +92,12 @@ class TestSuite(UuidPrimaryKeyMixin, TimestampMixin, Base):
     tags: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     draft_definition: Mapped[dict[str, Any]] = mapped_column(JSON)
     current_version: Mapped[int | None] = mapped_column(Integer)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+
+    @property
+    def draft_fingerprint(self) -> str:
+        return definition_fingerprint(self.draft_definition)
 
 
 class TestSuiteVersion(UuidPrimaryKeyMixin, TimestampMixin, Base):

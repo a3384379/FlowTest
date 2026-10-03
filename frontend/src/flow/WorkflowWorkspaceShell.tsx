@@ -1,22 +1,29 @@
 import { Button, Drawer } from 'antd'
 import { useRef, useState, type ReactNode } from 'react'
 import { readLayoutPreferences } from './editor/layout-preferences'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
 export default function WorkflowWorkspaceShell({
   header,
   list,
   children,
   runtimeDock,
   preferenceKey,
+  catalogRequested = false,
 }: {
   header: ReactNode
   list: ReactNode
   children: ReactNode
   runtimeDock?: ReactNode
   preferenceKey: string
+  catalogRequested?: boolean
 }) {
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
-  const [listOpen, setListOpen] = useState(false)
+  const [listOpen, setListOpen] = useRouteScopedState(
+    preferenceKey,
+    catalogRequested ? 'requested' : 'default',
+    catalogRequested,
+  )
   const [preferences] = useState(() => readLayoutPreferences(preferenceKey))
   return (
     <div ref={root} className="workflow-workspace" data-testid="workflow-workbench">
@@ -26,7 +33,7 @@ export default function WorkflowWorkspaceShell({
         className="workflow-list-toggle"
         aria-label="切换工作流列表"
         aria-expanded={listOpen}
-        onClick={() => setListOpen((open) => !open)}
+        onClick={() => setListOpen(!listOpen)}
       >
         列表
       </Button>

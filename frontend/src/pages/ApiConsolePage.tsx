@@ -26,6 +26,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
+import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import APIWorkbench from '../features/api-console/APIWorkbench'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import EnvironmentManager from '../features/api-console/EnvironmentManager'
@@ -39,23 +40,37 @@ import type {
 } from '../features/api-console/api-service'
 import { useApiConsole } from '../features/api-console/use-api-console'
 import { useAuthStore } from '../features/auth/auth-store'
-import type { ApiDefinition, Execution, ExecutionDetail } from '../lib/api'
+import type { ApiDefinition } from '../lib/api'
 
 type DialogState = 'project' | 'environment' | 'api' | null
 
 export default function ApiConsolePage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [dialog, setDialog] = useState<DialogState>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
   const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
-  const [artifactsOpen, setArtifactsOpen] = useState(false)
-  const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
+  const [artifactsOpen, setArtifactsOpen] = useState(searchParams.get('panel') === 'files')
+  const consoleState = useConsoleFromRoute(searchParams)
   const userId = useAuthStore((state) => state.user?.id)
   const currentDefinition = selectedApiDefinition(consoleState)
   const artifacts = artifactItems(consoleState)
   const apis = apiItems(consoleState)
-  const history = historyItems(consoleState)
+
+  function selectExecution(executionId: string | null) {
+    const next = new URLSearchParams(searchParams)
+    if (consoleState.apiId) next.set('focus', consoleState.apiId)
+    if (executionId) next.set('execution', executionId)
+    else next.delete('execution')
+    setSearchParams(next)
+  }
+
+  function selectApi(apiId: string) {
+    const next = new URLSearchParams(searchParams)
+    next.set('focus', apiId)
+    next.delete('execution')
+    setSearchParams(next)
+  }
 
   async function addProject(input: CreateProjectInput) {
     await consoleState.addProject(input)
@@ -72,12 +87,8 @@ export default function ApiConsolePage() {
     setDialog(null)
   }
 
-  const canCreateAssets = Boolean(consoleState.projectId)
-  const canExecute = allSelected([
-    consoleState.projectId,
-    consoleState.environmentId,
-    consoleState.apiId,
-  ])
+  const canCreateAssets = consoleState.canEdit
+  const canExecute = canExecuteCurrentApi(consoleState)
 
   return (
     <div className="api-console-page">
@@ -123,10 +134,11 @@ export default function ApiConsolePage() {
               />
             </div>
             <ApiTable
+              editable={consoleState.canEdit}
               loading={consoleState.apis.isLoading}
               items={apis}
               selectedId={consoleState.apiId}
-              onSelect={consoleState.setApiSelection}
+              onSelect={selectApi}
               onRename={setRenameTarget}
               page={consoleState.apis.data?.page ?? consoleState.apiPage}
               pageSize={consoleState.apis.data?.page_size ?? 50}
@@ -167,6 +179,7 @@ export default function ApiConsolePage() {
         <div className="api-workspace-main">
           <APIWorkbench
             detail={consoleState.apiDetail.data}
+            editable={consoleState.canEdit}
             loading={consoleState.apiDetail.isLoading}
             saving={consoleState.savingVersion}
             previewing={consoleState.previewing}
@@ -194,7 +207,7 @@ export default function ApiConsolePage() {
               </Space>
             }
           >
-            <RunnerContent enabled={canExecute} result={consoleState.result} history={history} />
+            <RunnerContent state={consoleState} onSelectExecution={selectExecution} />
           </Card>
         </div>
       </div>
@@ -212,6 +225,7 @@ export default function ApiConsolePage() {
           onUpload={consoleState.uploadFile}
           onDownload={consoleState.downloadFile}
         />
+        <WorkflowResourceReturn projectId={consoleState.projectId} />
       </Drawer>
       <CreateDialogs
         open={dialog}
@@ -267,6 +281,18 @@ function apiDraftScope(userId: string | undefined, projectId: string | null): st
 
 type ConsoleState = ReturnType<typeof useApiConsole>
 
+function useConsoleFromRoute(params: URLSearchParams) {
+  return useApiConsole(params.get('focus') ?? undefined, params.get('execution') ?? undefined)
+}
+
+function canExecuteCurrentApi(state: ConsoleState): boolean {
+  return (
+    state.canEdit &&
+    !state.viewingHistory &&
+    allSelected([state.projectId, state.environmentId, state.apiId])
+  )
+}
+
 function ApiConsoleHeading({
   state,
   canCreateAssets,
@@ -306,11 +332,11 @@ function ApiConsoleHeading({
             onClick: ({ key }) => state.exportApis(key as 'har' | 'curl' | 'bruno' | 'excel'),
           }}
         >
-          <Button icon={<DownloadOutlined />} disabled={!canCreateAssets} loading={state.exporting}>
+          <Button icon={<DownloadOutlined />} disabled={!state.projectId} loading={state.exporting}>
             导出
           </Button>
         </Dropdown>
-        <Button icon={<FolderOutlined />} disabled={!canCreateAssets} onClick={onArtifacts}>
+        <Button icon={<FolderOutlined />} disabled={!state.projectId} onClick={onArtifacts}>
           文件仓库
         </Button>
       </Space>
@@ -337,21 +363,36 @@ function RunnerActions({ state, enabled }: { state: ConsoleState; enabled: boole
 }
 
 function RunnerContent({
-  enabled,
-  result,
-  history,
+  state,
+  onSelectExecution,
 }: {
-  enabled: boolean
-  result: ExecutionDetail | null
-  history: Execution[]
+  state: ConsoleState
+  onSelectExecution: (id: string | null) => void
 }) {
-  if (!enabled) {
-    return <Empty description="请先准备项目、环境和接口" className="console-empty" />
+  if (!state.projectId || !state.apiId) {
+    return <Empty description="请选择接口查看响应与历史" className="console-empty" />
   }
-  return <ExecutionResultPanel result={result} history={history} />
+  return (
+    <ExecutionResultPanel
+      result={state.result}
+      history={state.history.data?.items ?? []}
+      historyLoading={state.history.isPending}
+      historyError={state.history.error}
+      onRetryHistory={() => void state.history.refetch()}
+      page={state.historyPage}
+      total={state.history.data?.total ?? 0}
+      onPageChange={state.setHistoryPage}
+      onSelectExecution={onSelectExecution}
+      viewingHistory={state.viewingHistory}
+      detailLoading={state.viewingHistory && state.selectedExecution.isPending}
+      detailError={state.selectedExecution.error}
+      onRetryDetail={() => void state.selectedExecution.refetch()}
+    />
+  )
 }
 
 type ApiTableProps = {
+  editable: boolean
   loading: boolean
   items: ApiDefinition[]
   selectedId: string | null
@@ -364,6 +405,7 @@ type ApiTableProps = {
 }
 
 function ApiTable({
+  editable,
   loading,
   items,
   selectedId,
@@ -428,6 +470,7 @@ function ApiTable({
               size="small"
               icon={<EditOutlined />}
               aria-label={`重命名接口 ${definition.name}`}
+              disabled={!editable}
               onClick={(event) => {
                 event.stopPropagation()
                 onRename(definition)
@@ -529,10 +572,6 @@ function artifactItems(state: ConsoleState) {
 
 function apiItems(state: ConsoleState) {
   return state.apis.data?.items ?? []
-}
-
-function historyItems(state: ConsoleState) {
-  return state.history.data?.items ?? []
 }
 
 function projectOptions(items?: Array<{ id: string; name: string }>) {

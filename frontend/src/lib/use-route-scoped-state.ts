@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 type RouteScopedValue<T> = {
   projectId: string | null
@@ -21,7 +21,16 @@ export function useRouteScopedState<T>(
     setState({ projectId, routeKey, value: initialValue })
   }
   const value = isCurrentScope ? state.value : initialValue
-  return [value, (nextValue: T) => setState({ projectId, routeKey, value: nextValue })] as const
+  const update = useCallback(
+    (nextValue: T) => {
+      setState((current) => {
+        if (current.projectId !== projectId || current.routeKey !== routeKey) return current
+        return { projectId, routeKey, value: nextValue }
+      })
+    },
+    [projectId, routeKey],
+  )
+  return [value, update] as const
 }
 
 export function useRouteScopedSelection(

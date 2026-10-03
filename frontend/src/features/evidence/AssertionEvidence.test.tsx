@@ -28,3 +28,19 @@ it('keeps incomplete report assertions unknown and does not invent evidence from
   ])
   expect(reportAssertionEvidence({ result: 'passed' }, '金额')).toEqual([])
 })
+
+it('derives numeric differences from frozen values and identifies the actual evidence owner', () => {
+  render(
+    <AssertionEvidence
+      source="订单断言 (assert-order)"
+      items={[
+        { name: '金额校验', passed: false, expected: 29900, actual: 29901 },
+        { name: '零值校验', passed: true, expected: 0, actual: 0 },
+        { name: '状态校验', passed: false, expected: 'paid', actual: 'pending' },
+      ]}
+    />,
+  )
+  expect(screen.getByText('差值（实际 − 期望）：+1 · 单位：未提供')).toBeVisible()
+  expect(screen.getByText('差值（实际 − 期望）：0 · 单位：未提供')).toBeVisible()
+  expect(screen.getAllByText('证据来源：订单断言 (assert-order)')).toHaveLength(3)
+})

@@ -23,8 +23,15 @@ import type {
   AIChangeSetInput,
 } from '../features/ai/ai-change-set-service'
 import { useAIChangeSets } from '../features/ai/use-ai-change-sets'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { apiErrorMessage } from '../lib/api'
 
 export default function AIChangeSetsPage() {
+  const { projectId } = useProjectContext()
+  return <AIChangeSetWorkspace key={projectId ?? 'none'} />
+}
+
+function AIChangeSetWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useAIChangeSets(searchParams.get('focus'))
   const [createOpen, setCreateOpen] = useState(false)
@@ -45,12 +52,14 @@ export default function AIChangeSetsPage() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          disabled={!state.projectId}
+          aria-label="生成 Draft Change Set"
+          disabled={!state.canCreate}
           onClick={() => setCreateOpen(true)}
         >
           生成 Draft Change Set
         </Button>
       </div>
+      <AIChangeSetStatus state={state} />
       <Alert
         showIcon
         type="info"
@@ -59,7 +68,7 @@ export default function AIChangeSetsPage() {
         style={{ marginBottom: 16 }}
       />
       <Row gutter={16}>
-        <Col span={7}>
+        <Col xs={24} xl={7}>
           <Card title="AI 建议摘要" loading={state.changeSets.isLoading}>
             {(state.changeSets.data?.items.length ?? 0) === 0 ? (
               <Typography.Text type="secondary">暂无 AI Change Set</Typography.Text>
@@ -89,17 +98,18 @@ export default function AIChangeSetsPage() {
             )}
           </Card>
         </Col>
-        <Col span={17}>
+        <Col xs={24} xl={17}>
           <Card
             title="变更集审核"
             extra={<Tag icon={<AuditOutlined />}>接受后只更新草稿</Tag>}
             loading={state.detail.isLoading}
           >
-            <ChangeSetDetail detail={detail} onReview={setReview} />
+            <ChangeSetDetail detail={detail} readOnly={!state.canEdit} onReview={setReview} />
           </Card>
         </Col>
       </Row>
       <CreateChangeSetDialog
+        readOnly={!state.canCreate}
         open={createOpen}
         submitting={state.creating}
         risks={state.risks.data?.items ?? []}
@@ -110,6 +120,7 @@ export default function AIChangeSetsPage() {
         }}
       />
       <ReviewChangeItemDialog
+        readOnly={!state.canEdit}
         value={review}
         submitting={state.reviewing}
         onClose={() => setReview(null)}
@@ -121,11 +132,50 @@ export default function AIChangeSetsPage() {
   )
 }
 
+function AIChangeSetStatus({ state }: { state: ReturnType<typeof useAIChangeSets> }) {
+  const queries = [
+    state.status,
+    state.flags,
+    state.permissions,
+    state.changeSets,
+    state.detail,
+    state.impacts,
+    state.risks,
+  ]
+  const failed = queries.filter((query) => query.isError)
+  if (failed.length)
+    return (
+      <Alert
+        className="page-alert"
+        showIcon
+        type="error"
+        title={apiErrorMessage(failed[0].error)}
+        action={
+          <Button onClick={() => void Promise.all(failed.map((query) => query.refetch()))}>
+            重试
+          </Button>
+        }
+      />
+    )
+  if (state.status.data?.enabled === false)
+    return (
+      <Alert
+        className="page-alert"
+        showIcon
+        type="info"
+        title="AI 生成功能尚未启用，可查看已有审核记录。"
+      />
+    )
+  return null
+}
+
 function ChangeSetDetail({
   detail,
+  readOnly,
   onReview,
 }: {
   detail: AIChangeSetDetail | undefined
+  readOnly: boolean
   onReview: (value: { item: AIChangeItem; decision: 'accept' | 'reject' }) => void
 }) {
   if (!detail) {
@@ -137,10 +187,11 @@ function ChangeSetDetail({
   if (detail.status === 'failed') {
     return <Alert showIcon type="error" title="AI Change Set 生成失败，请查看 AI 任务审计。" />
   }
-  return <ChangeItems items={detail.items} onReview={onReview} />
+  return <ChangeItems items={detail.items} readOnly={readOnly} onReview={onReview} />
 }
 
 function CreateChangeSetDialog({
+  readOnly,
   open,
   submitting,
   risks,
@@ -148,6 +199,7 @@ function CreateChangeSetDialog({
   onClose,
   onCreate,
 }: {
+  readOnly: boolean
   open: boolean
   submitting: boolean
   risks: Array<{ id: string; impact_run_id: string; title: string; score: number }>
@@ -163,11 +215,13 @@ function CreateChangeSetDialog({
       title="生成 Draft Change Set"
       open={open}
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       onCancel={onClose}
       onOk={() => form.submit()}
       destroyOnHidden
     >
       <Form
+        disabled={readOnly}
         form={form}
         layout="vertical"
         onFinish={(value) => void onCreate(value)}
@@ -203,9 +257,11 @@ function CreateChangeSetDialog({
 
 function ChangeItems({
   items,
+  readOnly,
   onReview,
 }: {
   items: AIChangeItem[]
+  readOnly: boolean
   onReview: (value: { item: AIChangeItem; decision: 'accept' | 'reject' }) => void
 }) {
   if (items.length === 0) {
@@ -229,10 +285,18 @@ function ChangeItems({
           extra={
             item.review_status === 'pending' ? (
               <Space>
-                <Button aria-label="拒绝" onClick={() => onReview({ item, decision: 'reject' })}>
+                <Button
+                  disabled={readOnly}
+                  aria-label="拒绝"
+                  onClick={() => onReview({ item, decision: 'reject' })}
+                >
                   拒绝
                 </Button>
-                <Button type="primary" onClick={() => onReview({ item, decision: 'accept' })}>
+                <Button
+                  type="primary"
+                  disabled={readOnly}
+                  onClick={() => onReview({ item, decision: 'accept' })}
+                >
                   审核并接受
                 </Button>
               </Space>
@@ -251,11 +315,13 @@ function ChangeItems({
 }
 
 function ReviewChangeItemDialog({
+  readOnly,
   value,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   value: { item: AIChangeItem; decision: 'accept' | 'reject' } | null
   submitting: boolean
   onClose: () => void
@@ -269,6 +335,7 @@ function ReviewChangeItemDialog({
   if (!value) return null
   return (
     <ReviewChangeItemDialogContent
+      readOnly={readOnly}
       key={`${value.item.id}:${value.decision}`}
       value={value}
       submitting={submitting}
@@ -279,11 +346,13 @@ function ReviewChangeItemDialog({
 }
 
 function ReviewChangeItemDialogContent({
+  readOnly,
   value,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   value: { item: AIChangeItem; decision: 'accept' | 'reject' }
   submitting: boolean
   onClose: () => void
@@ -303,6 +372,7 @@ function ReviewChangeItemDialogContent({
       title={value.decision === 'accept' ? '编辑并接受变更项' : '拒绝变更项'}
       open
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       onCancel={onClose}
       onOk={() => {
         let parsed: Record<string, unknown> | undefined

@@ -12,6 +12,8 @@ import { Link } from 'react-router-dom'
 
 import { DashboardTrendChart } from '../features/dashboard/DashboardTrendChart'
 import { useDashboard } from '../features/dashboard/use-dashboard'
+import PriorityIssueQueue from '../features/dashboard/PriorityIssueQueue'
+import { priorityIssues, recentExecutionPath } from '../features/dashboard/priority-issues'
 import type { ImpactRunSummary } from '../features/impact/impact-service'
 import { projectPath } from '../features/projects/project-routing'
 import ProjectEmptyState from '../features/projects/ProjectEmptyState'
@@ -122,18 +124,45 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
   const impact = firstItem(dashboard.impactRuns.data)
   const decision = firstItem(dashboard.decisions.data)
   const projectId = required(dashboard.projectId)
+  const issues = priorityIssues({
+    projectId,
+    risk: dashboard.risk.data,
+    decision,
+    impact,
+    recent: dashboard.recent.data,
+    flaky: dashboard.flaky.data,
+  })
   return (
     <>
+      <RiskSummaryCard
+        risk={risk}
+        detail={dashboard.risk.data}
+        enabled={dashboard.qualityEnabled}
+        loading={dashboard.flags.isLoading || dashboard.risks.isLoading}
+      />
       <ProjectQualityStats
         summary={summary}
-        risk={risk}
         impact={impact}
         flaky={dashboard.flaky.data?.items}
         decision={decision}
-        qualityEnabled={dashboard.qualityEnabled}
         impactEnabled={dashboard.impactEnabled}
         loading={anyLoading(dashboard.flags.isLoading, dashboard.summary.isLoading)}
       />
+      <PriorityIssueQueue
+        issues={issues}
+        loading={dashboard.evidenceLoading || dashboard.recent.isLoading}
+        incomplete={Boolean(dashboard.insightError || dashboard.recent.error)}
+      />
+      <div className="quality-command-secondary-grid">
+        <Card title="最近运行" loading={dashboard.recent.isLoading}>
+          <RecentExecutionTable items={dashboard.recent.data?.items ?? []} />
+        </Card>
+        <ReleaseDecisionCard
+          projectId={projectId}
+          decision={decision}
+          loading={dashboard.decisions.isLoading}
+        />
+      </div>
       <div className="quality-command-primary-grid">
         <TrendCard summary={dashboard.summary.data} loading={dashboard.summary.isLoading} />
         <div className="quality-command-evidence-stack">
@@ -150,16 +179,6 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
             loading={dashboard.impactRuns.isLoading}
           />
         </div>
-      </div>
-      <div className="quality-command-secondary-grid">
-        <Card title="最近运行" loading={dashboard.recent.isLoading}>
-          <RecentExecutionTable items={dashboard.recent.data?.items ?? []} />
-        </Card>
-        <ReleaseDecisionCard
-          projectId={projectId}
-          decision={decision}
-          loading={dashboard.decisions.isLoading}
-        />
       </div>
     </>
   )
@@ -219,38 +238,25 @@ function GlobalQualityOverview({ dashboard }: { dashboard: DashboardState }) {
 
 function ProjectQualityStats({
   summary,
-  risk,
   impact,
   flaky,
   decision,
-  qualityEnabled,
   impactEnabled,
   loading,
 }: {
   summary?: DashboardSummary
-  risk?: ReleaseRiskSummary
   impact?: ImpactRunSummary
   flaky?: FlakyRecord[]
   decision?: ReleaseDecision
-  qualityEnabled: boolean
   impactEnabled: boolean
   loading: boolean
 }) {
   const executionState = executionSummaryMetric(summary)
   const quarantined = flaky?.filter((item) => item.quarantined).length
-  const riskState = riskMetric(risk, qualityEnabled)
   const impactState = impactMetric(impact, impactEnabled)
   const decisionState = decisionMetric(decision)
   return (
-    <div className="quality-command-stats">
-      <QualityMetric
-        title="发布风险"
-        value={riskState.value}
-        detail={riskState.detail}
-        tone={riskState.tone}
-        icon={<SafetyCertificateOutlined />}
-        loading={loading}
-      />
+    <div className="quality-command-stats quality-context-metrics">
       <QualityMetric
         title="受影响变更"
         value={impactState.value}
@@ -284,6 +290,49 @@ function ProjectQualityStats({
         loading={loading}
       />
     </div>
+  )
+}
+
+function RiskSummaryCard({
+  risk,
+  detail,
+  enabled,
+  loading,
+}: {
+  risk?: ReleaseRiskSummary
+  detail?: ReleaseRiskDetail
+  enabled: boolean
+  loading: boolean
+}) {
+  const state = riskMetric(risk, enabled)
+  return (
+    <section aria-label="发布风险摘要" className="quality-risk-summary">
+      <Card title="发布风险" loading={loading}>
+        <div className="quality-risk-summary-main">
+          <div>
+            <Typography.Text type="secondary">最新冻结风险证据</Typography.Text>
+            <Typography.Title level={2}>{state.value}</Typography.Title>
+            <Tag color={state.tone}>{state.detail}</Tag>
+          </div>
+          <div>
+            {risk && (
+              <>
+                <Typography.Paragraph strong>{risk.title}</Typography.Paragraph>
+                <Typography.Paragraph type="secondary">
+                  快照 {risk.id} · 生成于 {risk.created_at} · 窗口 {risk.window_days} 天
+                </Typography.Paragraph>
+              </>
+            )}
+            {detail && (
+              <Typography.Paragraph type="secondary">
+                证据范围：{detail.window_started_at} 至 {detail.window_ended_at}
+                。该快照不等同于当前所有运行的即时质量。
+              </Typography.Paragraph>
+            )}
+          </div>
+        </div>
+      </Card>
+    </section>
   )
 }
 
@@ -374,7 +423,7 @@ function RiskEvidenceCard({
 }) {
   return (
     <Card
-      title="失败根因与推荐测试"
+      title="风险快照与推荐测试"
       loading={loading}
       extra={<Link to={projectPath(projectId, 'quality')}>质量洞察</Link>}
     >
@@ -386,23 +435,10 @@ function RiskEvidenceCard({
         <div className="quality-evidence-list">
           <Space wrap>
             <Typography.Text strong>{risk.title}</Typography.Text>
-            <Tag color={riskColors[risk.risk_level]}>{riskLabels[risk.risk_level]}</Tag>
             <Typography.Text type="secondary">
               推荐 {risk.recommended_tests.length} 项
             </Typography.Text>
           </Space>
-          {risk.failure_clusters.slice(0, 3).map((cluster) => (
-            <div className="quality-evidence-item" key={cluster.id}>
-              <div>
-                <Typography.Text strong>{cluster.title}</Typography.Text>
-                <Typography.Text type="secondary">
-                  影响 {cluster.occurrence_count} 次 · 置信度 {Math.round(cluster.confidence * 100)}
-                  %
-                </Typography.Text>
-              </div>
-              <Tag color="error">{cluster.failure_category}</Tag>
-            </div>
-          ))}
           {risk.recommended_tests.slice(0, 3).map((item) => (
             <div className="quality-evidence-item" key={`${item.target_type}:${item.target_id}`}>
               <div>
@@ -527,6 +563,12 @@ function RecentExecutionTable({ items }: { items: RecentExecution[] }) {
           dataIndex: 'started_at',
           width: 150,
           render: (value: string) => formatShanghaiTime(value),
+        },
+        {
+          title: '证据',
+          key: 'evidence',
+          width: 100,
+          render: (_, run: RecentExecution) => <Link to={recentExecutionPath(run)}>查看详情</Link>,
         },
       ]}
     />

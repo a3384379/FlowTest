@@ -24,6 +24,8 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 
 import {
   createCredential,
@@ -53,6 +55,7 @@ export default function DataMockPage() {
         <Typography.Text type="secondary">
           Credential 值仅写入并加密保存；数据节点只执行白名单只读操作，Mock 不执行脚本。
         </Typography.Text>
+        <WorkflowResourceReturn projectId={projectId} />
       </div>
       <Tabs
         items={[
@@ -105,6 +108,7 @@ export function CredentialPanel({ projectId, canEdit }: { projectId: string; can
       )}
       <Col xs={24} xl={canEdit ? 15 : 24}>
         <Card title="Credential 元数据" size="small">
+          <QueryFailureNotice queries={[credentials]} />
           <Table
             rowKey="id"
             size="small"
@@ -271,6 +275,7 @@ export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: 
   })
   return (
     <Space orientation="vertical" className="full-width">
+      <QueryFailureNotice queries={[services]} />
       <EditableMockServiceForm
         canEdit={canEdit}
         pending={createServiceMutation.isPending}
@@ -434,6 +439,7 @@ function MockRouteWorkspace({
         </Col>
       )}
       <Col xs={24} xl={canEdit ? 15 : 24}>
+        <QueryFailureNotice queries={[routes, logs]} />
         <Tabs
           items={[
             {

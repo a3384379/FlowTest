@@ -291,6 +291,9 @@ export type AssertionResult = {
 
 export type Execution = {
   id: string
+  project_id: string
+  api_definition_id: string
+  api_version_id: string
   status: 'running' | 'passed' | 'failed' | 'error'
   request_method: string
   request_url: string
@@ -301,6 +304,7 @@ export type Execution = {
   response_headers: Record<string, string>
   response_body: unknown
   response_artifact_id: string | null
+  response_size_bytes?: number | null
   elapsed_ms: number | null
   error_code: string | null
   error_message: string | null
@@ -1382,6 +1386,7 @@ export type TestCase = {
   is_template: boolean
   draft_definition: TestCaseDefinition
   draft_fingerprint?: string
+  archived_at?: string | null
   current_version: number | null
   created_by_id: string
   created_at: string
@@ -1425,6 +1430,8 @@ export type TestSuite = {
   description: string
   tags: string[]
   draft_definition: { items: TestSuiteItem[] }
+  draft_fingerprint?: string
+  archived_at?: string | null
   current_version: number | null
   created_by_id: string
   created_at: string
@@ -1589,6 +1596,8 @@ export type ReportNode = {
   attempts: number
   duration_ms: number | null
   observations?: WorkflowNodeObservation[]
+  output?: unknown
+  result?: NodeResult | null
   request: unknown
   response: unknown
   extraction: unknown

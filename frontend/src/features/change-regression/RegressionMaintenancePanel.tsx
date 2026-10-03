@@ -29,16 +29,23 @@ import {
   type RegressionMaintenancePatch,
 } from './regression-maintenance-service'
 
-export default function RegressionMaintenancePanel({ run }: { run: ChangeRegressionRun }) {
+export default function RegressionMaintenancePanel({
+  run,
+  readOnly = false,
+}: {
+  run: ChangeRegressionRun
+  readOnly?: boolean
+}) {
   const queryClient = useQueryClient()
   const snapshot = run.context_maintenance
-  const editable = run.status === 'review_required'
+  const editable = maintenanceEditable(readOnly, run)
   const [bindingOpen, setBindingOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { contexts, page, total, setPage } = useContextPage(run.project_id, bindingOpen)
 
   async function perform(action: () => Promise<unknown>) {
+    if (readOnly) return
     setBusy(true)
     setError(null)
     try {
@@ -66,10 +73,13 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
           </Typography.Text>
         )}
         {canBindContext(run) && (
-          <Button onClick={() => setBindingOpen(true)}>绑定 / 刷新 Context 对比</Button>
+          <Button disabled={readOnly} onClick={() => setBindingOpen(true)}>
+            绑定 / 刷新 Context 对比
+          </Button>
         )}
         {bindingOpen && (
           <Form<ContextBinding>
+            disabled={readOnly}
             name="maintenance-context"
             layout="vertical"
             onFinish={(input) =>
@@ -167,6 +177,10 @@ export default function RegressionMaintenancePanel({ run }: { run: ChangeRegress
       </Space>
     </Card>
   )
+}
+
+function maintenanceEditable(readOnly: boolean, run: ChangeRegressionRun): boolean {
+  return !readOnly && run.status === 'review_required'
 }
 
 function canBindContext(run: ChangeRegressionRun): boolean {

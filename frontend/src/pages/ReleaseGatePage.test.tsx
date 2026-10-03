@@ -288,6 +288,58 @@ describe('ReleaseGatePage', () => {
     await waitFor(() => expect(screen.getByText('v3.0.0-rc.1')).toBeVisible())
     expect(disabledEvidenceRequest).not.toHaveBeenCalled()
   })
+  it('opens a specific historical decision outside the loaded list without creating a decision', async () => {
+    handlers()
+    const old = {
+      ...decision,
+      id: 'old-decision',
+      candidate_ref: '历史候选-旧版本',
+      status: 'block' as const,
+      fingerprint: 'b'.repeat(64),
+    }
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-decisions/old-decision`, () =>
+        HttpResponse.json(old),
+      ),
+      http.post(`/api/v1/projects/${project.id}/release-decisions`, () => {
+        writes += 1
+        return HttpResponse.json(decision)
+      }),
+    )
+    renderPage(`/projects/${project.id}/release?decision=old-decision`)
+    const dialog = await screen.findByRole('dialog', { name: '发布判断证据' })
+    await waitFor(() => expect(within(dialog).getByText('历史候选-旧版本')).toBeVisible())
+    expect(within(dialog).getByText(old.fingerprint)).toBeVisible()
+    expect(within(dialog).queryByText(decision.candidate_ref)).not.toBeInTheDocument()
+    await userEvent.setup().click(within(dialog).getByRole('tab', { name: '冻结策略' }))
+    expect(within(dialog).getByRole('region', { name: '此判断的策略快照' })).toHaveTextContent(
+      'release_decision_v1',
+    )
+    expect(writes).toBe(0)
+  })
+
+  it('keeps missing linked evidence retryable and hides mutation access from viewers', async () => {
+    handlers()
+    let reads = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-decisions/missing`, () => {
+        reads += 1
+        return HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '判断不存在', trace_id: 'test' } },
+          { status: 404 },
+        )
+      }),
+    )
+    renderPage(`/projects/${project.id}/release?decision=missing`)
+    await waitFor(() => expect(screen.getByText('发布判断读取失败')).toBeVisible())
+    expect(screen.getByRole('button', { name: /新建策略/ })).toBeDisabled()
+    await userEvent.setup().click(screen.getByRole('button', { name: /重\s*试/ }))
+    await waitFor(() => expect(reads).toBe(2))
+  })
 })
 
 async function chooseEvidence(
@@ -333,6 +385,9 @@ function handlers(overrides: Partial<V3FeatureFlags> = {}) {
     ...overrides,
   }
   server.use(
+    http.get(`/api/v1/projects/${project.id}/release-decisions/${decision.id}`, () =>
+      HttpResponse.json(decision),
+    ),
     http.get('/api/v1/v3/features', () => HttpResponse.json(featureFlags)),
     http.get('/api/v1/projects', () => HttpResponse.json(page([project]))),
     http.get(`/api/v1/projects/${project.id}/release-policies`, () => HttpResponse.json([policy])),
@@ -378,7 +433,7 @@ function page<T>(items: T[]) {
   return { items, total: items.length, page: 1, page_size: 100 }
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -386,7 +441,7 @@ function renderPage() {
     <ConfigProvider theme={{ token: { motion: false } }}>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
-          <ProjectTestProvider section="release">
+          <ProjectTestProvider section="release" initialEntry={initialEntry}>
             <ReleaseGatePage />
           </ProjectTestProvider>
         </QueryClientProvider>

@@ -173,6 +173,74 @@ const unsafeCheck: DeploymentCheck = {
 }
 
 describe('ContractHubPage', () => {
+  it('keeps contract evidence readable while disabling writer operations for viewers', async () => {
+    installHandlers()
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'viewer',
+          capabilities: ['read'],
+          matrix: {},
+        }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/contract-hub/*`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('Provider 2.1.0 不可安全发布')).toBeInTheDocument()
+    for (const name of [
+      '登记服务',
+      '导入 OpenAPI',
+      '导入 Pact',
+      '执行提供方验证',
+      '判断是否可安全发布',
+    ]) {
+      const button = screen.getByRole('button', { name: new RegExp(name) })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+    }
+    expect(screen.getByRole('combobox', { name: '提供方服务' })).toBeEnabled()
+    expect(writes).toBe(0)
+  })
+
+  it('does not request disabled contract-hub endpoints or present unknown counts as zero', async () => {
+    installHandlers()
+    let requests = 0
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ contract_hub: false })),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/*`, () => {
+        requests += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('契约中心尚未启用')).toBeInTheDocument()
+    expect(screen.getAllByText('未提供')).toHaveLength(4)
+    expect(screen.getByRole('button', { name: '登记服务' })).toBeDisabled()
+    expect(requests).toBe(0)
+  })
+
+  it('shows query failures with a retry action instead of a successful empty summary', async () => {
+    installHandlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json(
+          {
+            error: { code: 'UNAVAILABLE', message: '契约摘要暂不可用', trace_id: 'contract-trace' },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText(/契约摘要暂不可用/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+    expect(screen.getAllByText('未提供')).toHaveLength(4)
+  })
+
   it('opens contract automation through the dedicated deep link', async () => {
     installHandlers()
     server.use(
@@ -423,6 +491,7 @@ describe('contract hub presentational branches', () => {
 function installHandlers({ empty = false }: { empty?: boolean } = {}) {
   const page = <T,>(items: T[]) => ({ items, total: items.length, page: 1, page_size: 100 })
   server.use(
+    http.get('/api/v1/v3/features', () => HttpResponse.json({ contract_hub: true })),
     http.get('/api/v1/projects', () => HttpResponse.json(page([project]))),
     http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
       HttpResponse.json(page(empty ? [] : services)),

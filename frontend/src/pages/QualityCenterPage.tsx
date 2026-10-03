@@ -1,8 +1,10 @@
 import { DownloadOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import {
+  Alert,
   Button,
   Card,
   Col,
+  Descriptions,
   Form,
   Input,
   InputNumber,
@@ -26,6 +28,7 @@ import type {
 } from '../features/quality/quality-service'
 import type { ImpactRunSummary } from '../features/impact/impact-service'
 import { useQualityCenter } from '../features/quality/use-quality-center'
+import { apiErrorMessage } from '../lib/api'
 import type { TestPlanRun } from '../lib/api'
 
 export default function QualityCenterPage() {
@@ -44,13 +47,13 @@ export default function QualityCenterPage() {
           </Typography.Text>
         </div>
         <Space>
-          <Button disabled={!state.projectId} onClick={() => setRiskOpen(true)}>
+          <Button disabled={!state.canEdit || !state.riskEnabled} onClick={() => setRiskOpen(true)}>
             分析发布风险
           </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            disabled={!state.projectId}
+            disabled={!state.canEdit}
             onClick={() => setCreateOpen(true)}
           >
             新建门禁
@@ -63,7 +66,7 @@ export default function QualityCenterPage() {
         quarantinedCount={records.filter((item) => item.quarantined).length}
         latest={latest}
       />
-      <QualityInsights risk={state.risk.data} loading={state.risk.isLoading} />
+      <QualityRiskReadState state={state} />
       <div className="quality-grid">
         <Card title="质量门禁" loading={state.gates.isLoading}>
           <Table
@@ -123,6 +126,7 @@ export default function QualityCenterPage() {
                     aria-label={`隔离 ${row.target_id}`}
                     checked={value}
                     loading={state.toggling}
+                    disabled={!state.canEdit}
                     onChange={(checked) => void state.toggleQuarantine(row.id, checked)}
                   />
                 ),
@@ -199,6 +203,15 @@ function QualityInsights({
         </Typography.Text>
       ) : (
         <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+          <Descriptions column={2} size="small" bordered>
+            <Descriptions.Item label="风险快照">{risk.id}</Descriptions.Item>
+            <Descriptions.Item label="冻结于">{risk.created_at}</Descriptions.Item>
+            <Descriptions.Item label="证据窗口">
+              {risk.window_started_at} 至 {risk.window_ended_at}
+            </Descriptions.Item>
+            <Descriptions.Item label="算法版本">{risk.algorithm_version}</Descriptions.Item>
+            <Descriptions.Item label="来源影响分析">{risk.impact_run_id}</Descriptions.Item>
+          </Descriptions>
           <Row gutter={16}>
             <Col span={6}>
               <Statistic title="质量评分" value={risk.quality_score} suffix="/ 100" />
@@ -321,19 +334,19 @@ function QualityOverview({
       </Col>
       <Col span={6}>
         <Card>
-          <Statistic title="Flaky 资产" value={flakyCount} />
+          <Statistic title="已载入 Flaky 资产" value={flakyCount} />
         </Card>
       </Col>
       <Col span={6}>
         <Card>
-          <Statistic title="已隔离" value={quarantinedCount} />
+          <Statistic title="已载入隔离资产" value={quarantinedCount} />
         </Card>
       </Col>
       <Col span={6}>
         <Card>
           <Statistic
             title="最近通过率"
-            value={typeof passRate === 'number' ? passRate : 0}
+            value={typeof passRate === 'number' ? passRate : '未提供'}
             suffix="%"
           />
         </Card>
@@ -464,11 +477,15 @@ function CreateRiskDialog({
   )
 }
 
-function nestedNumber(value: Record<string, unknown>, parent: string, child: string): number {
+function nestedNumber(
+  value: Record<string, unknown>,
+  parent: string,
+  child: string,
+): number | '未提供' {
   const nested = value[parent]
-  if (!nested || typeof nested !== 'object') return 0
+  if (!nested || typeof nested !== 'object') return '未提供'
   const result = (nested as Record<string, unknown>)[child]
-  return typeof result === 'number' ? result : 0
+  return typeof result === 'number' ? result : '未提供'
 }
 
 function riskLabel(value: ReleaseRiskDetail['risk_level']): string {
@@ -493,5 +510,40 @@ function firstPageItem<T>(value: { items: T[] } | undefined): T | undefined {
 
 function qualitySummary(value: Record<string, unknown>): string {
   if (typeof value.pass_rate !== 'number') return '待生成'
-  return `通过率 ${value.pass_rate}% · 失败 ${String(value.failed ?? 0)} · Flaky ${String(value.flaky ?? 0)}`
+  return `通过率 ${value.pass_rate}% · 失败 ${String(value.failed ?? '未提供')} · Flaky ${String(value.flaky ?? '未提供')}`
+}
+
+function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCenter> }) {
+  if (state.featureFlags.isError)
+    return (
+      <Alert
+        type="error"
+        title="功能状态读取失败"
+        description={apiErrorMessage(state.featureFlags.error)}
+        action={<Button onClick={() => void state.featureFlags.refetch()}>重试</Button>}
+      />
+    )
+  if (!state.riskEnabled)
+    return (
+      <Alert
+        type="info"
+        title={state.featureFlags.isPending ? '正在读取风险分析功能状态' : '发布风险分析尚未开放'}
+      />
+    )
+  return (
+    <>
+      {state.linkedRiskId && <Alert type="info" title={`冻结风险快照 ${state.linkedRiskId}`} />}
+      {state.risk.isError ? (
+        <Alert
+          showIcon
+          type="error"
+          title="风险快照读取失败"
+          description={apiErrorMessage(state.risk.error)}
+          action={<Button onClick={() => void state.risk.refetch()}>重试</Button>}
+        />
+      ) : (
+        <QualityInsights risk={state.risk.data} loading={state.risk.isLoading} />
+      )}
+    </>
+  )
 }

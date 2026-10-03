@@ -77,7 +77,7 @@ function ContextList({ state }: { state: InspectorState }) {
   const items = state.contexts.data?.items ?? []
   return (
     <Card
-      title={`Context List · ${state.contexts.data?.total ?? 0}`}
+      title={`Context List · ${state.contexts.data?.total ?? '未提供'}`}
       loading={state.contexts.isLoading}
     >
       {items.length === 0 && !state.contexts.isLoading ? (

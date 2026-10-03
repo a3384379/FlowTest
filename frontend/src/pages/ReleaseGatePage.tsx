@@ -13,10 +13,13 @@ import {
   Statistic,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { apiErrorMessage } from '../lib/api'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 import { iceColors } from '../theme/ice-theme'
 
 import type {
@@ -31,11 +34,10 @@ export default function ReleaseGatePage() {
   const state = useReleaseGate()
   const [policyOpen, setPolicyOpen] = useState(false)
   const [decisionOpen, setDecisionOpen] = useState(false)
-  const [selected, setSelected] = useState<ReleaseDecision | null>(null)
   return (
     <>
       <ReleaseGateHeader
-        projectSelected={Boolean(state.projectId)}
+        projectSelected={state.canEdit}
         hasPolicies={Boolean(state.policies.data?.length)}
         onCreatePolicy={() => setPolicyOpen(true)}
         onEvaluate={() => setDecisionOpen(true)}
@@ -53,7 +55,7 @@ export default function ReleaseGatePage() {
         <DecisionsCard
           decisions={state.decisions.data?.items}
           loading={state.decisions.isLoading}
-          onSelect={setSelected}
+          onSelect={(decision) => state.selectDecision(decision.id)}
         />
       </Space>
       <PolicyDialogContainer state={state} open={policyOpen} onClose={() => setPolicyOpen(false)} />
@@ -62,7 +64,18 @@ export default function ReleaseGatePage() {
         open={decisionOpen}
         onClose={() => setDecisionOpen(false)}
       />
-      <DecisionDetail decision={selected} onClose={() => setSelected(null)} />
+      <DecisionDetail
+        decision={
+          state.selectedDecision.data?.project_id === state.projectId
+            ? state.selectedDecision.data
+            : null
+        }
+        open={Boolean(state.decisionId)}
+        loading={state.selectedDecision.isPending}
+        error={state.selectedDecision.error}
+        onRetry={() => void state.selectedDecision.refetch()}
+        onClose={() => state.selectDecision(null)}
+      />
     </>
   )
 }
@@ -572,57 +585,107 @@ function EvidenceSelect({
 }
 
 function DecisionDetail({
+  open,
+  loading,
+  error,
+  onRetry,
   decision,
   onClose,
 }: {
+  open: boolean
+  loading: boolean
+  error: unknown
+  onRetry: () => void
   decision: ReleaseDecision | null
   onClose: () => void
 }) {
   return (
     <Modal
       title="发布判断证据"
-      open={Boolean(decision)}
+      open={open}
+      loading={open && loading}
       footer={null}
       onCancel={onClose}
       width={800}
     >
-      {decision && (
-        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-          <Descriptions bordered size="small" column={2}>
-            <Descriptions.Item label="候选版本">{decision.candidate_ref}</Descriptions.Item>
-            <Descriptions.Item label="结果">
-              <DecisionTag status={decision.status} />
-            </Descriptions.Item>
-            <Descriptions.Item label="证据指纹" span={2}>
-              <Typography.Text code copyable>
-                {decision.fingerprint}
-              </Typography.Text>
-            </Descriptions.Item>
-          </Descriptions>
-          <Table
-            rowKey="code"
-            size="small"
-            pagination={false}
-            dataSource={decision.reasons}
-            columns={[
-              {
-                title: '状态',
-                dataIndex: 'status',
-                render: (value: string) => (
-                  <Tag color={value === 'passed' ? 'success' : 'error'}>
-                    {value === 'passed' ? '通过' : '阻断'}
-                  </Tag>
-                ),
-              },
-              { title: '证据', dataIndex: 'evidence_type' },
-              { title: '原因', dataIndex: 'message' },
-              { title: '代码', dataIndex: 'code' },
-            ]}
-          />
-          <Typography.Text type="secondary">
-            历史判断只读；策略后续修改不会改变本次策略快照与证据指纹。
-          </Typography.Text>
-        </Space>
+      {error ? (
+        <Alert
+          type="error"
+          showIcon
+          title="发布判断读取失败"
+          description={apiErrorMessage(error)}
+          action={<Button onClick={onRetry}>重试</Button>}
+        />
+      ) : (
+        decision && (
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+            <Descriptions bordered size="small" column={2}>
+              <Descriptions.Item label="判断 ID">{decision.id}</Descriptions.Item>
+              <Descriptions.Item label="冻结时间">{decision.created_at}</Descriptions.Item>
+              <Descriptions.Item label="候选版本">{decision.candidate_ref}</Descriptions.Item>
+              <Descriptions.Item label="结果">
+                <DecisionTag status={decision.status} />
+              </Descriptions.Item>
+              <Descriptions.Item label="证据指纹" span={2}>
+                <Typography.Text code copyable>
+                  {decision.fingerprint}
+                </Typography.Text>
+              </Descriptions.Item>
+            </Descriptions>
+            <Table
+              rowKey="code"
+              size="small"
+              pagination={false}
+              dataSource={decision.reasons}
+              columns={[
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  render: (value: string) => (
+                    <Tag color={value === 'passed' ? 'success' : 'error'}>
+                      {value === 'passed' ? '通过' : '阻断'}
+                    </Tag>
+                  ),
+                },
+                { title: '证据', dataIndex: 'evidence_type' },
+                { title: '原因', dataIndex: 'message' },
+                { title: '代码', dataIndex: 'code' },
+                {
+                  title: '实际',
+                  render: (_, row: ReleaseReason) => JSON.stringify(row.actual) ?? '未提供',
+                },
+                {
+                  title: '期望',
+                  render: (_, row: ReleaseReason) => JSON.stringify(row.expected) ?? '未提供',
+                },
+              ]}
+            />
+            <Tabs
+              items={[
+                {
+                  key: 'policy',
+                  label: '冻结策略',
+                  children: (
+                    <ResponseCodeReader value={decision.policy_snapshot} title="此判断的策略快照" />
+                  ),
+                },
+                {
+                  key: 'evidence',
+                  label: '冻结证据',
+                  children: (
+                    <ResponseCodeReader
+                      value={decision.evidence_snapshot}
+                      title="此判断的证据快照"
+                    />
+                  ),
+                },
+              ]}
+            />
+            <Typography.Text type="secondary">
+              历史判断只读；策略后续修改不会改变本次策略快照与证据指纹。
+            </Typography.Text>
+          </Space>
+        )
       )}
     </Modal>
   )

@@ -6,10 +6,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.domain.api_assets import JsonValue
+from app.schemas.tasking import TestPlanRunDetailResponse
 
 RuntimeName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 TagName = Annotated[str, Field(min_length=1, max_length=50)]
 AssetName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+TestAssetKind = Literal["case", "suite"]
 
 
 def validate_runtime_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -82,6 +84,7 @@ class TestCaseResponse(BaseModel):
     draft_definition: StoredTestCaseDefinition
     draft_fingerprint: str
     current_version: int | None
+    archived_at: datetime | None
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
@@ -118,6 +121,26 @@ class TestCaseRunResponse(BaseModel):
     source: Literal["direct", "plan"]
     started_at: datetime
     created_new_version: bool = False
+
+
+class TestCaseRunHistoryResponse(BaseModel):
+    id: UUID
+    execution_id: UUID | None
+    case_version: int
+    workflow_id: UUID
+    workflow_version: int
+    environment_id: UUID
+    status: Literal["queued", "running", "passed", "failed", "cancelled", "quarantined"]
+    source: Literal["direct", "plan"]
+    started_at: datetime | None
+    created_at: datetime
+    plan_run_id: UUID | None
+    plan_id: UUID | None
+
+
+class TestSuiteLatestRunResponse(BaseModel):
+    suite_id: UUID
+    detail: TestPlanRunDetailResponse
 
 
 class TestCaseVersionResponse(BaseModel):
@@ -181,7 +204,9 @@ class TestSuiteResponse(BaseModel):
     description: str
     tags: list[str]
     draft_definition: TestSuiteDefinitionInput
+    draft_fingerprint: str
     current_version: int | None
+    archived_at: datetime | None
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
@@ -211,6 +236,77 @@ class AssetBulkMove(BaseModel):
 
 class AssetBulkMoveResponse(BaseModel):
     updated: int
+
+
+class AssetFolderCount(BaseModel):
+    folder_id: UUID
+    cases: int
+    suites: int
+
+
+class AssetDirectoryCountsResponse(BaseModel):
+    case_total: int
+    suite_total: int
+    published_case_total: int
+    unfiled_cases: int
+    unfiled_suites: int
+    folders: list[AssetFolderCount]
+
+
+class AssetDeletionPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+    @field_validator("asset_ids")
+    @classmethod
+    def unique_ids(cls, values: list[UUID]) -> list[UUID]:
+        if len(values) != len(set(values)):
+            raise ValueError("删除选择不能包含重复资产")
+        return values
+
+
+class AssetDeleteTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: UUID
+    expected_name: AssetName
+    expected_draft_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_version: int | None = Field(ge=1)
+    expected_updated_at: datetime
+
+
+class AssetReference(BaseModel):
+    kind: Literal["test_plan", "test_suite", "execution"]
+    id: UUID
+    name: str | None = None
+    version: int | None = None
+
+
+class AssetDeletionPreviewTarget(BaseModel):
+    asset: AssetDeleteTarget
+    archived: bool
+    references: list[AssetReference]
+
+
+class AssetDeletionPreviewResponse(BaseModel):
+    targets: list[AssetDeletionPreviewTarget]
+
+
+class AssetBulkDeleteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assets: list[AssetDeleteTarget] = Field(min_length=1, max_length=100)
+
+    @field_validator("assets")
+    @classmethod
+    def unique_assets(cls, values: list[AssetDeleteTarget]) -> list[AssetDeleteTarget]:
+        ids = [item.id for item in values]
+        if len(ids) != len(set(ids)):
+            raise ValueError("删除选择不能包含重复资产")
+        return values
+
+
+class AssetDeletionResponse(BaseModel):
+    archived_ids: list[UUID]
+    historical_data_retained: Literal[True] = True
 
 
 class VersionChangeResponse(BaseModel):

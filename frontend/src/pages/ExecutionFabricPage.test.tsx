@@ -63,6 +63,22 @@ const events: FabricEvent[] = [
 ]
 
 describe('ExecutionFabricPage', () => {
+  it('does not request administrator execution data when the fabric feature is closed', async () => {
+    let reads = 0
+    installHandlers()
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ runner_fabric: false })),
+      http.get('/api/v1/execution-fabric/*', () => {
+        reads += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('分布式执行面尚未启用')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /新建 Worker Pool/ })).not.toBeInTheDocument()
+    expect(reads).toBe(0)
+  })
+
   beforeEach(() => {
     authenticateTestUser(user)
   })
@@ -148,6 +164,7 @@ function installHandlers({
   onPool?: (payload: Record<string, unknown>) => void
 } = {}) {
   server.use(
+    http.get('/api/v1/v3/features', () => HttpResponse.json({ runner_fabric: true })),
     http.get('/api/v1/execution-fabric/overview', () =>
       HttpResponse.json({
         pools: 1,

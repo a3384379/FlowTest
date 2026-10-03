@@ -178,6 +178,23 @@ const run: ImpactRunDetail = {
 }
 
 describe('ImpactAnalysisPage', () => {
+  it('does not offer writes or fetch optional evidence when impact analysis is closed', async () => {
+    installHandlers({ mappings: [], runs: [] })
+    let reads = 0
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ impact_engine: false })),
+      http.get(`/api/v1/projects/${project.id}/impact/*`, () => {
+        reads += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('影响分析尚未启用')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /新建影响分析/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /登记资产映射/ })).toBeDisabled()
+    expect(reads).toBe(0)
+  })
+
   it('renders explainable impact evidence and creates a Git mapping and analysis', async () => {
     const mappings = [mapping]
     const runs: ImpactRunSummary[] = [run]
@@ -307,6 +324,35 @@ describe('ImpactAnalysisPage', () => {
     )
     expect(await screen.findByText('至少提供 Git Diff 或一组完整 Schema 版本')).toBeInTheDocument()
   })
+  it('keeps an explicit frozen analysis selected outside the current history page', async () => {
+    const old = {
+      ...run,
+      id: 'old-impact',
+      title: '历史影响分析',
+      source_ref: 'old-source-ref',
+      source_fingerprint: 'c'.repeat(64),
+    }
+    installHandlers({ mappings: [], runs: [run], details: [run, old] })
+    renderPage(`/projects/${project.id}/impact?run=old-impact`)
+    expect(await screen.findByText('历史影响分析 · old-source-ref')).toBeVisible()
+    expect(screen.getByText(old.source_fingerprint)).toBeVisible()
+    expect(screen.queryByText(`${run.title} · ${run.source_ref}`)).not.toBeInTheDocument()
+  })
+
+  it('shows a read failure instead of substituting the latest frozen analysis', async () => {
+    installHandlers({ mappings: [], runs: [run] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/impact/runs/missing`, () =>
+        HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '分析不存在', trace_id: 'test' } },
+          { status: 404 },
+        ),
+      ),
+    )
+    renderPage(`/projects/${project.id}/impact?run=missing`)
+    expect(await screen.findByText('所选影响分析读取失败')).toBeVisible()
+    expect(screen.queryByText(`${run.title} · ${run.source_ref}`)).not.toBeInTheDocument()
+  })
 })
 
 function installHandlers({
@@ -319,6 +365,7 @@ function installHandlers({
   details?: ImpactRunDetail[]
 }) {
   server.use(
+    http.get('/api/v1/v3/features', () => HttpResponse.json({ impact_engine: true })),
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
     ),
@@ -337,14 +384,14 @@ function installHandlers({
   )
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="impact">
+        <ProjectTestProvider section="impact" initialEntry={initialEntry}>
           <ImpactAnalysisPage />
         </ProjectTestProvider>
       </QueryClientProvider>

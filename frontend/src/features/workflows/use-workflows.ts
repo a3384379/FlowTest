@@ -85,6 +85,14 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     enabled: Boolean(projectId),
   })
   const canEdit = permissions.data?.capabilities.includes('edit') ?? false
+  const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
+  const [workflowSearch, setWorkflowSearchValue] = useRouteScopedState(projectId, null, '')
+  const [workflowPage, setWorkflowPage] = useRouteScopedState(projectId, null, 1)
+  const [deletedWorkflowIds, setDeletedWorkflowIds] = useRouteScopedState<string[]>(
+    draftScope,
+    null,
+    [],
+  )
   const [workflowSelection, setWorkflowSelection] = useRouteScopedSelection(
     projectId,
     initialWorkflowId ?? null,
@@ -96,7 +104,6 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
   const [draftStorageError, setDraftStorageErrorState] = useState<string | null>(null)
   const draftVersionRef = useRef(0)
   const previousUserIdRef = useRef<string | undefined>(userId)
-  const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
   const scopedMemory = useMemo(
     () => draftSession.workflowScope(draftScope),
     [draftSession, draftScope],
@@ -141,8 +148,13 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     enabled: Boolean(projectId),
   })
   const workflows = useQuery({
-    queryKey: ['workflows', projectId],
-    queryFn: () => listWorkflows(requiredId(projectId)),
+    queryKey: ['workflows', projectId, 'catalog', workflowSearch, workflowPage],
+    queryFn: () =>
+      listWorkflows(requiredId(projectId), {
+        page: workflowPage,
+        pageSize: 100,
+        search: workflowSearch,
+      }),
     enabled: Boolean(projectId),
   })
   const credentials = useQuery({
@@ -171,6 +183,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     workflowSelectionCleared,
     workflows.data,
     Boolean(initialExecutionId),
+    isCompleteWorkflowCatalog(workflowSearch, workflows.data),
   )
   const setDraftStorageError = useCallback(
     (error: string | null, targetId = workflowId) => {
@@ -389,6 +402,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     invalidateWorkflowDraft(targetWorkflowId)
     await runMutation(message.error, async () => {
       await deleteMutation.mutateAsync(targetWorkflowId)
+      setDeletedWorkflowIds([...deletedWorkflowIds, targetWorkflowId])
       const discarded = discardWorkflowDraft(targetWorkflowId)
       if (!discarded.ok) clearMemoryDraft(targetWorkflowId)
       if (targetWorkflowId === workflowId) {
@@ -622,18 +636,18 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     if (!canSaveTarget(targetWorkflowId)) {
       throw new Error('工作流暂不能保存，请先处理未应用配置或编辑权限。')
     }
-    if (!projectId || !userId) return
-    const targetWorkflow = workflows.data?.items.find((item) => item.id === targetWorkflowId)
+    if (!projectId || !userId) throw new Error('项目或登录状态已变化，页签保持打开。')
     const targetKey = workflowDraftKey(userId, projectId, targetWorkflowId)
     const memoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
     const storedDraft = readWorkflowDraft(targetKey)
     const targetDraft = memoryDraft ?? restoreWorkflowEdit(storedDraft, targetWorkflowId)
-    if (!targetWorkflow || !targetDraft) return
+    if (!targetDraft) throw new Error('本地草稿无法读取，页签保持打开。')
     if (!validForSave(targetDraft.definition)) {
       throw new Error('流程结构未完成，页签保持打开。')
     }
     const generationAtStart = draftGenerationRef.current.get(targetWorkflowId) ?? 0
     await runMutation(message.error, async () => {
+      const targetWorkflow = await getWorkflow(projectId, targetWorkflowId)
       const saved = await updateWorkflowDraft(
         projectId,
         targetWorkflow,
@@ -654,13 +668,14 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
         )
         setDraftStorageError(persisted.ok ? null : persisted.error, targetWorkflowId)
         await refreshWorkflows()
-        return
+        throw new Error('保存期间又产生了本地修改，页签保持打开。')
       }
       memoryDraftsRef.current.delete(targetWorkflowId)
       setMemoryDraftIds([...memoryDraftsRef.current.keys()])
       const removed = removeWorkflowDraft(targetKey)
       setDraftStorageError(removed.ok ? null : removed.error, targetWorkflowId)
       await refreshWorkflows()
+      if (!removed.ok) throw new Error(`${removed.error}，页签保持打开。`)
     })
   }
 
@@ -720,6 +735,13 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     historyDetail: historyExecution.data ?? null,
     liveNodes,
   })
+  const knownWorkflows = knownWorkflowItems(
+    queryClient
+      .getQueriesData<Page<Workflow>>({ queryKey: ['workflows', projectId] })
+      .flatMap(([, page]) => page?.items ?? []),
+    selectedWorkflow,
+    deletedWorkflowIds,
+  )
 
   return {
     projects,
@@ -734,6 +756,16 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     apis,
     artifacts,
     workflows,
+    knownWorkflows,
+    workflowSearch,
+    setWorkflowSearch: (value: string) => {
+      setWorkflowPage(1)
+      setWorkflowSearchValue(value)
+    },
+    workflowPage,
+    setWorkflowPage,
+    workflowCatalogComplete: isCompleteWorkflowCatalog(workflowSearch, workflows.data),
+    deletedWorkflowIds,
     credentials,
     graphqlSchemas,
     grpcDescriptors,
@@ -831,15 +863,22 @@ function useSelectedWorkflow(
   workflowSelectionCleared: boolean,
   workflows: Page<Workflow> | undefined,
   preserveExplicitSelection: boolean,
+  catalogComplete: boolean,
 ) {
   const listed = workflows?.items
   const workflowId = preserveExplicitSelection
     ? workflowSelection
-    : resolveSelectedWorkflowId(workflowSelection, workflowSelectionCleared, workflows)
+    : resolveSelectedWorkflowId(
+        workflowSelection,
+        workflowSelectionCleared,
+        workflows,
+        catalogComplete,
+      )
   const listedWorkflow = listed?.find((item) => item.id === workflowId) ?? null
   const workflowDetail = useQuery({
     queryKey: ['workflow', projectId, workflowId],
     queryFn: () => getWorkflow(requiredId(projectId), requiredId(workflowId)),
+    initialData: listedWorkflow ?? undefined,
     enabled: Boolean(workflows) && canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
   })
   return { workflowId, selectedWorkflow: listedWorkflow ?? workflowDetail.data ?? null }
@@ -849,17 +888,25 @@ function resolveSelectedWorkflowId(
   selection: string | null,
   cleared: boolean,
   workflows: Page<Workflow> | undefined,
+  catalogComplete: boolean,
 ): string | null {
   if (cleared) return null
   if (!workflows) return selection
   const listed = workflows.items
-  if (
-    selection &&
-    (listed.some((item) => item.id === selection) || listed.length < workflows.total)
-  ) {
+  if (selection && (!catalogComplete || listed.some((workflow) => workflow.id === selection)))
     return selection
-  }
   return listed.at(0)?.id ?? null
+}
+
+function knownWorkflowItems(
+  listed: Workflow[],
+  selected: Workflow | null,
+  deletedIds: string[],
+): Workflow[] {
+  const available = new Map(listed.map((workflow) => [workflow.id, workflow]))
+  if (selected) available.set(selected.id, selected)
+  for (const id of deletedIds) available.delete(id)
+  return [...available.values()]
 }
 
 function workflowDraftIdentity(
@@ -1138,4 +1185,8 @@ function restoreWorkflowEdit(
         editVersion: stored.editVersion,
       }
     : null
+}
+
+function isCompleteWorkflowCatalog(search: string, page: Page<Workflow> | undefined): boolean {
+  return search === '' && Boolean(page && page.items.length === page.total)
 }

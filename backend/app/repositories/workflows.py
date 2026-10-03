@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.control_reports import project_control_report
@@ -128,26 +128,25 @@ class WorkflowRepository:
         )
 
     async def list_workflows(
-        self, *, project_id: UUID, offset: int, limit: int
+        self, *, project_id: UUID, offset: int, limit: int, search: str | None = None
     ) -> tuple[list[Workflow], int]:
+        filters = [Workflow.project_id == project_id, Workflow.archived_at.is_(None)]
+        if search:
+            pattern = f"%{search}%"
+            filters.append(or_(Workflow.name.ilike(pattern), Workflow.description.ilike(pattern)))
         items = list(
             (
                 await self._session.scalars(
                     select(Workflow)
-                    .where(
-                        Workflow.project_id == project_id,
-                        Workflow.archived_at.is_(None),
-                    )
-                    .order_by(Workflow.updated_at.desc())
+                    .where(*filters)
+                    .order_by(Workflow.updated_at.desc(), Workflow.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count())
-            .select_from(Workflow)
-            .where(Workflow.project_id == project_id, Workflow.archived_at.is_(None))
+            select(func.count()).select_from(Workflow).where(*filters)
         )
         return items, int(total or 0)
 

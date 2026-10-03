@@ -14,7 +14,9 @@ import {
   diffTestCaseVersions,
   diffTestSuiteVersions,
   listTestCaseVersions,
+  listTestCases,
   listTestSuiteVersions,
+  listTestSuites,
   moveTestCases,
   moveTestSuites,
   publishTestCase,
@@ -26,9 +28,30 @@ import {
   updateTestCase,
   updateTestSuite,
 } from './test-asset-service'
-import { listAssetWorkflows, listCaseCatalog, listSuiteCatalog } from './asset-workspace-service'
+import {
+  listAssetWorkflows,
+  listCaseCatalog,
+  listAssetDirectoryCounts,
+} from './asset-workspace-service'
 
-export function useTestAssets() {
+type AssetBrowseOptions = {
+  folder?: string
+  casePage?: number
+  suitePage?: number
+  loadCaseOptions?: boolean
+}
+
+function resolveBrowseOptions({
+  folder = 'all',
+  casePage = 1,
+  suitePage = 1,
+  loadCaseOptions = true,
+}: AssetBrowseOptions) {
+  return { folder, casePage, suitePage, loadCaseOptions }
+}
+
+export function useTestAssets(options: AssetBrowseOptions = {}) {
+  const { folder, casePage, suitePage, loadCaseOptions } = resolveBrowseOptions(options)
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const [search, setSearch] = useState('')
@@ -36,13 +59,13 @@ export function useTestAssets() {
   const [diff, setDiff] = useState<VersionDiff | null>(null)
   const enabled = Boolean(projectId)
   const cases = useQuery({
-    queryKey: ['test-cases', projectId, search, tag],
-    queryFn: () => listCaseCatalog(projectId!, search, tag),
+    queryKey: ['test-cases', projectId, search, tag, folder, casePage],
+    queryFn: () => listTestCases(projectId!, search, tag, casePage, 20, folder),
     enabled,
   })
   const suites = useQuery({
-    queryKey: ['test-suites', projectId, search, tag],
-    queryFn: () => listSuiteCatalog(projectId!, search, tag),
+    queryKey: ['test-suites', projectId, search, tag, folder, suitePage],
+    queryFn: () => listTestSuites(projectId!, search, tag, suitePage, 20, folder),
     enabled,
   })
   const workflows = useQuery({
@@ -61,8 +84,13 @@ export function useTestAssets() {
     enabled,
   })
   const caseOptions = useQuery({
-    queryKey: ['test-cases', projectId, '', ''],
+    queryKey: ['test-case-options', projectId],
     queryFn: () => listCaseCatalog(projectId!, '', ''),
+    enabled: enabled && loadCaseOptions,
+  })
+  const directoryCounts = useQuery({
+    queryKey: ['asset-directory-counts', projectId, search, tag],
+    queryFn: () => listAssetDirectoryCounts(projectId!, search, tag),
     enabled,
   })
   const permissions = useQuery({
@@ -78,6 +106,8 @@ export function useTestAssets() {
       queryClient.invalidateQueries({ queryKey: ['test-asset', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['test-case-versions', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['test-suite-versions', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['test-case-options', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['asset-directory-counts', projectId] }),
     ])
   }
 
@@ -98,7 +128,11 @@ export function useTestAssets() {
   const runCaseMutation = useMutation({
     mutationFn: ({ caseId, input }: { caseId: string; input: RunCaseInput }) =>
       runTestCase(projectId!, caseId, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['asset-run-history', projectId] }),
+      ]),
   })
   const publishSuiteMutation = useMutation({
     mutationFn: (suiteId: string) => publishTestSuite(projectId!, suiteId),
@@ -151,6 +185,7 @@ export function useTestAssets() {
     environments,
     folders,
     caseOptions,
+    directoryCounts,
     permissions,
     canEdit: permissions.data?.capabilities.includes('edit') ?? false,
     canExecute: permissions.data?.capabilities.includes('execute') ?? false,

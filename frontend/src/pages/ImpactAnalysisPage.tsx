@@ -22,6 +22,7 @@ import {
 } from 'antd'
 import { useMemo, useState } from 'react'
 
+import { apiErrorMessage } from '../lib/api'
 import type {
   ImpactCatalog,
   ImpactChange,
@@ -32,6 +33,8 @@ import type {
   SelectedAsset,
 } from '../features/impact/impact-service'
 import { useImpactAnalysis } from '../features/impact/use-impact-analysis'
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useProjectContext } from '../features/projects/use-project-context'
 
 type MappingForm = {
   source_kind: ImpactSourceKind
@@ -65,6 +68,11 @@ const targetLabels: Record<ImpactTargetType, string> = {
 }
 
 export default function ImpactAnalysisPage() {
+  const { projectId } = useProjectContext()
+  return <ImpactAnalysisWorkspace key={projectId ?? 'none'} />
+}
+
+function ImpactAnalysisWorkspace() {
   const state = useImpactAnalysis()
   const [mappingOpen, setMappingOpen] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
@@ -83,14 +91,29 @@ export default function ImpactAnalysisPage() {
           </Typography.Text>
         </div>
         <Space>
-          <Button icon={<LinkOutlined />} onClick={() => setMappingOpen(true)}>
+          <Button
+            disabled={!state.canEdit}
+            icon={<LinkOutlined />}
+            onClick={() => setMappingOpen(true)}
+          >
             登记资产映射
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAnalysisOpen(true)}>
+          <Button
+            disabled={!state.canEdit}
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setAnalysisOpen(true)}
+          >
             新建影响分析
           </Button>
         </Space>
       </div>
+      <QueryFailureNotice
+        queries={[state.flags, state.permissions, state.mappings, state.catalog, state.runs]}
+      />
+      {state.flags.data?.impact_engine === false ? (
+        <Alert showIcon className="page-alert" type="info" title="影响分析尚未启用" />
+      ) : null}
       <Alert
         showIcon
         type="info"
@@ -99,7 +122,17 @@ export default function ImpactAnalysisPage() {
         description="仅解析有边界的标准 unified diff 与平台内已登记 Schema 版本；每个推荐资产都保留命中选择器和变更路径。"
       />
       <ImpactOverview detail={detail} mappingCount={mappings.length} />
-      <AnalysisWorkspace detail={detail} loading={state.detail.isLoading} />
+      {state.detail.isError ? (
+        <Alert
+          showIcon
+          type="error"
+          title="所选影响分析读取失败"
+          description={apiErrorMessage(state.detail.error)}
+          action={<Button onClick={() => void state.detail.refetch()}>重试</Button>}
+        />
+      ) : (
+        <AnalysisWorkspace detail={detail} loading={state.detail.isLoading} />
+      )}
       <CoverageMatrix detail={detail} />
       <Row gutter={16}>
         <Col span={14}>
@@ -115,6 +148,7 @@ export default function ImpactAnalysisPage() {
             mappings={mappings}
             loading={state.mappings.isLoading}
             deleting={state.mappingPending}
+            readOnly={!state.canEdit}
             onDelete={state.deleteMapping}
           />
         </Col>
@@ -160,19 +194,19 @@ function ImpactOverview({
         <Card>
           <Statistic
             title="变更项"
-            value={detail?.change_count ?? 0}
+            value={detail?.change_count ?? '未提供'}
             prefix={<BranchesOutlined />}
           />
         </Card>
       </Col>
       <Col span={6}>
         <Card>
-          <Statistic title="破坏性变更" value={detail?.summary.breaking_change_count ?? 0} />
+          <Statistic title="破坏性变更" value={detail?.summary.breaking_change_count ?? '未提供'} />
         </Card>
       </Col>
       <Col span={6}>
         <Card>
-          <Statistic title="推荐资产" value={detail?.summary.selected_asset_count ?? 0} />
+          <Statistic title="推荐资产" value={detail?.summary.selected_asset_count ?? '未提供'} />
         </Card>
       </Col>
       <Col span={6}>
@@ -214,6 +248,13 @@ function AnalysisContent({
       title={`${detail.title} · ${detail.source_ref || '未指定来源引用'}`}
       extra={<Tag color="success">证据已保存</Tag>}
     >
+      <Descriptions size="small" column={2}>
+        <Descriptions.Item label="分析 ID">{detail.id}</Descriptions.Item>
+        <Descriptions.Item label="冻结于">{detail.created_at}</Descriptions.Item>
+        <Descriptions.Item label="来源指纹" span={2}>
+          {detail.source_fingerprint}
+        </Descriptions.Item>
+      </Descriptions>
       <div className="impact-workspace">
         <ImpactColumn title="① 变更" count={detail.changes.length}>
           {detail.changes.map((change) => (
@@ -405,11 +446,13 @@ function RunHistory({
 function MappingTable({
   mappings,
   loading,
+  readOnly,
   deleting,
   onDelete,
 }: {
   mappings: ImpactMapping[]
   loading: boolean
+  readOnly: boolean
   deleting: boolean
   onDelete: (id: string) => Promise<void>
 }) {
@@ -450,6 +493,7 @@ function MappingTable({
                   type="text"
                   danger
                   loading={deleting}
+                  disabled={readOnly}
                   icon={<DeleteOutlined />}
                 />
               </Popconfirm>

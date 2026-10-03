@@ -341,10 +341,53 @@ export async function executeApi(
   return response.data
 }
 
-export async function listExecutions(projectId: string) {
+export async function listExecutions(
+  projectId: string,
+  options: { apiId?: string; page?: number; pageSize?: number } = {},
+) {
   const response = await apiClient.get<Page<ExecutionDetail['execution']>>(
     `/projects/${projectId}/executions`,
-    { params: { page: 1, page_size: 20 } },
+    {
+      params: {
+        page: options.page ?? 1,
+        page_size: options.pageSize ?? 20,
+        api_definition_id: options.apiId,
+      },
+    },
   )
   return response.data
+}
+
+export async function getApiExecution(
+  projectId: string,
+  executionId: string,
+  signal?: AbortSignal,
+): Promise<ExecutionDetail> {
+  const response = await apiClient.get<ExecutionDetail>(
+    `/projects/${projectId}/executions/${executionId}`,
+    { signal },
+  )
+  return response.data
+}
+
+export async function downloadApiResponse(
+  projectId: string,
+  execution: ExecutionDetail['execution'],
+) {
+  if (!execution.response_artifact_id || execution.project_id !== projectId) {
+    throw new Error('响应文件不属于当前执行或项目')
+  }
+  const response = await apiClient.get<Blob>(
+    `/projects/${projectId}/files/${execution.response_artifact_id}`,
+    { responseType: 'blob' },
+  )
+  const url = URL.createObjectURL(response.data)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `response-${execution.id}.bin`
+    anchor.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }

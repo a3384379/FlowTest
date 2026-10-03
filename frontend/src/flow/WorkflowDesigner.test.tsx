@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ConfigProvider } from 'antd'
+import { MemoryRouter } from 'react-router-dom'
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -31,6 +32,83 @@ vi.mock('../features/workflows/workflow-service', () => ({
 describe('WorkflowDesigner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('offers project-scoped configuration links for missing prerequisites and keeps node addition disabled', async () => {
+    render(
+      <MemoryRouter initialEntries={['/projects/project-one/workflows?focus=flow-one']}>
+        <WorkflowDesigner
+          projectId="project-one"
+          definition={workflowDefinition}
+          apis={[]}
+          artifacts={[]}
+          credentials={[]}
+          statuses={{}}
+          editable
+          onChange={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'plus 添加节点' }))
+    const search = screen.getByLabelText('搜索节点类型')
+    for (const [query, label, route] of [
+      ['SQL', '配置数据库凭据', '/projects/project-one/data'],
+      ['Redis', '配置 Redis 凭据', '/projects/project-one/data'],
+      ['GraphQL', '配置 GraphQL Schema', '/projects/project-one/protocols'],
+      ['gRPC', '配置 gRPC 描述文件', '/projects/project-one/protocols'],
+      ['数据集', '上传数据集文件', '/projects/project-one/apis'],
+    ]) {
+      fireEvent.change(search, { target: { value: query } })
+      const link = await screen.findByRole('link', { name: label })
+      const target = new URL(link.getAttribute('href')!, window.location.origin)
+      expect(target.pathname).toBe(route)
+      expect(target.searchParams.get('return_to')).toBe(
+        '/projects/project-one/workflows?focus=flow-one',
+      )
+      expect(
+        within(link.closest('article')!).getByRole('button', { name: /^plus 添加/ }),
+      ).toBeDisabled()
+    }
+  })
+
+  it('focuses reference overlays on the selected node and leaves persisted execution edges unchanged', async () => {
+    const definition = structuredClone(workflowDefinition)
+    const first = definition.nodes.find((node) => node.id === 'api')!
+    first.type = 'extract'
+    first.config = {
+      source_node_id: 'start',
+      expression: 'variables.id',
+    }
+    const second = definition.nodes.find((node) => node.id === 'end')!
+    second.type = 'extract'
+    second.config = {
+      source_node_id: 'api',
+      expression: 'body.id',
+    }
+    const before = structuredClone(definition)
+    const onChange = vi.fn()
+    render(
+      <WorkflowDesigner
+        definition={definition}
+        apis={[]}
+        artifacts={[]}
+        credentials={[]}
+        statuses={{}}
+        editable
+        onChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    const overlay = screen.getByRole('checkbox', { name: '数据引用' })
+    fireEvent.click(overlay)
+    expect(await screen.findByText('1 项节点字段引用')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '查看全图来源' }))
+    expect(await screen.findByText('2 项节点字段引用')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '只看当前节点来源' }))
+    fireEvent.click(overlay)
+    expect(screen.queryByText('1 项节点字段引用')).not.toBeInTheDocument()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(definition).toEqual(before)
   })
 
   it('edits workflow settings in the graph draft and supports undo', async () => {

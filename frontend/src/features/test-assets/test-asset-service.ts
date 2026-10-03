@@ -34,9 +34,16 @@ export async function listTestCases(
   tag: string,
   page = 1,
   pageSize = 20,
+  folder?: string,
 ): Promise<Page<TestCase>> {
   const response = await apiClient.get<Page<TestCase>>(`/projects/${projectId}/test-cases`, {
-    params: { page, page_size: pageSize, search: search || undefined, tag: tag || undefined },
+    params: {
+      page,
+      page_size: pageSize,
+      search: search || undefined,
+      tag: tag || undefined,
+      ...assetFolderFilter(folder),
+    },
   })
   return response.data
 }
@@ -186,11 +193,23 @@ export async function listTestSuites(
   tag: string,
   page = 1,
   pageSize = 20,
+  folder?: string,
 ): Promise<Page<TestSuite>> {
   const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
-    params: { page, page_size: pageSize, search: search || undefined, tag: tag || undefined },
+    params: {
+      page,
+      page_size: pageSize,
+      search: search || undefined,
+      tag: tag || undefined,
+      ...assetFolderFilter(folder),
+    },
   })
   return response.data
+}
+
+function assetFolderFilter(folder?: string): { folder_id?: string; unfiled?: boolean } {
+  if (!folder || folder === 'all') return {}
+  return folder === 'unfiled' ? { unfiled: true } : { folder_id: folder }
 }
 
 export async function getTestSuite(projectId: string, suiteId: string): Promise<TestSuite> {

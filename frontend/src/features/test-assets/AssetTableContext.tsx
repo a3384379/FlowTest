@@ -9,9 +9,11 @@ import type { useAssetHistory } from './use-asset-history'
 export type AssetTableWorkspace = {
   projectId: string
   page: number
+  total?: number
   onPage: (page: number) => void
   onFocus: (kind: AssetKind, id: string) => void
   onPlan: (target: PublishedAssetTarget, execute: boolean) => void
+  onDelete: (kind: AssetKind, ids: string[]) => void
   workflows: Workflow[]
   history: ReturnType<typeof useAssetHistory>
   canEdit: boolean

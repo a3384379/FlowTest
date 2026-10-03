@@ -21,18 +21,29 @@ import {
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 
-import type { CreateTestPlanInput } from '../features/task-plans/task-plan-service'
+import type {
+  CreateTestPlanInput,
+  TestPlanTargetAsset,
+} from '../features/task-plans/task-plan-service'
+import TestPlanTargetSelect from '../features/task-plans/TestPlanTargetSelect'
 import type { TestPlanTargetType } from '../features/task-plans/task-plan-service'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
-import type { TestPlan, TestPlanRun } from '../lib/api'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { apiErrorMessage, type TestPlan, type TestPlanRun } from '../lib/api'
 
 export default function TestPlansPage() {
+  const { projectId } = useProjectContext()
+  return <TaskPlanWorkspace key={projectId ?? 'none'} />
+}
+
+function TaskPlanWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useTestPlans()
 
   return (
     <>
       <TaskHeading state={state} />
+      <TaskErrorAlert state={state} />
       <TaskWorkspace state={state} focusedId={searchParams.get('focus') ?? undefined} />
       <TokenCard state={state} />
       <TaskDialogs state={state} />
@@ -42,12 +53,40 @@ export default function TestPlansPage() {
 
 type TaskState = ReturnType<typeof useTestPlans>
 
+function TaskErrorAlert({ state }: { state: TaskState }) {
+  const queries = [
+    state.permissions,
+    state.plans,
+    state.runs,
+    state.tokens,
+    state.workflows,
+    state.testCases,
+    state.testSuites,
+    state.environments,
+  ]
+  const error = queries.find((query) => query.isError)?.error
+  if (!error) return null
+  return (
+    <Alert
+      type="error"
+      showIcon
+      title="任务工作区加载失败"
+      description={apiErrorMessage(error)}
+      action={
+        <Button
+          onClick={() => {
+            queries.filter((query) => query.isError).forEach((query) => void query.refetch())
+          }}
+        >
+          重试
+        </Button>
+      }
+    />
+  )
+}
+
 function TaskHeading({ state }: { state: TaskState }) {
-  const cannotCreate =
-    !state.projectId ||
-    (!state.workflows.data?.items.length &&
-      !state.testCases.data?.items.some(isPublished) &&
-      !state.testSuites.data?.items.some(isPublished))
+  const cannotCreate = !state.canEdit || !state.projectId
   return (
     <div className="page-heading">
       <div>
@@ -67,7 +106,7 @@ function TaskHeading({ state }: { state: TaskState }) {
         />
         <Button
           icon={<KeyOutlined />}
-          disabled={!state.projectId}
+          disabled={!state.canManageTokens}
           onClick={() => void state.issueToken()}
         >
           生成 CI Token
@@ -92,17 +131,29 @@ function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: str
         <PlanTable
           items={state.plans.data?.items ?? []}
           focusedId={focusedId}
+          readOnly={!state.canEdit}
+          page={state.planPage}
+          total={state.plans.data?.total ?? 0}
+          onPageChange={state.setPlanPage}
           onRun={state.execute}
         />
       </Card>
       <Card title="运行队列" loading={state.runs.isLoading}>
-        <RunTable items={state.runs.data?.items ?? []} onCancel={state.cancel} />
+        <RunTable
+          page={state.runPage}
+          total={state.runs.data?.total ?? 0}
+          onPageChange={state.setRunPage}
+          items={state.runs.data?.items ?? []}
+          readOnly={!state.canEdit}
+          onCancel={state.cancel}
+        />
       </Card>
     </div>
   )
 }
 
 function TokenCard({ state }: { state: TaskState }) {
+  if (!state.canManageTokens) return null
   return (
     <Card title="CI 凭据" className="workflow-result-card">
       <Table
@@ -159,17 +210,31 @@ function TaskDialogs({ state }: { state: TaskState }) {
 function PlanTable({
   items,
   focusedId,
+  readOnly,
+  page,
+  total,
+  onPageChange,
   onRun,
 }: {
   items: TestPlan[]
   focusedId?: string
+  readOnly: boolean
+  page: number
+  total: number
+  onPageChange: (page: number) => void
   onRun: (id: string) => void
 }) {
   return (
     <Table
       rowKey="id"
       size="small"
-      pagination={false}
+      pagination={{
+        current: page,
+        pageSize: 20,
+        total,
+        showSizeChanger: false,
+        onChange: onPageChange,
+      }}
       dataSource={items}
       rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       locale={{ emptyText: '暂无测试计划' }}
@@ -206,7 +271,12 @@ function PlanTable({
           title: '操作',
           width: 90,
           render: (_, plan: TestPlan) => (
-            <Button type="link" icon={<PlayCircleOutlined />} onClick={() => onRun(plan.id)}>
+            <Button
+              type="link"
+              disabled={readOnly}
+              icon={<PlayCircleOutlined />}
+              onClick={() => onRun(plan.id)}
+            >
               运行
             </Button>
           ),
@@ -216,12 +286,32 @@ function PlanTable({
   )
 }
 
-function RunTable({ items, onCancel }: { items: TestPlanRun[]; onCancel: (id: string) => void }) {
+function RunTable({
+  items,
+  readOnly,
+  page,
+  total,
+  onPageChange,
+  onCancel,
+}: {
+  items: TestPlanRun[]
+  readOnly: boolean
+  page: number
+  total: number
+  onPageChange: (page: number) => void
+  onCancel: (id: string) => void
+}) {
   return (
     <Table
       rowKey="id"
       size="small"
-      pagination={false}
+      pagination={{
+        current: page,
+        pageSize: 20,
+        total,
+        showSizeChanger: false,
+        onChange: onPageChange,
+      }}
       dataSource={items}
       locale={{ emptyText: '暂无计划运行' }}
       columns={[
@@ -243,7 +333,13 @@ function RunTable({ items, onCancel }: { items: TestPlanRun[]; onCancel: (id: st
           width: 90,
           render: (_, run: TestPlanRun) =>
             ['queued', 'running'].includes(run.status) ? (
-              <Button type="link" danger icon={<StopOutlined />} onClick={() => onCancel(run.id)}>
+              <Button
+                type="link"
+                danger
+                disabled={readOnly}
+                icon={<StopOutlined />}
+                onClick={() => onCancel(run.id)}
+              >
                 取消
               </Button>
             ) : null,
@@ -264,10 +360,10 @@ function CreatePlanDialog({
   onCreate,
 }: {
   open: boolean
-  workflows: Array<{ id: string; name: string }>
+  workflows: TestPlanTargetAsset[]
   environments: Array<{ id: string; name: string }>
-  testCases: Array<{ id: string; name: string }>
-  testSuites: Array<{ id: string; name: string }>
+  testCases: TestPlanTargetAsset[]
+  testSuites: TestPlanTargetAsset[]
   submitting: boolean
   onClose: () => void
   onCreate: (input: CreateTestPlanInput) => Promise<void>
@@ -284,7 +380,7 @@ function CreatePlanDialog({
   const [form] = Form.useForm<PlanForm>()
   const targetType = Form.useWatch('targetType', form) ?? 'workflow'
   const scheduleMode = Form.useWatch('scheduleMode', form) ?? 'manual'
-  const targetOptions = selectTargetOptions(targetType, workflows, testCases, testSuites)
+  const targetAssets = { workflow: workflows, case: testCases, suite: testSuites }
   return (
     <Modal
       title="新建测试计划"
@@ -329,12 +425,22 @@ function CreatePlanDialog({
             ]}
             onChange={() => {
               form.setFieldValue('targetId', undefined)
+              form.setFieldValue('targetVersion', undefined)
               form.setFieldValue('environmentId', undefined)
             }}
           />
         </Form.Item>
         <Form.Item name="targetId" label={targetLabel(targetType)} rules={[{ required: true }]}>
-          <Select showSearch optionFilterProp="label" options={targetOptions} />
+          <TestPlanTargetSelect
+            key={targetType}
+            type={targetType}
+            label={targetLabel(targetType)}
+            known={targetAssets[targetType]}
+            onSelection={(asset) => form.setFieldValue('targetVersion', asset.current_version)}
+          />
+        </Form.Item>
+        <Form.Item name="targetVersion" label="固定发布版本" rules={[{ required: true }]}>
+          <InputNumber readOnly precision={0} className="full-width" />
         </Form.Item>
         {targetType === 'workflow' && (
           <Form.Item name="environmentId" label="环境" rules={[{ required: true }]}>
@@ -419,16 +525,6 @@ function targetLabel(targetType: TestPlanTargetType) {
     suite: '测试套件',
   }
   return labels[targetType]
-}
-
-function selectTargetOptions(
-  targetType: TestPlanTargetType,
-  workflows: Array<{ id: string; name: string }>,
-  testCases: Array<{ id: string; name: string }>,
-  testSuites: Array<{ id: string; name: string }>,
-) {
-  const targets = { workflow: workflows, case: testCases, suite: testSuites }
-  return options(targets[targetType])
 }
 
 function localTime(value: string): string {

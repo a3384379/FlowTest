@@ -51,6 +51,64 @@ const detail: AIChangeSetDetail = {
 }
 
 describe('AIChangeSetsPage', () => {
+  it('shows suggestions to viewers without allowing generation or item review', async () => {
+    handlers(detail)
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'viewer',
+          capabilities: ['read'],
+          matrix: {},
+        }),
+      ),
+      http.post('/api/v1/ai/change-sets*', () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('新增异常流程')).toBeInTheDocument()
+    for (const name of ['生成 Draft Change Set', '审核并接受', '拒绝']) {
+      const button = screen.getByRole('button', { name: new RegExp(name) })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+    }
+    expect(writes).toBe(0)
+  })
+
+  it('does not display or review a focused change set from another project', async () => {
+    handlers({ ...detail, project_id: 'other-project' })
+    renderPage(`/projects/${project.id}/ai-changes?focus=${changeSetId}`)
+    expect(await screen.findByText('该变更集不属于当前项目')).toBeInTheDocument()
+    expect(screen.queryByText('新增异常流程')).not.toBeInTheDocument()
+  })
+
+  it('preserves historical review when AI generation and optional evidence features are closed', async () => {
+    handlers(detail)
+    let evidenceRequests = 0
+    server.use(
+      http.get('/api/v1/ai/status', () => HttpResponse.json({ enabled: false })),
+      http.get('/api/v1/v3/features', () =>
+        HttpResponse.json({ impact_engine: false, quality_intelligence: false }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, () => {
+        evidenceRequests += 1
+        return HttpResponse.json({})
+      }),
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () => {
+        evidenceRequests += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('AI 生成功能尚未启用，可查看已有审核记录。')).toBeInTheDocument()
+    expect(await screen.findByText('新增异常流程')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成 Draft Change Set' })).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '审核并接受' })).toBeEnabled())
+    expect(evidenceRequests).toBe(0)
+  })
+
   it('shows the draft-only boundary and accepts an edited item', async () => {
     let accepted: Record<string, unknown> | null = null
     handlers(detail)
@@ -207,6 +265,10 @@ describe('AIChangeSetsPage', () => {
 
 function handlers(value: AIChangeSetDetail) {
   server.use(
+    http.get('/api/v1/ai/status', () => HttpResponse.json({ enabled: true })),
+    http.get('/api/v1/v3/features', () =>
+      HttpResponse.json({ impact_engine: true, quality_intelligence: true }),
+    ),
     http.get('/api/v1/ai/change-sets', () =>
       HttpResponse.json({ items: [value], total: 1, page: 1, page_size: 100 }),
     ),

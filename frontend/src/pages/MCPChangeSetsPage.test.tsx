@@ -54,6 +54,43 @@ const changeSet: MCPChangeSet = {
 }
 
 describe('MCPChangeSetsPage', () => {
+  it('keeps high-risk proposal evidence readable without viewer approval or materialization', async () => {
+    handlers(() => ({
+      ...changeSet,
+      governance: { ...changeSet.governance, manual_approval_required: true },
+    }))
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'viewer',
+          capabilities: ['read'],
+          matrix: {},
+        }),
+      ),
+      http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/*`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByText('加入回归 Workflow')).toBeInTheDocument()
+    for (const name of ['批准变更集', '拒绝', '接受并物化']) {
+      const button = screen.getByRole('button', { name: new RegExp(name) })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+    }
+    expect(writes).toBe(0)
+  })
+
+  it('rejects a focused change set that belongs to another project', async () => {
+    handlers(() => ({ ...changeSet, project_id: 'other-project' }))
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByText(/该变更集不属于当前项目/)).toBeInTheDocument()
+    expect(screen.queryByText('加入回归 Workflow')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '接受并物化' })).not.toBeInTheDocument()
+  })
+
   it('previews a new control workflow and links its reviewed draft', async () => {
     const definition = {
       ...workflowDefinition,

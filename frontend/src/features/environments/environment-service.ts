@@ -96,10 +96,12 @@ export type EnvironmentTemplateInput = {
   manifest: EnvironmentTemplateManifest
 }
 
-export async function listEnvironmentTemplates(): Promise<Page<EnvironmentTemplateVersion>> {
+export async function listEnvironmentTemplates(
+  page = 1,
+): Promise<Page<EnvironmentTemplateVersion>> {
   return (
     await apiClient.get<Page<EnvironmentTemplateVersion>>('/environment-templates', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20 },
     })
   ).data
 }
@@ -128,11 +130,20 @@ export async function disableEnvironmentTemplate(templateId: string): Promise<vo
 
 export async function listEnvironmentInstances(
   projectId: string,
+  page = 1,
 ): Promise<Page<EnvironmentInstance>> {
   return (
     await apiClient.get<Page<EnvironmentInstance>>(`/projects/${projectId}/environment-instances`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20 },
     })
+  ).data
+}
+
+export async function getEnvironmentInstance(projectId: string, instanceId: string) {
+  return (
+    await apiClient.get<EnvironmentInstance>(
+      `/projects/${projectId}/environment-instances/${instanceId}`,
+    )
   ).data
 }
 

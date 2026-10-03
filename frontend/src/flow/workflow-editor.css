@@ -546,6 +546,14 @@
   row-gap: 6px;
 }
 
+.workflow-toolbar-secondary {
+  flex-shrink: 0;
+}
+
+.workflow-toolbar .ant-checkbox-wrapper {
+  white-space: nowrap;
+}
+
 .workflow-toolbar-primary .ant-btn-primary {
   background: linear-gradient(135deg, var(--ft-brand), var(--ft-brand));
   box-shadow: none;

@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import html
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -11,18 +12,30 @@ from uuid import UUID
 import pytest
 import respx
 from httpx import ASGITransport, AsyncClient, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import get_session
 from app.core.security import password_service
 from app.core.storage import StoredObject
 from app.domain.reporting import FailureCategory, classify_failure
+from app.engine.contracts import NodeStatus
+from app.engine.results import (
+    HttpRequestSnapshot,
+    HttpResponseSnapshot,
+    NodeAssertion,
+    NodeObservation,
+    NodeResult,
+    NodeResultError,
+)
 from app.main import app
 from app.models import Base
 from app.models.access import Project, User
 from app.models.api_assets import Environment
+from app.models.durable_execution import ExecutionCheckpoint
 from app.models.workflows import (
     Workflow,
+    WorkflowControlRecord,
     WorkflowExecution,
     WorkflowNodeExecution,
     WorkflowVersion,
@@ -144,6 +157,48 @@ async def test_report_list_detail_trend_and_html_export(
     assert downloaded.status_code == 200
     assert "FlowTest 测试报告" in downloaded.text
     assert "raw-secret" not in downloaded.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("depth", "cycle"), [(2, True), (18, False)])
+async def test_report_export_rejects_cyclic_or_excessively_deep_execution_trees(
+    reporting_context: ReportingContext, depth: int, cycle: bool
+) -> None:
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        parent_id = execution.id
+        for index in range(depth):
+            child = WorkflowExecution(
+                project_id=execution.project_id,
+                workflow_id=execution.workflow_id,
+                workflow_version_id=execution.workflow_version_id,
+                environment_id=execution.environment_id,
+                triggered_by_id=execution.triggered_by_id,
+                parent_execution_id=parent_id,
+                dataset_row_index=index,
+                status="passed",
+                snapshot=execution.snapshot,
+                context={},
+                started_at=execution.started_at,
+                completed_at=execution.completed_at,
+            )
+            session.add(child)
+            await session.flush()
+            parent_id = child.id
+        if cycle:
+            execution.parent_execution_id = parent_id
+            execution.dataset_row_index = depth
+        await session.commit()
+    headers = await _login_headers(reporting_context.client)
+    response = await reporting_context.client.post(
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}/exports/html",
+        headers=headers,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "REPORT_EXPORT_LIMIT_EXCEEDED"
+    assert response.json()["error"]["trace_id"]
 
 
 @respx.mock
@@ -344,7 +399,12 @@ async def _seed(
 
 def _snapshot(workflow_id: UUID, version_id: UUID) -> dict[str, Any]:
     return {
-        "workflow": {"id": str(workflow_id), "version_id": str(version_id), "version": 1},
+        "workflow": {
+            "id": str(workflow_id),
+            "name": "失败分类流程",
+            "version_id": str(version_id),
+            "version": 1,
+        },
         "apis": {
             "api": {
                 "prepared_request": {
@@ -412,3 +472,212 @@ async def _login_headers(client: AsyncClient) -> dict[str, str]:
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+async def _seed_report_evidence(context: ReportingContext) -> UUID:
+    now = datetime.now(UTC)
+    observations = tuple(
+        NodeObservation(
+            attempt=attempt,
+            request=HttpRequestSnapshot(method="GET", url="https://api.example.test/amount"),
+            response=HttpResponseSnapshot(status_code=200, body={"marker": marker}, size_bytes=20),
+            duration_ms=1,
+            started_at=now,
+            completed_at=now,
+        )
+        for attempt, marker in ((1, "first-observation"), (2, "last-observation"))
+    )
+    result = NodeResult(
+        status=NodeStatus.FAILED,
+        assertions=(NodeAssertion(name="amount", passed=False, expected=29900, actual=29901),),
+        observations=observations,
+        error=NodeResultError(code="ASSERTION_FAILED", message="金额断言失败"),
+    )
+    async with context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, context.execution_id)
+        assert execution is not None
+        execution.completed_at = None
+        node = await session.scalar(
+            select(WorkflowNodeExecution).where(
+                WorkflowNodeExecution.workflow_execution_id == execution.id,
+                WorkflowNodeExecution.node_id == "api",
+            )
+        )
+        assert node is not None
+        node.result = result.model_dump(mode="json")
+        node.attempts = 2
+        node.output = {"input_mappings": [{"source_node_id": "mapping-marker"}]}
+        child = WorkflowExecution(
+            project_id=execution.project_id,
+            workflow_id=execution.workflow_id,
+            workflow_version_id=execution.workflow_version_id,
+            environment_id=execution.environment_id,
+            triggered_by_id=execution.triggered_by_id,
+            parent_execution_id=execution.id,
+            dataset_row_index=0,
+            status="failed",
+            snapshot=execution.snapshot,
+            context={},
+            started_at=now,
+            completed_at=now,
+        )
+        session.add(child)
+        await session.flush()
+        session.add(
+            WorkflowNodeExecution(
+                workflow_execution_id=child.id,
+                node_id="child-api",
+                node_type="api",
+                name="子运行请求",
+                status="failed",
+                attempts=2,
+                output={"frozen_child_marker": "retained-child-body"},
+                result=result.model_dump(mode="json"),
+                started_at=now,
+                completed_at=now,
+            )
+        )
+        session.add(
+            WorkflowNodeExecution(
+                workflow_execution_id=execution.id,
+                node_id="loop",
+                node_type="capability",
+                name="循环证据",
+                status="failed",
+                attempts=1,
+                output={"report_kind": "iteration", "report_paged": True, "record_count": 3},
+                started_at=now,
+                completed_at=now,
+            )
+        )
+        instance_id = "__nested_request__:export-marker"
+        session.add_all(
+            WorkflowControlRecord(
+                workflow_execution_id=execution.id,
+                node_id="loop",
+                kind="iteration",
+                ordinal=ordinal,
+                status="failed" if ordinal == 2 else "passed",
+                test_verdict="failed" if ordinal == 2 else "passed",
+                payload={
+                    "input_index": ordinal,
+                    "nodes": [{"node_id": "check", "instance_id": instance_id}]
+                    if ordinal == 2
+                    else [],
+                },
+            )
+            for ordinal in range(3)
+        )
+        session.add_all(
+            ExecutionCheckpoint(
+                project_id=execution.project_id,
+                execution_id=execution.id,
+                node_id=instance_id,
+                node_type="api",
+                node_name="嵌套请求",
+                phase="main",
+                best_effort=False,
+                attempt=attempt,
+                status="failed",
+                input_hash="a" * 64,
+                output_digest="b" * 64,
+                output={"amount": 29901},
+                result=result.model_dump(mode="json"),
+                started_at=now,
+                finished_at=now,
+            )
+            for attempt in (1, 2)
+        )
+        await session.commit()
+        return child.id
+
+
+@pytest.mark.asyncio
+async def test_report_preserves_protocol_assertions_and_control_output(
+    reporting_context: ReportingContext,
+) -> None:
+    await _seed_report_evidence(reporting_context)
+    headers = await _login_headers(reporting_context.client)
+    response = await reporting_context.client.get(
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    nodes = {node["node_id"]: node for node in response.json()["nodes"]}
+    assert nodes["api"]["assertion"] == [
+        {"name": "amount", "passed": False, "expected": 29900, "actual": 29901, "message": ""}
+    ]
+    assert nodes["api"]["result"]["observations"][0]["attempt"] == 1
+    assert nodes["loop"]["output"]["record_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_html_export_preserves_all_frozen_evidence_and_unknown_duration(
+    reporting_context: ReportingContext,
+) -> None:
+    child_id = await _seed_report_evidence(reporting_context)
+    headers = await _login_headers(reporting_context.client)
+    exported = await reporting_context.client.post(
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}/exports/html",
+        headers=headers,
+    )
+    assert exported.status_code == 201, exported.text
+    downloaded = await reporting_context.client.get(
+        f"/api/v1/projects/{reporting_context.project_id}/files/{exported.json()['id']}",
+        headers=headers,
+    )
+    assert downloaded.status_code == 200
+    evidence = json.loads(html.unescape(downloaded.text.split("<pre>")[1].split("</pre>")[0]))
+    api_node = next(node for node in evidence["nodes"] if node["node_id"] == "api")
+    assert [item["attempt"] for item in api_node["observations"]] == [1, 2]
+    assert api_node["observations"][0]["response"]["body"]["marker"] == "first-observation"
+    assert api_node["input_mappings"][0]["source_node_id"] == "mapping-marker"
+    assert evidence["dataset_children"][0]["id"] == str(child_id)
+    child = evidence["dataset_evidence"][0]
+    assert child["summary"]["id"] == str(child_id)
+    assert child["nodes"][0]["result"]["assertions"][0]["actual"] == 29901
+    assert len(child["nodes"][0]["observations"]) == 2
+    assert child["nodes"][0]["output"]["frozen_child_marker"] == "retained-child-body"
+    assert child["snapshot"]["workflow"]["name"] == "失败分类流程"
+    assert evidence["snapshot"]["workflow"]["version"] == 1
+    assert (
+        evidence["control_records"][2]["payload"]["nodes"][0]["instance_id"]
+        == "__nested_request__:export-marker"
+    )
+    assert [item["attempt"] for item in evidence["checkpoints"]] == [1, 2]
+    assert evidence["checkpoints"][0]["result"]["assertions"][0]["actual"] == 29901
+    assert evidence["summary"]["duration_ms"] is None
+    assert "耗时: 未提供" in downloaded.text
+    assert "耗时: 0 ms" not in downloaded.text
+
+
+async def test_report_name_uses_frozen_metadata_and_marks_legacy_current_names(
+    reporting_context: ReportingContext,
+) -> None:
+    headers = await _login_headers(reporting_context.client)
+    path = (
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}"
+    )
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        workflow = await session.get(Workflow, execution.workflow_id)
+        assert workflow is not None
+        workflow.name = "后续改名"
+        await session.commit()
+    frozen = await reporting_context.client.get(path, headers=headers)
+    assert frozen.json()["summary"]["workflow_name"] == "失败分类流程"
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        snapshot = dict(execution.snapshot)
+        metadata = dict(snapshot["workflow"])
+        metadata.pop("name")
+        snapshot["workflow"] = metadata
+        execution.snapshot = snapshot
+        await session.commit()
+    legacy = await reporting_context.client.get(path, headers=headers)
+    assert legacy.json()["summary"]["workflow_name"] == "后续改名(当前名称; 历史名称未提供)"

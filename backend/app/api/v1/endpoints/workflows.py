@@ -59,12 +59,14 @@ async def list_workflows(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=200),
 ) -> Page[WorkflowResponse]:
     items, total = await WorkflowService(session).list_workflows(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        search=search,
     )
     return Page(
         items=[WorkflowResponse.model_validate(item) for item in items],

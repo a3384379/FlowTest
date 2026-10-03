@@ -43,6 +43,8 @@ import type {
   ServiceGraph,
 } from '../features/contracts/contract-hub-service'
 import { useContractHub } from '../features/contracts/use-contract-hub'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { apiErrorMessage } from '../lib/api'
 
 type ServiceForm = { service_key: string; display_name: string; description: string }
 type PactForm = { consumer_version: string; consumer: string; provider: string }
@@ -54,6 +56,11 @@ type VerificationForm = {
 }
 
 export default function ContractHubPage() {
+  const { projectId } = useProjectContext()
+  return <ContractHubWorkspace key={projectId ?? 'none'} />
+}
+
+function ContractHubWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') === 'automation' ? 'automation' : 'hub'
   const [providerId, setProviderId] = useState<string | null>(null)
@@ -88,6 +95,7 @@ export default function ContractHubPage() {
       ) : (
         <>
           <ContractHubHeader
+            readOnly={!state.canEdit}
             brokerAvailable={Boolean(state.summary.data?.broker_available)}
             hasPacts={pacts.length > 0}
             onService={() => setServiceDialog(true)}
@@ -96,6 +104,7 @@ export default function ContractHubPage() {
             onBroker={() => setPactDialog('broker')}
             onVerify={() => setVerificationDialog(true)}
           />
+          <ContractHubStatus state={state} />
           <Alert
             showIcon
             type="info"
@@ -105,6 +114,7 @@ export default function ContractHubPage() {
           />
           <ContractOverview summary={state.summary.data} loading={state.summary.isLoading} />
           <CompatibilityPanel
+            readOnly={!state.canEdit}
             providers={providers}
             providerId={providerId}
             matrix={state.matrix.data}
@@ -125,6 +135,7 @@ export default function ContractHubPage() {
             loading={state.pacts.isLoading || state.openapiRuns.isLoading}
           />
           <ServiceDialog
+            readOnly={!state.canEdit}
             open={serviceDialog}
             submitting={state.creatingService}
             onClose={() => setServiceDialog(false)}
@@ -133,6 +144,7 @@ export default function ContractHubPage() {
             }}
           />
           <PactDialog
+            readOnly={!state.canEdit}
             key={pactDialog ?? 'closed'}
             mode={pactDialog}
             submitting={state.importing}
@@ -142,6 +154,7 @@ export default function ContractHubPage() {
             }}
           />
           <OpenapiDialog
+            readOnly={!state.canEdit}
             open={openapiDialog}
             services={services}
             submitting={state.importing}
@@ -151,6 +164,7 @@ export default function ContractHubPage() {
             }}
           />
           <VerificationDialog
+            readOnly={!state.canEdit}
             open={verificationDialog}
             pacts={pacts}
             submitting={state.verifying}
@@ -165,7 +179,45 @@ export default function ContractHubPage() {
   )
 }
 
+function ContractHubStatus({ state }: { state: ReturnType<typeof useContractHub> }) {
+  const queries = [
+    state.flags,
+    state.permissions,
+    state.services,
+    state.pacts,
+    state.openapiRuns,
+    state.summary,
+    state.graph,
+    state.matrix,
+    state.checks,
+  ]
+  const failed = queries.filter((query) => query.isError)
+  if (failed.length) {
+    return (
+      <Alert
+        showIcon
+        type="error"
+        className="page-alert"
+        title={apiErrorMessage(failed[0].error)}
+        action={
+          <Button
+            aria-label="重试"
+            onClick={() => void Promise.all(failed.map((query) => query.refetch()))}
+          >
+            重试
+          </Button>
+        }
+      />
+    )
+  }
+  if (state.flags.data?.contract_hub === false) {
+    return <Alert showIcon type="info" className="page-alert" title="契约中心尚未启用" />
+  }
+  return null
+}
+
 function ContractHubHeader({
+  readOnly,
   brokerAvailable,
   hasPacts,
   onService,
@@ -174,6 +226,7 @@ function ContractHubHeader({
   onBroker,
   onVerify,
 }: {
+  readOnly: boolean
   brokerAvailable: boolean
   hasPacts: boolean
   onService: () => void
@@ -194,24 +247,29 @@ function ContractHubHeader({
         </Typography.Text>
       </div>
       <Space wrap>
-        <Button icon={<PlusOutlined />} onClick={onService}>
+        <Button
+          aria-label="登记服务"
+          icon={<PlusOutlined />}
+          disabled={readOnly}
+          onClick={onService}
+        >
           登记服务
         </Button>
-        <Button icon={<UploadOutlined />} onClick={onOpenapi}>
+        <Button icon={<UploadOutlined />} disabled={readOnly} onClick={onOpenapi}>
           导入 OpenAPI
         </Button>
-        <Button icon={<UploadOutlined />} onClick={onPact}>
+        <Button icon={<UploadOutlined />} disabled={readOnly} onClick={onPact}>
           导入 Pact
         </Button>
         {brokerAvailable ? (
-          <Button icon={<CloudDownloadOutlined />} onClick={onBroker}>
+          <Button icon={<CloudDownloadOutlined />} disabled={readOnly} onClick={onBroker}>
             从 Broker 导入
           </Button>
         ) : null}
         <Button
           type="primary"
           icon={<SafetyCertificateOutlined />}
-          disabled={!hasPacts}
+          disabled={readOnly || !hasPacts}
           onClick={onVerify}
         >
           执行提供方验证
@@ -229,15 +287,20 @@ export function ContractOverview({
   loading: boolean
 }) {
   const items = [
-    ['OpenAPI 契约', summary?.openapi_contract_count ?? 0, <FileProtectOutlined />, undefined],
-    ['Pact 契约', summary?.pact_contract_count ?? 0, <ApartmentOutlined />, undefined],
-    ['待验证', summary?.pending_verification_count ?? 0, undefined, '#d97706'],
-    ['破坏性变更', summary?.breaking_change_count ?? 0, undefined, '#dc2626'],
+    [
+      'OpenAPI 契约',
+      summary?.openapi_contract_count ?? '未提供',
+      <FileProtectOutlined />,
+      undefined,
+    ],
+    ['Pact 契约', summary?.pact_contract_count ?? '未提供', <ApartmentOutlined />, undefined],
+    ['待验证', summary?.pending_verification_count ?? '未提供', undefined, '#d97706'],
+    ['破坏性变更', summary?.breaking_change_count ?? '未提供', undefined, '#dc2626'],
   ] as const
   return (
     <Row gutter={16} className="performance-overview">
       {items.map(([title, value, prefix, color]) => (
-        <Col span={6} key={title}>
+        <Col xs={12} lg={6} key={title}>
           <Card loading={loading}>
             <Statistic
               title={title}
@@ -253,6 +316,7 @@ export function ContractOverview({
 }
 
 export function CompatibilityPanel({
+  readOnly = false,
   providers,
   providerId,
   matrix,
@@ -262,6 +326,7 @@ export function CompatibilityPanel({
   onProviderChange,
   onRunCheck,
 }: {
+  readOnly?: boolean
   providers: ServiceCatalogEntry[]
   providerId: string | null
   matrix?: CompatibilityMatrix
@@ -334,7 +399,7 @@ export function CompatibilityPanel({
         <Button
           type="primary"
           loading={checking}
-          disabled={!providerId || !providerVersion.trim()}
+          disabled={deploymentCheckDisabled(readOnly, providerId, providerVersion)}
           onClick={() =>
             providerId &&
             void onRunCheck({
@@ -349,6 +414,14 @@ export function CompatibilityPanel({
       </Space>
     </Card>
   )
+}
+
+function deploymentCheckDisabled(
+  readOnly: boolean,
+  providerId: string | null,
+  version: string,
+): boolean {
+  return readOnly || !providerId || !version.trim()
 }
 
 export function ServiceGraphPanel({ graph, loading }: { graph?: ServiceGraph; loading: boolean }) {
@@ -504,11 +577,13 @@ export function UnifiedContractsPanel({
 }
 
 function ServiceDialog({
+  readOnly,
   open,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   open: boolean
   submitting: boolean
   onClose: () => void
@@ -520,13 +595,14 @@ function ServiceDialog({
       title="登记服务"
       open={open}
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       okText="登记"
       cancelText="取消"
       onCancel={onClose}
       onOk={() => void form.validateFields().then(onSubmit)}
       afterClose={() => form.resetFields()}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={readOnly}>
         <Form.Item name="service_key" label="服务标识" rules={[{ required: true }]}>
           <Input placeholder="orders-api" />
         </Form.Item>
@@ -542,11 +618,13 @@ function ServiceDialog({
 }
 
 function PactDialog({
+  readOnly,
   mode,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   mode: 'upload' | 'broker' | null
   submitting: boolean
   onClose: () => void
@@ -574,7 +652,7 @@ function PactDialog({
       confirmLoading={submitting}
       okText="导入"
       cancelText="取消"
-      okButtonProps={{ disabled: mode === 'upload' && !file }}
+      okButtonProps={{ disabled: readOnly || (mode === 'upload' && !file) }}
       onCancel={onClose}
       onOk={() => void submit()}
       afterClose={() => {
@@ -582,7 +660,7 @@ function PactDialog({
         setFile(null)
       }}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={readOnly}>
         {mode === 'broker' ? (
           <>
             <Form.Item name="consumer" label="Consumer" rules={[{ required: true }]}>
@@ -616,12 +694,14 @@ function PactDialog({
 }
 
 function OpenapiDialog({
+  readOnly,
   open,
   services,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   open: boolean
   services: ServiceCatalogEntry[]
   submitting: boolean
@@ -641,7 +721,7 @@ function OpenapiDialog({
       confirmLoading={submitting}
       okText="导入"
       cancelText="取消"
-      okButtonProps={{ disabled: !file }}
+      okButtonProps={{ disabled: readOnly || !file }}
       onCancel={onClose}
       onOk={() =>
         void form.validateFields().then((values) =>
@@ -659,7 +739,7 @@ function OpenapiDialog({
         setFile(null)
       }}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={readOnly}>
         <Form.Item label="OpenAPI 文档" required>
           <Upload
             maxCount={1}
@@ -686,12 +766,14 @@ function OpenapiDialog({
 }
 
 function VerificationDialog({
+  readOnly,
   open,
   pacts,
   submitting,
   onClose,
   onSubmit,
 }: {
+  readOnly: boolean
   open: boolean
   pacts: PactContract[]
   submitting: boolean
@@ -708,6 +790,7 @@ function VerificationDialog({
       title="执行提供方验证"
       open={open}
       confirmLoading={submitting}
+      okButtonProps={{ disabled: readOnly }}
       okText="执行验证"
       cancelText="取消"
       onCancel={onClose}
@@ -722,7 +805,7 @@ function VerificationDialog({
       }
       afterClose={() => form.resetFields()}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" disabled={readOnly}>
         <Form.Item name="pact_id" label="Pact 契约" rules={[{ required: true }]}>
           <Select
             options={pacts.map((item) => ({

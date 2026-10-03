@@ -1,7 +1,9 @@
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import httpx
 import pytest
@@ -19,6 +21,7 @@ from app.domain.scopes import HeaderScope
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.executions import APICallExecution
 from app.services.api_assets import PreparedHeader, PreparedRequest
 from app.services.executions import _redact_request_url, _send_request
 
@@ -27,6 +30,92 @@ pytestmark = pytest.mark.redaction_on
 
 ADMIN_EMAIL = "execution-admin@example.com"
 ADMIN_PASSWORD = "execution-password-123!"
+
+
+@pytest.mark.asyncio
+async def test_execution_history_uses_asset_identity_and_complete_pages(
+    execution_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(execution_client)
+    project_id, environment_id, definition_id = await _create_execution_assets(
+        execution_client, headers
+    )
+    other = await execution_client.post(
+        f"/api/v1/projects/{project_id}/apis",
+        headers=headers,
+        json={"name": "同地址的另一资产", "request": {"method": "POST", "path": "/users"}},
+    )
+    assert other.status_code == 201, other.text
+    detail = await execution_client.get(
+        f"/api/v1/projects/{project_id}/apis/{definition_id}", headers=headers
+    )
+    actor = await execution_client.get("/api/v1/auth/me", headers=headers)
+    assert actor.status_code == 200, actor.text
+    start = datetime(2026, 10, 1, tzinfo=UTC)
+    ids: list[str] = []
+    async for session in app.dependency_overrides[get_session]():
+        for index in range(43):
+            execution = APICallExecution(
+                project_id=UUID(project_id),
+                api_definition_id=UUID(definition_id),
+                api_version_id=UUID(detail.json()["version"]["id"]),
+                environment_id=UUID(environment_id),
+                triggered_by_id=UUID(actor.json()["id"]),
+                status="passed",
+                request_method="POST",
+                request_url="http://target.example.com/users",
+                started_at=start + timedelta(seconds=index),
+            )
+            session.add(execution)
+            await session.flush()
+            ids.append(str(execution.id))
+        session.add(
+            APICallExecution(
+                project_id=UUID(project_id),
+                api_definition_id=UUID(other.json()["definition"]["id"]),
+                api_version_id=UUID(other.json()["version"]["id"]),
+                environment_id=UUID(environment_id),
+                triggered_by_id=UUID(actor.json()["id"]),
+                status="failed",
+                request_method="POST",
+                request_url="http://target.example.com/users",
+                started_at=start + timedelta(days=1),
+            )
+        )
+        await session.commit()
+    pages = [
+        await execution_client.get(
+            f"/api/v1/projects/{project_id}/executions",
+            headers=headers,
+            params={"api_definition_id": definition_id, "page": page, "page_size": 20},
+        )
+        for page in (1, 2, 3)
+    ]
+    for page in pages:
+        assert page.status_code == 200, page.text
+        assert page.json()["total"] == 43
+        assert all(item["api_definition_id"] == definition_id for item in page.json()["items"])
+    assert [item["id"] for page in pages for item in page.json()["items"]] == list(reversed(ids))
+    all_assets = await execution_client.get(
+        f"/api/v1/projects/{project_id}/executions", headers=headers
+    )
+    assert all_assets.json()["total"] == 44
+    foreign_project, _, foreign_definition = await _create_execution_assets(
+        execution_client, headers, path="/foreign"
+    )
+    foreign = await execution_client.get(
+        f"/api/v1/projects/{project_id}/executions",
+        headers=headers,
+        params={"api_definition_id": foreign_definition},
+    )
+    assert foreign.status_code == 404, foreign.text
+    assert foreign.json()["error"]["trace_id"]
+    invalid = await execution_client.get(
+        f"/api/v1/projects/{foreign_project}/executions",
+        headers=headers,
+        params={"api_definition_id": "invalid-id"},
+    )
+    assert invalid.status_code == 422
 
 
 @pytest.fixture

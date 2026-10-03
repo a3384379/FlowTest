@@ -31,6 +31,7 @@ from app.schemas.tasking import TestPlanItemInput
 from app.services.audit import AuditService
 from app.services.encryption_keys import active_key_reference_for_project
 from app.services.projects import ProjectService
+from app.services.test_asset_state import ensure_test_asset_active
 from app.services.test_case_targets import resolve_test_case_target
 
 
@@ -655,20 +656,22 @@ class TestPlanService:
                 status_code=422,
             )
         if item.target_type is TestTargetType.CASE:
-            case = await self._assets.get_case(item.target_id)
+            case = await self._assets.get_case_for_update(item.target_id)
             if case is None or case.project_id != project_id:
                 raise AppError(
                     code="TEST_CASE_NOT_FOUND", message="测试资产不存在", status_code=404
                 )
             target_id = case.id
+            ensure_test_asset_active(case.archived_at)
             current_version = case.current_version
         else:
-            suite = await self._assets.get_suite(item.target_id)
+            suite = await self._assets.get_suite_for_update(item.target_id)
             if suite is None or suite.project_id != project_id:
                 raise AppError(
                     code="TEST_SUITE_NOT_FOUND", message="测试资产不存在", status_code=404
                 )
             target_id = suite.id
+            ensure_test_asset_active(suite.archived_at)
             current_version = suite.current_version
         version = item.target_version or current_version
         if version is None or not await self._target_version_exists(

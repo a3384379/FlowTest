@@ -1,22 +1,39 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.domain.test_assets import VersionChange
+from app.http.test_asset_packages import package_request_contract, read_package_payload
 from app.schemas.common import Page
+from app.schemas.tasking import TestPlanRunDetailResponse
+from app.schemas.test_asset_packages import (
+    PackageApplyRequest,
+    PackageApplyResponse,
+    PackageExportRequest,
+    PackagePreviewRequest,
+    PackagePreviewResponse,
+)
 from app.schemas.test_assets import (
+    AssetBulkDeleteRequest,
     AssetBulkMove,
     AssetBulkMoveResponse,
     AssetClone,
+    AssetDeleteTarget,
+    AssetDeletionPreviewRequest,
+    AssetDeletionPreviewResponse,
+    AssetDeletionResponse,
+    AssetDirectoryCountsResponse,
     TestCaseCreate,
     TestCaseResponse,
+    TestCaseRunHistoryResponse,
     TestCaseRunRequest,
     TestCaseRunResponse,
     TestCaseUpdate,
     TestCaseVersionResponse,
     TestSuiteCreate,
+    TestSuiteLatestRunResponse,
     TestSuiteResponse,
     TestSuiteUpdate,
     TestSuiteVersionResponse,
@@ -24,10 +41,230 @@ from app.schemas.test_assets import (
     VersionDiffResponse,
     VersionPublish,
 )
+from app.services.test_asset_deletion import TestAssetDeletionService
+from app.services.test_asset_history import TestAssetHistoryService
+from app.services.test_asset_package_imports import TestAssetPackageImportService
+from app.services.test_asset_packages import TestAssetPackageExportService
 from app.services.test_assets import TestCaseService, TestSuiteService
 from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.post("/test-assets/export")
+async def export_test_asset_package(
+    project_id: UUID,
+    payload: PackageExportRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Response:
+    package = await TestAssetPackageExportService(session).export(
+        actor=current_user, project_id=project_id, selection=payload
+    )
+    return Response(
+        content=package.model_dump_json(indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="flowtest-test-assets-{project_id}.json"'
+        },
+    )
+
+
+@router.post(
+    "/test-assets/import/preview",
+    response_model=PackagePreviewResponse,
+    openapi_extra=package_request_contract(PackagePreviewRequest),
+)
+async def preview_test_asset_package(
+    project_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PackagePreviewResponse:
+    payload = await read_package_payload(request, PackagePreviewRequest)
+    return await TestAssetPackageImportService(session).preview(
+        actor=current_user, project_id=project_id, request=payload
+    )
+
+
+@router.post(
+    "/test-assets/import/apply",
+    response_model=PackageApplyResponse,
+    openapi_extra=package_request_contract(PackageApplyRequest),
+)
+async def apply_test_asset_package(
+    project_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PackageApplyResponse:
+    payload = await read_package_payload(request, PackageApplyRequest)
+    return await TestAssetPackageImportService(session).apply(
+        actor=current_user, project_id=project_id, request=payload
+    )
+
+
+@router.get("/test-assets/directory-counts", response_model=AssetDirectoryCountsResponse)
+async def test_asset_directory_counts(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    search: str | None = Query(default=None, max_length=200),
+    tag: str | None = Query(default=None, max_length=50),
+) -> AssetDirectoryCountsResponse:
+    return await TestCaseService(session).directory_counts(
+        actor=current_user, project_id=project_id, search=search, tag=tag
+    )
+
+
+@router.post("/test-cases/deletion-preview", response_model=AssetDeletionPreviewResponse)
+async def preview_test_case_deletion(
+    project_id: UUID,
+    payload: AssetDeletionPreviewRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionPreviewResponse:
+    return await TestAssetDeletionService(session).preview(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        asset_ids=payload.asset_ids,
+    )
+
+
+@router.post("/test-cases/bulk-delete", response_model=AssetDeletionResponse)
+async def bulk_delete_test_cases(
+    project_id: UUID,
+    payload: AssetBulkDeleteRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        targets=payload.assets,
+    )
+
+
+@router.delete("/test-cases/{case_id}", response_model=AssetDeletionResponse)
+async def delete_test_case(
+    project_id: UUID,
+    case_id: UUID,
+    payload: AssetDeleteTarget,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete_one(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        asset_id=case_id,
+        target=payload,
+    )
+
+
+@router.post("/test-suites/deletion-preview", response_model=AssetDeletionPreviewResponse)
+async def preview_test_suite_deletion(
+    project_id: UUID,
+    payload: AssetDeletionPreviewRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionPreviewResponse:
+    return await TestAssetDeletionService(session).preview(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        asset_ids=payload.asset_ids,
+    )
+
+
+@router.post("/test-suites/bulk-delete", response_model=AssetDeletionResponse)
+async def bulk_delete_test_suites(
+    project_id: UUID,
+    payload: AssetBulkDeleteRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        targets=payload.assets,
+    )
+
+
+@router.delete("/test-suites/{suite_id}", response_model=AssetDeletionResponse)
+async def delete_test_suite(
+    project_id: UUID,
+    suite_id: UUID,
+    payload: AssetDeleteTarget,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete_one(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        asset_id=suite_id,
+        target=payload,
+    )
+
+
+@router.get("/test-cases/{case_id}/runs", response_model=Page[TestCaseRunHistoryResponse])
+async def test_case_run_history(
+    project_id: UUID,
+    case_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    version: int | None = Query(default=None, ge=1),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[TestCaseRunHistoryResponse]:
+    items, total = await TestAssetHistoryService(session).case_runs(
+        actor=current_user,
+        project_id=project_id,
+        case_id=case_id,
+        version=version,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/test-suites/runs/latest", response_model=list[TestSuiteLatestRunResponse])
+async def latest_test_suite_runs(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    suite_ids: Annotated[list[UUID] | None, Query(max_length=100)] = None,
+) -> list[TestSuiteLatestRunResponse]:
+    return await TestAssetHistoryService(session).latest_suite_runs(
+        actor=current_user,
+        project_id=project_id,
+        suite_ids=suite_ids or [],
+    )
+
+
+@router.get("/test-suites/{suite_id}/runs", response_model=Page[TestPlanRunDetailResponse])
+async def test_suite_run_history(
+    project_id: UUID,
+    suite_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    version: int | None = Query(default=None, ge=1),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[TestPlanRunDetailResponse]:
+    items, total = await TestAssetHistoryService(session).suite_runs(
+        actor=current_user,
+        project_id=project_id,
+        suite_id=suite_id,
+        version=version,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/test-cases/runs/latest", response_model=list[TestCaseRunResponse])
@@ -85,6 +322,8 @@ async def list_test_cases(
     is_template: bool | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    folder_id: UUID | None = None,
+    unfiled: bool = False,
 ) -> Page[TestCaseResponse]:
     items, total = await TestCaseService(session).list_cases(
         actor=current_user,
@@ -94,6 +333,8 @@ async def list_test_cases(
         is_template=is_template,
         page=page,
         page_size=page_size,
+        folder_id=folder_id,
+        unfiled=unfiled,
     )
     return Page(
         items=[TestCaseResponse.model_validate(item) for item in items],
@@ -257,6 +498,8 @@ async def list_test_suites(
     tag: str | None = Query(default=None, max_length=50),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    folder_id: UUID | None = None,
+    unfiled: bool = False,
 ) -> Page[TestSuiteResponse]:
     items, total = await TestSuiteService(session).list_suites(
         actor=current_user,
@@ -265,6 +508,8 @@ async def list_test_suites(
         tag=tag,
         page=page,
         page_size=page_size,
+        folder_id=folder_id,
+        unfiled=unfiled,
     )
     return Page(
         items=[TestSuiteResponse.model_validate(item) for item in items],

@@ -64,6 +64,14 @@ function useDashboardEvidence(projectId: string | null) {
     flaky.error,
     decisions.error,
   ])
+  const evidenceLoading = hasPendingEvidence({
+    base: [flags.isLoading, decisions.isLoading, flaky.isLoading],
+    qualityEnabled,
+    riskList: risks.isLoading,
+    riskDetail: latestRiskId !== undefined && risk.isLoading,
+    impactEnabled,
+    impact: impactRuns.isLoading,
+  })
   return {
     flags,
     risks,
@@ -72,9 +80,25 @@ function useDashboardEvidence(projectId: string | null) {
     flaky,
     decisions,
     insightError,
+    evidenceLoading,
     qualityEnabled,
     impactEnabled,
   }
+}
+
+function hasPendingEvidence(input: {
+  base: boolean[]
+  qualityEnabled: boolean
+  riskList: boolean
+  riskDetail: boolean
+  impactEnabled: boolean
+  impact: boolean
+}): boolean {
+  return (
+    input.base.some(Boolean) ||
+    (input.qualityEnabled && (input.riskList || input.riskDetail)) ||
+    (input.impactEnabled && input.impact)
+  )
 }
 
 function firstError(errors: Array<Error | null>): Error | null {

@@ -4,7 +4,7 @@ import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -20,7 +20,9 @@ import {
   workflowDefinition,
 } from '../test/fixtures'
 import { server } from '../test/server'
-import ProjectTestProvider from '../test/ProjectTestProvider'
+import ProjectProvider from '../features/projects/ProjectProvider'
+import { createMemoryRouter, RouterProvider } from 'react-router-dom'
+import { DraftSessionProvider } from '../features/drafts/DraftSessionProvider'
 
 beforeEach(() => authenticateTestUser(authenticatedUser))
 afterEach(() => {
@@ -115,6 +117,117 @@ describe('WorkflowsPage', () => {
     )
     expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
+  })
+
+  it('keeps the selected workflow history visible when opening a snapshot from an unfocused catalog', async () => {
+    renderPage(`/projects/${project.id}/workflows`)
+    await screen.findByText('已发布 v1')
+    fireEvent.click(screen.getByRole('button', { name: '打开执行历史' }))
+    const recordId = `workflow-history-${workflowExecutionDetail.execution.id}`
+    fireEvent.click(await screen.findByTestId(recordId))
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    expect(await screen.findByTestId(recordId)).toBeVisible()
+  })
+
+  it('protects unapplied node inputs when closing a workflow tab', async () => {
+    renderPage()
+    await screen.findByText('已发布 v1')
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.change(screen.getByDisplayValue('查询用户'), {
+      target: { value: '尚未应用的请求名称' },
+    })
+    const tab = screen.getByRole('tab', { name: new RegExp(workflow.name) })
+    await waitFor(() => expect(tab).toHaveTextContent('·'))
+    fireEvent.click(within(tab.parentElement!).getByRole('button'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByText('有尚未应用的节点配置')).toBeVisible())
+    expect(within(dialog).getByRole('button', { name: '保存并关闭' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: /取\s*消/ }))
+    expect(screen.getByDisplayValue('尚未应用的请求名称')).toBeVisible()
+    fireEvent.click(within(tab.parentElement!).getByRole('button'))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', {
+        name: '丢弃并关闭',
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue('尚未应用的请求名称')).not.toBeInTheDocument(),
+    )
+    expect(screen.queryByRole('tab', { name: new RegExp(workflow.name) })).not.toBeInTheDocument()
+  })
+
+  it('asks before viewing history and preserves unapplied inputs when returning to the draft', async () => {
+    renderPage()
+    await screen.findByText('已发布 v1')
+    fireEvent.click(screen.getByTestId('rf__node-api'))
+    fireEvent.change(screen.getByDisplayValue('查询用户'), {
+      target: { value: '历史切换前的未应用名称' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '打开执行历史' }))
+    fireEvent.click(screen.getByTestId(`workflow-history-${workflowExecutionDetail.execution.id}`))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByText('草稿尚未持久化')).toBeVisible())
+    fireEvent.click(within(dialog).getByRole('button', { name: '留在当前页保存' }))
+    expect(screen.getByDisplayValue('历史切换前的未应用名称')).toBeVisible()
+    fireEvent.click(screen.getByTestId(`workflow-history-${workflowExecutionDetail.execution.id}`))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '保留草稿并切换' }),
+    )
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    fireEvent.click(screen.getByRole('radio', { name: '编排' }))
+    fireEvent.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '保留草稿并切换' }),
+    )
+    expect(await screen.findByDisplayValue('历史切换前的未应用名称')).toBeVisible()
+    expect(screen.getByText('配置尚未应用')).toBeVisible()
+  })
+
+  it('discovers workflows after the first hundred without dropping off-page object tabs', async () => {
+    const catalog = [
+      workflow,
+      ...Array.from({ length: 100 }, (_, index) => ({
+        ...workflow,
+        id: `00000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+        name: `目录流程${index + 2}`,
+      })),
+    ]
+    const later = catalog[100]
+    const requests: { page: number; search: string }[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        const page = Number(params.get('page') ?? 1)
+        const search = params.get('search') ?? ''
+        requests.push({ page, search })
+        const matches = catalog.filter((candidate) => candidate.name.includes(search))
+        return HttpResponse.json({
+          items: matches.slice((page - 1) * 100, page * 100),
+          total: matches.length,
+          page,
+          page_size: 100,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/workflows/:id`, ({ params }) =>
+        HttpResponse.json(catalog.find((candidate) => candidate.id === params.id)),
+      ),
+    )
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '切换工作流列表' }))
+    expect(await screen.findByText('匹配 101 个流程，每页 100 项')).toBeVisible()
+    const directory = screen.getByRole('navigation', { name: '流程目录分页' })
+    fireEvent.click(within(directory).getByTitle('2'))
+    const next = await screen.findByRole('button', { name: later.name })
+    fireEvent.click(next)
+    expect(await screen.findByRole('tab', { name: later.name })).toBeVisible()
+    expect(screen.getByRole('tab', { name: workflow.name })).toBeVisible()
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索工作流' }), {
+      target: { value: later.name },
+    })
+    expect(await screen.findByText('匹配 1 个流程，每页 100 项')).toBeVisible()
+    expect(screen.getByRole('tab', { name: workflow.name })).toBeVisible()
+    expect(screen.getByRole('tab', { name: later.name })).toHaveAttribute('aria-selected', 'true')
+    expect(requests).toContainEqual({ page: 2, search: '' })
+    expect(requests).toContainEqual({ page: 1, search: later.name })
   })
 
   it('falls back to an available workflow when the focused workflow was archived', async () => {
@@ -448,13 +561,29 @@ function renderPage(initialEntry?: string) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="workflows" initialEntry={initialEntry}>
-          <WorkflowsPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider
+            router={createMemoryRouter(
+              [
+                {
+                  path: '*',
+                  element: (
+                    <ProjectProvider>
+                      <DraftSessionProvider>
+                        <WorkflowsPage />
+                      </DraftSessionProvider>
+                    </ProjectProvider>
+                  ),
+                },
+              ],
+              { initialEntries: [initialEntry ?? `/projects/${project.id}/workflows`] },
+            )}
+          />
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }
 

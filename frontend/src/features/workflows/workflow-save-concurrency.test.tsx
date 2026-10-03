@@ -20,7 +20,15 @@ vi.mock('../projects/use-project-context', () => ({
   }),
 }))
 vi.mock('./workflow-service', () => ({
-  listWorkflows: async () => ({ items: [workflow, secondWorkflow] }),
+  listWorkflows: vi.fn(async () => ({
+    items: [workflow, secondWorkflow],
+    total: 2,
+    page: 1,
+    page_size: 100,
+  })),
+  getWorkflow: vi.fn(async (_project: string, id: string) =>
+    id === workflow.id ? workflow : secondWorkflow,
+  ),
   listEnvironments: async () => [],
   listApis: async () => ({ items: [] }),
   listArtifacts: async () => ({ items: [] }),
@@ -35,7 +43,13 @@ vi.mock('../protocols/protocol-service', () => ({
   listGrpcDescriptors: async () => ({ items: [] }),
   listEventSources: async () => ({ items: [] }),
 }))
-import { updateWorkflowDraft, publishWorkflow, executeWorkflow } from './workflow-service'
+import {
+  updateWorkflowDraft,
+  publishWorkflow,
+  executeWorkflow,
+  listWorkflows,
+  getWorkflow,
+} from './workflow-service'
 import { readWorkflowDraft, workflowDraftKey } from './workflow-draft-store'
 import type { WorkflowDefinition } from '../../lib/api'
 
@@ -67,6 +81,16 @@ function Editor() {
         }
       >
         保存后关闭
+      </button>
+      <button
+        onClick={() =>
+          void state.saveWorkflowDraft(state.workflowId ?? '').then(
+            () => setCloseResult('允许关闭'),
+            () => setCloseResult('保持打开'),
+          )
+        }
+      >
+        保存当前流程后关闭
       </button>
       <button
         onClick={() => {
@@ -142,6 +166,54 @@ beforeEach(() => {
   authenticateTestUser(actor)
   vi.mocked(updateWorkflowDraft).mockReset()
   vi.mocked(publishWorkflow).mockReset()
+  vi.mocked(listWorkflows)
+    .mockReset()
+    .mockResolvedValue({ items: [workflow, secondWorkflow], total: 2, page: 1, page_size: 100 })
+  vi.mocked(getWorkflow).mockClear()
+})
+
+it('saves an off-page workflow draft by its exact object before permitting a close', async () => {
+  vi.mocked(listWorkflows).mockResolvedValue({
+    items: [workflow],
+    total: 126,
+    page: 1,
+    page_size: 100,
+  })
+  vi.mocked(updateWorkflowDraft).mockImplementation(async (_project, target, definition) => ({
+    ...target,
+    draft_revision: 2,
+    draft_definition: definition,
+  }))
+  setup()
+  await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '切换流程' }))
+  await waitFor(() => expect(screen.getByLabelText('草稿名称')).toHaveValue('另一个流程'))
+  fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: '页外流程的新稿' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存当前流程后关闭' }))
+  expect(await screen.findByText('允许关闭')).toBeVisible()
+  expect(getWorkflow).toHaveBeenCalledWith('one', secondWorkflow.id)
+  expect(updateWorkflowDraft).toHaveBeenCalledWith(
+    'one',
+    expect.objectContaining({ id: secondWorkflow.id }),
+    expect.objectContaining({
+      nodes: expect.arrayContaining([expect.objectContaining({ name: '页外流程的新稿' })]),
+    }),
+    1,
+  )
+})
+
+it('keeps the tab open when another edit appears while saving before close', async () => {
+  const complete = pendingSave()
+  setup()
+  await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+  fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: '关闭前待保存' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存后关闭' }))
+  await waitFor(() => expect(updateWorkflowDraft).toHaveBeenCalledOnce())
+  const sent = vi.mocked(updateWorkflowDraft).mock.calls[0][2]
+  fireEvent.change(screen.getByLabelText('草稿名称'), { target: { value: '保存中的更新' } })
+  await act(async () => complete({ ...workflow, draft_revision: 2, draft_definition: sent }))
+  expect(await screen.findByText('保持打开')).toBeVisible()
+  expect(screen.getByLabelText('草稿名称')).toHaveValue('保存中的更新')
 })
 afterEach(() => {
   localStorage.clear()

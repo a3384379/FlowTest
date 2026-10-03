@@ -14,6 +14,10 @@ import {
   Form,
   Input,
   InputNumber,
+  Empty,
+  Spin,
+  Tabs,
+  Timeline,
   Modal,
   Popconfirm,
   Row,
@@ -32,6 +36,8 @@ import type {
   EnvironmentTemplateManifest,
   EnvironmentTemplateVersion,
 } from '../features/environments/environment-service'
+import { apiErrorMessage } from '../lib/api'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 import { useEnvironmentLab } from '../features/environments/use-environment-lab'
 
 type TemplateForm = {
@@ -92,50 +98,82 @@ export default function EnvironmentLabPage() {
         title="仅接受平台声明式模板"
         description="禁止上传任意 Compose、命令、脚本和卷挂载；所有镜像必须固定 Digest 并进入管理员白名单。"
       />
-      <EnvironmentOverview templates={templates} instances={instances} />
+      <EnvironmentOverview totalTemplates={state.templates.data?.total} instances={instances} />
       <ProvisionCard
         templates={templates.filter((item) => item.status === 'active')}
-        disabled={!state.projectId}
+        disabled={!state.canEdit}
         submitting={state.provisioning}
         onProvision={state.startProvision}
       />
-      <Card title="已签名环境模板" loading={state.templates.isLoading} className="performance-card">
-        <TemplateTable
-          templates={templates}
-          isSystemAdmin={state.isSystemAdmin}
-          pending={state.templateMutationPending}
-          onVersion={(template) => setTemplateDialog({ mode: 'version', template })}
-          onDisable={state.disableTemplate}
+      <EnvironmentReadErrors state={state} />
+      <div className="lab-workspace">
+        <div className="lab-catalogs">
+          <Card
+            title="已签名环境模板"
+            loading={state.templates.isLoading}
+            className="performance-card"
+          >
+            <TemplateTable
+              templates={templates}
+              page={state.templatePage}
+              total={state.templates.data?.total}
+              onPage={state.setTemplatePage}
+              isSystemAdmin={state.isSystemAdmin}
+              pending={state.templateMutationPending}
+              onVersion={(template) => setTemplateDialog({ mode: 'version', template })}
+              onDisable={state.disableTemplate}
+            />
+          </Card>
+          <Card
+            title="环境实例与清理"
+            loading={state.instances.isLoading}
+            className="performance-card"
+          >
+            <InstanceTable
+              instances={instances}
+              page={state.instancePage}
+              total={state.instances.data?.total}
+              onPage={state.setInstancePage}
+              disabled={!state.canEdit}
+              onSelect={state.selectInstance}
+              cleaning={state.cleaning}
+              onCleanup={state.startCleanup}
+            />
+          </Card>
+        </div>
+        <EnvironmentInstanceWorkspace state={state} />
+      </div>
+      {isVersionDialog(templateDialog) ? (
+        <TemplateVersionDialog
+          key={templateDialog.template.id}
+          template={templateDialog.template}
+          submitting={state.templateMutationPending}
+          onClose={() => setTemplateDialog(null)}
+          onSubmit={async (manifest) => {
+            if (await state.addVersion(templateDialog.template.template_id, manifest))
+              setTemplateDialog(null)
+          }}
         />
-      </Card>
-      <Card title="环境实例与清理" loading={state.instances.isLoading} className="performance-card">
-        <InstanceTable
-          instances={instances}
-          cleaning={state.cleaning}
-          onCleanup={state.startCleanup}
+      ) : (
+        <TemplateDialog
+          state={templateDialog}
+          submitting={state.templateMutationPending}
+          onClose={() => setTemplateDialog(null)}
+          onSubmit={async (input) => {
+            const succeeded = await state.registerTemplate(input)
+            if (succeeded) setTemplateDialog(null)
+          }}
         />
-      </Card>
-      <TemplateDialog
-        state={templateDialog}
-        submitting={state.templateMutationPending}
-        onClose={() => setTemplateDialog(null)}
-        onSubmit={async (input) => {
-          const succeeded =
-            templateDialog?.mode === 'version'
-              ? await state.addVersion(templateDialog.template.template_id, input.manifest)
-              : await state.registerTemplate(input)
-          if (succeeded) setTemplateDialog(null)
-        }}
-      />
+      )}
     </>
   )
 }
 
 function EnvironmentOverview({
-  templates,
+  totalTemplates,
   instances,
 }: {
-  templates: EnvironmentTemplateVersion[]
+  totalTemplates: number | undefined
   instances: EnvironmentInstance[]
 }) {
   return (
@@ -144,7 +182,7 @@ function EnvironmentOverview({
         <Card>
           <Statistic
             title="签名模板版本"
-            value={templates.length}
+            value={totalTemplates ?? '未提供'}
             prefix={<SafetyCertificateOutlined />}
           />
         </Card>
@@ -152,7 +190,7 @@ function EnvironmentOverview({
       <Col span={8}>
         <Card>
           <Statistic
-            title="就绪实例"
+            title="本页就绪实例"
             value={instances.filter((item) => item.status === 'ready').length}
             prefix={<CloudServerOutlined />}
           />
@@ -161,7 +199,7 @@ function EnvironmentOverview({
       <Col span={8}>
         <Card>
           <Statistic
-            title="已完成清理"
+            title="本页已完成清理"
             value={instances.filter((item) => item.cleanup_status === 'completed').length}
           />
         </Card>
@@ -185,6 +223,7 @@ function ProvisionCard({
   return (
     <Card title="Provision 受控环境" className="performance-card">
       <Form
+        className="environment-provision-form"
         form={form}
         layout="inline"
         initialValues={{ ttl_seconds: 3600 }}
@@ -197,7 +236,7 @@ function ProvisionCard({
         >
           <Select
             aria-label="模板版本"
-            style={{ width: 300 }}
+            className="environment-template-select"
             placeholder="选择管理员签名模板"
             options={templates.map((item) => ({
               value: item.id,
@@ -224,12 +263,18 @@ function ProvisionCard({
 }
 
 function TemplateTable({
+  page,
+  total,
+  onPage,
   templates,
   isSystemAdmin,
   pending,
   onVersion,
   onDisable,
 }: {
+  page: number
+  total: number | undefined
+  onPage: (page: number) => void
   templates: EnvironmentTemplateVersion[]
   isSystemAdmin: boolean
   pending: boolean
@@ -240,7 +285,7 @@ function TemplateTable({
     <Table
       rowKey="id"
       size="small"
-      pagination={{ pageSize: 8 }}
+      pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: onPage }}
       dataSource={templates}
       locale={{ emptyText: '暂无管理员签名环境模板' }}
       expandable={{ expandedRowRender: (item) => <TemplateEvidence template={item} /> }}
@@ -313,10 +358,20 @@ function TemplateEvidence({ template }: { template: EnvironmentTemplateVersion }
 }
 
 function InstanceTable({
+  page,
+  total,
+  onPage,
+  disabled,
+  onSelect,
   instances,
   cleaning,
   onCleanup,
 }: {
+  page: number
+  total: number | undefined
+  onPage: (page: number) => void
+  disabled: boolean
+  onSelect: (id: string) => void
   instances: EnvironmentInstance[]
   cleaning: boolean
   onCleanup: (instanceId: string) => Promise<void>
@@ -325,12 +380,19 @@ function InstanceTable({
     <Table
       rowKey="id"
       size="small"
-      pagination={{ pageSize: 8 }}
+      pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: onPage }}
       dataSource={instances}
       locale={{ emptyText: '暂无环境实例' }}
       expandable={{ expandedRowRender: (item) => <InstanceEvidence instance={item} /> }}
       columns={[
-        { title: '实例', dataIndex: 'id', render: (value) => value.slice(0, 8) },
+        {
+          title: '实例',
+          render: (_, row) => (
+            <Button type="link" onClick={() => onSelect(row.id)}>
+              {row.id.slice(0, 8)}
+            </Button>
+          ),
+        },
         { title: '模板', render: (_, item) => `${item.template_key} · v${item.template_version}` },
         { title: '状态', dataIndex: 'status', render: (value) => <InstanceStatus value={value} /> },
         { title: '清理', dataIndex: 'cleanup_status', render: cleanupStatus },
@@ -339,7 +401,7 @@ function InstanceTable({
           title: '操作',
           render: (_, item) => (
             <Popconfirm
-              title="确认取消实例并执行幂等清理？"
+              title={`确认取消实例 ${item.id}（${item.template_key} · v${item.template_version}）并执行幂等清理？`}
               onConfirm={() => void onCleanup(item.id)}
             >
               <Button
@@ -347,7 +409,7 @@ function InstanceTable({
                 danger
                 icon={<DeleteOutlined />}
                 loading={cleaning}
-                disabled={item.cleanup_status === 'completed'}
+                disabled={disabled || item.cleanup_status === 'completed'}
               >
                 清理
               </Button>
@@ -371,7 +433,7 @@ function InstanceEvidence({ instance }: { instance: EnvironmentInstance }) {
       <Descriptions.Item label="端点" span={2}>
         {instance.endpoints.length > 0
           ? instance.endpoints.map((endpoint) => `${endpoint.service}: ${endpoint.url}`).join('；')
-          : '尚未就绪'}
+          : '此实例尚未提供端点'}
       </Descriptions.Item>
       {instance.error_message ? (
         <Descriptions.Item label="失败原因" span={2}>
@@ -636,4 +698,229 @@ function toTemplateInput(value: TemplateForm): EnvironmentTemplateInput {
     description: value.description,
     manifest,
   }
+}
+
+function EnvironmentReadErrors({ state }: { state: ReturnType<typeof useEnvironmentLab> }) {
+  return (
+    <>
+      {[
+        { query: state.templates, name: '模板目录' },
+        { query: state.instances, name: '实例目录' },
+        { query: state.permissions, name: '项目权限' },
+      ]
+        .filter((read) => read.query.isError)
+        .map((read) => (
+          <Alert
+            key={read.name}
+            type="error"
+            showIcon
+            title={`${read.name}读取失败`}
+            description={apiErrorMessage(read.query.error)}
+            action={<Button onClick={() => void read.query.refetch()}>重试</Button>}
+          />
+        ))}
+    </>
+  )
+}
+
+function EnvironmentInstanceWorkspace({ state }: { state: ReturnType<typeof useEnvironmentLab> }) {
+  if (!state.instanceId)
+    return (
+      <Card className="lab-detail" title="环境实例工作区">
+        <Empty description="选择实例查看生命周期、端点、Seed 和清理证据" />
+      </Card>
+    )
+  if (state.instance.isError)
+    return (
+      <Card className="lab-detail">
+        <Alert
+          showIcon
+          type="error"
+          title="实例读取失败"
+          description={apiErrorMessage(state.instance.error)}
+          action={<Button onClick={() => void state.instance.refetch()}>重试</Button>}
+        />
+      </Card>
+    )
+  if (state.instance.isPending)
+    return (
+      <Card className="lab-detail">
+        <Spin aria-label="正在读取实例" />
+      </Card>
+    )
+  if (state.instance.data.project_id !== state.projectId)
+    return (
+      <Card className="lab-detail">
+        <Alert type="error" title="实例不属于当前项目" />
+      </Card>
+    )
+  const instance = state.instance.data
+  const template = state.templates.data?.items.find(
+    (item) => item.id === instance.template_version_id,
+  )
+  return (
+    <Card className="lab-detail" title="环境实例 · 生命周期">
+      <Space wrap>
+        <InstanceStatus value={instance.status} />
+        <Tag>
+          {instance.template_key} · v{instance.template_version}
+        </Tag>
+        <Typography.Text>{instance.id}</Typography.Text>
+      </Space>
+      <InstanceEvidence instance={instance} />
+      <Alert type="info" title="状态来自实例生命周期记录；当前接口未提供持续服务健康采样。" />
+      <Tabs
+        items={[
+          {
+            key: 'lifecycle',
+            label: '生命周期与清理',
+            children: <InstanceLifecycle instance={instance} />,
+          },
+          {
+            key: 'seed',
+            label: 'Seed 证据',
+            children: instance.seed_evidence.length ? (
+              <Table
+                rowKey={(row) => `${row.service}:${row.path}`}
+                pagination={false}
+                size="small"
+                dataSource={instance.seed_evidence}
+                columns={[
+                  { title: '服务', dataIndex: 'service' },
+                  { title: '预定义任务', dataIndex: 'profile' },
+                  { title: '路径', dataIndex: 'path' },
+                  { title: '实际状态码', dataIndex: 'status_code' },
+                ]}
+              />
+            ) : (
+              <Empty description="此实例没有 Seed 执行证据" />
+            ),
+          },
+          {
+            key: 'resources',
+            label: '签名配置与资源',
+            children: template ? (
+              <>
+                <TemplateEvidence template={template} />
+                <ResponseCodeReader value={template.manifest} title="此实例绑定的签名模板配置" />
+              </>
+            ) : (
+              <Alert
+                type="info"
+                title="当前模板页未提供此实例绑定的版本；切换模板目录页查看，实例记录不会替换为其他版本。"
+              />
+            ),
+          },
+        ]}
+      />
+    </Card>
+  )
+}
+
+function InstanceLifecycle({ instance }: { instance: EnvironmentInstance }) {
+  const milestones = [
+    { name: '进入队列', time: instance.queued_at },
+    { name: '开始 Provision', time: instance.started_at },
+    { name: '就绪', time: instance.ready_at },
+    { name: '到期', time: instance.expires_at },
+    { name: '请求取消', time: instance.cancellation_requested_at },
+    { name: '开始清理', time: instance.cleanup_started_at },
+    { name: '完成清理', time: instance.cleaned_at },
+  ]
+  return (
+    <>
+      <Timeline
+        items={milestones.map((item) => ({
+          color: item.time ? 'blue' : 'gray',
+          title: item.name,
+          content: item.time ?? '尚未发生',
+        }))}
+      />
+      <Descriptions column={1} size="small">
+        <Descriptions.Item label="清理状态">
+          {cleanupStatus(instance.cleanup_status)}
+        </Descriptions.Item>
+        <Descriptions.Item label="清理次数">{instance.cleanup_attempts}</Descriptions.Item>
+        <Descriptions.Item label="清理失败代码">
+          {instance.cleanup_error_code ?? '未提供'}
+        </Descriptions.Item>
+        <Descriptions.Item label="最近记录更新">{instance.updated_at}</Descriptions.Item>
+      </Descriptions>
+    </>
+  )
+}
+
+function TemplateVersionDialog({
+  template,
+  submitting,
+  onClose,
+  onSubmit,
+}: {
+  template: EnvironmentTemplateVersion
+  submitting: boolean
+  onClose: () => void
+  onSubmit: (manifest: EnvironmentTemplateManifest) => Promise<void>
+}) {
+  const [form] = Form.useForm<{ manifest: string }>()
+  return (
+    <Modal
+      title={`为 ${template.display_name} 创建签名版本`}
+      open
+      width={900}
+      confirmLoading={submitting}
+      onCancel={onClose}
+      onOk={() => form.submit()}
+      destroyOnHidden
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{ manifest: JSON.stringify(template.manifest, null, 2) }}
+        onFinish={(value) => void onSubmit(parseEnvironmentManifest(value.manifest))}
+      >
+        <Alert
+          type="info"
+          title={`完整保留 v${template.version} 的全部服务、依赖、健康检查、资源与 Seed；提交后由服务端校验并签名。`}
+        />
+        <Form.Item
+          name="manifest"
+          label="完整声明式模板"
+          rules={[
+            { required: true },
+            {
+              validator: async (_, value: string) => {
+                parseEnvironmentManifest(value)
+              },
+            },
+          ]}
+          extra="仅接受受控模板字段；镜像必须固定 Digest。"
+        >
+          <Input.TextArea rows={18} className="code-input" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+function parseEnvironmentManifest(text: string): EnvironmentTemplateManifest {
+  let value: EnvironmentTemplateManifest
+  try {
+    value = JSON.parse(text) as EnvironmentTemplateManifest
+  } catch {
+    throw new Error('请输入有效的声明式 JSON 模板')
+  }
+  if (
+    !value ||
+    !Array.isArray(value.services) ||
+    !value.services.length ||
+    !Array.isArray(value.seeds)
+  )
+    throw new Error('模板需包含服务和 Seed 列表')
+  return value
+}
+
+function isVersionDialog(
+  state: { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null,
+): state is { mode: 'version'; template: EnvironmentTemplateVersion } {
+  return state?.mode === 'version'
 }

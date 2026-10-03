@@ -280,10 +280,16 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await chooseOption(page, dialog.getByLabel('执行目标'), '测试套件')
   const suiteSelect = dialog.getByLabel('测试套件')
   await expect(suiteSelect).toBeVisible()
-  await chooseOption(page, suiteSelect, suiteName)
+  await chooseOption(page, suiteSelect, `${suiteName} · v1`, suiteName)
+  await expect(dialog.getByLabel('固定发布版本')).toHaveValue('1')
   const created = waitForProjectPost(page, '/test-plans')
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  await expectSuccessful(created)
+  const response = await created
+  expect(response.ok(), await response.text()).toBeTruthy()
+  const plan = (await response.json()) as {
+    items: Array<{ target_type: string; target_version: number }>
+  }
+  expect(plan.items).toMatchObject([{ target_type: 'suite', target_version: 1 }])
 
   await expect(page.getByText('Webhook Secret（仅显示一次）')).toBeVisible()
   await page.keyboard.press('Escape')
@@ -302,12 +308,17 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await expect(runQueue.getByRole('row').nth(1)).toContainText('passed', { timeout: 30_000 })
 }
 
-async function chooseOption(page: Page, select: Locator, optionName: string) {
+async function chooseOption(
+  page: Page,
+  select: Locator,
+  optionName: string,
+  searchTerm = optionName,
+) {
   await expect(select).toBeEnabled()
   const modal = page.locator('.ant-modal:visible').last()
   if (await modal.count()) await expect(modal).not.toHaveClass(/ant-zoom-(?:appear|enter|leave)/)
   await select.click()
-  if (await select.isEditable()) await select.fill(optionName)
+  if (await select.isEditable()) await select.fill(searchTerm)
   const dropdown = page.locator('.ant-select-dropdown:visible').last()
   const option = dropdown.getByText(optionName, { exact: true })
   await expect(option).toBeVisible()

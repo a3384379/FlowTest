@@ -39,7 +39,8 @@ export default function AssetPlanDialog({
       if (execute) {
         await runTestPlan(projectId, plan.id, idempotencyKey)
         setQueued(true)
-        await client.invalidateQueries({ queryKey: ['asset-recent-runs', projectId] })
+        await client.invalidateQueries({ queryKey: ['test-suite-latest-runs', projectId] })
+        await client.invalidateQueries({ queryKey: ['asset-run-history', projectId] })
         await client.invalidateQueries({ queryKey: ['test-plan-runs', projectId] })
       }
     } catch (failure) {

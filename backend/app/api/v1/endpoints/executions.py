@@ -71,12 +71,14 @@ async def list_executions(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    api_definition_id: UUID | None = None,
 ) -> Page[ExecutionResponse]:
     executions, total = await ExecutionService(session).list_executions(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        api_definition_id=api_definition_id,
     )
     return Page(
         items=[ExecutionResponse.model_validate(execution) for execution in executions],

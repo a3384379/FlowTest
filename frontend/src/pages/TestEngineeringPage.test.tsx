@@ -128,6 +128,54 @@ const design: TestDesignDocument = {
 }
 
 describe('TestEngineeringPage', () => {
+  it('allows read-only generation but keeps proposal review and materialization disabled for viewers', async () => {
+    let writes = 0
+    const proposal: TestEngineeringProposal = {
+      change_set_id: 'readonly-proposal',
+      status: 'draft',
+      review_status: 'pending',
+      fingerprint: 'viewer-fingerprint',
+      design,
+      scenario_ids: ['scenario_happy_path'],
+      applied: false,
+      contract_completeness: 'complete',
+      contract_fingerprint: 'd'.repeat(64),
+      contract: operationContract,
+    }
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'], matrix: {} }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([environment]),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/test-engineering/proposals/${proposal.change_set_id}`,
+        () => HttpResponse.json(proposal),
+      ),
+      http.post(`/api/v1/projects/${project.id}/test-engineering/proposals/*`, () => {
+        writes += 1
+        return HttpResponse.json(proposal)
+      }),
+    )
+    renderPage(`/projects/${project.id}/test-engineering?proposal=${proposal.change_set_id}`)
+    expect(await screen.findByText(design.intent.objective)).toBeVisible()
+    expect(screen.getByRole('button', { name: '只读生成预览' })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: '创建待审核 Draft' })).toBeDisabled()
+    for (const name of ['接受 Draft', '拒绝 Draft']) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toBeDisabled()
+      await userEvent.click(button)
+    }
+    expect(writes).toBe(0)
+  })
+
   it('reviews generated scenarios and materializes an accepted draft', async () => {
     const serviceId = '00000000-0000-4000-8000-000000007000'
     const targetedApi = { ...apiDefinition, service_id: serviceId }

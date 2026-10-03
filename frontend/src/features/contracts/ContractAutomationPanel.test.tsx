@@ -16,6 +16,47 @@ import ContractAutomationPanel, {
 } from './ContractAutomationPanel'
 
 describe('ContractAutomationPanel views', () => {
+  it('lets viewers inspect generated evidence without creating or reviewing contract drafts', async () => {
+    let writes = 0
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'], matrix: {} }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-runs`, () =>
+        HttpResponse.json({ items: [contractRun], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/contract-runs/${contractRun.id}/generated-cases`,
+        () => HttpResponse.json({ items: [generatedCase], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/contract-runs*`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <AntdApp>
+          <ProjectTestProvider section="contracts">
+            <ContractAutomationPanel />
+          </ProjectTestProvider>
+        </AntdApp>
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /审核用例/ }))
+    expect(await screen.findByText('边界用例')).toBeInTheDocument()
+    for (const name of ['生成契约用例', '编辑并接受', '拒绝']) {
+      const button = screen.getByRole('button', { name: new RegExp(name) })
+      expect(button).toBeDisabled()
+      fireEvent.click(button)
+    }
+    expect(writes).toBe(0)
+  })
+
   it('shows contract diff, coverage, and selects a run', () => {
     const onSelect = vi.fn()
     render(

@@ -15,6 +15,35 @@ const definition: WorkflowDefinition = {
 }
 
 describe('workflow definition relations', () => {
+  it('shows separate source paths, loop scope and unresolved bindings without clickable guessed nodes', () => {
+    const locate = vi.fn()
+    const target = {
+      ...definition.nodes[1]!,
+      type: 'capability' as const,
+      capability_id: 'flow.control.group',
+      configuration: {
+        inputs: {
+          first: { kind: 'node_output', node_id: 'source', path: ['body', 'first'] },
+          second: { kind: 'node_output', node_id: 'source', path: ['body', 'second'] },
+          amount: { kind: 'variable', scope: 'loop', path: ['item', 'amount'] },
+          missing: { kind: 'node_output', node_id: 'gone', path: ['body'] },
+        },
+      },
+      bindings: [{ input: 'token', expression: '{{unknown.token}}' }],
+    }
+    render(<WorkflowNodeRelations node={target} definition={definition} onLocateNode={locate} />)
+    expect(screen.getByText('$.body.first')).toBeVisible()
+    expect(screen.getByText('$.body.second')).toBeVisible()
+    expect(screen.getByText('$.inputs.second')).toBeVisible()
+    expect(screen.getByText('循环变量 · loop')).toBeVisible()
+    expect(screen.getByText('$.item.amount')).toBeVisible()
+    expect(screen.getByText('来源节点不存在')).toBeVisible()
+    expect(screen.getByText('表达式未解析')).toBeVisible()
+    expect(screen.getByText('{{unknown.token}}')).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'gone' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '开始' })[1]!)
+    expect(locate).toHaveBeenCalledWith('source')
+  })
   it.each([undefined, null])('does not infer a branch when condition is %s', (condition) => {
     const locate = vi.fn()
     // Exercise the HTTP shape with an omitted property as well as explicit null.

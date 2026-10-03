@@ -3,6 +3,8 @@ import { createContext, useContext, useState } from 'react'
 import type { WorkbenchFields } from '../api-console/APIWorkbench'
 import type { WorkflowDraftEdit } from '../workflows/use-workflows'
 
+export const DRAFT_NAVIGATION_CANCELLED = 'flowtest:draft-navigation-cancelled'
+
 type ApiDraft = {
   fields: WorkbenchFields
   generation: number
@@ -51,7 +53,6 @@ export class DraftSession {
     return scope
   }
   markUnsafe(key: string, unsafe: boolean) {
-    if (this.unsafe.has(key) === unsafe) return
     if (unsafe) this.unsafe.add(key)
     else this.unsafe.delete(key)
     this.revision += 1

@@ -32,6 +32,7 @@ import {
   type RunnerPool,
 } from '../features/capabilities/capability-service'
 import { useAuthStore } from '../features/auth/auth-store'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 
 type ViewMode = '能力' | '插件' | 'Runner'
 
@@ -45,8 +46,10 @@ export default function PlatformCapabilitiesPage() {
   return (
     <div className="v3-platform-page">
       <PlatformPageHeading />
+      <QueryFailureNotice queries={inventory.queries} />
       <FeatureBoundaryAlert flags={inventory.flags} />
       <CapabilityStatistics
+        available={inventory.capabilitiesAvailable}
         capabilities={inventory.capabilities}
         pluginCount={inventory.pluginCount}
         runnerCount={inventory.runnerCount}
@@ -89,14 +92,18 @@ function usePlatformInventory(isSystemAdmin: boolean) {
   const pluginItems = pageItems(plugins.data)
   const poolItems = pageItems(runnerPools.data)
   return {
+    queries: [flags, capabilities, plugins, runnerPools],
+    capabilitiesAvailable: capabilities.isSuccess,
     flags: flags.data,
     capabilities: capabilityItems,
     capabilitiesLoading: capabilities.isLoading,
     plugins: pluginItems,
-    pluginCount: pluginItems.length,
+    pluginCount: plugins.isSuccess ? pluginItems.length : '未提供',
     pluginsLoading: plugins.isLoading,
     runnerPools: poolItems,
-    runnerCount: poolItems.flatMap((pool) => pool.runners).length,
+    runnerCount: runnerPools.isSuccess
+      ? poolItems.flatMap((pool) => pool.runners).length
+      : '未提供',
     runnerPoolsLoading: runnerPools.isLoading,
   }
 }
@@ -242,7 +249,7 @@ function FeatureBoundaryAlert({
 }: {
   flags?: Awaited<ReturnType<typeof getV3FeatureFlags>>
 }) {
-  if (flags?.capability_sdk) return null
+  if (flags?.capability_sdk !== false) return null
   return (
     <Alert
       showIcon
@@ -255,38 +262,48 @@ function FeatureBoundaryAlert({
 }
 
 function CapabilityStatistics({
+  available,
   capabilities,
   pluginCount,
   runnerCount,
 }: {
+  available: boolean
   capabilities: Capability[]
-  pluginCount: number
-  runnerCount: number
+  pluginCount: number | string
+  runnerCount: number | string
 }) {
   const enabled = capabilities.filter((item) => item.enabled).length
   const runnerTypes = new Set(capabilities.map((item) => item.runner_type)).size
   return (
     <Row gutter={16} className="v3-capability-statistics">
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="内置能力" value={capabilities.length} prefix={<ApiOutlined />} />
+          <Statistic
+            title="已载入能力"
+            value={available ? capabilities.length : '未提供'}
+            prefix={<ApiOutlined />}
+          />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="已启用" value={enabled} prefix={<SafetyCertificateOutlined />} />
+          <Statistic
+            title="已载入且启用"
+            value={available ? enabled : '未提供'}
+            prefix={<SafetyCertificateOutlined />}
+          />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic title="签名插件" value={pluginCount} prefix={<LockOutlined />} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
-            title="Runner 类型 / 在线"
-            value={`${runnerTypes} / ${runnerCount}`}
+            title="Runner 类型 / 已载入"
+            value={`${available ? runnerTypes : '未提供'} / ${runnerCount}`}
             prefix={<CloudServerOutlined />}
           />
         </Card>
