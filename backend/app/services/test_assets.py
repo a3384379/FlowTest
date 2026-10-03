@@ -29,6 +29,7 @@ from app.schemas.test_assets import (
 )
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
+from app.services.test_asset_state import ensure_test_asset_active
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,7 +283,9 @@ class TestCaseService:
     ) -> int:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await _validate_folder(self._session, project_id, folder_id)
-        cases = [await self._get_project_case(project_id, case_id) for case_id in case_ids]
+        cases = [
+            await self._get_project_case_for_update(project_id, case_id) for case_id in case_ids
+        ]
         for model in cases:
             model.folder_id = folder_id
         self._audit.record(
@@ -355,6 +358,7 @@ class TestCaseService:
         model = await self._assets.get_case_for_update(case_id)
         if model is None or model.project_id != project_id:
             raise AppError(code="TEST_CASE_NOT_FOUND", message="测试用例不存在", status_code=404)
+        ensure_test_asset_active(model.archived_at)
         return model
 
     async def _get_version(self, case_id: UUID, version: int) -> TestCaseVersion:
@@ -474,7 +478,7 @@ class TestSuiteService:
         definition: TestSuiteDefinitionInput | None,
     ) -> TestSuite:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
-        model = await self._get_project_suite(project_id, suite_id)
+        model = await self._get_project_suite_for_update(project_id, suite_id)
         if name is not None:
             normalized_name = name.strip()
             await self._ensure_unique_name(project_id, normalized_name, excluding_id=model.id)
@@ -591,7 +595,9 @@ class TestSuiteService:
     ) -> int:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         await _validate_folder(self._session, project_id, folder_id)
-        suites = [await self._get_project_suite(project_id, suite_id) for suite_id in suite_ids]
+        suites = [
+            await self._get_project_suite_for_update(project_id, suite_id) for suite_id in suite_ids
+        ]
         for model in suites:
             model.folder_id = folder_id
         self._audit.record(
@@ -620,11 +626,12 @@ class TestSuiteService:
                 status_code=422,
             )
         for item in definition.items:
-            case = await self._assets.get_case(item.test_case_id)
+            case = await self._assets.get_case_for_update(item.test_case_id)
             if case is None or case.project_id != project_id:
                 raise AppError(
                     code="TEST_CASE_NOT_FOUND", message="测试用例不存在", status_code=404
                 )
+            ensure_test_asset_active(case.archived_at)
             version = item.test_case_version or case.current_version
             if require_published and (
                 version is None or await self._assets.find_case_version(case.id, version) is None
@@ -675,6 +682,7 @@ class TestSuiteService:
         model = await self._assets.get_suite_for_update(suite_id)
         if model is None or model.project_id != project_id:
             raise AppError(code="TEST_SUITE_NOT_FOUND", message="测试套件不存在", status_code=404)
+        ensure_test_asset_active(model.archived_at)
         return model
 
     async def _get_version(self, suite_id: UUID, version: int) -> TestSuiteVersion:

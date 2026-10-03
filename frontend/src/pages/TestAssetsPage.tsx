@@ -35,6 +35,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProjectContext } from '../features/projects/use-project-context'
 import AssetDetailDrawer from '../features/test-assets/AssetDetailDrawer'
 import AssetPlanDialog from '../features/test-assets/AssetPlanDialog'
+import AssetDeletionDialog from '../features/test-assets/AssetDeletionDialog'
 import { AssetHistoryNotice } from '../features/test-assets/AssetRunEvidence'
 import {
   PublishedCaseBinding,
@@ -102,6 +103,7 @@ function TestAssetsWorkspace() {
   const [recentRun, setRecentRun] = useState<TestCaseRun | null>(null)
   const [selectedCases, setSelectedCases] = useState<string[]>([])
   const [selectedSuites, setSelectedSuites] = useState<string[]>([])
+  const [deletion, setDeletion] = useState<{ kind: AssetKind; ids: string[] } | null>(null)
   const [folderId, setFolderId] = useState<string | null>(null)
   const [casePage, setCasePage] = useState(1)
   const [suitePage, setSuitePage] = useState(1)
@@ -194,6 +196,7 @@ function TestAssetsWorkspace() {
     },
     onFocus: focus,
     onPlan: openTarget,
+    onDelete: (kind, ids) => setDeletion({ kind, ids }),
     workflows: pageItems(state.workflows.data),
     history,
     canEdit: state.canEdit,
@@ -276,6 +279,15 @@ function TestAssetsWorkspace() {
         onPlan={openTarget}
       />
       <WorkspaceAssetPlan projectId={state.projectId} plan={plan} onClose={() => setPlan(null)} />
+      <WorkspaceAssetDeletion
+        state={state}
+        selection={deletion}
+        onClose={() => setDeletion(null)}
+        onDeleted={() => {
+          resetSelection()
+          setDeletion(null)
+        }}
+      />
       <WorkspaceCaseDialogs
         state={state}
         runCase={runCase}
@@ -289,6 +301,31 @@ function TestAssetsWorkspace() {
         onNewPlan={(target) => setPlan({ targets: [target], execute: false })}
       />
     </div>
+  )
+}
+
+function WorkspaceAssetDeletion({
+  state,
+  selection,
+  onClose,
+  onDeleted,
+}: {
+  state: AssetState
+  selection: { kind: AssetKind; ids: string[] } | null
+  onClose: () => void
+  onDeleted: () => void
+}) {
+  if (!state.projectId || !selection) return null
+  return (
+    <AssetDeletionDialog
+      key={`${selection.kind}:${selection.ids.join('|')}`}
+      projectId={state.projectId}
+      kind={selection.kind}
+      ids={selection.ids}
+      canEdit={state.canEdit}
+      onClose={onClose}
+      onDeleted={onDeleted}
+    />
   )
 }
 
@@ -644,6 +681,8 @@ function caseTab(props: Parameters<typeof AssetTabs>[0]) {
           })
         }
         moveDisabled={!state.canEdit}
+        onDelete={() => props.workspace.onDelete('case', selectedCases)}
+        deleteDisabled={!state.canEdit}
         onPlan={() => props.onPlan(selectedTargets('case', cases, selectedCases))}
         planDisabled={!state.canEdit || !allPublished(cases, selectedCases)}
       >
@@ -699,6 +738,8 @@ function suiteTab(props: Parameters<typeof AssetTabs>[0]) {
           })
         }
         moveDisabled={!state.canEdit}
+        onDelete={() => props.suiteWorkspace.onDelete('suite', selectedSuites)}
+        deleteDisabled={!state.canEdit}
         onPlan={() => props.onPlan(selectedTargets('suite', suites, selectedSuites))}
         planDisabled={!state.canEdit || !allPublished(suites, selectedSuites)}
       >
@@ -801,6 +842,8 @@ export function AssetPane({
   moveDisabled = false,
   onPlan,
   planDisabled = false,
+  onDelete,
+  deleteDisabled = false,
   children,
 }: {
   title: string
@@ -814,6 +857,8 @@ export function AssetPane({
   moveDisabled?: boolean
   onPlan?: () => void
   planDisabled?: boolean
+  onDelete?: () => void
+  deleteDisabled?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -846,10 +891,28 @@ export function AssetPane({
             加入计划 ({selected.length})
           </Button>
         )}
+        <AssetDeleteButton selected={selected} disabled={deleteDisabled} onDelete={onDelete} />
         <Typography.Text type="secondary">仅选择当前页</Typography.Text>
       </Space>
       {children}
     </>
+  )
+}
+
+function AssetDeleteButton({
+  selected,
+  disabled,
+  onDelete,
+}: {
+  selected: string[]
+  disabled: boolean
+  onDelete?: () => void
+}) {
+  if (!onDelete) return null
+  return (
+    <Button danger disabled={disabled || !selected.length} onClick={onDelete}>
+      批量删除 ({selected.length})
+    </Button>
   )
 }
 
@@ -1005,6 +1068,7 @@ export function CaseTable({
               onDiff={onDiff}
               canEdit={workspace?.canEdit ?? true}
               canExecute={workspace?.canExecute ?? true}
+              onDelete={workspace ? () => workspace.onDelete('case', [item.id]) : undefined}
             />
           ),
         },
@@ -1023,6 +1087,7 @@ function CaseRowActions({
   onDiff,
   canEdit,
   canExecute,
+  onDelete,
 }: {
   item: TestCase
   onRun?: (item: TestCase) => void
@@ -1033,6 +1098,7 @@ function CaseRowActions({
   onDiff: (item: TestCase) => void
   canEdit: boolean
   canExecute: boolean
+  onDelete?: () => void
 }) {
   return (
     <Space size={0}>
@@ -1057,6 +1123,13 @@ function CaseRowActions({
             },
             { key: 'publish', label: '发布新版本', disabled: !canEdit },
             { key: 'clone', label: '克隆', disabled: !canEdit },
+            {
+              key: 'delete',
+              label: '删除',
+              danger: true,
+              disabled: !canEdit || !onDelete,
+              onClick: onDelete,
+            },
             {
               key: 'diff',
               label: '版本对比',
@@ -1172,6 +1245,7 @@ export function SuiteTable({
               onDiff={() => onDiff(item)}
               compact={Boolean(workspace)}
               canEdit={workspace?.canEdit ?? true}
+              onDelete={workspace ? () => workspace.onDelete('suite', [item.id]) : undefined}
             />
           ),
         },
@@ -1225,6 +1299,7 @@ function RowActions({
   onDiff,
   compact = false,
   canEdit = true,
+  onDelete,
 }: {
   version: number | null
   onEdit: () => void
@@ -1233,6 +1308,7 @@ function RowActions({
   onDiff: () => void
   compact?: boolean
   canEdit?: boolean
+  onDelete?: () => void
 }) {
   return (
     <Space size={0}>
@@ -1246,6 +1322,13 @@ function RowActions({
         <Dropdown
           menu={{
             items: [
+              {
+                key: 'delete',
+                label: '删除',
+                danger: true,
+                disabled: !canEdit || !onDelete,
+                onClick: onDelete,
+              },
               {
                 key: 'clone',
                 label: '克隆',

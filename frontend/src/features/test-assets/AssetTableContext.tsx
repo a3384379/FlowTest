@@ -12,6 +12,7 @@ export type AssetTableWorkspace = {
   onPage: (page: number) => void
   onFocus: (kind: AssetKind, id: string) => void
   onPlan: (target: PublishedAssetTarget, execute: boolean) => void
+  onDelete: (kind: AssetKind, ids: string[]) => void
   workflows: Workflow[]
   history: ReturnType<typeof useAssetHistory>
   canEdit: boolean

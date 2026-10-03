@@ -1308,3 +1308,206 @@ async def test_asset_history_rejects_other_project_assets_and_invalid_version(
             params={"version": 0},
         )
         assert invalid.status_code == 422, invalid.text
+
+
+@pytest.mark.asyncio
+async def test_asset_deletion_preview_protects_references_and_bulk_is_atomic(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    client = fixture.context.client
+    path = f"/api/v1/projects/{fixture.project_id}/test-cases"
+    clone = await client.post(
+        f"{path}/{fixture.case_id}/clone", headers=fixture.headers, json={"name": "可移除副本"}
+    )
+    clone_id = clone.json()["id"]
+    preview = await client.post(
+        f"{path}/deletion-preview",
+        headers=fixture.headers,
+        json={"asset_ids": [clone_id, fixture.case_id]},
+    )
+    assert preview.status_code == 200, preview.text
+    targets = preview.json()["targets"]
+    assert {item["asset"]["id"] for item in targets} == {clone_id, fixture.case_id}
+    original = next(item for item in targets if item["asset"]["id"] == fixture.case_id)
+    assert {item["kind"] for item in original["references"]} >= {"test_suite", "test_plan"}
+    assert next(item for item in targets if item["asset"]["id"] == clone_id)["references"] == []
+    deleted = await client.post(
+        f"{path}/bulk-delete",
+        headers=fixture.headers,
+        json={"assets": [item["asset"] for item in targets]},
+    )
+    assert deleted.status_code == 409, deleted.text
+    assert deleted.json()["error"]["code"] == "TEST_ASSET_IN_USE"
+    assert (await client.get(f"{path}/{clone_id}", headers=fixture.headers)).json()[
+        "archived_at"
+    ] is None
+    assert (await client.get(f"{path}/{fixture.case_id}", headers=fixture.headers)).json()[
+        "archived_at"
+    ] is None
+    duplicate = await client.post(
+        f"{path}/deletion-preview",
+        headers=fixture.headers,
+        json={"asset_ids": [clone_id, clone_id]},
+    )
+    assert duplicate.status_code == 422, duplicate.text
+
+
+@pytest.mark.asyncio
+async def test_asset_deletion_rechecks_drafts_and_retains_published_versions(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    client = fixture.context.client
+    path = f"/api/v1/projects/{fixture.project_id}/test-cases"
+    cloned = await client.post(
+        f"{path}/{fixture.case_id}/clone", headers=fixture.headers, json={"name": "历史保留副本"}
+    )
+    case_id = cloned.json()["id"]
+    published = await client.post(f"{path}/{case_id}/versions", headers=fixture.headers, json={})
+    assert published.status_code == 200, published.text
+    preview = await client.post(
+        f"{path}/deletion-preview", headers=fixture.headers, json={"asset_ids": [case_id]}
+    )
+    assert preview.status_code == 200, preview.text
+    old_target = preview.json()["targets"][0]["asset"]
+    changed = await client.patch(
+        f"{path}/{case_id}", headers=fixture.headers, json={"name": "更名后的副本"}
+    )
+    assert changed.status_code == 200, changed.text
+    stale = await client.request(
+        "DELETE", f"{path}/{case_id}", headers=fixture.headers, json=old_target
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["code"] == "TEST_ASSET_DELETE_STALE"
+    fresh = await client.post(
+        f"{path}/deletion-preview", headers=fixture.headers, json={"asset_ids": [case_id]}
+    )
+    deleted = await client.request(
+        "DELETE",
+        f"{path}/{case_id}",
+        headers=fixture.headers,
+        json=fresh.json()["targets"][0]["asset"],
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["archived_ids"] == [case_id]
+    assert deleted.json()["historical_data_retained"] is True
+    listing = await client.get(path, headers=fixture.headers)
+    assert case_id not in {item["id"] for item in listing.json()["items"]}
+    retained = await client.get(f"{path}/{case_id}/versions", headers=fixture.headers)
+    assert retained.status_code == 200 and retained.json()[0]["id"] == published.json()["id"]
+    metadata = await client.get(f"{path}/{case_id}", headers=fixture.headers)
+    assert metadata.json()["archived_at"] is not None
+    editing = await client.patch(
+        f"{path}/{case_id}", headers=fixture.headers, json={"name": "不能编辑"}
+    )
+    assert editing.status_code == 409 and editing.json()["error"]["code"] == "TEST_ASSET_ARCHIVED"
+    running = await client.post(
+        f"{path}/{case_id}/runs",
+        headers={**fixture.headers, "Idempotency-Key": "archived-case"},
+        json={"source": "published", "version": 1},
+    )
+    assert running.status_code == 409 and running.json()["error"]["code"] == "TEST_ASSET_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_suite_deletion_preserves_history_after_live_references_are_removed(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    client = fixture.context.client
+    path = f"/api/v1/projects/{fixture.project_id}/test-suites"
+    blocked = await client.post(
+        f"{path}/deletion-preview", headers=fixture.headers, json={"asset_ids": [fixture.suite_id]}
+    )
+    assert blocked.status_code == 200, blocked.text
+    assert {item["kind"] for item in blocked.json()["targets"][0]["references"]} >= {
+        "test_plan",
+        "execution",
+    }
+    async with fixture.context.session_maker() as session:
+        items = (await session.scalars(select(tasking_models.TestPlanItem))).all()
+        for item in items:
+            await session.delete(item)
+        runs = (
+            await session.scalars(
+                select(tasking_models.TestPlanRun).where(
+                    tasking_models.TestPlanRun.status == "queued"
+                )
+            )
+        ).all()
+        for run in runs:
+            run.status = "cancelled"
+        await session.commit()
+    fresh = await client.post(
+        f"{path}/deletion-preview", headers=fixture.headers, json={"asset_ids": [fixture.suite_id]}
+    )
+    assert fresh.json()["targets"][0]["references"] == []
+    deleted = await client.post(
+        f"{path}/bulk-delete",
+        headers=fixture.headers,
+        json={"assets": [fresh.json()["targets"][0]["asset"]]},
+    )
+    assert deleted.status_code == 200, deleted.text
+    history = await client.get(f"{path}/{fixture.suite_id}/runs", headers=fixture.headers)
+    assert history.status_code == 200 and history.json()["total"] == 41
+    versions = await client.get(f"{path}/{fixture.suite_id}/versions", headers=fixture.headers)
+    assert [item["version"] for item in versions.json()] == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_asset_deletion_checks_project_permissions_and_exact_selection(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    client = fixture.context.client
+    created = await client.post(
+        "/api/v1/users",
+        headers=fixture.headers,
+        json={
+            "email": "asset-viewer@example.com",
+            "display_name": "资产只读成员",
+            "password": ADMIN_PASSWORD,
+        },
+    )
+    assert created.status_code == 201, created.text
+    member = await client.put(
+        f"/api/v1/projects/{fixture.project_id}/members/{created.json()['id']}",
+        headers=fixture.headers,
+        json={"user_id": created.json()["id"], "role": "viewer"},
+    )
+    assert member.status_code == 200, member.text
+    login = await client.post(
+        "/api/v1/auth/login", json={"email": "asset-viewer@example.com", "password": ADMIN_PASSWORD}
+    )
+    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    changed = await client.post(
+        "/api/v1/auth/change-password",
+        headers=viewer_headers,
+        json={
+            "current_password": ADMIN_PASSWORD,
+            "new_password": "asset-viewer-updated-123!",
+        },
+    )
+    assert changed.status_code == 204, changed.text
+    path = f"/api/v1/projects/{fixture.project_id}/test-cases"
+    preview = await client.post(
+        f"{path}/deletion-preview", headers=viewer_headers, json={"asset_ids": [fixture.case_id]}
+    )
+    assert preview.status_code == 403, preview.text
+    assert preview.json()["error"]["code"] == "PROJECT_FORBIDDEN"
+    foreign = await client.post(
+        "/api/v1/projects", headers=fixture.headers, json={"name": "隔离删除项目"}
+    )
+    denied = await client.post(
+        f"/api/v1/projects/{foreign.json()['id']}/test-cases/deletion-preview",
+        headers=fixture.headers,
+        json={"asset_ids": [fixture.case_id]},
+    )
+    assert denied.status_code == 404 and denied.json()["error"]["trace_id"]
+    mixed = await client.post(
+        f"{path}/deletion-preview",
+        headers=fixture.headers,
+        json={"asset_ids": [fixture.case_id, str(uuid4())]},
+    )
+    assert mixed.status_code == 404, mixed.text

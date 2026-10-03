@@ -13,6 +13,7 @@ from app.models.workflows import Workflow
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.test_assets import PublishedTestCaseDefinition
+from app.services.test_asset_state import ensure_test_asset_active
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,12 +50,13 @@ async def resolve_test_case_target(
     suite_version: int | None = None,
 ) -> ResolvedTestCaseTarget:
     assets = TestAssetRepository(session)
-    case = await assets.get_case(case_id)
+    case = await assets.get_case_for_update(case_id)
     version = await assets.find_case_version(case_id, case_version)
     if case is None or case.project_id != project_id or version is None:
         raise AppError(
             code="TEST_CASE_VERSION_NOT_FOUND", message="测试用例版本不存在", status_code=409
         )
+    ensure_test_asset_active(case.archived_at)
     try:
         definition = PublishedTestCaseDefinition.model_validate(version.definition)
     except ValidationError as error:

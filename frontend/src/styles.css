@@ -1237,6 +1237,21 @@ body {
   border-radius: 10px;
   background: var(--ft-surface);
 }
+.asset-deletion-list {
+  display: grid;
+  gap: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+.asset-deletion-list > li {
+  padding: 12px;
+  border: 1px solid var(--ft-border-subtle);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
 .asset-detail-drawer .ant-table-cell {
   overflow-wrap: anywhere;
 }

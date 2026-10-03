@@ -1382,6 +1382,7 @@ export type TestCase = {
   is_template: boolean
   draft_definition: TestCaseDefinition
   draft_fingerprint?: string
+  archived_at?: string | null
   current_version: number | null
   created_by_id: string
   created_at: string
@@ -1425,6 +1426,8 @@ export type TestSuite = {
   description: string
   tags: string[]
   draft_definition: { items: TestSuiteItem[] }
+  draft_fingerprint?: string
+  archived_at?: string | null
   current_version: number | null
   created_by_id: string
   created_at: string

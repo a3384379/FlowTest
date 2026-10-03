@@ -8,9 +8,14 @@ from app.domain.test_assets import VersionChange
 from app.schemas.common import Page
 from app.schemas.tasking import TestPlanRunDetailResponse
 from app.schemas.test_assets import (
+    AssetBulkDeleteRequest,
     AssetBulkMove,
     AssetBulkMoveResponse,
     AssetClone,
+    AssetDeleteTarget,
+    AssetDeletionPreviewRequest,
+    AssetDeletionPreviewResponse,
+    AssetDeletionResponse,
     TestCaseCreate,
     TestCaseResponse,
     TestCaseRunHistoryResponse,
@@ -27,11 +32,106 @@ from app.schemas.test_assets import (
     VersionDiffResponse,
     VersionPublish,
 )
+from app.services.test_asset_deletion import TestAssetDeletionService
 from app.services.test_asset_history import TestAssetHistoryService
 from app.services.test_assets import TestCaseService, TestSuiteService
 from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.post("/test-cases/deletion-preview", response_model=AssetDeletionPreviewResponse)
+async def preview_test_case_deletion(
+    project_id: UUID,
+    payload: AssetDeletionPreviewRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionPreviewResponse:
+    return await TestAssetDeletionService(session).preview(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        asset_ids=payload.asset_ids,
+    )
+
+
+@router.post("/test-cases/bulk-delete", response_model=AssetDeletionResponse)
+async def bulk_delete_test_cases(
+    project_id: UUID,
+    payload: AssetBulkDeleteRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        targets=payload.assets,
+    )
+
+
+@router.delete("/test-cases/{case_id}", response_model=AssetDeletionResponse)
+async def delete_test_case(
+    project_id: UUID,
+    case_id: UUID,
+    payload: AssetDeleteTarget,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete_one(
+        actor=current_user,
+        project_id=project_id,
+        kind="case",
+        asset_id=case_id,
+        target=payload,
+    )
+
+
+@router.post("/test-suites/deletion-preview", response_model=AssetDeletionPreviewResponse)
+async def preview_test_suite_deletion(
+    project_id: UUID,
+    payload: AssetDeletionPreviewRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionPreviewResponse:
+    return await TestAssetDeletionService(session).preview(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        asset_ids=payload.asset_ids,
+    )
+
+
+@router.post("/test-suites/bulk-delete", response_model=AssetDeletionResponse)
+async def bulk_delete_test_suites(
+    project_id: UUID,
+    payload: AssetBulkDeleteRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        targets=payload.assets,
+    )
+
+
+@router.delete("/test-suites/{suite_id}", response_model=AssetDeletionResponse)
+async def delete_test_suite(
+    project_id: UUID,
+    suite_id: UUID,
+    payload: AssetDeleteTarget,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> AssetDeletionResponse:
+    return await TestAssetDeletionService(session).delete_one(
+        actor=current_user,
+        project_id=project_id,
+        kind="suite",
+        asset_id=suite_id,
+        target=payload,
+    )
 
 
 @router.get("/test-cases/{case_id}/runs", response_model=Page[TestCaseRunHistoryResponse])

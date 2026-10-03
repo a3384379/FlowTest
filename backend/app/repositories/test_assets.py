@@ -66,7 +66,7 @@ class TestAssetRepository:
         offset: int,
         limit: int,
     ) -> tuple[list[TestCase], int]:
-        filters = [TestCase.project_id == project_id]
+        filters = [TestCase.project_id == project_id, TestCase.archived_at.is_(None)]
         if search:
             pattern = f"%{search}%"
             filters.append(or_(TestCase.name.ilike(pattern), TestCase.description.ilike(pattern)))
@@ -150,7 +150,7 @@ class TestAssetRepository:
         offset: int,
         limit: int,
     ) -> tuple[list[TestSuite], int]:
-        filters = [TestSuite.project_id == project_id]
+        filters = [TestSuite.project_id == project_id, TestSuite.archived_at.is_(None)]
         if search:
             pattern = f"%{search}%"
             filters.append(or_(TestSuite.name.ilike(pattern), TestSuite.description.ilike(pattern)))
