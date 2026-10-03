@@ -14,7 +14,7 @@ from app.domain.reporting import FailureCategory, classify_failure
 from app.engine.results import NodeObservation, NodeResult
 from app.models.access import User
 from app.models.artifacts import Artifact
-from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
 from app.repositories.durable_execution import DurableExecutionRepository
 from app.repositories.reporting import ReportingRepository
 from app.schemas.durable_execution import ExecutionCheckpointResponse
@@ -84,6 +84,7 @@ class ExecutionExportDetail(ExecutionReportDetail):
     snapshot: dict[str, JsonValue]
     control_records: list[ExportControlRecord]
     checkpoints: list[ExecutionCheckpointResponse]
+    dataset_evidence: list["ExecutionExportDetail"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +137,7 @@ class ReportService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         execution = await self._execution(project_id, execution_id)
         nodes = await self._reports.list_nodes(execution.id)
-        children = await self._reports.list_children(execution.id)
+        children = await self._reports.list_children(execution.id, project_id=project_id)
         return ExecutionReportDetail(
             summary=await self._summary(execution, nodes),
             nodes=[self._node(execution, item) for item in nodes],
@@ -192,17 +193,29 @@ class ReportService:
     async def _export_detail(
         self, *, actor: User, project_id: UUID, execution_id: UUID
     ) -> ExecutionExportDetail:
-        detail = await self.get_execution(
-            actor=actor, project_id=project_id, execution_id=execution_id
-        )
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._export_execution(project_id, execution_id, set(), 0)
+
+    async def _export_execution(
+        self, project_id: UUID, execution_id: UUID, visited: set[UUID], depth: int
+    ) -> ExecutionExportDetail:
+        if execution_id in visited or len(visited) >= 1000 or depth > 16:
+            raise AppError(
+                code="REPORT_EXPORT_LIMIT_EXCEEDED",
+                message="报告执行树循环或超过导出边界; 请分别导出子运行",
+                status_code=422,
+            )
+        visited.add(execution_id)
         execution = await self._execution(project_id, execution_id)
+        nodes = await self._reports.list_nodes(execution_id)
+        children = await self._reports.list_children(execution_id, project_id=project_id)
         records = await self._reports.list_control_records(execution_id)
         checkpoints = await self._durable.list_checkpoints(execution_id)
         return ExecutionExportDetail(
-            summary=detail.summary,
-            nodes=detail.nodes,
-            context=detail.context,
-            dataset_children=detail.dataset_children,
+            summary=await self._summary(execution, nodes),
+            nodes=[self._node(execution, item) for item in nodes],
+            context=cast(dict[str, JsonValue], execution.context),
+            dataset_children=[await self._summary(child) for child in children],
             snapshot=cast(dict[str, JsonValue], execution.snapshot),
             control_records=[
                 ExportControlRecord(
@@ -216,6 +229,10 @@ class ReportService:
                 for item in records
             ],
             checkpoints=[ExecutionCheckpointResponse.model_validate(item) for item in checkpoints],
+            dataset_evidence=[
+                await self._export_execution(project_id, child.id, visited, depth + 1)
+                for child in children
+            ],
         )
 
     async def _execution(self, project_id: UUID, execution_id: UUID) -> WorkflowExecution:
@@ -242,13 +259,7 @@ class ReportService:
         return ExecutionReportSummary(
             id=execution.id,
             workflow_id=execution.workflow_id,
-            workflow_name=(
-                workflow.name
-                if workflow is not None
-                else "Sandbox Preview"
-                if execution.run_purpose == "preview"
-                else "已删除工作流"
-            ),
+            workflow_name=_report_workflow_name(execution, workflow),
             workflow_version=_workflow_version(execution.snapshot),
             status=execution.status,
             failure_category=classify_failure(
@@ -434,3 +445,16 @@ def _export_value(value: object) -> JsonValue:
     if isinstance(value, UUID):
         return str(value)
     raise TypeError(f"Unsupported report value: {type(value).__name__}")
+
+
+def _report_workflow_name(execution: WorkflowExecution, workflow: Workflow | None) -> str:
+    metadata = execution.snapshot.get("workflow")
+    if isinstance(metadata, dict):
+        name = metadata.get("name")
+        if isinstance(name, str) and name.strip():
+            return name
+    if execution.run_purpose == "preview":
+        return "Sandbox Preview"
+    if workflow is None:
+        return "已删除工作流(历史名称未提供)"
+    return f"{workflow.name}(当前名称; 历史名称未提供)"

@@ -95,6 +95,9 @@ class WorkflowSnapshotSource(Protocol):
     @property
     def id(self) -> UUID | None: ...
 
+    @property
+    def name(self) -> str: ...
+
 
 class WorkflowVersionSnapshotSource(Protocol):
     @property
@@ -113,6 +116,7 @@ class WorkflowVersionSnapshotSource(Protocol):
 @dataclass(frozen=True, slots=True)
 class PreviewWorkflowSnapshot:
     id: UUID | None
+    name: str = "Sandbox Preview"
 
 
 @dataclass(frozen=True, slots=True)
@@ -734,6 +738,7 @@ def _snapshot(
         "schema_version": "1.0",
         "workflow": {
             "id": str(workflow.id) if workflow.id is not None else None,
+            "name": workflow.name,
             "version_id": str(version.id) if version.id is not None else None,
             "version": version.version,
             "fingerprint": version.fingerprint,
@@ -772,6 +777,7 @@ def _nested_snapshot(
     return {
         "workflow": {
             "id": str(workflow.id) if workflow.id is not None else None,
+            "name": workflow.name,
             "version_id": str(version.id) if version.id is not None else None,
             "version": version.version,
             "fingerprint": version.fingerprint,

@@ -1212,6 +1212,7 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert missing_log_entry.json()["error"]["code"] == "WORKFLOW_CHECKPOINT_NOT_FOUND"
     snapshot = detail["execution"]["snapshot"]
     assert snapshot["workflow"]["version"] == 1
+    assert snapshot["workflow"]["name"] == "订单流程"
     assert snapshot["apis"]["api"]["version"] == 1
     assert snapshot["apis"]["api"]["prepared_request"]["url"].endswith("/users/v1")
     assert snapshot["apis"]["api"]["spec"]["auth_config"]["value"] == "***"

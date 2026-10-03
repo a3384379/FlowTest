@@ -82,12 +82,17 @@ class ReportingRepository:
             ).all()
         )
 
-    async def list_children(self, execution_id: UUID) -> list[WorkflowExecution]:
+    async def list_children(
+        self, execution_id: UUID, *, project_id: UUID
+    ) -> list[WorkflowExecution]:
         return list(
             (
                 await self._session.scalars(
                     select(WorkflowExecution)
-                    .where(WorkflowExecution.parent_execution_id == execution_id)
+                    .where(
+                        WorkflowExecution.parent_execution_id == execution_id,
+                        WorkflowExecution.project_id == project_id,
+                    )
                     .order_by(WorkflowExecution.dataset_row_index)
                 )
             ).all()

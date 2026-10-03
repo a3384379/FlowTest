@@ -159,6 +159,48 @@ async def test_report_list_detail_trend_and_html_export(
     assert "raw-secret" not in downloaded.text
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("depth", "cycle"), [(2, True), (18, False)])
+async def test_report_export_rejects_cyclic_or_excessively_deep_execution_trees(
+    reporting_context: ReportingContext, depth: int, cycle: bool
+) -> None:
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        parent_id = execution.id
+        for index in range(depth):
+            child = WorkflowExecution(
+                project_id=execution.project_id,
+                workflow_id=execution.workflow_id,
+                workflow_version_id=execution.workflow_version_id,
+                environment_id=execution.environment_id,
+                triggered_by_id=execution.triggered_by_id,
+                parent_execution_id=parent_id,
+                dataset_row_index=index,
+                status="passed",
+                snapshot=execution.snapshot,
+                context={},
+                started_at=execution.started_at,
+                completed_at=execution.completed_at,
+            )
+            session.add(child)
+            await session.flush()
+            parent_id = child.id
+        if cycle:
+            execution.parent_execution_id = parent_id
+            execution.dataset_row_index = depth
+        await session.commit()
+    headers = await _login_headers(reporting_context.client)
+    response = await reporting_context.client.post(
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}/exports/html",
+        headers=headers,
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "REPORT_EXPORT_LIMIT_EXCEEDED"
+    assert response.json()["error"]["trace_id"]
+
+
 @respx.mock
 @pytest.mark.asyncio
 async def test_signed_webhook_secret_is_write_only_and_delivery_is_auditable(
@@ -357,7 +399,12 @@ async def _seed(
 
 def _snapshot(workflow_id: UUID, version_id: UUID) -> dict[str, Any]:
     return {
-        "workflow": {"id": str(workflow_id), "version_id": str(version_id), "version": 1},
+        "workflow": {
+            "id": str(workflow_id),
+            "name": "失败分类流程",
+            "version_id": str(version_id),
+            "version": 1,
+        },
         "apis": {
             "api": {
                 "prepared_request": {
@@ -475,6 +522,21 @@ async def _seed_report_evidence(context: ReportingContext) -> UUID:
             completed_at=now,
         )
         session.add(child)
+        await session.flush()
+        session.add(
+            WorkflowNodeExecution(
+                workflow_execution_id=child.id,
+                node_id="child-api",
+                node_type="api",
+                name="子运行请求",
+                status="failed",
+                attempts=2,
+                output={"frozen_child_marker": "retained-child-body"},
+                result=result.model_dump(mode="json"),
+                started_at=now,
+                completed_at=now,
+            )
+        )
         session.add(
             WorkflowNodeExecution(
                 workflow_execution_id=execution.id,
@@ -573,6 +635,12 @@ async def test_html_export_preserves_all_frozen_evidence_and_unknown_duration(
     assert api_node["observations"][0]["response"]["body"]["marker"] == "first-observation"
     assert api_node["input_mappings"][0]["source_node_id"] == "mapping-marker"
     assert evidence["dataset_children"][0]["id"] == str(child_id)
+    child = evidence["dataset_evidence"][0]
+    assert child["summary"]["id"] == str(child_id)
+    assert child["nodes"][0]["result"]["assertions"][0]["actual"] == 29901
+    assert len(child["nodes"][0]["observations"]) == 2
+    assert child["nodes"][0]["output"]["frozen_child_marker"] == "retained-child-body"
+    assert child["snapshot"]["workflow"]["name"] == "失败分类流程"
     assert evidence["snapshot"]["workflow"]["version"] == 1
     assert (
         evidence["control_records"][2]["payload"]["nodes"][0]["instance_id"]
@@ -583,3 +651,33 @@ async def test_html_export_preserves_all_frozen_evidence_and_unknown_duration(
     assert evidence["summary"]["duration_ms"] is None
     assert "耗时: 未提供" in downloaded.text
     assert "耗时: 0 ms" not in downloaded.text
+
+
+async def test_report_name_uses_frozen_metadata_and_marks_legacy_current_names(
+    reporting_context: ReportingContext,
+) -> None:
+    headers = await _login_headers(reporting_context.client)
+    path = (
+        f"/api/v1/projects/{reporting_context.project_id}/reports/executions/"
+        f"{reporting_context.execution_id}"
+    )
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        workflow = await session.get(Workflow, execution.workflow_id)
+        assert workflow is not None
+        workflow.name = "后续改名"
+        await session.commit()
+    frozen = await reporting_context.client.get(path, headers=headers)
+    assert frozen.json()["summary"]["workflow_name"] == "失败分类流程"
+    async with reporting_context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert execution is not None
+        snapshot = dict(execution.snapshot)
+        metadata = dict(snapshot["workflow"])
+        metadata.pop("name")
+        snapshot["workflow"] = metadata
+        execution.snapshot = snapshot
+        await session.commit()
+    legacy = await reporting_context.client.get(path, headers=headers)
+    assert legacy.json()["summary"]["workflow_name"] == "后续改名(当前名称; 历史名称未提供)"
