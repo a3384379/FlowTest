@@ -46,10 +46,12 @@ import { useExecutionEvents } from './use-execution-events'
 
 function pending<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((done, fail) => {
     resolve = done
+    reject = fail
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 function execution(id: string, workflowId = workflow.id): WorkflowExecution {
   return { ...workflowRunningExecution, id, workflow_id: workflowId }
@@ -215,6 +217,43 @@ it('keeps terminal server evidence when a node event arrives after completion', 
   expect(hook.result.current.nodeStatuses).toEqual({})
   expect(hook.result.current.activeExecutionId).toBeNull()
 })
+
+it.each(['execute', 'rerun'] as const)(
+  'preserves the terminal evidence while a replacement %s request is pending or rejected',
+  async (kind) => {
+    const run = execution('run-finished')
+    vi.mocked(executeWorkflow).mockResolvedValueOnce(run)
+    const hook = await setup()
+    await act(async () => hook.result.current.execute())
+    const finished = detail(run, 'failed')
+    vi.mocked(getWorkflowExecution).mockResolvedValueOnce(finished)
+    await act(async () => callbacks(run.id).reconcile(run.id))
+    const request = pending<WorkflowExecution>()
+    if (kind === 'execute') vi.mocked(executeWorkflow).mockReturnValueOnce(request.promise)
+    else vi.mocked(rerunFailedWorkflowItems).mockReturnValueOnce(request.promise)
+    let operation!: Promise<void>
+    act(() => {
+      operation = (
+        kind === 'execute'
+          ? hook.result.current.execute()
+          : hook.result.current.rerunFailedItems(run.id, {
+              loop_node_id: 'loop',
+              input_indices: [0],
+              upstream_resource_status: 'unverified',
+              write_retry_strategy: 'reject',
+            })
+      ).catch(() => undefined)
+    })
+    expect(hook.result.current.lastResult).toEqual(finished)
+    expect(hook.result.current.runtimeExecution?.id).toBe(run.id)
+    await act(async () => {
+      request.reject(new Error('replacement request rejected'))
+      await operation
+    })
+    expect(hook.result.current.lastResult).toEqual(finished)
+    expect(hook.result.current.runtimeExecution?.id).toBe(run.id)
+  },
+)
 
 it.each(['project', 'user', 'unmount'] as const)(
   'invalidates an in-flight completion on %s changes',

@@ -104,7 +104,6 @@ export function useWorkflowExecution(
 
   function reserve(): ExecutionTicket {
     scope.invalidate()
-    setState(emptyState())
     return scope.capture()
   }
   function reset() {
