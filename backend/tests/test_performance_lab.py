@@ -551,3 +551,36 @@ async def _get_run(
     )
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def test_scenario_detail_is_versioned_project_scoped_and_feature_guarded(
+    performance_environment: PerformanceEnvironment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = performance_environment
+    headers = await _login_headers(context.client)
+    project_id = await _create_project(context.client, headers)
+    scenario_id = await _create_published_scenario(context.client, headers, project_id)
+    path = f"/api/v1/projects/{project_id}/performance-scenarios/{scenario_id}"
+    response = await context.client.get(path, headers=headers)
+    assert response.status_code == 200
+    frozen = response.json()
+    assert frozen["project_id"] == project_id
+    assert frozen["status"] == "published"
+    assert frozen["version"] == 1
+    versioned = await context.client.post(
+        f"{path}/versions",
+        headers=headers,
+        json={"description": "新版本", "definition": _definition(steps=2).model_dump(mode="json")},
+    )
+    assert versioned.status_code == 201
+    assert (await context.client.get(path, headers=headers)).json() == frozen
+    other_project = await _create_project(context.client, headers)
+    foreign = await context.client.get(
+        f"/api/v1/projects/{other_project}/performance-scenarios/{scenario_id}", headers=headers
+    )
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["trace_id"]
+    monkeypatch.setattr(settings, "feature_performance_lab_enabled", False)
+    disabled = await context.client.get(path, headers=headers)
+    assert disabled.status_code == 409
+    assert disabled.json()["error"]["trace_id"]

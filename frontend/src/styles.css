@@ -2068,3 +2068,58 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.lab-workspace {
+  display: grid;
+  grid-template-columns: minmax(440px, 0.95fr) minmax(0, 1.15fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.lab-catalogs,
+.lab-detail {
+  min-width: 0;
+}
+
+.lab-catalogs .ant-table-wrapper {
+  overflow-x: auto;
+}
+
+.lab-detail .ant-descriptions-item-content,
+.lab-identity {
+  overflow-wrap: anywhere;
+}
+
+.lab-detail .ant-alert,
+.lab-detail .ant-descriptions,
+.lab-detail .ant-timeline {
+  margin-block: 16px;
+}
+
+@media (max-width: 1200px) {
+  .lab-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.workflow-resource-pagination {
+  padding: 10px;
+  border-top: 1px solid var(--ft-border-subtle);
+}
+
+.environment-template-select {
+  width: 300px;
+}
+
+@media (max-width: 600px) {
+  .environment-provision-form .ant-form-item {
+    width: 100%;
+    margin-inline-end: 0;
+  }
+  .environment-provision-form .ant-form-item-row {
+    display: block;
+  }
+  .environment-provision-form .environment-template-select {
+    width: 100%;
+  }
+}

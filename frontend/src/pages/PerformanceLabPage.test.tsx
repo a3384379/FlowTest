@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -238,6 +238,115 @@ describe('PerformanceLabPage', () => {
     expect(await screen.findByText('请输入有效的 HTTP 或 HTTPS URL')).toBeInTheDocument()
     expect(submitted).toBe(false)
   })
+  it('opens an off-page frozen run and preserves the original load configuration', async () => {
+    let writes = 0
+    installHandlers({
+      scenarios: [{ ...scenario, version: 9, definition: { ...scenario.definition, vus: 90 } }],
+      runs: [],
+    })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/performance-runs/${run.id}`, () =>
+        HttpResponse.json(run),
+      ),
+      http.post('*/performance-scenarios/:id/runs', () => {
+        writes += 1
+        return HttpResponse.json(run)
+      }),
+    )
+    renderPage(`/projects/${project.id}/performance?run=${run.id}`)
+    expect(await screen.findByText(run.id)).toBeVisible()
+    expect(screen.getByText('未提供稳定性判定')).toBeVisible()
+    await userEvent.setup().click(screen.getByRole('tab', { name: '冻结负载与请求' }))
+    const snapshot = screen.getByRole('region', { name: '运行时声明式配置' })
+    expect(snapshot).toHaveTextContent('"vus": 5')
+    expect(snapshot).not.toHaveTextContent('"vus": 90')
+    expect(snapshot).toHaveTextContent(scenario.definition.steps[0].url)
+    expect(writes).toBe(0)
+  })
+
+  it('shows missing metrics explicitly and keeps an unavailable deep link retryable', async () => {
+    let reads = 0
+    installHandlers({ runs: [{ ...run, summary: {}, baseline_run_id: null }] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/performance-runs/missing`, () => {
+        reads += 1
+        return HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '运行不存在', trace_id: 'test-trace' } },
+          { status: 404 },
+        )
+      }),
+    )
+    const { container } = renderPage(`/projects/${project.id}/performance?run=missing`)
+    expect(await screen.findByText('所选对象读取失败')).toBeVisible()
+    const overview = container.querySelector('.performance-overview')!
+    await waitFor(() =>
+      expect(within(overview as HTMLElement).getAllByText('未提供')).toHaveLength(2),
+    )
+    await userEvent.setup().click(screen.getByRole('button', { name: /重\s*试/ }))
+    await waitFor(() => expect(reads).toBe(2))
+    expect(screen.queryByText('性能运行 · 冻结证据')).not.toBeInTheDocument()
+  })
+
+  it('creates a full new version without truncating steps, stages, headers or thresholds', async () => {
+    const fullDefinition = {
+      ...scenario.definition,
+      steps: [
+        ...scenario.definition.steps,
+        {
+          ...scenario.definition.steps[0],
+          name: '第二步',
+          headers: { 'X-Trace': 'preserve' },
+          body: { order: 7 },
+        },
+      ],
+    }
+    let payload: unknown
+    installHandlers({ scenarios: [{ ...scenario, definition: fullDefinition }] })
+    server.use(
+      http.post(
+        `/api/v1/projects/${project.id}/performance-scenarios/${scenario.id}/versions`,
+        async ({ request }) => {
+          payload = await request.json()
+          return HttpResponse.json({ ...scenario, version: 2 }, { status: 201 })
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '新建版本' }))
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() =>
+      expect(payload).toEqual({ description: scenario.description, definition: fullDefinition }),
+    )
+  })
+
+  it('pages the server catalog and disables mutation controls for a read-only member', async () => {
+    const requested: number[] = []
+    installHandlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/performance-scenarios`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        requested.push(page)
+        return HttpResponse.json({
+          items: [{ ...scenario, id: `scenario-${page}`, name: `第${page}页场景` }],
+          total: 126,
+          page,
+          page_size: 20,
+        })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('第1页场景')).toBeVisible()
+    expect(screen.getByRole('button', { name: /新建性能场景/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '新建版本' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /运行/ })).toBeDisabled()
+    await userEvent.setup().click(screen.getAllByTitle('Next Page')[0])
+    expect(await screen.findByText('第2页场景')).toBeVisible()
+    expect(requested).toEqual([1, 2])
+  })
 })
 
 function installHandlers({
@@ -257,14 +366,14 @@ function installHandlers({
   )
 }
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="performance">
+        <ProjectTestProvider section="performance" initialEntry={initialEntry}>
           <PerformanceLabPage />
         </ProjectTestProvider>
       </QueryClientProvider>
