@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Alert, Modal } from 'antd'
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom'
-import { DraftContext, DraftSession } from './draft-session'
+import { DRAFT_NAVIGATION_CANCELLED, DraftContext, DraftSession } from './draft-session'
 
 export function DraftSessionProvider({ children }: { children: ReactNode }) {
   const [session] = useState(() => new DraftSession())
@@ -44,7 +44,10 @@ function DraftNavigationGuard({ unsafe }: { unsafe: boolean }) {
       okText="保留草稿并切换"
       cancelText="留在当前页保存"
       onOk={() => blocker.proceed?.()}
-      onCancel={() => blocker.reset?.()}
+      onCancel={() => {
+        blocker.reset?.()
+        window.dispatchEvent(new Event(DRAFT_NAVIGATION_CANCELLED))
+      }}
     >
       尚未应用的节点配置或未持久化草稿仅保留在本次会话。切换后返回原项目和资源可继续编辑；刷新、关闭浏览器或退出登录会丢失这些输入。
     </Modal>
