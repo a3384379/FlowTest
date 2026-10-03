@@ -1035,6 +1035,376 @@ def _workflow_definition(api_id: str) -> dict[str, object]:
     }
 
 
+async def _native_asset_package(context: TaskingTestContext) -> tuple[str, dict[str, str], dict]:
+    client = context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    root = f"/api/v1/projects/{project_id}"
+    folder = await client.post(root + "/folders", headers=headers, json={"name": "包目录"})
+    definition = {
+        "workflow_id": workflow_id,
+        "workflow_version": 1,
+        "environment_id": environment_id,
+        "runtime_variables": {"fixture": "v1"},
+    }
+    created = await client.post(
+        root + "/test-cases",
+        headers=headers,
+        json={
+            "name": "原生包用例",
+            "description": "保留说明",
+            "folder_id": folder.json()["id"],
+            "tags": ["中文标签"],
+            "is_template": True,
+            "definition": definition,
+        },
+    )
+    assert created.status_code == 201, created.text
+    case_id = created.json()["id"]
+    for version in (1, 2):
+        definition["runtime_variables"] = {"fixture": f"v{version}"}
+        updated = await client.patch(
+            root + f"/test-cases/{case_id}", headers=headers, json={"definition": definition}
+        )
+        assert updated.status_code == 200, updated.text
+        published = await client.post(
+            root + f"/test-cases/{case_id}/versions", headers=headers, json={}
+        )
+        assert published.status_code == 200, published.text
+    suite = await client.post(
+        root + "/test-suites",
+        headers=headers,
+        json={
+            "name": "原生包套件",
+            "folder_id": folder.json()["id"],
+            "tags": ["中文标签"],
+            "definition": {"items": [{"test_case_id": case_id, "test_case_version": 1}]},
+        },
+    )
+    assert suite.status_code == 201, suite.text
+    published = await client.post(
+        root + f"/test-suites/{suite.json()['id']}/versions", headers=headers, json={}
+    )
+    assert published.status_code == 200, published.text
+    exported = await client.post(
+        root + "/test-assets/export",
+        headers=headers,
+        json={"case_ids": [], "suite_ids": [suite.json()["id"]]},
+    )
+    assert exported.status_code == 200, exported.text
+    assert "attachment" in exported.headers["content-disposition"]
+    return root, headers, exported.json()
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_keeps_case_versions_and_suite_fixed_references(
+    tasking_context: TaskingTestContext,
+) -> None:
+    context = tasking_context
+    root, headers, package = await _native_asset_package(context)
+    assert package["format"] == "flowtest-test-assets"
+    assert package["format_version"] == 1
+    assert len(package["cases"]) == 1
+    case = package["cases"][0]
+    assert case["is_template"] and case["tags"] == ["中文标签"]
+    assert [row["version"] for row in case["versions"]] == [1, 2]
+    assert package["suites"][0]["versions"][0]["definition"]["items"][0]["test_case_version"] == 1
+    assert package["folders"][0]["name"] == "包目录"
+    payload = {"package": package, "choices": [], "bindings": {}}
+    conflict = await context.client.post(
+        root + "/test-assets/import/preview", headers=headers, json=payload
+    )
+    assert conflict.status_code == 200, conflict.text
+    assert not conflict.json()["can_apply"]
+    payload["choices"] = [
+        {"kind": "case", "source_id": case["id"], "action": "clone", "name": "导入用例"},
+        {
+            "kind": "suite",
+            "source_id": package["suites"][0]["id"],
+            "action": "clone",
+            "name": "导入套件",
+        },
+    ]
+    preview = await context.client.post(
+        root + "/test-assets/import/preview", headers=headers, json=payload
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["can_apply"], preview.text
+    assert not context.queue.test_plan_run_ids
+
+    imported = await context.client.post(
+        root + "/test-assets/import/apply",
+        headers=headers,
+        json={**payload, "expected_preview_fingerprint": preview.json()["fingerprint"]},
+    )
+    assert imported.status_code == 200, imported.text
+    mappings = imported.json()["assets"]
+    imported_case = next(row for row in mappings if row["kind"] == "case")
+    imported_suite = next(row for row in mappings if row["kind"] == "suite")
+    case_versions = await context.client.get(
+        root + f"/test-cases/{imported_case['target_id']}/versions", headers=headers
+    )
+    assert len(case_versions.json()) == 2
+    suite_versions = await context.client.get(
+        root + f"/test-suites/{imported_suite['target_id']}/versions", headers=headers
+    )
+    member = suite_versions.json()[0]["definition"]["items"][0]
+    assert member == {"test_case_id": imported_case["target_id"], "test_case_version": 1}
+    assert not context.queue.test_plan_run_ids
+
+
+def _package_clone_choices(package: dict) -> list[dict[str, str]]:
+    return [
+        {
+            "kind": "case",
+            "source_id": package["cases"][0]["id"],
+            "action": "clone",
+            "name": "导入用例",
+        },
+        {
+            "kind": "suite",
+            "source_id": package["suites"][0]["id"],
+            "action": "clone",
+            "name": "导入套件",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_rejects_stale_review_before_any_write(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    root, headers, package = await _native_asset_package(tasking_context)
+    payload = {
+        "package": package,
+        "choices": [
+            {"kind": "case", "source_id": package["cases"][0]["id"], "action": "update"},
+            {"kind": "suite", "source_id": package["suites"][0]["id"], "action": "skip"},
+        ],
+    }
+    preview = await client.post(root + "/test-assets/import/preview", headers=headers, json=payload)
+    assert preview.json()["can_apply"], preview.text
+    case_path = root + f"/test-cases/{package['cases'][0]['id']}"
+    await client.patch(case_path, headers=headers, json={"description": "已在其他窗口编辑"})
+    response = await client.post(
+        root + "/test-assets/import/apply",
+        headers=headers,
+        json={
+            **payload,
+            "expected_preview_fingerprint": preview.json()["fingerprint"],
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "TEST_ASSET_PACKAGE_PREVIEW_STALE"
+    assert response.json()["error"]["trace_id"]
+    current = await client.get(case_path, headers=headers)
+    assert current.json()["description"] == "已在其他窗口编辑"
+    assert current.json()["current_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_rolls_back_case_versions_when_suite_write_fails(
+    tasking_context: TaskingTestContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.test_assets import TestSuiteService as SuiteService
+
+    client = tasking_context.client
+    root, headers, package = await _native_asset_package(tasking_context)
+    payload = {"package": package, "choices": _package_clone_choices(package)}
+    preview = await client.post(root + "/test-assets/import/preview", headers=headers, json=payload)
+    assert preview.json()["can_apply"], preview.text
+
+    async def fail_publish(
+        self: SuiteService,
+        *,
+        actor: User,
+        project_id: UUID,
+        suite_id: UUID,
+        change_note: str,
+        commit: bool = True,
+    ) -> test_asset_models.TestSuiteVersion:
+        raise AppError(
+            code="TEST_IMPORT_WRITE_FAILURE", message="模拟套件写入失败", status_code=409
+        )
+
+    monkeypatch.setattr(SuiteService, "publish", fail_publish)
+    response = await client.post(
+        root + "/test-assets/import/apply",
+        headers=headers,
+        json={
+            **payload,
+            "expected_preview_fingerprint": preview.json()["fingerprint"],
+        },
+    )
+    assert response.status_code == 409, response.text
+    cases = await client.get(root + "/test-cases", headers=headers)
+    suites = await client.get(root + "/test-suites", headers=headers)
+    assert cases.json()["total"] == suites.json()["total"] == 1
+    async with tasking_context.session_maker() as session:
+        assert len((await session.scalars(select(test_asset_models.TestCaseVersion))).all()) == 2
+        assert len((await session.scalars(select(test_asset_models.TestSuiteVersion))).all()) == 1
+    assert not tasking_context.queue.test_plan_run_ids
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "defect", ["marker", "fingerprint", "fixed-reference", "duplicate", "header"]
+)
+async def test_native_asset_package_strict_validation_keeps_invalid_input_out_of_writes(
+    tasking_context: TaskingTestContext,
+    defect: str,
+) -> None:
+    client = tasking_context.client
+    root, headers, package = await _native_asset_package(tasking_context)
+    if defect == "marker":
+        package["format_version"] = True
+    elif defect == "fingerprint":
+        package["cases"][0]["versions"][0]["fingerprint"] = "0" * 64
+    elif defect == "fixed-reference":
+        package["suites"][0]["versions"][0]["definition"]["items"][0]["test_case_version"] = 9
+    elif defect == "duplicate":
+        package["cases"].append(package["cases"][0])
+    else:
+        package["cases"][0]["draft_definition"]["runtime_headers"] = {
+            "X-Test": "secret\r\ninjected"
+        }
+    response = await client.post(
+        root + "/test-assets/import/preview", headers=headers, json={"package": package}
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "TEST_ASSET_PACKAGE_INVALID"
+    assert response.json()["error"]["trace_id"]
+    assert "secret" not in response.text
+    cases = await client.get(root + "/test-cases", headers=headers)
+    assert cases.json()["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_requires_explicit_project_local_resource_bindings(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    root, headers, package = await _native_asset_package(tasking_context)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    target_root = f"/api/v1/projects/{project_id}"
+    selection = await client.post(
+        target_root + "/test-assets/export",
+        headers=headers,
+        json={"case_ids": [package["cases"][0]["id"]]},
+    )
+    assert selection.status_code == 404 and selection.json()["error"]["trace_id"]
+    payload = {"package": package}
+    missing = await client.post(
+        target_root + "/test-assets/import/preview", headers=headers, json=payload
+    )
+    assert missing.status_code == 200 and not missing.json()["can_apply"]
+    source_workflow = package["workflows"][0]["id"]
+    source_environment = package["environments"][0]["id"]
+    payload["bindings"] = {
+        "workflows": {source_workflow: {"target_id": workflow_id, "versions": {"1": 1}}},
+        "environments": {source_environment: environment_id},
+        "folders": {package["folders"][0]["id"]: None},
+    }
+    reviewed = await client.post(
+        target_root + "/test-assets/import/preview", headers=headers, json=payload
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["can_apply"], reviewed.text
+    workflow_binding = next(
+        row for row in reviewed.json()["dependencies"] if row["kind"] == "workflow"
+    )
+    assert workflow_binding["fingerprint_changed"]
+    imported = await client.post(
+        target_root + "/test-assets/import/apply",
+        headers=headers,
+        json={
+            **payload,
+            "expected_preview_fingerprint": reviewed.json()["fingerprint"],
+        },
+    )
+    assert imported.status_code == 200, imported.text
+    new_case = next(row for row in imported.json()["assets"] if row["kind"] == "case")
+    versions = await client.get(
+        target_root + f"/test-cases/{new_case['target_id']}/versions", headers=headers
+    )
+    assert all(version["definition"]["workflow_id"] == workflow_id for version in versions.json())
+    assert all(version["definition"]["workflow_version"] == 1 for version in versions.json())
+    assert all(
+        version["definition"]["environment_id"] == environment_id for version in versions.json()
+    )
+    original = await client.get(root + f"/test-cases/{package['cases'][0]['id']}", headers=headers)
+    assert original.json()["current_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_readonly_members_can_export_but_cannot_preview_or_apply(
+    tasking_context: TaskingTestContext,
+) -> None:
+    from app.models.access import ProjectMember, ProjectRole
+
+    client = tasking_context.client
+    root, _headers, package = await _native_asset_package(tasking_context)
+    async with tasking_context.session_maker() as session:
+        viewer = User(
+            email="package-viewer@example.com",
+            display_name="包只读成员",
+            password_hash=password_service.hash(ADMIN_PASSWORD),
+            is_active=True,
+            is_system_admin=False,
+            requires_password_change=False,
+        )
+        session.add(viewer)
+        await session.flush()
+        session.add(
+            ProjectMember(
+                project_id=UUID(package["source_project_id"]),
+                user_id=viewer.id,
+                role=ProjectRole.VIEWER,
+            )
+        )
+        await session.commit()
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "package-viewer@example.com", "password": ADMIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    exported = await client.post(
+        root + "/test-assets/export",
+        headers=viewer_headers,
+        json={"case_ids": [package["cases"][0]["id"]]},
+    )
+    assert exported.status_code == 200, exported.text
+    for path in ("preview", "apply"):
+        payload = {"package": package}
+        if path == "apply":
+            payload["expected_preview_fingerprint"] = "f" * 64
+        response = await client.post(
+            root + f"/test-assets/import/{path}", headers=viewer_headers, json=payload
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["error"]["code"] == "PROJECT_FORBIDDEN"
+        assert response.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_native_asset_package_enforces_streamed_request_limit(
+    tasking_context: TaskingTestContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = tasking_context.client
+    root, headers, package = await _native_asset_package(tasking_context)
+    monkeypatch.setattr("app.http.test_asset_packages.PACKAGE_MAX_BYTES", 128)
+    response = await client.post(
+        root + "/test-assets/import/preview", headers=headers, json={"package": package}
+    )
+    assert response.status_code == 413, response.text
+    assert response.json()["error"]["code"] == "TEST_ASSET_PACKAGE_TOO_LARGE"
+    assert response.json()["error"]["trace_id"]
+
+
 @dataclass(slots=True)
 class AssetHistoryFixture:
     context: TaskingTestContext

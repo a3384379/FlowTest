@@ -1,12 +1,20 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.domain.test_assets import VersionChange
+from app.http.test_asset_packages import read_package_payload
 from app.schemas.common import Page
 from app.schemas.tasking import TestPlanRunDetailResponse
+from app.schemas.test_asset_packages import (
+    PackageApplyRequest,
+    PackageApplyResponse,
+    PackageExportRequest,
+    PackagePreviewRequest,
+    PackagePreviewResponse,
+)
 from app.schemas.test_assets import (
     AssetBulkDeleteRequest,
     AssetBulkMove,
@@ -35,10 +43,57 @@ from app.schemas.test_assets import (
 )
 from app.services.test_asset_deletion import TestAssetDeletionService
 from app.services.test_asset_history import TestAssetHistoryService
+from app.services.test_asset_package_imports import TestAssetPackageImportService
+from app.services.test_asset_packages import TestAssetPackageExportService
 from app.services.test_assets import TestCaseService, TestSuiteService
 from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.post("/test-assets/export")
+async def export_test_asset_package(
+    project_id: UUID,
+    payload: PackageExportRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Response:
+    package = await TestAssetPackageExportService(session).export(
+        actor=current_user, project_id=project_id, selection=payload
+    )
+    return Response(
+        content=package.model_dump_json(indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="flowtest-test-assets-{project_id}.json"'
+        },
+    )
+
+
+@router.post("/test-assets/import/preview", response_model=PackagePreviewResponse)
+async def preview_test_asset_package(
+    project_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PackagePreviewResponse:
+    payload = await read_package_payload(request, PackagePreviewRequest)
+    return await TestAssetPackageImportService(session).preview(
+        actor=current_user, project_id=project_id, request=payload
+    )
+
+
+@router.post("/test-assets/import/apply", response_model=PackageApplyResponse)
+async def apply_test_asset_package(
+    project_id: UUID,
+    request: Request,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PackageApplyResponse:
+    payload = await read_package_payload(request, PackageApplyRequest)
+    return await TestAssetPackageImportService(session).apply(
+        actor=current_user, project_id=project_id, request=payload
+    )
 
 
 @router.get("/test-assets/directory-counts", response_model=AssetDirectoryCountsResponse)

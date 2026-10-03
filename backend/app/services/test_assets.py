@@ -438,6 +438,7 @@ class TestSuiteService:
         folder_id: UUID | None,
         tags: list[str],
         definition: TestSuiteDefinitionInput,
+        commit: bool = True,
     ) -> TestSuite:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         normalized_name = name.strip()
@@ -457,8 +458,9 @@ class TestSuiteService:
         self._assets.add(model)
         await self._session.flush()
         self._record(actor, model, "test_suite.created")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
         return model
 
     async def list_suites(
@@ -507,6 +509,7 @@ class TestSuiteService:
         change_folder: bool,
         tags: list[str] | None,
         definition: TestSuiteDefinitionInput | None,
+        commit: bool = True,
     ) -> TestSuite:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         model = await self._get_project_suite_for_update(project_id, suite_id)
@@ -525,8 +528,11 @@ class TestSuiteService:
             await self._validate_definition(project_id, definition, require_published=False)
             model.draft_definition = _json_definition(definition)
         self._record(actor, model, "test_suite.updated")
-        await self._session.commit()
-        await self._session.refresh(model)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(model)
+        else:
+            await self._session.flush()
         return model
 
     async def publish(
@@ -536,6 +542,7 @@ class TestSuiteService:
         project_id: UUID,
         suite_id: UUID,
         change_note: str,
+        commit: bool = True,
     ) -> TestSuiteVersion:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         suite = await self._get_project_suite_for_update(project_id, suite_id)
@@ -571,8 +578,11 @@ class TestSuiteService:
             "test_suite.published",
             details={"version": version_number, "item_count": len(published.items)},
         )
-        await self._session.commit()
-        await self._session.refresh(version)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(version)
+        else:
+            await self._session.flush()
         return version
 
     async def list_versions(

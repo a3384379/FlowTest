@@ -38,6 +38,7 @@ import { FolderManagementPanel } from '../features/projects/AssetManagementPanel
 import AssetDetailDrawer from '../features/test-assets/AssetDetailDrawer'
 import AssetPlanDialog from '../features/test-assets/AssetPlanDialog'
 import AssetDeletionDialog from '../features/test-assets/AssetDeletionDialog'
+import AssetPackageToolbar from '../features/test-assets/AssetPackageToolbar'
 import { AssetHistoryNotice } from '../features/test-assets/AssetRunEvidence'
 import {
   PublishedCaseBinding,
@@ -225,6 +226,18 @@ function TestAssetsWorkspace() {
         />
         <div className="test-asset-main">
           <AssetCatalogScope state={state} />
+          <AssetPackageToolbar
+            projectId={state.projectId ?? ''}
+            canEdit={state.canEdit}
+            caseIds={selectedCases}
+            suiteIds={selectedSuites}
+            resources={{
+              workflows: pageItems(state.workflows.data),
+              environments: state.environments.data ?? [],
+              folders: folderItems(state),
+            }}
+            onImported={resetSelection}
+          />
           <AssetHistoryNotice history={history} />
           <AssetTabs
             state={state}
