@@ -42,6 +42,21 @@ export type AssetRunItem = {
   error_message: string | null
 }
 export type AssetRunDetail = { run: TestPlanRun; items: AssetRunItem[] }
+export type CaseRunHistory = {
+  id: string
+  execution_id: string | null
+  case_version: number
+  workflow_id: string
+  workflow_version: number
+  environment_id: string
+  status: AssetRunItem['status']
+  source: 'direct' | 'plan'
+  started_at: string | null
+  created_at: string
+  plan_run_id: string | null
+  plan_id: string | null
+}
+export type SuiteLatestRun = { suite_id: string; detail: AssetRunDetail }
 
 // These three existing resources share the same page contract. Complete catalogs
 // let directory filters and version pickers include records beyond page one.
@@ -108,17 +123,46 @@ export async function listAssetPlans(projectId: string): Promise<AssetCatalog<Te
   )
 }
 
-export async function listRecentAssetRuns(projectId: string): Promise<Page<TestPlanRun>> {
+export async function listCaseRunHistory(
+  projectId: string,
+  caseId: string,
+  page: number,
+  version?: number,
+): Promise<Page<CaseRunHistory>> {
   return (
-    await apiClient.get<Page<TestPlanRun>>(`/projects/${projectId}/test-plan-runs`, {
-      params: { page: 1, page_size: 20 },
+    await apiClient.get<Page<CaseRunHistory>>(`/projects/${projectId}/test-cases/${caseId}/runs`, {
+      params: { page, page_size: 20, version },
     })
   ).data
 }
 
-export async function getAssetRun(projectId: string, runId: string): Promise<AssetRunDetail> {
-  return (await apiClient.get<AssetRunDetail>(`/projects/${projectId}/test-plan-runs/${runId}`))
-    .data
+export async function listSuiteRunHistory(
+  projectId: string,
+  suiteId: string,
+  page: number,
+  version?: number,
+): Promise<Page<AssetRunDetail>> {
+  return (
+    await apiClient.get<Page<AssetRunDetail>>(
+      `/projects/${projectId}/test-suites/${suiteId}/runs`,
+      {
+        params: { page, page_size: 20, version },
+      },
+    )
+  ).data
+}
+
+export async function listLatestSuiteRuns(
+  projectId: string,
+  suiteIds: string[],
+): Promise<SuiteLatestRun[]> {
+  if (!suiteIds.length) return []
+  return (
+    await apiClient.get<SuiteLatestRun[]>(`/projects/${projectId}/test-suites/runs/latest`, {
+      params: { suite_ids: suiteIds },
+      paramsSerializer: { indexes: null },
+    })
+  ).data
 }
 
 export async function createAssetPlan(

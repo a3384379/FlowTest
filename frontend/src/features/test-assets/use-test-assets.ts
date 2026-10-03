@@ -98,7 +98,11 @@ export function useTestAssets() {
   const runCaseMutation = useMutation({
     mutationFn: ({ caseId, input }: { caseId: string; input: RunCaseInput }) =>
       runTestCase(projectId!, caseId, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['asset-run-history', projectId] }),
+      ]),
   })
   const publishSuiteMutation = useMutation({
     mutationFn: (suiteId: string) => publishTestSuite(projectId!, suiteId),

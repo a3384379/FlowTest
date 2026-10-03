@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.domain.api_assets import JsonValue
+from app.schemas.tasking import TestPlanRunDetailResponse
 
 RuntimeName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 TagName = Annotated[str, Field(min_length=1, max_length=50)]
@@ -118,6 +119,26 @@ class TestCaseRunResponse(BaseModel):
     source: Literal["direct", "plan"]
     started_at: datetime
     created_new_version: bool = False
+
+
+class TestCaseRunHistoryResponse(BaseModel):
+    id: UUID
+    execution_id: UUID | None
+    case_version: int
+    workflow_id: UUID
+    workflow_version: int
+    environment_id: UUID
+    status: Literal["queued", "running", "passed", "failed", "cancelled", "quarantined"]
+    source: Literal["direct", "plan"]
+    started_at: datetime | None
+    created_at: datetime
+    plan_run_id: UUID | None
+    plan_id: UUID | None
+
+
+class TestSuiteLatestRunResponse(BaseModel):
+    suite_id: UUID
+    detail: TestPlanRunDetailResponse
 
 
 class TestCaseVersionResponse(BaseModel):

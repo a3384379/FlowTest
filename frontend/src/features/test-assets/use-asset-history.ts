@@ -1,31 +1,25 @@
-import { useQueries, useQuery } from '@tanstack/react-query'
-import { getAssetRun, listRecentAssetRuns, type AssetKind } from './asset-workspace-service'
+import { useQuery } from '@tanstack/react-query'
+import { listLatestSuiteRuns, type AssetKind } from './asset-workspace-service'
 import { assetRunHistory } from './asset-run-view-model'
 
-export function useAssetHistory(projectId: string | null) {
+export function useAssetHistory(projectId: string | null, suiteIds: string[]) {
   const runs = useQuery({
-    queryKey: ['asset-recent-runs', projectId],
-    queryFn: () => listRecentAssetRuns(projectId!),
+    queryKey: ['test-suite-latest-runs', projectId, suiteIds],
+    queryFn: () => listLatestSuiteRuns(projectId!, suiteIds),
     enabled: Boolean(projectId),
-    refetchInterval: (query) => (hasActiveRun(query.state.data?.items) ? 1000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.some(({ detail }) => hasActiveRun(detail.items)) ? 2000 : false,
   })
-  const details = useQueries({
-    queries: (runs.data?.items ?? []).map((run) => ({
-      queryKey: ['test-plan-run-detail', projectId, run.id],
-      queryFn: () => getAssetRun(projectId!, run.id),
-      staleTime: 10_000,
-      refetchInterval: (query: { state: { data?: Awaited<ReturnType<typeof getAssetRun>> } }) =>
-        hasActiveRun(query.state.data ? [query.state.data.run] : []) ? 1000 : false,
-    })),
-  })
-  const records = details.flatMap((query) => (query.data ? [query.data] : []))
   return {
-    total: runs.data?.total,
-    count: records.length,
-    loading: runs.isPending || details.some((query) => query.isPending),
-    error: runs.error ?? details.find((query) => query.error)?.error,
-    history: (kind: AssetKind, id: string) => assetRunHistory(records, kind, id),
-    reload: () => Promise.all([runs.refetch(), ...details.map((query) => query.refetch())]),
+    loading: runs.isPending,
+    error: runs.error,
+    history: (kind: AssetKind, id: string) =>
+      assetRunHistory(
+        (runs.data ?? []).filter((entry) => entry.suite_id === id).map((entry) => entry.detail),
+        kind,
+        id,
+      ),
+    reload: () => runs.refetch(),
   }
 }
 

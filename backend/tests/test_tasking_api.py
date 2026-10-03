@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import respx
@@ -21,9 +21,10 @@ from app.domain.tasking import webhook_signature
 from app.domain.test_assets import definition_fingerprint
 from app.main import app
 from app.models import Base
+from app.models import tasking as tasking_models
 from app.models import test_assets as test_asset_models
 from app.models.access import User
-from app.models.workflows import WorkflowExecution
+from app.models.workflows import WorkflowExecution, WorkflowVersion
 from app.services.execution_events import ExecutionEvent
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -1032,3 +1033,278 @@ def _workflow_definition(api_id: str) -> dict[str, object]:
             {"id": "api-end", "source": "api", "target": "end"},
         ],
     }
+
+
+@dataclass(slots=True)
+class AssetHistoryFixture:
+    context: TaskingTestContext
+    headers: dict[str, str]
+    project_id: str
+    case_id: str
+    suite_id: str
+    oldest_execution_id: UUID
+    retry_execution_id: UUID
+    direct_execution_id: UUID
+    oldest_run_id: UUID
+
+
+@pytest.fixture
+async def asset_history_fixture(tasking_context: TaskingTestContext) -> AssetHistoryFixture:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    base_path = f"/api/v1/projects/{project_id}"
+    created = await client.post(
+        f"{base_path}/test-cases",
+        headers=headers,
+        json={
+            "name": "历史分页用例",
+            "definition": {
+                "workflow_id": workflow_id,
+                "workflow_version": 1,
+                "environment_id": environment_id,
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    case_id = created.json()["id"]
+    for version in (1, 2):
+        response = await client.post(
+            f"{base_path}/test-cases/{case_id}/versions", headers=headers, json={}
+        )
+        assert response.json()["version"] == version
+    suite = await client.post(
+        f"{base_path}/test-suites",
+        headers=headers,
+        json={
+            "name": "历史分页套件",
+            "definition": {"items": [{"test_case_id": case_id, "test_case_version": 1}]},
+        },
+    )
+    assert suite.status_code == 201, suite.text
+    suite_id = suite.json()["id"]
+    for version in (1, 2):
+        published = await client.post(
+            f"{base_path}/test-suites/{suite_id}/versions", headers=headers, json={}
+        )
+        assert published.json()["version"] == version
+    plan = await client.post(
+        f"{base_path}/test-plans",
+        headers=headers,
+        json={
+            "name": "资产历史计划",
+            "items": [{"target_type": "suite", "target_id": suite_id, "target_version": 1}],
+        },
+    )
+    assert plan.status_code == 201, plan.text
+    oldest_execution_id, retry_id, direct_id, oldest_run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    async with tasking_context.session_maker() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        version = await session.scalar(
+            select(WorkflowVersion).where(WorkflowVersion.workflow_id == UUID(workflow_id))
+        )
+        assert actor is not None and version is not None
+        start = datetime(2026, 9, 1, tzinfo=UTC)
+        for index in range(41):
+            run = tasking_models.TestPlanRun(
+                id=oldest_run_id if index == 0 else uuid4(),
+                project_id=UUID(project_id),
+                test_plan_id=UUID(plan.json()["id"]),
+                requested_by_id=actor.id,
+                status="queued" if index == 40 else "passed",
+                trigger_type="manual",
+                created_at=start + timedelta(minutes=index),
+            )
+            item = tasking_models.TestPlanRunItem(
+                id=uuid4(),
+                test_plan_run_id=run.id,
+                target_type="case",
+                target_id=UUID(case_id),
+                target_version=1 if index < 30 or index == 40 else 2,
+                target_snapshot={
+                    "source_suite": {
+                        "id": suite_id,
+                        "version": 1 if index < 30 or index == 40 else 2,
+                    }
+                },
+                workflow_id=UUID(workflow_id),
+                environment_id=UUID(environment_id),
+                workflow_version=1,
+                position=0,
+                max_retries=1,
+                attempts=0 if index == 40 else 1,
+                status="queued" if index == 40 else "passed",
+            )
+            session.add_all([run, item])
+            if index == 40:
+                continue
+            execution = WorkflowExecution(
+                id=oldest_execution_id if index == 0 else uuid4(),
+                project_id=UUID(project_id),
+                workflow_id=UUID(workflow_id),
+                workflow_version_id=version.id,
+                environment_id=UUID(environment_id),
+                triggered_by_id=actor.id,
+                source_case_id=None if index == 0 else UUID(case_id),
+                source_case_version=None if index == 0 else item.target_version,
+                source_trigger=None if index == 0 else "plan",
+                source_plan_run_item_id=None if index == 0 else item.id,
+                status="passed",
+                snapshot={"workflow_version": 1},
+                started_at=start + timedelta(minutes=index),
+            )
+            item.workflow_execution_id = execution.id
+            session.add(execution)
+            if index == 2:
+                session.add(
+                    WorkflowExecution(
+                        id=retry_id,
+                        project_id=UUID(project_id),
+                        workflow_id=UUID(workflow_id),
+                        workflow_version_id=version.id,
+                        environment_id=UUID(environment_id),
+                        triggered_by_id=actor.id,
+                        source_case_id=UUID(case_id),
+                        source_case_version=1,
+                        source_trigger="plan",
+                        source_plan_run_item_id=item.id,
+                        status="failed",
+                        snapshot={"workflow_version": 1},
+                        started_at=start + timedelta(minutes=index, seconds=-1),
+                    )
+                )
+        direct = WorkflowExecution(
+            id=direct_id,
+            project_id=UUID(project_id),
+            workflow_id=UUID(workflow_id),
+            workflow_version_id=version.id,
+            environment_id=UUID(environment_id),
+            triggered_by_id=actor.id,
+            source_case_id=UUID(case_id),
+            source_case_version=2,
+            source_trigger="direct",
+            status="passed",
+            snapshot={"workflow_version": 1},
+            started_at=start + timedelta(minutes=100),
+        )
+        session.add(direct)
+        session.add(
+            WorkflowExecution(
+                project_id=UUID(project_id),
+                workflow_id=UUID(workflow_id),
+                workflow_version_id=version.id,
+                environment_id=UUID(environment_id),
+                triggered_by_id=actor.id,
+                source_case_id=UUID(case_id),
+                source_case_version=2,
+                source_trigger="direct",
+                parent_execution_id=direct_id,
+                dataset_row_index=0,
+                status="passed",
+                snapshot={"workflow_version": 1},
+                started_at=start + timedelta(minutes=101),
+            )
+        )
+        await session.commit()
+    return AssetHistoryFixture(
+        tasking_context,
+        headers,
+        project_id,
+        case_id,
+        suite_id,
+        oldest_execution_id,
+        retry_id,
+        direct_id,
+        oldest_run_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_case_history_pages_direct_legacy_retry_and_queued_records(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    path = f"/api/v1/projects/{fixture.project_id}/test-cases/{fixture.case_id}/runs"
+    records: list[dict[str, object]] = []
+    for page in range(1, 4):
+        response = await fixture.context.client.get(
+            path, headers=fixture.headers, params={"page": page, "page_size": 20}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["total"] == 43
+        records.extend(response.json()["items"])
+    assert len(records) == 43
+    assert len({row["id"] for row in records}) == 43
+    assert records[0]["execution_id"] == str(fixture.direct_execution_id)
+    assert records[0]["source"] == "direct"
+    assert any(row["execution_id"] == str(fixture.oldest_execution_id) for row in records)
+    retry = next(row for row in records if row["execution_id"] == str(fixture.retry_execution_id))
+    assert retry["plan_run_id"] is not None
+    assert retry["status"] == "failed"
+    queued = next(row for row in records if row["execution_id"] is None)
+    assert queued["status"] == "queued" and queued["source"] == "plan"
+    filtered = await fixture.context.client.get(
+        path, headers=fixture.headers, params={"version": 1, "page_size": 100}
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 32
+    assert {row["case_version"] for row in filtered.json()["items"]} == {1}
+
+
+@pytest.mark.asyncio
+async def test_suite_history_queries_frozen_members_beyond_recent_twenty_runs(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    path = f"/api/v1/projects/{fixture.project_id}/test-suites/{fixture.suite_id}/runs"
+    response = await fixture.context.client.get(
+        path, headers=fixture.headers, params={"page": 3, "page_size": 20}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 41
+    assert len(response.json()["items"]) == 1
+    oldest = response.json()["items"][0]
+    assert oldest["run"]["id"] == str(fixture.oldest_run_id)
+    assert oldest["items"][0]["workflow_execution_id"] == str(fixture.oldest_execution_id)
+    filtered = await fixture.context.client.get(
+        path, headers=fixture.headers, params={"version": 1, "page_size": 100}
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 31
+    assert all(
+        item["target_snapshot"]["source_suite"] == {"id": fixture.suite_id, "version": 1}
+        for entry in filtered.json()["items"]
+        for item in entry["items"]
+    )
+    latest = await fixture.context.client.get(
+        f"/api/v1/projects/{fixture.project_id}/test-suites/runs/latest",
+        headers=fixture.headers,
+        params={"suite_ids": fixture.suite_id},
+    )
+    assert latest.status_code == 200, latest.text
+    assert latest.json()[0]["suite_id"] == fixture.suite_id
+    assert latest.json()[0]["detail"]["items"][0]["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_asset_history_rejects_other_project_assets_and_invalid_version(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    client = fixture.context.client
+    other = await client.post(
+        "/api/v1/projects", headers=fixture.headers, json={"name": "其他历史项目"}
+    )
+    for resource, asset_id in (("test-cases", fixture.case_id), ("test-suites", fixture.suite_id)):
+        denied = await client.get(
+            f"/api/v1/projects/{other.json()['id']}/{resource}/{asset_id}/runs",
+            headers=fixture.headers,
+        )
+        assert denied.status_code == 404, denied.text
+        assert denied.json()["error"]["trace_id"]
+        invalid = await client.get(
+            f"/api/v1/projects/{fixture.project_id}/{resource}/{asset_id}/runs",
+            headers=fixture.headers,
+            params={"version": 0},
+        )
+        assert invalid.status_code == 422, invalid.text

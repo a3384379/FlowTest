@@ -93,7 +93,6 @@ function TestAssetsWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { message } = App.useApp()
   const state = useTestAssets()
-  const history = useAssetHistory(state.projectId)
   const [caseEditor, setCaseEditor] = useState<TestCase | null | undefined>(undefined)
   const [suiteEditor, setSuiteEditor] = useState<TestSuite | null | undefined>(undefined)
   const [runCase, setRunCase] = useState<TestCase | null>(null)
@@ -113,6 +112,12 @@ function TestAssetsWorkspace() {
   const suites = pageItems(state.suites.data)
   const publishedCases = pageItems(state.caseOptions.data).filter((item) => item.current_version)
   const browseFolder = searchParams.get('folder') ?? 'all'
+  const history = useAssetHistory(
+    state.projectId,
+    filterLoadedAssets(suites, browseFolder)
+      .slice((suitePage - 1) * 20, suitePage * 20)
+      .map((suite) => suite.id),
+  )
   function resetSelection() {
     setSelectedCases([])
     setSelectedSuites([])
@@ -1203,7 +1208,7 @@ function suiteContextColumns(workspace: AssetTableWorkspace | undefined) {
   if (!workspace) return []
   return [
     {
-      title: '最近结果（近 20 次计划运行）',
+      title: '最近套件结果',
       width: 200,
       render: (_: unknown, item: TestSuite) => (
         <RecentAssetCell kind="suite" id={item.id} workspace={workspace} />

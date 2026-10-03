@@ -6,17 +6,20 @@ from fastapi import APIRouter, Header, Query, status
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.domain.test_assets import VersionChange
 from app.schemas.common import Page
+from app.schemas.tasking import TestPlanRunDetailResponse
 from app.schemas.test_assets import (
     AssetBulkMove,
     AssetBulkMoveResponse,
     AssetClone,
     TestCaseCreate,
     TestCaseResponse,
+    TestCaseRunHistoryResponse,
     TestCaseRunRequest,
     TestCaseRunResponse,
     TestCaseUpdate,
     TestCaseVersionResponse,
     TestSuiteCreate,
+    TestSuiteLatestRunResponse,
     TestSuiteResponse,
     TestSuiteUpdate,
     TestSuiteVersionResponse,
@@ -24,10 +27,67 @@ from app.schemas.test_assets import (
     VersionDiffResponse,
     VersionPublish,
 )
+from app.services.test_asset_history import TestAssetHistoryService
 from app.services.test_assets import TestCaseService, TestSuiteService
 from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.get("/test-cases/{case_id}/runs", response_model=Page[TestCaseRunHistoryResponse])
+async def test_case_run_history(
+    project_id: UUID,
+    case_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    version: int | None = Query(default=None, ge=1),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[TestCaseRunHistoryResponse]:
+    items, total = await TestAssetHistoryService(session).case_runs(
+        actor=current_user,
+        project_id=project_id,
+        case_id=case_id,
+        version=version,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/test-suites/runs/latest", response_model=list[TestSuiteLatestRunResponse])
+async def latest_test_suite_runs(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    suite_ids: Annotated[list[UUID] | None, Query(max_length=100)] = None,
+) -> list[TestSuiteLatestRunResponse]:
+    return await TestAssetHistoryService(session).latest_suite_runs(
+        actor=current_user,
+        project_id=project_id,
+        suite_ids=suite_ids or [],
+    )
+
+
+@router.get("/test-suites/{suite_id}/runs", response_model=Page[TestPlanRunDetailResponse])
+async def test_suite_run_history(
+    project_id: UUID,
+    suite_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    version: int | None = Query(default=None, ge=1),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> Page[TestPlanRunDetailResponse]:
+    items, total = await TestAssetHistoryService(session).suite_runs(
+        actor=current_user,
+        project_id=project_id,
+        suite_id=suite_id,
+        version=version,
+        page=page,
+        page_size=page_size,
+    )
+    return Page(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/test-cases/runs/latest", response_model=list[TestCaseRunResponse])

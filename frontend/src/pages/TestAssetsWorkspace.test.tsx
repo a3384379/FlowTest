@@ -119,7 +119,8 @@ function mockWorkspace(viewer = false, otherCaseCount: number = 98) {
     http.get(root + '/test-plans', () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
     ),
-    http.get(root + '/test-plan-runs', () =>
+    http.get(root + '/test-suites/runs/latest', () => HttpResponse.json([])),
+    http.get(root + '/test-cases/:id/runs', () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
     ),
     http.post(root + '/*', () => {
@@ -237,28 +238,25 @@ it('links only matching case-run evidence to the report and frozen workflow', as
     created_at: workflow.created_at,
   } as TestPlanRun
   server.use(
-    http.get(root + '/test-plan-runs', () =>
-      HttpResponse.json({ items: [run], total: 81, page: 1, page_size: 20 }),
-    ),
-    http.get(root + '/test-plan-runs/' + run.id, () =>
+    http.get(root + '/test-cases/' + baseCase.id + '/runs', () =>
       HttpResponse.json({
-        run,
+        total: 81,
+        page: 1,
+        page_size: 20,
         items: [
           {
             id: 'run-item-1',
-            target_type: 'case',
-            target_id: baseCase.id,
-            target_version: 1,
-            target_snapshot: { target_type: 'case', target_id: baseCase.id, target_version: 1 },
+            case_version: 1,
+            source: 'plan',
+            started_at: run.created_at,
+            created_at: run.created_at,
+            plan_run_id: run.id,
+            plan_id: run.test_plan_id,
             workflow_id: workflow.id,
             workflow_version: 1,
             environment_id: environment.id,
             status: 'failed',
-            workflow_execution_id: 'execution-case-1',
-            position: 0,
-            max_retries: 0,
-            attempts: 1,
-            error_message: null,
+            execution_id: 'execution-case-1',
           },
         ],
       }),
@@ -276,7 +274,7 @@ it('links only matching case-run evidence to the report and frozen workflow', as
     'href',
     '/projects/' + project.id + '/workflows?focus=' + workflow.id + '&execution=execution-case-1',
   )
-  expect(within(drawer).getByText(/最近 1 次计划运行 \/ 全部 81 次/)).toBeVisible()
+  expect(within(drawer).getByText(/当前页 1 条 · 当前筛选共 81 条/)).toBeVisible()
 })
 
 it('runs the selected older case version directly without creating a plan', async () => {
