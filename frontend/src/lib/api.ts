@@ -291,6 +291,9 @@ export type AssertionResult = {
 
 export type Execution = {
   id: string
+  project_id: string
+  api_definition_id: string
+  api_version_id: string
   status: 'running' | 'passed' | 'failed' | 'error'
   request_method: string
   request_url: string
@@ -301,6 +304,7 @@ export type Execution = {
   response_headers: Record<string, string>
   response_body: unknown
   response_artifact_id: string | null
+  response_size_bytes?: number | null
   elapsed_ms: number | null
   error_code: string | null
   error_message: string | null

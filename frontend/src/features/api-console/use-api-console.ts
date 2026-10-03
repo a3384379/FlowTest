@@ -3,12 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useEffect, useState } from 'react'
 
-import {
-  apiErrorMessage,
-  type ApiDetail,
-  type ExecutionDetail,
-  type ImportRun,
-} from '../../lib/api'
+import { apiErrorMessage, type ApiDetail, type ImportRun, type Project } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import {
@@ -22,13 +17,11 @@ import {
   mergeApiImport,
   previewApiDocument,
   previewApiDocumentUrl,
-  executeApi,
   exportApis,
   getApiDetail,
   listApis,
   listArtifacts,
   listEnvironments,
-  listExecutions,
   uploadArtifact,
   previewApi,
   updateApiDefinition,
@@ -41,18 +34,26 @@ import {
   type HttpMethod,
 } from './api-service'
 import { getProjectRedactionPolicy } from '../projects/project-service'
+import { useApiExecutions } from './use-api-executions'
+import { useAuthStore } from '../auth/auth-store'
 
-export function useApiConsole(initialApiId?: string) {
+export function useApiConsole(initialApiId?: string, initialExecutionId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
-  const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
+  const {
+    projects,
+    projectId,
+    currentProject,
+    selectProject: selectContextProject,
+  } = useProjectContext()
+  const systemAdmin = useAuthStore((state) => state.user?.is_system_admin === true)
+  const canEdit = canEditApiProject(currentProject, systemAdmin)
   const [apiSelection, setApiSelection] = useRouteScopedSelection(projectId, initialApiId ?? null)
   const [apiSearchInput, setApiSearchInput] = useState('')
   const [apiSearch, setApiSearch] = useState('')
   const [apiMethod, setApiMethod] = useState<HttpMethod | null>(null)
   const [apiPage, setApiPage] = useState(1)
   const [expectedStatus, setExpectedStatus] = useState(200)
-  const [result, setResult] = useState<ExecutionDetail | null>(null)
   const [lastImport, setLastImport] = useState<ImportRun | null>(null)
 
   const environments = useQuery({
@@ -84,10 +85,13 @@ export function useApiConsole(initialApiId?: string) {
     queryFn: () => getApiDetail(requiredId(projectId), requiredId(apiId)),
     enabled: Boolean(projectId && apiId),
   })
-  const history = useQuery({
-    queryKey: ['executions', projectId],
-    queryFn: () => listExecutions(requiredId(projectId)),
-    enabled: Boolean(projectId),
+  const executions = useApiExecutions({
+    projectId,
+    apiId,
+    executionId: initialExecutionId,
+    environmentId,
+    expectedStatus,
+    assertions: apiDetail.data?.version.assertions,
   })
   const artifacts = useQuery({
     queryKey: ['artifacts', projectId],
@@ -114,30 +118,6 @@ export function useApiConsole(initialApiId?: string) {
   })
   const apiMutation = useMutation({
     mutationFn: (input: CreateApiInput) => createApi(requiredId(projectId), input),
-  })
-  const executionMutation = useMutation({
-    mutationFn: () =>
-      executeApi(
-        requiredId(projectId),
-        requiredId(apiId),
-        requiredId(environmentId),
-        expectedStatus,
-        apiDetail.data?.version.assertions,
-      ),
-    onSuccess: async (value) => {
-      setResult(value)
-      await queryClient.invalidateQueries({ queryKey: ['executions', projectId] })
-      void message.open({
-        type:
-          value.execution.status === 'passed'
-            ? 'success'
-            : value.execution.status === 'running'
-              ? 'info'
-              : 'error',
-        content: executionMessage(value),
-      })
-    },
-    onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const previewImportMutation = useMutation({
     mutationFn: (input: ImportPreviewInput) =>
@@ -231,7 +211,6 @@ export function useApiConsole(initialApiId?: string) {
     setApiSearch('')
     setApiMethod(null)
     setApiPage(1)
-    setResult(null)
   }
 
   async function addProject(input: CreateProjectInput) {
@@ -284,6 +263,7 @@ export function useApiConsole(initialApiId?: string) {
   return {
     projects,
     projectId,
+    canEdit,
     selectProject,
     environments,
     environmentId,
@@ -304,12 +284,11 @@ export function useApiConsole(initialApiId?: string) {
     },
     apiPage,
     setApiPage,
-    history,
+    ...executions,
     artifacts,
     redactionMode,
     expectedStatus,
     setExpectedStatus,
-    result,
     lastImport,
     clearImportResult: () => setLastImport(null),
     discoverImport: discoverImportMutation.mutateAsync,
@@ -322,8 +301,6 @@ export function useApiConsole(initialApiId?: string) {
     uploadFile: uploadMutation.mutateAsync,
     uploading: uploadMutation.isPending,
     downloadFile,
-    execute: executionMutation.mutate,
-    executing: executionMutation.isPending,
     addProject,
     addEnvironment,
     editEnvironment,
@@ -364,19 +341,14 @@ function useProjectRedactionMode(projectId: string | null): 'off' | 'on' {
 
 export type ApiConsoleDetail = ApiDetail
 
+function canEditApiProject(project: Project | null, systemAdmin: boolean): boolean {
+  if (!project) return false
+  return systemAdmin || project.role === 'owner' || project.role === 'editor'
+}
+
 function requiredId(value: string | null): string {
   if (!value) throw new Error('缺少必要的资源标识')
   return value
-}
-
-function executionMessage(result: ExecutionDetail): string {
-  const labels: Record<ExecutionDetail['execution']['status'], string> = {
-    passed: '接口执行通过',
-    running: '接口正在执行',
-    failed: '接口执行失败，请查看断言和响应',
-    error: '接口执行出错，请查看诊断',
-  }
-  return labels[result.execution.status]
 }
 
 async function withErrorMessage(

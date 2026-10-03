@@ -11,9 +11,11 @@ import {
   createProject,
   discoverApiDocumentUrl,
   downloadArtifact,
+  downloadApiResponse,
   executeApi,
   exportApis,
   getApiDetail,
+  getApiExecution,
   mergeApiImport,
   listApis,
   listArtifacts,
@@ -28,6 +30,59 @@ import {
 } from './api-service'
 
 describe('API console service', () => {
+  it('downloads an external response through its authorized project route and keeps missing-file errors', async () => {
+    const createUrl = vi.fn(() => 'blob:response')
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+    const clicked: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      clicked.push(this.download)
+    })
+    const get = vi
+      .spyOn(apiClient, 'get')
+      .mockResolvedValueOnce({ data: new Blob(['captured original']) } as never)
+    const execution = { ...executionDetail.execution, response_artifact_id: 'response-artifact' }
+    await downloadApiResponse(project.id, execution)
+    expect(get).toHaveBeenCalledWith(`/projects/${project.id}/files/response-artifact`, {
+      responseType: 'blob',
+    })
+    expect(clicked).toEqual([`response-${execution.id}.bin`])
+    expect(revokeUrl).toHaveBeenCalledWith('blob:response')
+    await expect(downloadApiResponse('foreign-project', execution)).rejects.toThrow(
+      '不属于当前执行或项目',
+    )
+    expect(get).toHaveBeenCalledTimes(1)
+    get.mockRejectedValueOnce(new Error('响应文件已过期'))
+    await expect(downloadApiResponse(project.id, execution)).rejects.toThrow('响应文件已过期')
+    get.mockRestore()
+    click.mockRestore()
+  })
+
+  it('uses asset identity and server pagination for history and loads the exact frozen execution', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/executions`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        expect(params.get('api_definition_id')).toBe(apiDefinition.id)
+        expect(params.get('page')).toBe('3')
+        expect(params.get('page_size')).toBe('20')
+        return HttpResponse.json({
+          items: [executionDetail.execution],
+          total: 43,
+          page: 3,
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/executions/${executionDetail.execution.id}`, () =>
+        HttpResponse.json(executionDetail),
+      ),
+    )
+    expect((await listExecutions(project.id, { apiId: apiDefinition.id, page: 3 })).total).toBe(43)
+    expect(await getApiExecution(project.id, executionDetail.execution.id)).toEqual(executionDetail)
+  })
+
   it('maps project and environment resources', async () => {
     server.use(
       http.get('/api/v1/projects', () =>

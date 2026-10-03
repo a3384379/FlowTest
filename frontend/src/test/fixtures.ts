@@ -52,6 +52,9 @@ export const apiDefinition: ApiDefinition = {
 export const executionDetail: ExecutionDetail = {
   execution: {
     id: '00000000-0000-4000-8000-000000000040',
+    project_id: project.id,
+    api_definition_id: apiDefinition.id,
+    api_version_id: 'api-v1',
     status: 'passed',
     request_method: 'GET',
     request_url: 'http://mock-target:8080/users/me',

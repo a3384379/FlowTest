@@ -17,23 +17,29 @@ class ExecutionRepository:
         return await self._session.get(APICallExecution, execution_id)
 
     async def list_for_project(
-        self, *, project_id: UUID, offset: int, limit: int
+        self,
+        *,
+        project_id: UUID,
+        offset: int,
+        limit: int,
+        api_definition_id: UUID | None = None,
     ) -> tuple[list[APICallExecution], int]:
+        conditions = [APICallExecution.project_id == project_id]
+        if api_definition_id is not None:
+            conditions.append(APICallExecution.api_definition_id == api_definition_id)
         executions = list(
             (
                 await self._session.scalars(
                     select(APICallExecution)
-                    .where(APICallExecution.project_id == project_id)
-                    .order_by(APICallExecution.started_at.desc())
+                    .where(*conditions)
+                    .order_by(APICallExecution.started_at.desc(), APICallExecution.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count())
-            .select_from(APICallExecution)
-            .where(APICallExecution.project_id == project_id)
+            select(func.count()).select_from(APICallExecution).where(*conditions)
         )
         return executions, int(total or 0)
 

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -211,6 +211,31 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText('BLOCK').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('v3.0.0-rc.dashboard').length).toBeGreaterThanOrEqual(1)
     expect(await screen.findByText('Token 获取失败')).toBeVisible()
+    const queue = screen.getByRole('region', { name: '优先处理的问题' })
+    await waitFor(() => expect(within(queue).getAllByRole('row')).toHaveLength(6))
+    const rows = within(queue).getAllByRole('row').slice(1)
+    expect(rows[0]).toHaveTextContent('发布阻断')
+    expect(rows[0]).toHaveTextContent('v3.0.0-rc.dashboard')
+    expect(rows[1]).toHaveTextContent('Token 获取失败')
+    expect(rows[1]).toHaveTextContent('2026-08-08T00:00:00Z 至 2026-08-15T00:00:00Z')
+    expect(rows[2]).toHaveTextContent('覆盖缺口')
+    expect(rows[3]).toHaveTextContent('Flaky 资产')
+    expect(within(queue).getByRole('link', { name: '查看样本执行报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=execution-1`,
+    )
+    const riskSummary = screen.getByRole('region', { name: '发布风险摘要' })
+    expect(
+      riskSummary.compareDocumentPosition(queue) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      queue.compareDocumentPosition(screen.getByText('最近运行')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      screen.getByText('最近运行').compareDocumentPosition(screen.getByText('最近 7 日执行趋势')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(screen.getByText('订单回归流程')).toBeVisible()
     expect(screen.getByRole('link', { name: '查看影响分析' })).toHaveAttribute(
       'href',
@@ -259,6 +284,37 @@ describe('DashboardPage', () => {
     expect(impactRequest).not.toHaveBeenCalled()
   })
 
+  it('links recent failed API and workflow runs to their exact evidence and states the loaded window', async () => {
+    server.use(
+      http.get('/api/v1/dashboard/recent-executions', () =>
+        HttpResponse.json({
+          items: [
+            recentExecution('failed-api', 'api', 'error', '查询用户'),
+            recentExecution('failed-workflow', 'workflow', 'failed', '订单流程'),
+          ],
+          total: 126,
+          page: 1,
+          page_size: 10,
+        }),
+      ),
+    )
+    renderDashboard()
+    const queue = await screen.findByRole('region', { name: '优先处理的问题' })
+    const apiLink = await within(queue).findByRole('link', { name: '查看接口冻结详情' })
+    expect(apiLink).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/apis?focus=failed-api-target&execution=failed-api`,
+    )
+    expect(within(queue).getByRole('link', { name: '查看执行报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=failed-workflow`,
+    )
+    expect(within(queue).getAllByText('最近运行已载入 2/126 条 · 不代表全部失败历史')).toHaveLength(
+      2,
+    )
+    expect(within(queue).queryByText('已读取来源中暂无待处理问题')).not.toBeInTheDocument()
+  })
+
   it('renders the global quality overview without project evidence requests', async () => {
     renderDashboard('/dashboard')
 
@@ -293,6 +349,10 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('质量总览加载失败')).toBeVisible()
     expect(screen.getByText('最近执行暂不可用')).toBeVisible()
+    expect(
+      await screen.findByText('部分来源读取失败，当前队列不完整，不能据此判断所有风险已消除。'),
+    ).toBeVisible()
+    expect(screen.queryByText('已读取来源中暂无待处理问题')).not.toBeInTheDocument()
     expect(screen.getByText('未提供终态通过率')).toBeVisible()
     expect(screen.queryByText('0%')).not.toBeInTheDocument()
     expect(screen.getByText('暂无执行记录')).toBeVisible()

@@ -1974,3 +1974,97 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.response-reader-toolbar {
+  padding: 8px 0;
+}
+.response-reader-code {
+  display: flex;
+  align-items: stretch;
+  max-height: 440px;
+  overflow: auto;
+  border: 1px solid var(--ft-border-subtle);
+  border-radius: 9px;
+  background: var(--ft-canvas);
+  font: 13px/1.65 var(--ft-font-mono);
+}
+.response-reader-code pre {
+  margin: 0;
+  padding: 12px;
+  font: inherit;
+}
+.response-reader-code .response-line-numbers {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  text-align: right;
+  user-select: none;
+  color: var(--ft-text-secondary);
+  background: var(--ft-surface);
+  border-right: 1px solid var(--ft-border-subtle);
+}
+.response-reader-text {
+  white-space: pre;
+  min-width: 0;
+  flex: 1;
+}
+.response-reader-code.is-wrapped .response-reader-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.response-reader-code.is-wrapped .response-line-numbers {
+  display: none;
+}
+.response-token-key {
+  color: #0056a6;
+}
+.response-token-string {
+  color: #206a38;
+}
+.response-token-number {
+  color: #965100;
+}
+.response-token-keyword {
+  color: #7442a3;
+}
+.response-reader-code:focus-visible {
+  outline: 2px solid var(--ft-brand);
+  outline-offset: 2px;
+}
+.response-reader-code ::selection {
+  color: var(--ft-text);
+  background: #bfdbfe;
+}
+
+.quality-risk-summary {
+  margin-bottom: 16px;
+  border-left: 4px solid var(--ft-brand);
+  border-radius: 12px;
+}
+.quality-risk-summary-main {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.5fr) minmax(0, 1.5fr);
+  align-items: center;
+  gap: 24px;
+}
+.quality-context-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.quality-priority-queue {
+  margin-bottom: 16px;
+}
+.quality-command-secondary-grid {
+  margin-bottom: 16px;
+}
+@media (max-width: 980px) {
+  .quality-context-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .quality-risk-summary-main,
+  .quality-context-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

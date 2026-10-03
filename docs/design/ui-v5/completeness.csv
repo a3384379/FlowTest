@@ -13,11 +13,11 @@ W01,流程列表,完整分页和搜索,定向验证通过,backend/tests/test_tas
 W02,全局工作区,流程接口报告对象标签,待开发,,用户项目隔离与草稿保护
 W03,编排数据关系,字段路径作用域及聚焦来源,定向验证通过,frontend/src/flow/editor/node-presentation.test.ts;frontend/src/flow/WorkflowNodeRelations.test.tsx;frontend/src/flow/WorkflowDesigner.test.tsx,来源路径作用域与未解析表达式仅作展示；综合验收与最新提交远程门禁待执行
 W04,编排节点库,缺资源配置引导,定向验证通过,frontend/src/flow/WorkflowResourceNavigation.test.tsx;frontend/src/flow/WorkflowDesigner.test.tsx;frontend/src/pages/ProtocolWorkbenchPage.test.tsx,同项目返回定位及资源重新读取；综合验收与最新提交远程门禁待执行
-A01,接口管理,资产历史选择与冻结详情,待开发,,真实资产归属
+A01,接口管理,资产历史选择与冻结详情,定向验证通过,backend/tests/test_execution_api.py;frontend/src/features/api-console/use-api-executions.test.tsx;frontend/src/pages/ApiConsolePage.test.tsx,真实资产归属分页冻结详情与直接链接及异步隔离；综合验收与最新提交远程门禁待执行
 C05,用例目录,工作区就地目录维护,定向验证通过,frontend/src/features/projects/FolderManagementPanel.test.tsx;frontend/src/pages/TestAssetsWorkspace.test.tsx;backend/tests/test_access_api.py,综合验收与最新提交远程门禁待执行
-D01,质量总览,风险摘要及优先问题队列,待开发,,只用真实数据
+D01,质量总览,风险摘要及优先问题队列,定向验证通过,frontend/src/pages/DashboardPage.test.tsx,单一风险摘要与真实问题来源优先队列及执行证据定位；综合验收与最新提交远程门禁待执行
 M01,全部页面族,26模块逐项任务版式及证据,待开发,,逐页核对权限功能特殊状态
 L01,资产规模,服务端目录过滤和聚合,定向验证通过,backend/tests/test_tasking_api.py;frontend/src/features/test-assets/use-test-assets.test.tsx;frontend/src/pages/TestAssetsWorkspace.test.tsx,综合验收与最新提交远程门禁待执行
 L02,失败摘要,真实差值单位来源说明,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,缺单位不猜测；综合验收与最新提交远程门禁待执行
 L03,草稿保护,节点未应用与图未保存离开保护,定向验证通过,frontend/src/pages/WorkflowsPage.test.tsx;frontend/src/features/workflows/use-workflow-tabs.test.tsx;frontend/src/features/workflows/workflow-save-concurrency.test.tsx,未应用节点与页外草稿关闭保护及历史路由取消；综合验收与最新提交远程门禁待执行
-L04,接口工作台,响应和代码阅读体验,待开发,,正式方案允许右侧或下方布局
+L04,接口工作台,响应和代码阅读体验,定向验证通过,frontend/src/features/api-console/ResponseCodeReader.test.tsx;frontend/src/features/api-console/api-service.test.ts;frontend/src/pages/ApiConsolePage.test.tsx,浅色语法及格式换行有界预览与完整授权下载；综合验收与最新提交远程门禁待执行

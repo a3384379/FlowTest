@@ -3,25 +3,133 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import ApiConsolePage from './ApiConsolePage'
-import { apiDefinition, environment, executionDetail, project } from '../test/fixtures'
+import { apiDefinition, environment, executionDetail, project, user } from '../test/fixtures'
 import type { ExecutionDetail } from '../lib/api'
 import { server } from '../test/server'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 
-beforeEach(() => authenticateTestUser(authenticatedUser))
+beforeEach(() => {
+  authenticateTestUser(authenticatedUser)
+  server.use(
+    http.get('/api/v1/projects', () =>
+      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/apis`, () =>
+      HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 50 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([environment])),
+    http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+      HttpResponse.json({
+        definition: apiDefinition,
+        version: {
+          id: 'api-v1',
+          api_definition_id: apiDefinition.id,
+          version: 1,
+          method: 'GET',
+          path: '/users/me',
+          query_parameters: [],
+          headers: {},
+          body_kind: 'none',
+          body: null,
+          auth_kind: 'none',
+          auth_config: {},
+          extraction_rules: [],
+          assertions: [],
+          created_at: '2026-08-09T08:00:00Z',
+        },
+      }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/executions`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/files`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+  )
+})
 afterEach(() => {
   useAuthStore.setState({ user: null })
   localStorage.clear()
 })
 
 describe('ApiConsolePage', () => {
+  it('pages this API history, opens frozen detail, and restores it from a direct link without an environment', async () => {
+    const frozen = {
+      ...executionDetail,
+      execution: {
+        ...executionDetail.execution,
+        id: 'old-record',
+        request_url: 'http://mock-target/old',
+        response_body: { revision: 'old snapshot' },
+      },
+    }
+    const requests: URLSearchParams[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/executions`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        requests.push(params)
+        expect(params.get('api_definition_id')).toBe(apiDefinition.id)
+        return HttpResponse.json({
+          items: params.get('page') === '3' ? [frozen.execution] : [executionDetail.execution],
+          total: 43,
+          page: Number(params.get('page')),
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/executions/old-record`, () =>
+        HttpResponse.json(frozen),
+      ),
+    )
+    const browser = userEvent.setup()
+    const page = renderPage()
+    await browser.click(await screen.findByRole('tab', { name: '执行历史' }))
+    expect(await screen.findByText('共 43 次执行')).toBeVisible()
+    fireEvent.click(screen.getByTitle('3'))
+    await browser.click(await screen.findByRole('button', { name: '查看执行 old-record' }))
+    expect(await screen.findByText('正在查看历史执行的冻结请求与响应')).toBeVisible()
+    expect(screen.getByText('"old snapshot"')).toBeVisible()
+    await browser.click(screen.getByRole('tab', { name: '实际请求' }))
+    expect(screen.getByText('GET http://mock-target/old')).toBeVisible()
+    expect(requests.some((params) => params.get('page') === '3')).toBe(true)
+    page.unmount()
+    renderPage(`/projects/${project.id}/apis?focus=${apiDefinition.id}&execution=old-record`)
+    expect(await screen.findByText('正在查看历史执行的冻结请求与响应')).toBeVisible()
+    expect(screen.getByText('"old snapshot"')).toBeVisible()
+  })
+
+  it('allows viewers to read historical evidence while editing and sending remain disabled', async () => {
+    authenticateTestUser({ ...user, is_system_admin: false })
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({
+          items: [{ ...project, role: 'viewer' }],
+          total: 1,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/executions/${executionDetail.execution.id}`, () =>
+        HttpResponse.json(executionDetail),
+      ),
+    )
+    renderPage(
+      `/projects/${project.id}/apis?focus=${apiDefinition.id}&execution=${executionDetail.execution.id}`,
+    )
+    expect(await screen.findByText('正在查看历史执行的冻结请求与响应')).toBeVisible()
+    expect(screen.getByText('"测试用户"')).toBeVisible()
+    expect(await screen.findByRole('button', { name: /保存新版本/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '发送请求' })).toBeDisabled()
+    expect(screen.getByLabelText('请求路径')).toBeDisabled()
+  })
+
   it.each([
     { verdict: 'passed', result: executionDetail, notification: '接口执行通过' },
     {
@@ -169,7 +277,7 @@ describe('ApiConsolePage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -177,7 +285,7 @@ function renderPage() {
     <ConfigProvider theme={createIceTheme(true)}>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
-          <ProjectTestProvider section="apis">
+          <ProjectTestProvider section="apis" initialEntry={initialEntry}>
             <ApiConsolePage />
           </ProjectTestProvider>
         </QueryClientProvider>

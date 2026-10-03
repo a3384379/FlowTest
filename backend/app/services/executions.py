@@ -25,6 +25,7 @@ from app.domain.assertions import (
 from app.domain.execution import ExecutionStatus
 from app.models.access import User
 from app.models.executions import APICallExecution, AssertionResult
+from app.repositories.api_assets import APIAssetRepository
 from app.repositories.executions import ExecutionRepository
 from app.schemas.api_assets import MultipartBody
 from app.services.api_assets import APIAssetService, PreparedRequest
@@ -68,6 +69,7 @@ class ExecutionService:
     ) -> None:
         self._session = session
         self._repository = ExecutionRepository(session)
+        self._api_repository = APIAssetRepository(session)
         self._assets = APIAssetService(session)
         self._artifacts = ArtifactService(session)
         self._projects = ProjectService(session)
@@ -227,13 +229,24 @@ class ExecutionService:
                 await client.aclose()
 
     async def list_executions(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        api_definition_id: UUID | None = None,
     ) -> tuple[list[APICallExecution], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        if api_definition_id is not None:
+            definition = await self._api_repository.get_definition(api_definition_id)
+            if definition is None or definition.project_id != project_id:
+                raise AppError(code="API_NOT_FOUND", message="接口不存在", status_code=404)
         return await self._repository.list_for_project(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            api_definition_id=api_definition_id,
         )
 
     async def get_execution(
