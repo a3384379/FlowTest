@@ -1282,10 +1282,12 @@ function WorkflowWorkspace({
 }) {
   const userId = useAuthStore((store) => store.user?.id)
   const [historyDockOpen, setHistoryDockOpen] = useState(false)
+  const [params] = useSearchParams()
   return (
     <WorkflowWorkspaceShell
       key={workflowLayoutKey(userId, state.projectId)}
       preferenceKey={workflowLayoutKey(userId, state.projectId)}
+      catalogRequested={params.get('directory') === '1'}
       header={
         <WorkflowWorkbenchHeader
           left={workspaceTitle(state)}

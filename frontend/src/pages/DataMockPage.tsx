@@ -24,6 +24,7 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 
 import {
   createCredential,
@@ -53,6 +54,7 @@ export default function DataMockPage() {
         <Typography.Text type="secondary">
           Credential 值仅写入并加密保存；数据节点只执行白名单只读操作，Mock 不执行脚本。
         </Typography.Text>
+        <WorkflowResourceReturn projectId={projectId} />
       </div>
       <Tabs
         items={[

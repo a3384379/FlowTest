@@ -3,6 +3,8 @@ import { workflowLayoutKey } from './editor/layout-preferences'
 import WorkflowContextMenu from './WorkflowContextMenu'
 import WorkflowDiagnostics from './WorkflowDiagnostics'
 import WorkflowNodeLibrary, { type NodeLibraryItem } from './WorkflowNodeLibrary'
+import { WorkflowResourceLink } from './WorkflowResourceNavigation'
+import { projectPath, type ProjectSection } from '../features/projects/project-routing'
 import WorkflowInspectorShell from './WorkflowInspectorShell'
 import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import { useAuthStore } from '../features/auth/auth-store'
@@ -287,6 +289,7 @@ function WorkflowDesignerReady({
   const [focusMode, setFocusMode] = useState(false)
   const [libraryContainer, setLibraryContainer] = useState<HTMLDivElement | null>(null)
   const [showDataReferences, setShowDataReferences] = useState(false)
+  const [showAllDataReferences, setShowAllDataReferences] = useState(false)
   const [shortcutHelp, setShortcutHelp] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [wrapPathOpen, setWrapPathOpen] = useState(false)
@@ -364,7 +367,7 @@ function WorkflowDesignerReady({
   }))
   const edges: CanvasEdge[] = [
     ...executionEdges,
-    ...canvasReferenceEdges(definition, showDataReferences),
+    ...canvasReferenceEdges(definition, showDataReferences, selectedId, showAllDataReferences),
   ]
   const selected = selectedNode(definition, selectedId)
   const selectedApi = resolveSelectedApi(
@@ -1010,7 +1013,13 @@ function WorkflowDesignerReady({
                 </Panel>
                 <MiniMap pannable zoomable position="bottom-left" />
                 <Panel position="top-right">
-                  <ReferenceLegend visible={showDataReferences} definition={definition} />
+                  <ReferenceLegend
+                    visible={showDataReferences}
+                    definition={definition}
+                    selectedId={selectedId}
+                    showAll={showAllDataReferences}
+                    onScopeChange={setShowAllDataReferences}
+                  />
                 </Panel>
                 <Controls position="bottom-right" showFitView={false} showInteractive={false} />
               </ReactFlow>
@@ -1094,9 +1103,15 @@ function MissingRuntimeNode({
 function ReferenceLegend({
   visible,
   definition,
+  selectedId,
+  showAll,
+  onScopeChange,
 }: {
   visible: boolean
   definition: WorkflowDefinition
+  selectedId: string | null
+  showAll: boolean
+  onScopeChange: (showAll: boolean) => void
 }) {
   if (!visible) return null
   const unresolved = unresolvedReferenceCount(definition)
@@ -1104,6 +1119,20 @@ function ReferenceLegend({
     <div className="workflow-reference-legend">
       <Tag>实线：执行顺序</Tag>
       <Tag color="blue">虚线：数据引用 · 只读</Tag>
+      <Tag>
+        {dataReferences(definition, showAll ? undefined : (selectedId ?? undefined)).length}{' '}
+        项节点字段引用
+      </Tag>
+      <Tag>
+        {selectedId && !showAll
+          ? '当前节点的直接来源 · 字段见来源面板'
+          : '全图数据来源 · 字段见来源面板'}
+      </Tag>
+      {selectedId && (
+        <Button size="small" type="link" onClick={() => onScopeChange(!showAll)}>
+          {showAll ? '只看当前节点来源' : '查看全图来源'}
+        </Button>
+      )}
       {unresolved > 0 && (
         <Tag color="warning">{unresolved} 项引用/表达式未解析，请在配置中核对</Tag>
       )}
@@ -1694,6 +1723,7 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
     disabled: Boolean(unavailableReason),
     unavailableReason,
     resourceControl,
+    configurationAction: nodeConfigurationAction(input, id, unavailableReason),
     onAdd,
     onDragStart: (event) => dragLibraryNode(event, id),
   })
@@ -1862,6 +1892,43 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
       subflowControl,
     ),
   ]
+}
+
+const prerequisiteTargets: Readonly<
+  Partial<Record<NodeRegistryKey, { section: ProjectSection; query: string; label: string }>>
+> = {
+  api: { section: 'apis', query: '', label: '前往接口管理' },
+  graphql: { section: 'protocols', query: 'mode=graphql', label: '配置 GraphQL Schema' },
+  grpc: { section: 'protocols', query: 'mode=grpc', label: '配置 gRPC 描述文件' },
+  'kafka.produce': { section: 'protocols', query: 'mode=kafka', label: '配置 Kafka 事件源' },
+  'kafka.consume': { section: 'protocols', query: 'mode=kafka', label: '配置 Kafka 事件源' },
+  'websocket.exchange': {
+    section: 'protocols',
+    query: 'mode=websocket',
+    label: '配置 WebSocket 事件源',
+  },
+  dataset: { section: 'apis', query: 'panel=files', label: '上传数据集文件' },
+  sql: { section: 'data', query: 'tab=credentials', label: '配置数据库凭据' },
+  redis: { section: 'data', query: 'tab=credentials', label: '配置 Redis 凭据' },
+  subflow: { section: 'workflows', query: 'directory=1', label: '管理并发布子流程' },
+  for_each: { section: 'workflows', query: 'directory=1', label: '管理并发布子流程' },
+}
+
+function nodeConfigurationAction(
+  input: NodeLibraryInput,
+  key: NodeRegistryKey,
+  reason?: string,
+): ReactNode {
+  const target = prerequisiteTargets[key]
+  if (!input.editable || !input.projectId || !target || !reason?.startsWith('需要'))
+    return undefined
+  return (
+    <WorkflowResourceLink
+      projectId={input.projectId}
+      label={target.label}
+      to={`${projectPath(input.projectId, target.section)}?${target.query}`}
+    />
+  )
 }
 
 function FocusModeButton({
@@ -2113,10 +2180,15 @@ function NodeFooter({ data }: { data: NodeData }) {
   )
 }
 
-function canvasReferenceEdges(definition: WorkflowDefinition, visible: boolean): CanvasEdge[] {
+function canvasReferenceEdges(
+  definition: WorkflowDefinition,
+  visible: boolean,
+  selectedId: string | null,
+  showAll: boolean,
+): CanvasEdge[] {
   if (!visible) return []
   const executionIds = new Set(definition.edges.map((edge) => edge.id))
-  return dataReferences(definition)
+  return dataReferences(definition, showAll ? undefined : (selectedId ?? undefined))
     .filter((reference) => !executionIds.has(reference.id))
     .map((reference) => ({
       ...reference,

@@ -21,6 +21,7 @@ export type NodeLibraryItem = NodeRegistryItem & {
   disabled: boolean
   unavailableReason?: string
   resourceControl?: ReactNode
+  configurationAction?: ReactNode
   onAdd: () => void
   onDragStart: (event: DragEvent<HTMLElement>) => void
 }
@@ -183,6 +184,7 @@ function NodeLibraryRow({ item }: { item: NodeLibraryItem }) {
           {item.resourceControl}
         </details>
       )}
+      {item.configurationAction}
     </div>
   )
 }
@@ -214,6 +216,9 @@ function NodeLibraryCard({ item }: { item: NodeLibraryItem }) {
           <WarningOutlined />
           <span>{item.unavailableReason}</span>
         </div>
+      )}
+      {item.configurationAction && (
+        <div className="workflow-library-configuration-action">{item.configurationAction}</div>
       )}
       <Button
         block

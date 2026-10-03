@@ -11,8 +11,8 @@ C03,用例历史,按用例版本分页运行历史,定向验证通过,backend/te
 C04,套件历史,按套件版本分页运行历史,定向验证通过,backend/tests/test_tasking_api.py;frontend/src/features/test-assets/AssetRunEvidence.test.tsx,取消最近20次窗口限制；综合验收与最新提交远程门禁待执行
 W01,流程列表,完整分页和搜索,定向验证通过,backend/tests/test_tasking_api.py;frontend/src/pages/WorkflowsPage.test.tsx;frontend/src/features/workflows/use-workflow-tabs.test.tsx,补齐服务端搜索分页并保留页外对象标签；综合验收与最新提交远程门禁待执行
 W02,全局工作区,流程接口报告对象标签,待开发,,用户项目隔离与草稿保护
-W03,编排数据关系,字段路径作用域及聚焦来源,待开发,,展示模型不改变执行边
-W04,编排节点库,缺资源配置引导,待开发,,沿用权限与只读约束
+W03,编排数据关系,字段路径作用域及聚焦来源,定向验证通过,frontend/src/flow/editor/node-presentation.test.ts;frontend/src/flow/WorkflowNodeRelations.test.tsx;frontend/src/flow/WorkflowDesigner.test.tsx,来源路径作用域与未解析表达式仅作展示；综合验收与最新提交远程门禁待执行
+W04,编排节点库,缺资源配置引导,定向验证通过,frontend/src/flow/WorkflowResourceNavigation.test.tsx;frontend/src/flow/WorkflowDesigner.test.tsx;frontend/src/pages/ProtocolWorkbenchPage.test.tsx,同项目返回定位及资源重新读取；综合验收与最新提交远程门禁待执行
 A01,接口管理,资产历史选择与冻结详情,待开发,,真实资产归属
 C05,用例目录,工作区就地目录维护,定向验证通过,frontend/src/features/projects/FolderManagementPanel.test.tsx;frontend/src/pages/TestAssetsWorkspace.test.tsx;backend/tests/test_access_api.py,综合验收与最新提交远程门禁待执行
 D01,质量总览,风险摘要及优先问题队列,待开发,,只用真实数据

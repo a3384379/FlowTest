@@ -26,6 +26,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
+import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import APIWorkbench from '../features/api-console/APIWorkbench'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import EnvironmentManager from '../features/api-console/EnvironmentManager'
@@ -49,7 +50,7 @@ export default function ApiConsolePage() {
   const [importOpen, setImportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
   const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
-  const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(searchParams.get('panel') === 'files')
   const consoleState = useApiConsole(searchParams.get('focus') ?? undefined)
   const userId = useAuthStore((state) => state.user?.id)
   const currentDefinition = selectedApiDefinition(consoleState)
@@ -212,6 +213,7 @@ export default function ApiConsolePage() {
           onUpload={consoleState.uploadFile}
           onDownload={consoleState.downloadFile}
         />
+        <WorkflowResourceReturn projectId={consoleState.projectId} />
       </Drawer>
       <CreateDialogs
         open={dialog}

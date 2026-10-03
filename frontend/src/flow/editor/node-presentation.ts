@@ -1,6 +1,7 @@
 import type { WorkflowDefinition, WorkflowNode } from '../../lib/api'
 import { effectiveConfig, resolveEffectiveNodeType } from './graph-analysis'
-import { parseValueSource } from './control-source-browser'
+import { nodeDataSources } from './node-data-sources'
+export { nodeDataSources } from './node-data-sources'
 
 export type RegionPreview = { id: string; label: string; steps: string[] }
 export type DataReference = { id: string; source: string; target: string; label: string }
@@ -67,52 +68,26 @@ function controlSummary(config: Record<string, unknown>): string {
 }
 
 // These are view data only. They never enter WorkflowDefinition.edges or graph commands.
-export function dataReferences(definition: WorkflowDefinition): DataReference[] {
+export function dataReferences(definition: WorkflowDefinition, targetId?: string): DataReference[] {
   const known = new Set(definition.nodes.map((node) => node.id))
-  const references = new Map<string, DataReference>()
-  const add = (source: unknown, target: string, label: string) => {
-    if (typeof source !== 'string' || !known.has(source) || !known.has(target) || source === target)
-      return
-    const id = `data-reference:${source}:${target}`
-    references.set(id, { id, source, target, label })
-  }
-  for (const node of definition.nodes) {
-    const config = effectiveConfig(node)
-    add(config.source_node_id, node.id, '数据引用')
-    add(config.expected_source_node_id, node.id, '期望值引用')
-    for (const source of typedSourceIds(node.configuration)) add(source, node.id, '数据引用')
-  }
-  for (const edge of definition.edges) {
-    for (const mapping of edge.mappings)
-      add(mapping.source.node_id, mapping.target.node_id, '字段映射')
-  }
-  return [...references.values()]
+  return nodeDataSources(definition, targetId)
+    .filter(
+      (reference) =>
+        reference.sourceId &&
+        known.has(reference.sourceId) &&
+        known.has(reference.target) &&
+        !reference.reason,
+    )
+    .map((reference) => ({
+      id: reference.id,
+      source: reference.sourceId!,
+      target: reference.target,
+      label: `${reference.path} → ${reference.targetPath}`,
+    }))
 }
 
 export function unresolvedReferenceCount(definition: WorkflowDefinition): number {
-  const known = new Set(definition.nodes.map((node) => node.id))
-  return definition.nodes.reduce((count, node) => {
-    const config = effectiveConfig(node)
-    const sources = [
-      config.source_node_id,
-      config.expected_source_node_id,
-      ...typedSourceIds(node.configuration),
-    ]
-    const missing = new Set(sources.filter((id) => typeof id === 'string' && id && !known.has(id)))
-    return count + missing.size + (node.bindings?.length ?? 0)
-  }, 0)
-}
-
-function typedSourceIds(value: unknown, depth = 0): string[] {
-  if (depth > 12) return []
-  if (Array.isArray(value)) return value.flatMap((item) => typedSourceIds(item, depth + 1))
-  const item = record(value)
-  if (item.kind === 'literal') return []
-  const source = parseValueSource(item)
-  if (source?.kind === 'node_output') return [source.node_id]
-  return Object.values(item).flatMap((child) =>
-    child && typeof child === 'object' ? typedSourceIds(child, depth + 1) : [],
-  )
+  return nodeDataSources(definition).filter((reference) => reference.reason).length
 }
 
 function record(value: unknown): Record<string, unknown> {
