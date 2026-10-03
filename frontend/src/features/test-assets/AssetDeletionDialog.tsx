@@ -51,6 +51,7 @@ export default function AssetDeletionDialog({
           'test-cases',
           'test-suites',
           'test-asset',
+          'test-case-options',
           'asset-directory-counts',
           'test-suite-latest-runs',
         ].map((key) => client.invalidateQueries({ queryKey: [key, projectId] })),

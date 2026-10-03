@@ -82,15 +82,36 @@ function mockWorkspace(viewer = false, otherCaseCount: number = 98) {
       HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
     ),
     http.get(root + '/test-cases', ({ request }) => {
-      const page = Number(new URL(request.url).searchParams.get('page'))
-      pages(page)
+      const params = new URL(request.url).searchParams
+      const page = Number(params.get('page'))
+      const size = Number(params.get('page_size'))
+      const folderId = params.get('folder_id')
+      const items = params.get('unfiled')
+        ? records.filter((item) => item.folder_id === null)
+        : folderId
+          ? records.filter((item) => item.folder_id === folderId)
+          : records
+      pages(page, size, folderId)
       return HttpResponse.json({
-        items: records.slice((page - 1) * 100, page * 100),
-        total: records.length,
+        items: items.slice((page - 1) * size, page * size),
+        total: items.length,
         page,
-        page_size: 100,
+        page_size: size,
       })
     }),
+    http.get(root + '/test-assets/directory-counts', () =>
+      HttpResponse.json({
+        case_total: records.length,
+        suite_total: 0,
+        published_case_total: 3,
+        unfiled_cases: 1,
+        unfiled_suites: 0,
+        folders: [
+          { folder_id: folder.id, cases: 2, suites: 0 },
+          { folder_id: 'folder-other', cases: otherCaseCount, suites: 0 },
+        ],
+      }),
+    ),
     http.get(root + '/test-suites', () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
     ),
@@ -146,15 +167,17 @@ function renderWorkspace(initialEntry?: string) {
   )
 }
 
-it('reads every server page before filtering the complete asset directory without writes', async () => {
+it('loads the selected server directory page and uses aggregate counts without preloading every asset', async () => {
   const { pages, writes } = mockWorkspace()
   renderWorkspace('/projects/' + project.id + '/assets?folder=' + folder.id)
   expect((await screen.findByText('跨页用例')).closest('tr')).toBeVisible()
   expect(screen.getByText('目录用例').closest('tr')).toBeVisible()
-  expect(screen.getByText('筛选命中 101 个用例、0 个套件。')).toBeVisible()
+  expect(screen.getByText('当前目录匹配 2 个用例、0 个套件。')).toBeVisible()
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
-  expect(pages).toHaveBeenCalledWith(1)
-  expect(pages).toHaveBeenCalledWith(2)
+  expect(pages).toHaveBeenCalledExactlyOnceWith(1, 20, folder.id)
+  const directory = within(screen.getByLabelText('浏览测试资产目录'))
+  expect(directory.getByText('全部测试资产').closest('button')).toHaveTextContent('101')
+  expect(directory.getByText('核心回归').closest('button')).toHaveTextContent('2')
   expect(writes).not.toHaveBeenCalled()
 })
 
@@ -168,8 +191,8 @@ it('clears selection outside the new directory without moving records', async ()
   fireEvent.click(
     within(screen.getByLabelText('浏览测试资产目录')).getByText('核心回归').closest('button')!,
   )
+  expect((await screen.findByText('目录用例')).closest('tr')).toBeVisible()
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
-  expect(screen.getByText('目录用例').closest('tr')).toBeVisible()
   expect(screen.getByText('跨页用例').closest('tr')).toBeVisible()
   expect(toolbar.getByText(/批量移动 \(0\)/).closest('button')).toBeDisabled()
   expect(toolbar.getByLabelText('测试用例批量目录').closest('.ant-select')).toHaveTextContent(

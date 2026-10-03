@@ -21,6 +21,7 @@ from app.models.workflows import Workflow
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.test_assets import (
+    AssetDirectoryCountsResponse,
     PublishedTestCaseDefinition,
     PublishedTestSuiteDefinition,
     PublishedTestSuiteItem,
@@ -105,8 +106,17 @@ class TestCaseService:
         is_template: bool | None,
         page: int,
         page_size: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestCase], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        if folder_id is not None and unfiled:
+            raise AppError(
+                code="INVALID_ASSET_FOLDER_FILTER",
+                message="目录与未分类筛选不能同时使用",
+                status_code=422,
+            )
+        await _validate_folder(self._session, project_id, folder_id)
         return await self._assets.list_cases(
             project_id=project_id,
             search=search.strip() if search else None,
@@ -114,6 +124,16 @@ class TestCaseService:
             is_template=is_template,
             offset=(page - 1) * page_size,
             limit=page_size,
+            folder_id=folder_id,
+            unfiled=unfiled,
+        )
+
+    async def directory_counts(
+        self, *, actor: User, project_id: UUID, search: str | None, tag: str | None
+    ) -> AssetDirectoryCountsResponse:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._assets.directory_counts(
+            project_id=project_id, search=search.strip() if search else None, tag=tag
         )
 
     async def get(self, *, actor: User, project_id: UUID, case_id: UUID) -> TestCase:
@@ -450,14 +470,25 @@ class TestSuiteService:
         tag: str | None,
         page: int,
         page_size: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestSuite], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        if folder_id is not None and unfiled:
+            raise AppError(
+                code="INVALID_ASSET_FOLDER_FILTER",
+                message="目录与未分类筛选不能同时使用",
+                status_code=422,
+            )
+        await _validate_folder(self._session, project_id, folder_id)
         return await self._assets.list_suites(
             project_id=project_id,
             search=search.strip() if search else None,
             tag=tag,
             offset=(page - 1) * page_size,
             limit=page_size,
+            folder_id=folder_id,
+            unfiled=unfiled,
         )
 
     async def get(self, *, actor: User, project_id: UUID, suite_id: UUID) -> TestSuite:

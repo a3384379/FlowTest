@@ -8,7 +8,11 @@ import { listFolders } from '../projects/asset-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { getProjectPermission } from '../projects/project-service'
 import { listEnvironments } from '../workflows/workflow-service'
-import { listAssetWorkflows, listCaseCatalog, listSuiteCatalog } from './asset-workspace-service'
+import {
+  listAssetWorkflows,
+  listCaseCatalog,
+  listAssetDirectoryCounts,
+} from './asset-workspace-service'
 import {
   cloneTestCase,
   cloneTestSuite,
@@ -17,7 +21,9 @@ import {
   diffTestCaseVersions,
   diffTestSuiteVersions,
   listTestCaseVersions,
+  listTestCases,
   listTestSuiteVersions,
+  listTestSuites,
   moveTestCases,
   moveTestSuites,
   publishTestCase,
@@ -55,7 +61,16 @@ describe('useTestAssets', () => {
     vi.resetAllMocks()
     vi.mocked(useProjectContext).mockReturnValue({ projectId: 'project-1' } as never)
     vi.mocked(listCaseCatalog).mockResolvedValue(page([testCase]))
-    vi.mocked(listSuiteCatalog).mockResolvedValue(page([testSuite]))
+    vi.mocked(listTestCases).mockResolvedValue(page([testCase]))
+    vi.mocked(listTestSuites).mockResolvedValue(page([testSuite]))
+    vi.mocked(listAssetDirectoryCounts).mockResolvedValue({
+      case_total: 1,
+      suite_total: 1,
+      published_case_total: 1,
+      unfiled_cases: 0,
+      unfiled_suites: 0,
+      folders: [],
+    })
     vi.mocked(listAssetWorkflows).mockResolvedValue(page([]))
     vi.mocked(getProjectPermission).mockResolvedValue({
       capabilities: ['read', 'edit', 'execute'],
@@ -84,7 +99,9 @@ describe('useTestAssets', () => {
       result.current.setSearch('登录')
       result.current.setTag('smoke')
     })
-    await waitFor(() => expect(listCaseCatalog).toHaveBeenCalledWith('project-1', '登录', 'smoke'))
+    await waitFor(() =>
+      expect(listTestCases).toHaveBeenCalledWith('project-1', '登录', 'smoke', 1, 20, 'all'),
+    )
     await waitFor(() => expect(result.current.cases.data?.items).toEqual([testCase]))
     await waitFor(() => expect(result.current.suites.data?.items).toEqual([testSuite]))
     expect(result.current.caseOptions.data?.items).toEqual([testCase])

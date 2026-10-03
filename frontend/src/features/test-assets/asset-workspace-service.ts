@@ -57,6 +57,29 @@ export type CaseRunHistory = {
   plan_id: string | null
 }
 export type SuiteLatestRun = { suite_id: string; detail: AssetRunDetail }
+export type AssetDirectoryCounts = {
+  case_total: number
+  suite_total: number
+  published_case_total: number
+  unfiled_cases: number
+  unfiled_suites: number
+  folders: Array<{ folder_id: string; cases: number; suites: number }>
+}
+
+export async function listAssetDirectoryCounts(
+  projectId: string,
+  search: string,
+  tag: string,
+): Promise<AssetDirectoryCounts> {
+  return (
+    await apiClient.get<AssetDirectoryCounts>(
+      `/projects/${projectId}/test-assets/directory-counts`,
+      {
+        params: { search: search || undefined, tag: tag || undefined },
+      },
+    )
+  ).data
+}
 
 // These three existing resources share the same page contract. Complete catalogs
 // let directory filters and version pickers include records beyond page one.

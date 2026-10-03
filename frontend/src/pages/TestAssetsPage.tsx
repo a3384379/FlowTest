@@ -15,6 +15,7 @@ import {
   Button,
   Card,
   Dropdown,
+  Drawer,
   Form,
   Input,
   InputNumber,
@@ -33,6 +34,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useProjectContext } from '../features/projects/use-project-context'
+import { FolderManagementPanel } from '../features/projects/AssetManagementPanel'
 import AssetDetailDrawer from '../features/test-assets/AssetDetailDrawer'
 import AssetPlanDialog from '../features/test-assets/AssetPlanDialog'
 import AssetDeletionDialog from '../features/test-assets/AssetDeletionDialog'
@@ -43,6 +45,7 @@ import {
   type AssetTableWorkspace,
 } from '../features/test-assets/AssetTableContext'
 import type {
+  AssetDirectoryCounts,
   AssetKind,
   PublishedAssetTarget,
 } from '../features/test-assets/asset-workspace-service'
@@ -93,7 +96,6 @@ function TestAssetsWorkspace() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { message } = App.useApp()
-  const state = useTestAssets()
   const [caseEditor, setCaseEditor] = useState<TestCase | null | undefined>(undefined)
   const [suiteEditor, setSuiteEditor] = useState<TestSuite | null | undefined>(undefined)
   const [runCase, setRunCase] = useState<TestCase | null>(null)
@@ -105,20 +107,25 @@ function TestAssetsWorkspace() {
   const [selectedSuites, setSelectedSuites] = useState<string[]>([])
   const [deletion, setDeletion] = useState<{ kind: AssetKind; ids: string[] } | null>(null)
   const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderManagementOpen, setFolderManagementOpen] = useState(false)
   const [casePage, setCasePage] = useState(1)
   const [suitePage, setSuitePage] = useState(1)
   const [plan, setPlan] = useState<{ targets: PublishedAssetTarget[]; execute: boolean } | null>(
     null,
   )
+  const browseFolder = searchParams.get('folder') ?? 'all'
+  const state = useTestAssets({
+    folder: browseFolder,
+    casePage,
+    suitePage,
+    loadCaseOptions: suiteEditor !== undefined,
+  })
   const cases = pageItems(state.cases.data)
   const suites = pageItems(state.suites.data)
   const publishedCases = pageItems(state.caseOptions.data).filter((item) => item.current_version)
-  const browseFolder = searchParams.get('folder') ?? 'all'
   const history = useAssetHistory(
     state.projectId,
-    filterLoadedAssets(suites, browseFolder)
-      .slice((suitePage - 1) * 20, suitePage * 20)
-      .map((suite) => suite.id),
+    suites.map((suite) => suite.id),
   )
   function resetSelection() {
     setSelectedCases([])
@@ -190,6 +197,7 @@ function TestAssetsWorkspace() {
   const workspace: AssetTableWorkspace = {
     projectId: state.projectId ?? '',
     page: casePage,
+    total: state.cases.data?.total,
     onPage: (page) => {
       setCasePage(page)
       setSelectedCases([])
@@ -210,18 +218,18 @@ function TestAssetsWorkspace() {
         <AssetDirectory
           folders={folderItems(state)}
           selected={browseFolder}
-          cases={cases}
-          suites={suites}
-          loaded={Boolean(state.cases.data && state.suites.data)}
+          counts={state.directoryCounts.data}
           onBrowse={browse}
+          canEdit={state.canEdit}
+          onManage={() => setFolderManagementOpen(true)}
         />
         <div className="test-asset-main">
           <AssetCatalogScope state={state} />
           <AssetHistoryNotice history={history} />
           <AssetTabs
             state={state}
-            cases={filterLoadedAssets(cases, browseFolder)}
-            suites={filterLoadedAssets(suites, browseFolder)}
+            cases={cases}
+            suites={suites}
             publishedCases={publishedCases}
             selectedCases={selectedCases}
             selectedSuites={selectedSuites}
@@ -237,6 +245,7 @@ function TestAssetsWorkspace() {
             suiteWorkspace={{
               ...workspace,
               page: suitePage,
+              total: state.suites.data?.total,
               onPage: (page) => {
                 setSuitePage(page)
                 setSelectedSuites([])
@@ -279,6 +288,15 @@ function TestAssetsWorkspace() {
         onPlan={openTarget}
       />
       <WorkspaceAssetPlan projectId={state.projectId} plan={plan} onClose={() => setPlan(null)} />
+      <WorkspaceFolderManagement
+        projectId={state.projectId}
+        open={folderManagementOpen}
+        canEdit={state.canEdit}
+        onClose={() => setFolderManagementOpen(false)}
+        onRemoved={(ids) => {
+          if (ids.includes(browseFolder)) browse('unfiled')
+        }}
+      />
       <WorkspaceAssetDeletion
         state={state}
         selection={deletion}
@@ -301,6 +319,27 @@ function TestAssetsWorkspace() {
         onNewPlan={(target) => setPlan({ targets: [target], execute: false })}
       />
     </div>
+  )
+}
+
+function WorkspaceFolderManagement({
+  projectId,
+  open,
+  canEdit,
+  onClose,
+  onRemoved,
+}: {
+  projectId: string | null
+  open: boolean
+  canEdit: boolean
+  onClose: () => void
+  onRemoved: (ids: string[]) => void
+}) {
+  if (!projectId || !open) return null
+  return (
+    <Drawer open title="管理测试资产目录" size={640} onClose={onClose} destroyOnHidden>
+      <FolderManagementPanel projectId={projectId} canEdit={canEdit} onRemoved={onRemoved} />
+    </Drawer>
   )
 }
 
@@ -416,8 +455,8 @@ function AssetCatalogScope({ state }: { state: AssetState }) {
   return (
     <Typography.Paragraph type="secondary" className="asset-loaded-scope">
       {loading
-        ? '正在分页读取完整资产目录…'
-        : `筛选命中 ${state.cases.data?.total ?? '—'} 个用例、${state.suites.data?.total ?? '—'} 个套件。`}
+        ? '正在读取当前目录与当前页…'
+        : `当前目录匹配 ${state.cases.data?.total ?? '—'} 个用例、${state.suites.data?.total ?? '—'} 个套件。`}
     </Typography.Paragraph>
   )
 }
@@ -445,7 +484,7 @@ function WorkspaceAssetDetail(
       version={assetRouteVersion(params)}
       workflows={pageItems(state.workflows.data)}
       environments={state.environments.data ?? []}
-      cases={pageItems(state.caseOptions.data)}
+      cases={state.caseOptions.data?.items ?? pageItems(state.cases.data)}
       canEdit={state.canEdit}
       canExecute={state.canExecute}
     />
@@ -480,28 +519,20 @@ function assetRouteVersion(params: URLSearchParams): number | 'draft' | undefine
   return Number.isSafeInteger(version) ? version : undefined
 }
 
-function filterLoadedAssets<T extends { folder_id: string | null }>(
-  items: T[],
-  folder: string,
-): T[] {
-  if (folder === 'all') return items
-  return items.filter((item) => item.folder_id === (folder === 'unfiled' ? null : folder))
-}
-
 function AssetDirectory({
   folders,
   selected,
-  cases,
-  suites,
-  loaded,
+  counts,
   onBrowse,
+  canEdit,
+  onManage,
 }: {
   folders: Folder[]
   selected: string
-  cases: TestCase[]
-  suites: TestSuite[]
-  loaded: boolean
+  counts?: AssetDirectoryCounts
   onBrowse: (folder: string) => void
+  canEdit: boolean
+  onManage: () => void
 }) {
   const entries = [
     { id: 'all', name: '全部测试资产' },
@@ -511,7 +542,15 @@ function AssetDirectory({
       .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
   ]
   return (
-    <Card title="用例目录" className="test-asset-directory">
+    <Card
+      title="用例目录"
+      className="test-asset-directory"
+      extra={
+        <Button size="small" disabled={!canEdit} onClick={onManage}>
+          管理目录
+        </Button>
+      }
+    >
       <nav aria-label="浏览测试资产目录">
         {entries.map((entry) => (
           <Button
@@ -522,20 +561,23 @@ function AssetDirectory({
           >
             <FolderOpenOutlined />
             <span>{entry.name}</span>
-            <Tag>
-              {loaded
-                ? filterLoadedAssets(cases, entry.id).length +
-                  filterLoadedAssets(suites, entry.id).length
-                : '—'}
-            </Tag>
+            <Tag>{assetDirectoryCount(counts, entry.id)}</Tag>
           </Button>
         ))}
       </nav>
       <Typography.Paragraph type="secondary">
-        数量覆盖全部筛选结果。批量移动目标在列表工具栏选择。
+        数量由服务端统计全部筛选结果；列表按目录分页读取。批量选择只影响当前页。
       </Typography.Paragraph>
     </Card>
   )
+}
+
+function assetDirectoryCount(counts: AssetDirectoryCounts | undefined, id: string): number | '—' {
+  if (!counts) return '—'
+  if (id === 'all') return counts.case_total + counts.suite_total
+  if (id === 'unfiled') return counts.unfiled_cases + counts.unfiled_suites
+  const row = counts.folders.find((item) => item.folder_id === id)
+  return row ? row.cases + row.suites : 0
 }
 
 function directoryPath(folder: Folder, folders: Folder[]): string {
@@ -637,6 +679,7 @@ function AssetLoadErrors({ state }: { state: AssetState }) {
     state.environments,
     state.folders,
     state.permissions,
+    state.directoryCounts,
   ]
   const failed = queries.find((query) => query.error)
   if (!failed) return null
@@ -660,7 +703,7 @@ function caseTab(props: Parameters<typeof AssetTabs>[0]) {
     props
   return {
     key: 'cases',
-    label: `测试用例 (${cases.length})`,
+    label: `测试用例 (${state.cases.data?.total ?? '—'})`,
     children: (
       <AssetPane
         title="测试用例"
@@ -712,7 +755,6 @@ function suiteTab(props: Parameters<typeof AssetTabs>[0]) {
   const {
     state,
     suites,
-    publishedCases,
     selectedSuites,
     folderId,
     setSuiteEditor,
@@ -721,14 +763,14 @@ function suiteTab(props: Parameters<typeof AssetTabs>[0]) {
   } = props
   return {
     key: 'suites',
-    label: `测试套件 (${suites.length})`,
+    label: `测试套件 (${state.suites.data?.total ?? '—'})`,
     children: (
       <AssetPane
         title="测试套件"
         selected={selectedSuites}
         folderId={folderId}
         folders={folderItems(state)}
-        createDisabled={!state.canEdit || !publishedCases.length}
+        createDisabled={!state.canEdit}
         onFolderChange={setFolderId}
         onCreate={() => setSuiteEditor(null)}
         onMove={() =>
@@ -819,6 +861,8 @@ function AssetDialogs({
           cases={publishedCases}
           folders={folderItems(state)}
           submitting={state.saving}
+          assetOptionsLoading={state.caseOptions.isFetching}
+          assetOptionsError={state.caseOptions.error}
           onClose={() => setSuiteEditor(undefined)}
           onSave={async (input) => {
             await state.saveSuite({ current: suiteEditor, input })
@@ -918,9 +962,7 @@ function AssetDeleteButton({
 
 function WorkspaceCaseTable(props: Parameters<typeof CaseTable>[0]) {
   const workspace = props.workspace!
-  const ids = props.items
-    .slice((workspace.page - 1) * 20, workspace.page * 20)
-    .map((item) => item.id)
+  const ids = props.items.map((item) => item.id)
   const latest = useQuery({
     queryKey: ['test-case-runs', workspace.projectId, ids.join('|')],
     queryFn: () => listLatestTestCaseRuns(workspace.projectId, ids),
@@ -1258,6 +1300,7 @@ function assetPagination(workspace: AssetTableWorkspace | undefined) {
   if (!workspace) return false as const
   return {
     current: workspace.page,
+    total: workspace.total,
     pageSize: 20,
     showSizeChanger: false,
     onChange: workspace.onPage,
@@ -1882,6 +1925,8 @@ export function SuiteDialog({
   cases,
   folders,
   submitting,
+  assetOptionsLoading = false,
+  assetOptionsError = null,
   onClose,
   onSave,
 }: {
@@ -1889,6 +1934,8 @@ export function SuiteDialog({
   cases: TestCase[]
   folders: Folder[]
   submitting: boolean
+  assetOptionsLoading?: boolean
+  assetOptionsError?: Error | null
   onClose: () => void
   onSave: (input: TestSuiteDraftInput) => Promise<void>
 }) {
@@ -1912,7 +1959,15 @@ export function SuiteDialog({
       confirmLoading={submitting}
       onCancel={onClose}
       onOk={() => void save()}
+      okButtonProps={{
+        disabled: assetOptionsLoading || Boolean(assetOptionsError) || !cases.length,
+      }}
     >
+      <SuiteAssetOptionsStatus
+        loading={assetOptionsLoading}
+        error={assetOptionsError}
+        empty={!cases.length}
+      />
       <Form form={form} layout="vertical" initialValues={suiteDialogDefaults(current)}>
         <Form.Item name="name" label="套件名称" rules={[{ required: true }]}>
           <Input />
@@ -1937,6 +1992,23 @@ export function SuiteDialog({
       {error && <Alert type="error" showIcon title="保存套件失败" description={error} />}
     </Modal>
   )
+}
+
+function SuiteAssetOptionsStatus({
+  loading,
+  error,
+  empty,
+}: {
+  loading: boolean
+  error: Error | null
+  empty: boolean
+}) {
+  if (loading) return <Alert type="info" title="正在读取完整已发布用例列表…" />
+  if (error) {
+    return <Alert type="error" title="用例选择列表读取失败" description={apiErrorMessage(error)} />
+  }
+  if (empty) return <Alert type="info" title="尚无已发布用例，请先创建并发布用例" />
+  return null
 }
 
 function SuiteCaseVersions({

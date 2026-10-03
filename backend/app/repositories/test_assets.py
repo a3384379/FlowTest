@@ -1,8 +1,11 @@
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.test_assets import (
     TestCase,
@@ -11,6 +14,7 @@ from app.models.test_assets import (
     TestSuiteVersion,
     TestSuiteVersionItem,
 )
+from app.schemas.test_assets import AssetDirectoryCountsResponse, AssetFolderCount
 
 TestAssetEntity = TestCase | TestCaseVersion | TestSuite | TestSuiteVersion | TestSuiteVersionItem
 
@@ -65,23 +69,19 @@ class TestAssetRepository:
         is_template: bool | None,
         offset: int,
         limit: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestCase], int]:
-        filters = [TestCase.project_id == project_id, TestCase.archived_at.is_(None)]
-        if search:
-            pattern = f"%{search}%"
-            filters.append(or_(TestCase.name.ilike(pattern), TestCase.description.ilike(pattern)))
+        filters = self._catalog_filters(TestCase, project_id, search, tag, folder_id, unfiled)
         if is_template is not None:
             filters.append(TestCase.is_template == is_template)
         query = select(TestCase).where(*filters)
-        if tag:
-            matches = [
-                item for item in (await self._session.scalars(query)).all() if tag in item.tags
-            ]
-            return matches[offset : offset + limit], len(matches)
         items = list(
             (
                 await self._session.scalars(
-                    query.order_by(TestCase.updated_at.desc()).offset(offset).limit(limit)
+                    query.order_by(TestCase.updated_at.desc(), TestCase.id.desc())
+                    .offset(offset)
+                    .limit(limit)
                 )
             ).all()
         )
@@ -149,21 +149,17 @@ class TestAssetRepository:
         tag: str | None,
         offset: int,
         limit: int,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[TestSuite], int]:
-        filters = [TestSuite.project_id == project_id, TestSuite.archived_at.is_(None)]
-        if search:
-            pattern = f"%{search}%"
-            filters.append(or_(TestSuite.name.ilike(pattern), TestSuite.description.ilike(pattern)))
+        filters = self._catalog_filters(TestSuite, project_id, search, tag, folder_id, unfiled)
         query = select(TestSuite).where(*filters)
-        if tag:
-            matches = [
-                item for item in (await self._session.scalars(query)).all() if tag in item.tags
-            ]
-            return matches[offset : offset + limit], len(matches)
         items = list(
             (
                 await self._session.scalars(
-                    query.order_by(TestSuite.updated_at.desc()).offset(offset).limit(limit)
+                    query.order_by(TestSuite.updated_at.desc(), TestSuite.id.desc())
+                    .offset(offset)
+                    .limit(limit)
                 )
             ).all()
         )
@@ -171,6 +167,78 @@ class TestAssetRepository:
             select(func.count()).select_from(TestSuite).where(*filters)
         )
         return items, int(total or 0)
+
+    def _catalog_filters(
+        self,
+        model: type[TestCase] | type[TestSuite],
+        project_id: UUID,
+        search: str | None,
+        tag: str | None,
+        folder_id: UUID | None,
+        unfiled: bool,
+    ) -> list[ColumnElement[bool]]:
+        filters = [model.project_id == project_id, model.archived_at.is_(None)]
+        if search:
+            pattern = f"%{search}%"
+            filters.append(or_(model.name.ilike(pattern), model.description.ilike(pattern)))
+        if tag:
+            filters.append(self._tag_filter(model.tags, tag))
+        if folder_id is not None:
+            filters.append(model.folder_id == folder_id)
+        if unfiled:
+            filters.append(model.folder_id.is_(None))
+        return filters
+
+    def _tag_filter(
+        self, column: InstrumentedAttribute[list[str]], tag: str
+    ) -> ColumnElement[bool]:
+        if self._session.get_bind().dialect.name == "sqlite":
+            values = func.json_each(column).table_valued("value")
+            return select(literal(1)).select_from(values).where(values.c.value == tag).exists()
+        return cast(column, JSONB).contains([tag])
+
+    async def directory_counts(
+        self, *, project_id: UUID, search: str | None, tag: str | None
+    ) -> AssetDirectoryCountsResponse:
+        case_rows = await self._session.execute(
+            select(
+                TestCase.folder_id,
+                func.count(),
+                func.sum(case((TestCase.current_version.is_not(None), 1), else_=0)),
+            )
+            .where(*self._catalog_filters(TestCase, project_id, search, tag, None, False))
+            .group_by(TestCase.folder_id)
+        )
+        case_groups = case_rows.all()
+        cases = {folder_id: int(count) for folder_id, count, _published in case_groups}
+        # Aggregates retain one row per folder, rather than materializing assets.
+        published = sum(int(value or 0) for _folder, _count, value in case_groups)
+        suite_rows = await self._session.execute(
+            select(TestSuite.folder_id, func.count())
+            .where(
+                *self._catalog_filters(TestSuite, project_id, search, tag, None, False),
+            )
+            .group_by(TestSuite.folder_id)
+        )
+        suites = {folder_id: int(count) for folder_id, count in suite_rows}
+        folder_ids = sorted(
+            {folder_id for folder_id in (*cases, *suites) if folder_id is not None}, key=str
+        )
+        return AssetDirectoryCountsResponse(
+            case_total=sum(cases.values()),
+            suite_total=sum(suites.values()),
+            published_case_total=int(published or 0),
+            unfiled_cases=cases.get(None, 0),
+            unfiled_suites=suites.get(None, 0),
+            folders=[
+                AssetFolderCount(
+                    folder_id=folder_id,
+                    cases=cases.get(folder_id, 0),
+                    suites=suites.get(folder_id, 0),
+                )
+                for folder_id in folder_ids
+            ],
+        )
 
     async def suite_name_exists(
         self, *, project_id: UUID, name: str, excluding_id: UUID | None = None

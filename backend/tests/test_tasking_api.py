@@ -1511,3 +1511,130 @@ async def test_asset_deletion_checks_project_permissions_and_exact_selection(
         json={"asset_ids": [fixture.case_id, str(uuid4())]},
     )
     assert mixed.status_code == 404, mixed.text
+
+
+@pytest.mark.asyncio
+async def test_asset_directory_filters_pages_and_counts_the_complete_filtered_catalog(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, environment_id, workflow_id = await _create_published_workflow(client, headers)
+    root = f"/api/v1/projects/{project_id}"
+    folders = []
+    for name in ("规模目录甲", "规模目录乙"):
+        response = await client.post(f"{root}/folders", headers=headers, json={"name": name})
+        assert response.status_code == 201, response.text
+        folders.append(UUID(response.json()["id"]))
+    folders.append(None)
+    definition = {
+        "workflow_id": workflow_id,
+        "workflow_version": 1,
+        "environment_id": environment_id,
+        "runtime_variables": {},
+        "runtime_headers": {},
+    }
+    async with tasking_context.session_maker() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        cases = [
+            test_asset_models.TestCase(
+                id=uuid4(),
+                project_id=UUID(project_id),
+                folder_id=folders[index % 3],
+                name=f"规模用例 {index}",
+                tags=["回归", "规模"] if index % 2 == 0 else ["规模扩展"],
+                draft_definition=definition,
+                current_version=1 if index in {0, 2} else None,
+                archived_at=datetime.now(UTC) if index >= 126 else None,
+                created_by_id=actor.id,
+            )
+            for index in range(128)
+        ]
+        session.add_all(cases)
+        session.add_all(
+            [
+                test_asset_models.TestCaseVersion(
+                    test_case_id=cases[index].id,
+                    version=1,
+                    definition=definition,
+                    fingerprint=definition_fingerprint(definition),
+                    created_by_id=actor.id,
+                )
+                for index in (0, 2)
+            ]
+        )
+        session.add_all(
+            [
+                test_asset_models.TestSuite(
+                    project_id=UUID(project_id),
+                    folder_id=folders[index % 3],
+                    name=f"规模套件 {index}",
+                    tags=["规模"] if index % 2 == 0 else ["规模扩展"],
+                    draft_definition={
+                        "items": [{"test_case_id": str(cases[0].id), "test_case_version": 1}]
+                    },
+                    archived_at=datetime.now(UTC) if index == 63 else None,
+                    created_by_id=actor.id,
+                )
+                for index in range(64)
+            ]
+        )
+        await session.commit()
+    filtered = await client.get(
+        f"{root}/test-cases",
+        headers=headers,
+        params={"folder_id": str(folders[0]), "page": 3, "page_size": 20},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["total"] == 42 and len(filtered.json()["items"]) == 2
+    assert {row["folder_id"] for row in filtered.json()["items"]} == {str(folders[0])}
+    unfiled = await client.get(
+        f"{root}/test-cases", headers=headers, params={"unfiled": True, "page_size": 100}
+    )
+    assert unfiled.json()["total"] == 42 and all(
+        row["folder_id"] is None for row in unfiled.json()["items"]
+    )
+    suites = await client.get(
+        f"{root}/test-suites",
+        headers=headers,
+        params={"folder_id": str(folders[1]), "page": 2, "page_size": 20},
+    )
+    assert suites.json()["total"] == 21 and len(suites.json()["items"]) == 1
+    counts = await client.get(
+        f"{root}/test-assets/directory-counts", headers=headers, params={"search": "规模"}
+    )
+    assert counts.status_code == 200, counts.text
+    assert counts.json()["case_total"] == 126 and counts.json()["suite_total"] == 63
+    assert counts.json()["published_case_total"] == 2
+    exact_tags = await client.get(
+        f"{root}/test-assets/directory-counts",
+        headers=headers,
+        params={"search": "规模", "tag": "规模"},
+    )
+    assert exact_tags.status_code == 200, exact_tags.text
+    assert exact_tags.json()["case_total"] == 63 and exact_tags.json()["suite_total"] == 32
+    assert exact_tags.json()["unfiled_cases"] == 21 and exact_tags.json()["unfiled_suites"] == 11
+    directory = {row["folder_id"]: row for row in exact_tags.json()["folders"]}
+    assert directory[str(folders[0])]["cases"] == 21 and directory[str(folders[0])]["suites"] == 11
+    tagged = await client.get(
+        f"{root}/test-cases", headers=headers, params={"tag": "规模", "page_size": 100}
+    )
+    assert tagged.json()["total"] == 63 and all(
+        "规模" in row["tags"] for row in tagged.json()["items"]
+    )
+    injection = await client.get(
+        f"{root}/test-suites", headers=headers, params={"tag": "规模' OR 1=1 --"}
+    )
+    assert injection.json()["total"] == 0
+    for resource in ("test-cases", "test-suites"):
+        invalid = await client.get(
+            f"{root}/{resource}",
+            headers=headers,
+            params={"folder_id": str(folders[0]), "unfiled": True},
+        )
+        assert invalid.status_code == 422 and invalid.json()["error"]["trace_id"]
+        foreign = await client.get(
+            f"{root}/{resource}", headers=headers, params={"folder_id": str(uuid4())}
+        )
+        assert foreign.status_code == 404, foreign.text

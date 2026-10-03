@@ -16,6 +16,7 @@ from app.schemas.test_assets import (
     AssetDeletionPreviewRequest,
     AssetDeletionPreviewResponse,
     AssetDeletionResponse,
+    AssetDirectoryCountsResponse,
     TestCaseCreate,
     TestCaseResponse,
     TestCaseRunHistoryResponse,
@@ -38,6 +39,19 @@ from app.services.test_assets import TestCaseService, TestSuiteService
 from app.services.test_case_runs import TestCaseRunService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.get("/test-assets/directory-counts", response_model=AssetDirectoryCountsResponse)
+async def test_asset_directory_counts(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    search: str | None = Query(default=None, max_length=200),
+    tag: str | None = Query(default=None, max_length=50),
+) -> AssetDirectoryCountsResponse:
+    return await TestCaseService(session).directory_counts(
+        actor=current_user, project_id=project_id, search=search, tag=tag
+    )
 
 
 @router.post("/test-cases/deletion-preview", response_model=AssetDeletionPreviewResponse)
@@ -245,6 +259,8 @@ async def list_test_cases(
     is_template: bool | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    folder_id: UUID | None = None,
+    unfiled: bool = False,
 ) -> Page[TestCaseResponse]:
     items, total = await TestCaseService(session).list_cases(
         actor=current_user,
@@ -254,6 +270,8 @@ async def list_test_cases(
         is_template=is_template,
         page=page,
         page_size=page_size,
+        folder_id=folder_id,
+        unfiled=unfiled,
     )
     return Page(
         items=[TestCaseResponse.model_validate(item) for item in items],
@@ -417,6 +435,8 @@ async def list_test_suites(
     tag: str | None = Query(default=None, max_length=50),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    folder_id: UUID | None = None,
+    unfiled: bool = False,
 ) -> Page[TestSuiteResponse]:
     items, total = await TestSuiteService(session).list_suites(
         actor=current_user,
@@ -425,6 +445,8 @@ async def list_test_suites(
         tag=tag,
         page=page,
         page_size=page_size,
+        folder_id=folder_id,
+        unfiled=unfiled,
     )
     return Page(
         items=[TestSuiteResponse.model_validate(item) for item in items],

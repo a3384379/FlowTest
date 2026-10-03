@@ -238,6 +238,21 @@ class AssetBulkMoveResponse(BaseModel):
     updated: int
 
 
+class AssetFolderCount(BaseModel):
+    folder_id: UUID
+    cases: int
+    suites: int
+
+
+class AssetDirectoryCountsResponse(BaseModel):
+    case_total: int
+    suite_total: int
+    published_case_total: int
+    unfiled_cases: int
+    unfiled_suites: int
+    folders: list[AssetFolderCount]
+
+
 class AssetDeletionPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     asset_ids: list[UUID] = Field(min_length=1, max_length=100)
