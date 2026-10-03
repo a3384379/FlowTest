@@ -636,18 +636,18 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     if (!canSaveTarget(targetWorkflowId)) {
       throw new Error('工作流暂不能保存，请先处理未应用配置或编辑权限。')
     }
-    if (!projectId || !userId) return
-    const targetWorkflow = workflows.data?.items.find((item) => item.id === targetWorkflowId)
+    if (!projectId || !userId) throw new Error('项目或登录状态已变化，页签保持打开。')
     const targetKey = workflowDraftKey(userId, projectId, targetWorkflowId)
     const memoryDraft = memoryDraftsRef.current.get(targetWorkflowId)
     const storedDraft = readWorkflowDraft(targetKey)
     const targetDraft = memoryDraft ?? restoreWorkflowEdit(storedDraft, targetWorkflowId)
-    if (!targetWorkflow || !targetDraft) return
+    if (!targetDraft) throw new Error('本地草稿无法读取，页签保持打开。')
     if (!validForSave(targetDraft.definition)) {
       throw new Error('流程结构未完成，页签保持打开。')
     }
     const generationAtStart = draftGenerationRef.current.get(targetWorkflowId) ?? 0
     await runMutation(message.error, async () => {
+      const targetWorkflow = await getWorkflow(projectId, targetWorkflowId)
       const saved = await updateWorkflowDraft(
         projectId,
         targetWorkflow,
@@ -668,13 +668,14 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
         )
         setDraftStorageError(persisted.ok ? null : persisted.error, targetWorkflowId)
         await refreshWorkflows()
-        return
+        throw new Error('保存期间又产生了本地修改，页签保持打开。')
       }
       memoryDraftsRef.current.delete(targetWorkflowId)
       setMemoryDraftIds([...memoryDraftsRef.current.keys()])
       const removed = removeWorkflowDraft(targetKey)
       setDraftStorageError(removed.ok ? null : removed.error, targetWorkflowId)
       await refreshWorkflows()
+      if (!removed.ok) throw new Error(`${removed.error}，页签保持打开。`)
     })
   }
 

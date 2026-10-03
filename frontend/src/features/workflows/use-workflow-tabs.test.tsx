@@ -10,6 +10,10 @@ import {
 } from './workflow-draft-store'
 import { readWorkflowTabs, workflowTabKey, writeWorkflowTabs } from './workflow-tab-store'
 import { useWorkflowTabs } from './use-workflow-tabs'
+import { DraftContext, DraftSession } from '../drafts/draft-session'
+import { nodeEditorScope } from '../../flow/editor/editor-identity'
+import { workflowDefinition } from '../../test/fixtures'
+import { useState } from 'react'
 
 const draft = { nodes: [], edges: [] } as unknown as WorkflowDefinition
 
@@ -18,6 +22,66 @@ describe('useWorkflowTabs', () => {
     const rendered = renderTabsHook()
     await act(async () => rendered.result.current.resolvePendingClose('discard'))
     expect(rendered.result.current.pendingClose).toBeNull()
+  })
+
+  it('requires a close decision for unapplied node inputs and prevents saving the previous graph', async () => {
+    const session = new DraftSession()
+    const key = nodeEditorScope('user-1', 'project-1', 'one') + 'api'
+    const node = workflowDefinition.nodes[1]!
+    const save = vi.fn().mockResolvedValue(undefined)
+    const discard = vi.fn(() => {
+      session.clearNodeEditor(key)
+      return { ok: true } as const
+    })
+    const rendered = renderHook(
+      () => {
+        const [active, select] = useState<string | null>('one')
+        return useWorkflowTabs({
+          userId: 'user-1',
+          projectId: 'project-1',
+          workflowIds: ['one'],
+          activeWorkflowId: active,
+          hasExplicitFocus: true,
+          selectWorkflow: select,
+          saveWorkflowDraft: save,
+          discardWorkflowDraft: discard,
+          searchParams: new URLSearchParams('focus=one'),
+          setSearchParams: vi.fn(),
+        })
+      },
+      {
+        wrapper: ({ children }) => (
+          <DraftContext.Provider value={session}>{children}</DraftContext.Provider>
+        ),
+      },
+    )
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one']))
+    act(() =>
+      session.updateNodeEditor(key, {
+        nodeId: node.id,
+        baseNode: node,
+        draftNode: { ...node, name: '未应用输入' },
+        generation: session.nextGeneration(),
+        dirty: true,
+        rawFields: {},
+        activeTab: 'params',
+        requestDraft: null,
+        requestDirty: false,
+      }),
+    )
+    expect(rendered.result.current.dirtyIds).toEqual(['one'])
+    act(() => rendered.result.current.requestCloseTabs(['one']))
+    expect(rendered.result.current.pendingClose).toEqual({ ids: ['one'], dirtyIds: ['one'] })
+    await act(async () => rendered.result.current.resolvePendingClose('save'))
+    expect(save).not.toHaveBeenCalled()
+    expect(rendered.result.current.pendingClose).not.toBeNull()
+    act(() => rendered.result.current.cancelPendingClose())
+    expect(session.nodeEditors.get(key)?.draftNode.name).toBe('未应用输入')
+    act(() => rendered.result.current.requestCloseTabs(['one']))
+    await act(async () => rendered.result.current.resolvePendingClose('discard'))
+    expect(discard).toHaveBeenCalledWith('one')
+    expect(session.nodeEditors.has(key)).toBe(false)
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual([]))
   })
 
   beforeEach(() => {

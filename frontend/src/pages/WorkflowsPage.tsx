@@ -92,7 +92,6 @@ export default function WorkflowsPage() {
       next.delete('node')
       next.delete('attempt')
       setSearchParams(next)
-      workflows.showHistory(executionId)
     },
     showDraft: () => {
       const next = new URLSearchParams(searchParams)
@@ -100,7 +99,7 @@ export default function WorkflowsPage() {
       next.delete('node')
       next.delete('attempt')
       setSearchParams(next)
-      workflows.showDraft()
+      if (!searchParams.has('execution')) workflows.showDraft()
     },
   }
   useEffect(() => {
@@ -405,6 +404,7 @@ function WorkflowTabCloseModal({ tabs }: { tabs: WorkflowTabsState }) {
           <Button
             type="primary"
             loading={tabs.closingTabs}
+            disabled={tabs.pendingUnappliedIds.length > 0}
             onClick={() => void tabs.resolvePendingClose('save')}
           >
             保存并关闭
@@ -413,6 +413,18 @@ function WorkflowTabCloseModal({ tabs }: { tabs: WorkflowTabsState }) {
       }
     >
       {dirtyCount === 1 ? '当前页签有未保存修改。' : `${dirtyCount} 个页签有未保存修改。`}
+      {tabs.pendingUnappliedIds.length > 0 && (
+        <Alert
+          type="warning"
+          title="有尚未应用的节点配置"
+          description="先返回节点应用配置，再保存流程。丢弃并关闭会同时清除节点输入和本地流程草稿。"
+          action={
+            <Button disabled={tabs.closingTabs} onClick={tabs.editUnappliedTab}>
+              继续编辑未应用节点
+            </Button>
+          }
+        />
+      )}
     </Modal>
   )
 }

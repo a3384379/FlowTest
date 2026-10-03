@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useDraftSession } from '../drafts/draft-session'
+import { nodeEditorScope } from '../../flow/editor/editor-identity'
+import { clearExecutionEvidence } from './execution-navigation'
 
 import {
   readWorkflowDraft,
@@ -37,6 +40,8 @@ type WorkflowTabHookInput = {
 }
 
 export function useWorkflowTabs(input: WorkflowTabHookInput) {
+  const session = useDraftSession()
+  useSyncExternalStore(session.subscribe, session.snapshot)
   const storageKey = useMemo(
     () => (input.userId && input.projectId ? workflowTabKey(input.userId, input.projectId) : null),
     [input.projectId, input.userId],
@@ -149,7 +154,14 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     queueMicrotask(() => setStorageError(result.ok ? cleanupErrorRef.current : result.error))
   }, [input.activeWorkflowId, storageKey, storageReady, workflowIds])
 
-  const memoryDraftIds = new Set(input.memoryDraftIds ?? [])
+  const unappliedIds = workflowIds.filter(
+    (id) =>
+      session.dirtyNodeEditorKeys(
+        nodeEditorScope(input.userId ?? 'anonymous', input.projectId ?? 'embedded', id),
+      ).length > 0,
+  )
+  const pendingUnappliedIds = unappliedCloseIds(pendingClose, unappliedIds)
+  const memoryDraftIds = new Set([...(input.memoryDraftIds ?? []), ...unappliedIds])
   const dirtyIds = workflowIds.filter((workflowId) =>
     Boolean(
       memoryDraftIds.has(workflowId) ||
@@ -167,6 +179,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     next.delete('execution')
     next.delete('node')
     next.delete('attempt')
+    clearExecutionEvidence(next)
     input.setSearchParams(next, { replace: true })
   }
 
@@ -196,11 +209,13 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     next.delete('execution')
     next.delete('node')
     next.delete('attempt')
+    clearExecutionEvidence(next)
     input.setSearchParams(next, { replace: true })
   }
 
   async function resolvePendingClose(action: 'save' | 'discard') {
     if (!pendingClose) return
+    if (action === 'save' && pendingUnappliedIds.length) return
     setClosingTabs(true)
     try {
       if (action === 'save') {
@@ -229,6 +244,13 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   return {
     workflowIds,
     dirtyIds,
+    pendingUnappliedIds,
+    editUnappliedTab: () => {
+      const id = pendingUnappliedIds[0]
+      if (!id) return
+      setPendingClose(null)
+      activateWorkflow(id)
+    },
     storageError,
     pendingClose,
     closingTabs,
@@ -237,6 +259,10 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     resolvePendingClose,
     cancelPendingClose: () => setPendingClose(null),
   }
+}
+
+function unappliedCloseIds(request: WorkflowTabCloseRequest | null, unapplied: string[]): string[] {
+  return request ? request.ids.filter((id) => unapplied.includes(id)) : []
 }
 
 function discardDraft(input: WorkflowTabHookInput, workflowId: string): DraftStorageResult {
