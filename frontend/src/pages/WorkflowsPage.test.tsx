@@ -119,6 +119,16 @@ describe('WorkflowsPage', () => {
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
   })
 
+  it('keeps the selected workflow history visible when opening a snapshot from an unfocused catalog', async () => {
+    renderPage(`/projects/${project.id}/workflows`)
+    await screen.findByText('已发布 v1')
+    fireEvent.click(screen.getByRole('button', { name: '打开执行历史' }))
+    const recordId = `workflow-history-${workflowExecutionDetail.execution.id}`
+    fireEvent.click(await screen.findByTestId(recordId))
+    expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+    expect(await screen.findByTestId(recordId)).toBeVisible()
+  })
+
   it('protects unapplied node inputs when closing a workflow tab', async () => {
     renderPage()
     await screen.findByText('已发布 v1')

@@ -88,6 +88,11 @@ export default function WorkflowsPage() {
     ...workflows,
     showHistory: (executionId: string) => {
       const next = new URLSearchParams(searchParams)
+      const workflowId =
+        workflows.executions.data?.items.find((item) => item.id === executionId)?.workflow_id ??
+        workflows.runtimeChildren.find((item) => item.id === executionId)?.workflow_id ??
+        workflows.workflowId
+      if (workflowId) next.set('focus', workflowId)
       next.set('execution', executionId)
       next.delete('node')
       next.delete('attempt')

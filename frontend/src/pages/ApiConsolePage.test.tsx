@@ -60,7 +60,7 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
-  it('pages this API history, opens frozen detail, and restores it from a direct link without an environment', async () => {
+  it('pages this API history and opens its frozen request and response without an environment', async () => {
     const frozen = {
       ...executionDetail,
       execution: {
@@ -89,17 +89,36 @@ describe('ApiConsolePage', () => {
       ),
     )
     const browser = userEvent.setup()
-    const page = renderPage()
+    renderPage()
     await browser.click(await screen.findByRole('tab', { name: '执行历史' }))
-    expect(await screen.findByText('共 43 次执行')).toBeVisible()
-    fireEvent.click(screen.getByTitle('3'))
-    await browser.click(await screen.findByRole('button', { name: '查看执行 old-record' }))
+    const history = within(screen.getByRole('tabpanel', { name: '执行历史' }))
+    expect(await history.findByText('共 43 次执行')).toBeVisible()
+    fireEvent.click(history.getByTitle('3'))
+    const record = await history.findByLabelText('查看执行 old-record')
+    await browser.click(record)
     expect(await screen.findByText('正在查看历史执行的冻结请求与响应')).toBeVisible()
     expect(screen.getByText('"old snapshot"')).toBeVisible()
     await browser.click(screen.getByRole('tab', { name: '实际请求' }))
     expect(screen.getByText('GET http://mock-target/old')).toBeVisible()
     expect(requests.some((params) => params.get('page') === '3')).toBe(true)
-    page.unmount()
+  })
+
+  it('restores frozen API evidence from a direct link without an environment', async () => {
+    const frozen = {
+      ...executionDetail,
+      execution: {
+        ...executionDetail.execution,
+        id: 'old-record',
+        request_url: 'http://mock-target/old',
+        response_body: { revision: 'old snapshot' },
+      },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/executions/old-record`, () =>
+        HttpResponse.json(frozen),
+      ),
+    )
     renderPage(`/projects/${project.id}/apis?focus=${apiDefinition.id}&execution=old-record`)
     expect(await screen.findByText('正在查看历史执行的冻结请求与响应')).toBeVisible()
     expect(screen.getByText('"old snapshot"')).toBeVisible()

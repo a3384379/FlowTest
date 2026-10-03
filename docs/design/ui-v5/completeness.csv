@@ -1,7 +1,7 @@
 id,module,requirement,status,evidence,notes
 R01,报告,协议断言期望实际证据,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,先复现后修复；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行
 R02,报告与编排,结构控制实例检查点日志工作区,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,复用真实控制记录与实例接口；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行
-R03,跨页定位,保留复杂执行上下文,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,不增加虚构后端参数；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行
+R03,跨页定位,保留复杂执行上下文,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx;frontend/src/pages/WorkflowsPage.test.tsx;frontend/e2e/workflow-editor-visual.spec.ts,不增加虚构后端参数；未带focus的目录打开快照时补齐记录所属流程，历史列表保持可见；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行
 R04,报告导出,完整冻结证据及未知值,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,完整冻结执行树与授权子运行；新快照冻结名称；循环和深度越界明确失败；本轮完整检查与真实环境验收分层记录
 R05,报告查询,服务端状态筛选与分页,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,复用已有status查询；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行
 R06,报告证据,外置响应下载,定向验证通过,backend/tests/test_reporting_api.py;frontend/src/pages/ReportsPage.test.tsx;frontend/src/flow/WorkflowRunInspector.test.tsx,沿用已有授权下载；本轮完整本地与最新提交远程门禁单独记录；真实环境综合验收待执行

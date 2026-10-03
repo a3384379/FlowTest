@@ -57,6 +57,10 @@ for (const viewport of viewports) {
 
     await page.getByRole('button', { name: '专注模式', exact: true }).click()
     await expect(page.getByTestId('workflow-focus-toolbar')).toBeVisible()
+    const referenceToggle = page
+      .getByTestId('workflow-focus-toolbar')
+      .locator('.ant-checkbox-wrapper')
+    expect((await requiredBox(referenceToggle)).height).toBeLessThanOrEqual(28)
     await settleViewport(page)
     await fitCanvas(page)
     await captureState('07-focus-mode')
@@ -75,10 +79,13 @@ for (const viewport of viewports) {
     await captureState('08-run-mode')
 
     await page.getByTestId('workflow-runtime-tab-history').click()
-    await page.locator('[data-testid^="workflow-history-"]').first().click()
+    const historicalRun = page.locator('[data-testid^="workflow-history-"]').first()
+    const historicalRunId = await historicalRun.getAttribute('data-testid')
+    await historicalRun.click()
     await expect(page.getByText('历史快照 · 不可修改')).toBeVisible()
     await expect(page.locator('.workflow-workbench-card .ant-card-loading-content')).toHaveCount(0)
     await expect(page.locator('.workflow-workbench-card .react-flow__node').first()).toBeVisible()
+    await expect(page.getByTestId(historicalRunId!)).toBeVisible()
     await settleViewport(page)
     await fitCanvas(page)
     await captureState('09-history-mode')
@@ -92,6 +99,7 @@ async function capture(
   testInfo: TestInfo,
 ): Promise<void> {
   await expectNoOverflow(page)
+  await page.mouse.move(0, 0)
   await page.evaluate(() => document.fonts.ready)
   await settleViewport(page)
   const screenshot = resolve(directory, `${name}.png`)
@@ -168,6 +176,19 @@ function visualFixtureMasks(page: Page, name: string): Locator[] {
   return masks
 }
 async function settleViewport(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll('.react-flow__node')).every((node) => {
+          const body = node.querySelector('.flow-node')
+          if (!body) return true
+          return (
+            Math.abs(node.getBoundingClientRect().height - body.getBoundingClientRect().height) < 1
+          )
+        }),
+      ),
+    )
+    .toBe(true)
   await page.evaluate(async () => {
     let previous = ''
     let stableFrames = 0
