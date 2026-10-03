@@ -8,7 +8,13 @@ export type AssertionEvidenceItem = {
   message?: string
 }
 
-export default function AssertionEvidence({ items }: { items: AssertionEvidenceItem[] }) {
+export default function AssertionEvidence({
+  items,
+  source,
+}: {
+  items: AssertionEvidenceItem[]
+  source?: string
+}) {
   if (!items.length)
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未提供断言证据" />
   const ordered = [...items].sort(
@@ -39,10 +45,32 @@ export default function AssertionEvidence({ items }: { items: AssertionEvidenceI
               <pre>{displayValue(item.actual)}</pre>
             </div>
           </div>
+          <NumericAssertionDifference expected={item.expected} actual={item.actual} />
+          <Typography.Text type="secondary">证据来源：{source ?? '未提供'}</Typography.Text>
           {item.message && <p>{item.message}</p>}
         </article>
       ))}
     </div>
+  )
+}
+
+function NumericAssertionDifference({ expected, actual }: { expected: unknown; actual: unknown }) {
+  if (
+    typeof expected !== 'number' ||
+    typeof actual !== 'number' ||
+    !Number.isFinite(expected) ||
+    !Number.isFinite(actual)
+  )
+    return null
+  const delta = actual - expected
+  if (!Number.isFinite(delta))
+    return <Typography.Paragraph>差值超出数值范围，请查看原始期望值和实际值。</Typography.Paragraph>
+  const formatted = new Intl.NumberFormat('zh-CN', {
+    maximumSignificantDigits: 15,
+    signDisplay: 'exceptZero',
+  }).format(delta)
+  return (
+    <Typography.Paragraph>差值（实际 − 期望）：{formatted} · 单位：未提供</Typography.Paragraph>
   )
 }
 

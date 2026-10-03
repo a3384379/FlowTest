@@ -27,6 +27,9 @@ import AssertionEvidence from '../evidence/AssertionEvidence'
 import { reportAssertionEvidence } from '../evidence/assertion-model'
 import { workflowExecutionPath } from '../workflows/execution-navigation'
 import { getWorkflowExecution } from '../workflows/workflow-service'
+import type { ExecutionEvidenceLocation } from '../workflows/execution-navigation'
+import ExecutionCheckpointLog from '../workflows/ExecutionCheckpointLog'
+import { WorkflowControlEvidence, WorkflowEvidencePayload } from '../../flow/WorkflowRunInspector'
 
 type WorkspaceProps = {
   projectId: string
@@ -36,6 +39,8 @@ type WorkspaceProps = {
   error: unknown
   nodeId: string | null
   attempt?: number
+  evidence?: ExecutionEvidenceLocation
+  onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
   onSelectNode: (nodeId: string) => void
   onSelectAttempt: (nodeId: string, attempt: number) => void
   onBack: () => void
@@ -56,6 +61,7 @@ export default function ReportExecutionWorkspace(props: WorkspaceProps) {
     workflowId: detail?.summary.workflow_id,
     nodeId: node?.node_id,
     attempt: props.attempt,
+    ...props.evidence,
   })
   return (
     <section className="report-execution-workspace" aria-label="执行报告详情">
@@ -176,6 +182,10 @@ function ReportExecutionBody({
             workflowPath={workflowPath}
             initialAttempt={props.attempt}
             onSelectAttempt={(attempt) => props.onSelectAttempt(node.node_id, attempt)}
+            projectId={props.projectId}
+            executionId={executionId}
+            evidence={props.evidence}
+            onSelectEvidence={props.onSelectEvidence}
           />
         ) : (
           <Card>
@@ -301,11 +311,19 @@ function ReportNodeEvidence({
   workflowPath,
   initialAttempt,
   onSelectAttempt,
+  projectId,
+  executionId,
+  evidence,
+  onSelectEvidence,
 }: {
   node: ReportNode
   workflowPath: string
   initialAttempt?: number
   onSelectAttempt: (attempt: number) => void
+  projectId: string
+  executionId: string
+  evidence?: ExecutionEvidenceLocation
+  onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
 }) {
   const observations = node.observations ?? []
   const [attempt, setAttempt] = useRouteScopedState<number | undefined>(
@@ -338,7 +356,9 @@ function ReportNodeEvidence({
           className="report-node-error"
         />
       )}
-      {assertions.length > 0 && <AssertionEvidence items={assertions} />}
+      {assertions.length > 0 && (
+        <AssertionEvidence items={assertions} source={`${node.name} (${node.node_id})`} />
+      )}
       <MissingReportAttempt attempt={initialAttempt} observations={observations} />
       <Space wrap className="report-node-context">
         <Tag>{node.node_type}</Tag>
@@ -359,7 +379,37 @@ function ReportNodeEvidence({
           />
         )}
       </Space>
-      <Tabs items={reportEvidenceTabs(node, observation)} />
+      <WorkflowControlEvidence
+        output={node.output}
+        projectId={projectId}
+        executionId={executionId}
+        nodeId={node.node_id}
+        evidence={evidence}
+        onSelectEvidence={onSelectEvidence}
+      />
+      <Tabs
+        items={[
+          ...reportEvidenceTabs(node, observation, projectId),
+          {
+            key: 'output',
+            label: '输出',
+            children: (
+              <ReportPayload title="当次节点输出" value={node.output} projectId={projectId} />
+            ),
+          },
+          {
+            key: 'checkpoints',
+            label: '检查点与日志',
+            children: (
+              <ExecutionCheckpointLog
+                projectId={projectId}
+                executionId={executionId}
+                running={node.status === 'running'}
+              />
+            ),
+          },
+        ]}
+      />
     </Card>
   )
 }
@@ -382,7 +432,11 @@ function MissingReportAttempt({
   )
 }
 
-function reportEvidenceTabs(node: ReportNode, observation: WorkflowNodeObservation | undefined) {
+function reportEvidenceTabs(
+  node: ReportNode,
+  observation: WorkflowNodeObservation | undefined,
+  projectId: string,
+) {
   return [
     {
       key: 'response',
@@ -391,6 +445,7 @@ function reportEvidenceTabs(node: ReportNode, observation: WorkflowNodeObservati
         <ReportPayload
           title="本节点响应"
           value={observation ? observation.response : node.response}
+          projectId={projectId}
         />
       ),
     },
@@ -401,6 +456,7 @@ function reportEvidenceTabs(node: ReportNode, observation: WorkflowNodeObservati
         <ReportPayload
           title="本节点实际请求"
           value={observation ? observation.request : node.request}
+          projectId={projectId}
         />
       ),
     },
@@ -427,14 +483,22 @@ function reportEvidenceTabs(node: ReportNode, observation: WorkflowNodeObservati
   ]
 }
 
-function ReportPayload({ title, value }: { title: string; value: unknown }) {
+function ReportPayload({
+  title,
+  value,
+  projectId,
+}: {
+  title: string
+  value: unknown
+  projectId?: string
+}) {
   return (
     <section className="report-payload">
       <Typography.Text strong>{title}</Typography.Text>
       {value === null || value === undefined ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本节点未提供此项证据" />
       ) : (
-        <pre className="report-code">{JSON.stringify(value, null, 2)}</pre>
+        <WorkflowEvidencePayload title="证据内容" value={value} projectId={projectId} />
       )}
     </section>
   )

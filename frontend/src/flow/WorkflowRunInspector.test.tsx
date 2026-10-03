@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
@@ -177,8 +177,99 @@ describe('WorkflowRunInspector', () => {
     expect(await screen.findByText('check · failed')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: '查看实例详情' }))
     expect(await screen.findByText(/"actual": 409/)).toBeVisible()
+    await browser.click(
+      within(screen.getByRole('region', { name: '实例执行证据' })).getByRole('tab', {
+        name: '原始证据',
+      }),
+    )
     expect(screen.getByText(/"status_code": 409/)).toBeVisible()
     expect(requestedPages).toEqual([1, 2])
+  })
+
+  it('restores a third iteration and its exact instance request attempt from a deep link', async () => {
+    const browser = userEvent.setup()
+    const execution = apiNodeExecution()
+    const instanceId = '__nested_request__:third-item'
+    const onSelectEvidence = vi.fn()
+    const reportPath = '/api/v1/projects/project-1/workflow-executions/execution-1'
+    server.use(
+      http.get(`${reportPath}/control-records`, () =>
+        HttpResponse.json({
+          items: [0, 1, 2].map((ordinal) => ({
+            ordinal,
+            status: 'failed',
+            test_verdict: 'failed',
+          })),
+          total: 3,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get(`${reportPath}/control-records/iteration/2`, () =>
+        HttpResponse.json({
+          kind: 'iteration',
+          ordinal: 2,
+          status: 'failed',
+          test_verdict: 'failed',
+          payload: {
+            input_index: 2,
+            status: 'failed',
+            test_verdict: 'failed',
+            nodes: [{ node_id: 'check', instance_id: instanceId, status: 'failed' }],
+          },
+        }),
+      ),
+      http.get(`${reportPath}/instances/${instanceId}`, () =>
+        HttpResponse.json({
+          id: 'checkpoint-3',
+          node_id: instanceId,
+          node_name: '第3项校验',
+          status: 'failed',
+          phase: 'main',
+          attempt: 2,
+          output: {},
+          result: execution.result,
+        }),
+      ),
+    )
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        projectId="project-1"
+        executionId="execution-1"
+        node={workflowDefinition.nodes.find((node) => node.id === 'api') ?? null}
+        definition={workflowDefinition}
+        execution={{
+          ...execution,
+          output: {
+            report_kind: 'iteration',
+            report_paged: true,
+            record_count: 3,
+            completed_count: 3,
+            input_count: 3,
+            failed_count: 3,
+          },
+        }}
+        nodes={[execution]}
+        context={{}}
+        evidence={{ controlKind: 'iteration', controlOrdinal: 2, instanceId, instanceAttempt: 1 }}
+        onSelectEvidence={onSelectEvidence}
+      />,
+    )
+    const evidence = await screen.findByRole('region', { name: '实例执行证据' })
+    expect(within(evidence).getByText(/"busy"/)).toBeVisible()
+    expect(within(evidence).queryByText(/"Ada"/)).not.toBeInTheDocument()
+    await browser.click(within(evidence).getByRole('combobox'))
+    await browser.click(
+      screen.getByText(/第 2 次/, { selector: '.ant-select-item-option-content' }),
+    )
+    expect(onSelectEvidence).toHaveBeenLastCalledWith({
+      controlKind: 'iteration',
+      controlOrdinal: 2,
+      instanceId,
+      instanceAttempt: 2,
+    })
+    expect(within(evidence).getByText(/"Ada"/)).toBeVisible()
   })
 
   it('shows the selected loop item and its actual failed node', async () => {

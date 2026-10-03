@@ -5,7 +5,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.reporting import NotificationDelivery, NotificationWebhook
-from app.models.workflows import Workflow, WorkflowExecution, WorkflowNodeExecution
+from app.models.workflows import (
+    Workflow,
+    WorkflowControlRecord,
+    WorkflowExecution,
+    WorkflowNodeExecution,
+)
 
 
 class ReportingRepository:
@@ -84,6 +89,21 @@ class ReportingRepository:
                     select(WorkflowExecution)
                     .where(WorkflowExecution.parent_execution_id == execution_id)
                     .order_by(WorkflowExecution.dataset_row_index)
+                )
+            ).all()
+        )
+
+    async def list_control_records(self, execution_id: UUID) -> list[WorkflowControlRecord]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(WorkflowControlRecord)
+                    .where(WorkflowControlRecord.workflow_execution_id == execution_id)
+                    .order_by(
+                        WorkflowControlRecord.node_id,
+                        WorkflowControlRecord.kind,
+                        WorkflowControlRecord.ordinal,
+                    )
                 )
             ).all()
         )

@@ -1589,6 +1589,8 @@ export type ReportNode = {
   attempts: number
   duration_ms: number | null
   observations?: WorkflowNodeObservation[]
+  output?: unknown
+  result?: NodeResult | null
   request: unknown
   response: unknown
   extraction: unknown

@@ -18,6 +18,8 @@ export type CreateNotificationWebhookInput = {
   events: NotificationEvent[]
 }
 
+export type ReportStatusFilter = 'all' | 'running' | 'passed' | 'failed' | 'cancelled'
+
 export async function listReportProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
     params: { page: 1, page_size: 100 },
@@ -28,10 +30,11 @@ export async function listReportProjects(): Promise<Page<Project>> {
 export async function listReportExecutions(
   projectId: string,
   page = 1,
+  status: ReportStatusFilter = 'all',
 ): Promise<Page<ReportExecution>> {
   const response = await apiClient.get<Page<ReportExecution>>(
     `/projects/${projectId}/reports/executions`,
-    { params: { page, page_size: 50 } },
+    { params: { page, page_size: 50, status: status === 'all' ? undefined : status } },
   )
   return response.data
 }

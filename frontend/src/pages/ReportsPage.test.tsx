@@ -1,6 +1,6 @@
 import { createIceTheme } from '../theme/ice-theme'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -144,13 +144,23 @@ describe('ReportsPage', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
   })
 
-  it('labels page statistics and filters only the loaded page when the server total is larger', async () => {
+  it('queries failures on the server with the filtered total and resets pagination', async () => {
+    const requests: Array<{ status: string | null; page: string | null }> = []
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
       ),
-      http.get(`/api/v1/projects/${project.id}/reports/executions`, () =>
-        HttpResponse.json({
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        requests.push({ status: params.get('status'), page: params.get('page') })
+        if (params.get('status') === 'failed')
+          return HttpResponse.json({
+            items: [{ ...execution, workflow_name: '更早失败流程' }],
+            total: 61,
+            page: Number(params.get('page')),
+            page_size: 50,
+          })
+        return HttpResponse.json({
           items: [
             execution,
             { ...execution, id: 'passed-execution', workflow_name: '通过流程', status: 'passed' },
@@ -158,8 +168,8 @@ describe('ReportsPage', () => {
           total: 120,
           page: 1,
           page_size: 50,
-        }),
-      ),
+        })
+      }),
       http.get(`/api/v1/projects/${project.id}/reports/trends`, () => HttpResponse.json(trend)),
       http.get(`/api/v1/projects/${project.id}/notification-webhooks`, () => HttpResponse.json([])),
       http.get(`/api/v1/projects/${project.id}/notification-deliveries`, () =>
@@ -170,14 +180,15 @@ describe('ReportsPage', () => {
     const browser = userEvent.setup()
     expect(await screen.findByText('1/2 条本页记录')).toBeVisible()
     expect(screen.getByText('本页通过率')).toBeVisible()
-    expect(screen.getByText('当前页 2 / 2 条 · 全部记录 120 条')).toBeVisible()
-    await browser.click(screen.getByRole('combobox', { name: '本页执行状态' }))
-    await browser.click(
-      screen.getByText('本页失败', { selector: '.ant-select-item-option-content' }),
-    )
-    expect(screen.getByText('当前页 1 / 2 条 · 全部记录 120 条')).toBeVisible()
+    expect(screen.getByText('当前页 2 条 · 当前筛选共 120 条')).toBeVisible()
+    await browser.click(screen.getByTitle('2'))
+    await waitFor(() => expect(requests.at(-1)?.page).toBe('2'))
+    await browser.click(screen.getByRole('combobox', { name: '执行状态' }))
+    await browser.click(screen.getByText('仅失败', { selector: '.ant-select-item-option-content' }))
+    expect(await screen.findByText('当前页 1 条 · 当前筛选共 61 条')).toBeVisible()
+    expect(requests.at(-1)).toEqual({ status: 'failed', page: '1' })
     expect(screen.queryByText('通过流程 · v3')).not.toBeInTheDocument()
-    expect(screen.getByText('订单回归流程 · v3')).toBeVisible()
+    expect(screen.getByText('更早失败流程 · v3')).toBeVisible()
   })
 
   it('drills into reports, exports HTML and manages signed notifications', async () => {
@@ -351,6 +362,122 @@ describe('ReportsPage', () => {
       `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order`,
     )
     expect(screen.queryByText(/"selected_attempt": 1/)).not.toBeInTheDocument()
+  })
+
+  it('restores the exact control instance in reports and carries it back to the canvas', async () => {
+    const instanceId = '__nested_request__:third-item'
+    const apiNode = {
+      ...detail.nodes[0],
+      node_id: 'loop',
+      name: '订单循环',
+      node_type: 'capability',
+      assertion: null,
+      output: {
+        report_kind: 'iteration',
+        report_paged: true,
+        record_count: 3,
+        input_count: 3,
+        completed_count: 3,
+        failed_count: 1,
+      },
+    }
+    const path = `/api/v1/projects/${project.id}/workflow-executions/${execution.id}`
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json({ ...detail, nodes: [apiNode, detail.nodes[0]] }),
+      ),
+      http.get(`${path}/control-records`, () =>
+        HttpResponse.json({
+          items: [{ ordinal: 2, status: 'failed', test_verdict: 'failed' }],
+          total: 3,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get(`${path}/control-records/iteration/2`, () =>
+        HttpResponse.json({
+          kind: 'iteration',
+          ordinal: 2,
+          status: 'failed',
+          test_verdict: 'failed',
+          payload: {
+            input_index: 2,
+            status: 'failed',
+            nodes: [{ node_id: 'check', instance_id: instanceId, status: 'failed' }],
+          },
+        }),
+      ),
+      http.get(`${path}/instances/${instanceId}`, () =>
+        HttpResponse.json({
+          id: 'checkpoint-3',
+          node_id: instanceId,
+          node_name: '第三项金额',
+          status: 'failed',
+          phase: 'main',
+          attempt: 1,
+          output: { item: 3 },
+          result: { assertions: [{ name: '金额', passed: false, expected: 29900, actual: 29901 }] },
+        }),
+      ),
+    )
+    const params = new URLSearchParams({
+      execution: execution.id,
+      node: 'loop',
+      control_kind: 'iteration',
+      control_ordinal: '2',
+      instance: instanceId,
+      instance_attempt: '1',
+    })
+    renderPage(`/projects/${project.id}/reports?${params}`)
+    const instance = await screen.findByRole('region', { name: '实例执行证据' })
+    expect(within(instance).getByText('29901')).toBeVisible()
+    const link = screen.getByRole('link', { name: '定位画布' })
+    const selection = new URL(link.getAttribute('href')!, 'https://flowtest.test').searchParams
+    expect(selection.get('control_ordinal')).toBe('2')
+    expect(selection.get('instance')).toBe(instanceId)
+    expect(selection.get('instance_attempt')).toBe('1')
+    fireEvent.click(screen.getByRole('button', { name: /订单循环/ }))
+    expect(screen.getByRole('region', { name: '实例执行证据' })).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /校验订单状态/ }))
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '实例执行证据' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('link', { name: '定位画布' }).getAttribute('href')).not.toContain(
+      'instance=',
+    )
+  })
+
+  it('downloads an external response body through the existing authorized file endpoint', async () => {
+    const browser = userEvent.setup()
+    let reads = 0
+    const apiNode = {
+      ...detail.nodes[0],
+      node_id: 'large-api',
+      assertion: null,
+      response: {
+        status_code: 200,
+        headers: {},
+        size_bytes: 3000000,
+        body: {
+          __flowtest_workflow_output_ref__: { artifact_id: artifact.id, size_bytes: 3000000 },
+        },
+      },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json({ ...detail, nodes: [apiNode] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/files/${artifact.id}`, () => {
+        reads += 1
+        return new HttpResponse('stored response', {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}`)
+    await browser.click(await screen.findByRole('button', { name: '下载响应体' }))
+    await waitFor(() => expect(reads).toBe(1))
+    expect(URL.createObjectURL).toHaveBeenCalled()
   })
 })
 

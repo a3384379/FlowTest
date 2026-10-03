@@ -1,12 +1,12 @@
 import html
 import json
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
 from uuid import UUID
 
-from pydantic import JsonValue
+from pydantic import BaseModel, JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
@@ -15,7 +15,9 @@ from app.engine.results import NodeObservation, NodeResult
 from app.models.access import User
 from app.models.artifacts import Artifact
 from app.models.workflows import WorkflowExecution, WorkflowNodeExecution
+from app.repositories.durable_execution import DurableExecutionRepository
 from app.repositories.reporting import ReportingRepository
+from app.schemas.durable_execution import ExecutionCheckpointResponse
 from app.services.artifacts import ArtifactService
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
@@ -55,6 +57,8 @@ class NodeReport:
     input_mappings: JsonValue
     error_code: str | None
     error_message: str | None
+    output: JsonValue = None
+    result: NodeResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,23 @@ class ExecutionReportDetail:
     nodes: list[NodeReport]
     context: dict[str, JsonValue]
     dataset_children: list[ExecutionReportSummary]
+
+
+@dataclass(frozen=True, slots=True)
+class ExportControlRecord:
+    node_id: str
+    kind: str
+    ordinal: int
+    status: str
+    test_verdict: str
+    payload: JsonValue
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionExportDetail(ExecutionReportDetail):
+    snapshot: dict[str, JsonValue]
+    control_records: list[ExportControlRecord]
+    checkpoints: list[ExecutionCheckpointResponse]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +107,7 @@ class ReportService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._reports = ReportingRepository(session)
+        self._durable = DurableExecutionRepository(session)
         self._projects = ProjectService(session)
         self._artifacts = ArtifactService(session)
         self._audit = AuditService(session)
@@ -143,7 +165,7 @@ class ReportService:
         )
 
     async def export_html(self, *, actor: User, project_id: UUID, execution_id: UUID) -> Artifact:
-        detail = await self.get_execution(
+        detail = await self._export_detail(
             actor=actor,
             project_id=project_id,
             execution_id=execution_id,
@@ -166,6 +188,35 @@ class ReportService:
         await self._session.commit()
         await self._session.refresh(artifact)
         return artifact
+
+    async def _export_detail(
+        self, *, actor: User, project_id: UUID, execution_id: UUID
+    ) -> ExecutionExportDetail:
+        detail = await self.get_execution(
+            actor=actor, project_id=project_id, execution_id=execution_id
+        )
+        execution = await self._execution(project_id, execution_id)
+        records = await self._reports.list_control_records(execution_id)
+        checkpoints = await self._durable.list_checkpoints(execution_id)
+        return ExecutionExportDetail(
+            summary=detail.summary,
+            nodes=detail.nodes,
+            context=detail.context,
+            dataset_children=detail.dataset_children,
+            snapshot=cast(dict[str, JsonValue], execution.snapshot),
+            control_records=[
+                ExportControlRecord(
+                    node_id=item.node_id,
+                    kind=item.kind,
+                    ordinal=item.ordinal,
+                    status=item.status,
+                    test_verdict=item.test_verdict,
+                    payload=cast(JsonValue, item.payload),
+                )
+                for item in records
+            ],
+            checkpoints=[ExecutionCheckpointResponse.model_validate(item) for item in checkpoints],
+        )
 
     async def _execution(self, project_id: UUID, execution_id: UUID) -> WorkflowExecution:
         execution = await self._reports.get_execution(execution_id)
@@ -215,8 +266,11 @@ class ReportService:
 
     @staticmethod
     def _node(execution: WorkflowExecution, node: WorkflowNodeExecution) -> NodeReport:
-        output = node.output if isinstance(node.output, dict) else {}
-        observations = _node_observations(node.result)
+        stored_output = node.output_summary if node.output_summary is not None else node.output
+        output = stored_output if isinstance(stored_output, dict) else {}
+        stored_result = node.result_summary if node.result_summary is not None else node.result
+        result = _node_result(stored_result)
+        observations = list(result.observations) if result is not None else []
         latest = observations[-1] if observations else None
         request = (
             cast(JsonValue, latest.request.model_dump(mode="json"))
@@ -240,10 +294,12 @@ class ReportService:
             request=request,
             response=response,
             extraction=cast(JsonValue, output) if node.node_type == "extract" else None,
-            assertion=cast(JsonValue, output) if node.node_type == "assert" else None,
+            assertion=_node_assertion(node.node_type, output, result),
             input_mappings=cast(JsonValue, output.get("input_mappings")),
             error_code=node.error_code,
             error_message=node.error_message,
+            output=cast(JsonValue, stored_output),
+            result=result,
         )
 
     @staticmethod
@@ -276,13 +332,24 @@ def _prepared_request(snapshot: dict[str, object], node_id: str) -> JsonValue:
     return cast(JsonValue, api.get("prepared_request"))
 
 
-def _node_observations(result: dict[str, object] | None) -> list[NodeObservation]:
+def _node_result(result: dict[str, object] | None) -> NodeResult | None:
     if result is None:
-        return []
+        return None
     try:
-        return list(NodeResult.model_validate(result).observations)
+        return NodeResult.model_validate(result)
     except ValueError:
-        return []
+        # Legacy results can be incomplete; retain their separate stored output.
+        return None
+
+
+def _node_assertion(
+    node_type: str, output: dict[str, object], result: NodeResult | None
+) -> JsonValue:
+    if node_type == "assert":
+        return cast(JsonValue, output)
+    if result is not None and result.assertions:
+        return [cast(JsonValue, item.model_dump(mode="json")) for item in result.assertions]
+    return None
 
 
 def _response(node_type: str, output: dict[str, object]) -> JsonValue:
@@ -333,24 +400,13 @@ def _render_html(detail: ExecutionReportDetail) -> str:
     )
     payload = html.escape(
         json.dumps(
-            {
-                "context": detail.context,
-                "nodes": [
-                    {
-                        "name": node.name,
-                        "request": node.request,
-                        "response": node.response,
-                        "extraction": node.extraction,
-                        "assertion": node.assertion,
-                    }
-                    for node in detail.nodes
-                ],
-            },
+            asdict(detail),
             ensure_ascii=False,
             indent=2,
-            default=str,
+            default=_export_value,
         )
     )
+    duration = "未提供" if summary.duration_ms is None else f"{summary.duration_ms} ms"
     return (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
         "<title>FlowTest 测试报告</title><style>"
@@ -363,8 +419,18 @@ def _render_html(detail: ExecutionReportDetail) -> str:
         f'v{summary.workflow_version}</p><p>状态: <strong class="{html.escape(summary.status)}">'
         f"{html.escape(summary.status)}</strong> · 执行 ID: {summary.id}</p>"
         f"<p>节点: {summary.total_nodes} · 通过: {summary.passed_nodes} · "
-        f"失败: {summary.failed_nodes} · 耗时: {summary.duration_ms or 0} ms</p>"
+        f"失败: {summary.failed_nodes} · 耗时: {duration}</p>"
         "<h2>步骤</h2><table><thead><tr><th>名称</th><th>类型</th><th>状态</th>"
         f"<th>尝试</th><th>错误</th></tr></thead><tbody>{rows}</tbody></table>"
-        f"<h2>脱敏详情</h2><pre>{payload}</pre></body></html>"
+        f"<h2>冻结执行证据</h2><pre>{payload}</pre></body></html>"
     )
+
+
+def _export_value(value: object) -> JsonValue:
+    if isinstance(value, BaseModel):
+        return cast(JsonValue, value.model_dump(mode="json"))
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    raise TypeError(f"Unsupported report value: {type(value).__name__}")

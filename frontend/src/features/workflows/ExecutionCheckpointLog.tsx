@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import type { ExecutionCheckpointSummary } from '../../lib/api'
 import { getWorkflowCheckpointLogEntry, listWorkflowCheckpointLog } from './workflow-service'
+import { WorkflowCheckpointEvidence } from '../../flow/WorkflowRunInspector'
 
 const PAGE_SIZE = 20
 
@@ -82,10 +83,7 @@ export default function ExecutionCheckpointLog({ projectId, executionId, running
             <Typography.Paragraph>
               {detail.data.node_name} · 第 {detail.data.attempt} 次尝试 · {detail.data.status}
             </Typography.Paragraph>
-            <Typography.Text strong>输出与结果</Typography.Text>
-            <pre className="workflow-checkpoint-log-detail">
-              {JSON.stringify({ output: detail.data.output, result: detail.data.result }, null, 2)}
-            </pre>
+            <WorkflowCheckpointEvidence checkpoint={detail.data} projectId={projectId} />
           </>
         )}
       </Modal>

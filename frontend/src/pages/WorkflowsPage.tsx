@@ -51,7 +51,13 @@ import FlowSpecReviewDialog, {
 import FlowProposalReviewDialog from '../features/workflows/FlowProposalReviewDialog'
 import NativeWorkflowTransferDialog from '../features/workflows/NativeWorkflowTransferDialog'
 import { useWorkflows } from '../features/workflows/use-workflows'
-import { executionAttempt, reportExecutionPath } from '../features/workflows/execution-navigation'
+import {
+  clearExecutionEvidence,
+  executionAttempt,
+  executionEvidence,
+  reportExecutionPath,
+  writeExecutionEvidence,
+} from '../features/workflows/execution-navigation'
 import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
@@ -1361,6 +1367,7 @@ function WorkflowReportLink({ state }: { state: WorkflowState }) {
         executionId: execution.id,
         nodeId: params.get('node'),
         attempt: executionAttempt(params),
+        ...executionEvidence(params),
       })}
     >
       <BarChartOutlined /> 查看完整报告
@@ -1570,11 +1577,20 @@ function designerFocusProps(
   return {
     focusNodeId: params.get('node') ?? undefined,
     runtimeAttempt: executionAttempt(params),
+    runtimeEvidence: executionEvidence(params),
+    onEvidenceFocus: (evidence: ReturnType<typeof executionEvidence>) => {
+      const next = new URLSearchParams(params)
+      writeExecutionEvidence(next, evidence)
+      setParams(next, { replace: true })
+    },
     onNodeFocus: (nodeId: string | null) => {
       const next = new URLSearchParams(params)
       if (nodeId) next.set('node', nodeId)
       else next.delete('node')
-      if (!nodeId || nodeId !== params.get('node')) next.delete('attempt')
+      if (!nodeId || nodeId !== params.get('node')) {
+        next.delete('attempt')
+        clearExecutionEvidence(next)
+      }
       setParams(next, { replace: true })
     },
     onAttemptFocus: (nodeId: string, attempt: number) => {

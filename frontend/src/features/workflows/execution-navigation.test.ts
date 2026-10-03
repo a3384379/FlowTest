@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   executionAttempt,
+  executionEvidence,
   reportExecutionPath,
   workflowExecutionPath,
 } from './execution-navigation'
@@ -36,5 +37,39 @@ describe('execution navigation', () => {
     )
     for (const value of ['0', '-1', '1.2', 'abc', '9007199254740992'])
       expect(executionAttempt(new URLSearchParams({ attempt: value }))).toBeUndefined()
+  })
+
+  it('round trips exact control and nested instance selection without confusing request attempts', () => {
+    const evidence = {
+      controlKind: 'iteration' as const,
+      controlOrdinal: 2,
+      instanceId: '__nested_request__:loop:2:branch&3:request',
+      instanceAttempt: 1,
+    }
+    for (const path of [workflowExecutionPath, reportExecutionPath]) {
+      const url = new URL(
+        path('project-1', {
+          executionId: 'run-3',
+          nodeId: 'loop',
+          attempt: 2,
+          ...evidence,
+        }),
+        'https://flowtest.test',
+      )
+      expect(executionEvidence(url.searchParams)).toEqual(evidence)
+      expect(executionAttempt(url.searchParams)).toBe(2)
+    }
+    const invalid = executionEvidence(
+      new URLSearchParams({
+        control_kind: 'invented',
+        control_ordinal: '-1',
+        instance: '../other-run',
+        instance_attempt: '0',
+      }),
+    )
+    expect(Object.values(invalid).every((value) => value === undefined)).toBe(true)
+    expect(
+      executionEvidence(new URLSearchParams({ control_kind: 'branch', control_ordinal: '0' })),
+    ).toMatchObject({ controlKind: 'branch', controlOrdinal: 0 })
   })
 })

@@ -14,6 +14,8 @@ import {
 import { useEffect, useState } from 'react'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
 import AssertionEvidence from '../features/evidence/AssertionEvidence'
+import { reportAssertionEvidence } from '../features/evidence/assertion-model'
+import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowNodeRelations from './WorkflowNodeRelations'
 
 import type {
@@ -46,6 +48,8 @@ type RuntimeInspectorProps = {
   onLocateNode?: (nodeId: string) => void
   initialAttempt?: number
   onSelectAttempt?: (attempt: number) => void
+  evidence?: ExecutionEvidenceLocation
+  onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
 }
 
 export default function WorkflowRunInspector({
@@ -60,6 +64,8 @@ export default function WorkflowRunInspector({
   onLocateNode,
   initialAttempt,
   onSelectAttempt,
+  evidence,
+  onSelectEvidence,
 }: RuntimeInspectorProps) {
   if (!node) return <EmptyRuntimeInspector mode={mode} />
   return (
@@ -76,6 +82,8 @@ export default function WorkflowRunInspector({
       onLocateNode={onLocateNode}
       initialAttempt={initialAttempt}
       onSelectAttempt={onSelectAttempt}
+      evidence={evidence}
+      onSelectEvidence={onSelectEvidence}
     />
   )
 }
@@ -92,6 +100,8 @@ function RuntimeNodeDetail({
   onLocateNode,
   initialAttempt,
   onSelectAttempt,
+  evidence,
+  onSelectEvidence,
 }: RuntimeInspectorProps & { node: WorkflowNode }) {
   const observations = execution?.result?.observations ?? []
   const [attempt, setAttempt] = useRuntimeAttempt(
@@ -111,7 +121,10 @@ function RuntimeNodeDetail({
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
       {execution?.result?.assertions.length ? (
-        <AssertionEvidence items={execution.result.assertions} />
+        <AssertionEvidence
+          items={execution.result.assertions}
+          source={`${execution.name} (${execution.node_id})`}
+        />
       ) : null}
       <ExecutionError execution={execution} />
       <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
@@ -121,6 +134,8 @@ function RuntimeNodeDetail({
         projectId={projectId}
         executionId={executionId}
         nodeId={node.id}
+        evidence={evidence}
+        onSelectEvidence={onSelectEvidence}
       />
       <ObservationPicker
         observations={observations}
@@ -235,14 +250,23 @@ function ControlIterations({
   projectId,
   executionId,
   nodeId,
+  evidence,
+  onSelectEvidence,
 }: {
   output: unknown
   projectId?: string
   executionId?: string
   nodeId: string
+  evidence?: ExecutionEvidenceLocation
+  onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
 }) {
   const report = controlReport(output)
-  const [selected, setSelected] = useState<number | undefined>(undefined)
+  const initialOrdinal = initialControlOrdinal(report, evidence)
+  const [selected, setSelected] = useRouteScopedState<number | undefined>(
+    projectId ?? null,
+    `${executionId}:${nodeId}:${initialOrdinal}`,
+    initialOrdinal,
+  )
   const [page, setPage] = useState(1)
   const { listed, detail, error } = useControlReportData(
     report,
@@ -256,9 +280,7 @@ function ControlIterations({
   const pageSize = 20
   const visibleItems = visibleControlItems(report, listed, page, pageSize)
   const selectedItem = selectedControlItem(report, detail, selected)
-  const total = report.paged
-    ? (listed?.total ?? Number(report.summary.record_count ?? 0))
-    : report.items.length
+  const total = controlReportTotal(report, listed)
   const summary = report.summary
   return (
     <section
@@ -276,8 +298,11 @@ function ControlIterations({
       <ControlRecordSelector
         report={report}
         selected={selected}
-        items={visibleItems}
-        onChange={setSelected}
+        items={selectedControlOptions(report, visibleItems, selectedItem)}
+        onChange={(ordinal) => {
+          setSelected(ordinal)
+          onSelectEvidence?.({ controlKind: report.kind, controlOrdinal: ordinal })
+        }}
       />
       <ControlRecordPagination
         kind={report.kind}
@@ -287,10 +312,75 @@ function ControlIterations({
         onChange={(nextPage) => {
           setPage(nextPage)
           setSelected(undefined)
+          onSelectEvidence?.({ controlKind: report.kind })
         }}
       />
-      <ControlRecordNodes item={selectedItem} projectId={projectId} executionId={executionId} />
+      <ControlRecordNodes
+        item={selectedItem}
+        projectId={projectId}
+        executionId={executionId}
+        onSelectInstance={
+          onSelectEvidence
+            ? (instanceId) =>
+                onSelectEvidence({
+                  controlKind: report.kind,
+                  controlOrdinal: selected,
+                  instanceId,
+                })
+            : undefined
+        }
+      />
+      <SelectedControlInstance
+        projectId={projectId}
+        executionId={executionId}
+        evidence={evidence}
+        onSelectEvidence={onSelectEvidence}
+      />
     </section>
+  )
+}
+
+function initialControlOrdinal(
+  report: ControlReport | null,
+  evidence: ExecutionEvidenceLocation | undefined,
+): number | undefined {
+  return evidence?.controlKind === report?.kind ? evidence?.controlOrdinal : undefined
+}
+
+function controlReportTotal(
+  report: ControlReport,
+  listed: Page<WorkflowControlRecordSummary> | null,
+): number {
+  return report.paged
+    ? (listed?.total ?? Number(report.summary.record_count ?? 0))
+    : report.items.length
+}
+
+function SelectedControlInstance({
+  projectId,
+  executionId,
+  evidence,
+  onSelectEvidence,
+}: {
+  projectId?: string
+  executionId?: string
+  evidence?: ExecutionEvidenceLocation
+  onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
+}) {
+  if (!evidence?.instanceId || !projectId || !executionId) return null
+  return (
+    <ControlInstanceDetail
+      key={evidence.instanceId}
+      projectId={projectId}
+      executionId={executionId}
+      instanceId={evidence.instanceId}
+      initiallyOpen
+      initialAttempt={evidence.instanceAttempt}
+      onSelectAttempt={(instanceAttempt) => onSelectEvidence?.({ ...evidence, instanceAttempt })}
+      onSelectInstance={(instanceId) =>
+        onSelectEvidence?.({ ...evidence, instanceId, instanceAttempt: undefined })
+      }
+    />
   )
 }
 
@@ -303,8 +393,8 @@ function ControlReportSummary({
 }) {
   return (
     <Typography.Text strong>
-      已完成 {String(summary.completed_count ?? summary.started_count ?? total)}/
-      {String(summary.input_count ?? total)}， 失败 {String(summary.failed_count ?? 0)}
+      已完成 {String(summary.completed_count ?? summary.started_count ?? '未提供')}/
+      {String(summary.input_count ?? total)}， 失败 {String(summary.failed_count ?? '未提供')}
       ，退出原因：{String(summary.termination_reason ?? '未知')}
     </Typography.Text>
   )
@@ -391,10 +481,12 @@ function ControlRecordNodes({
   item,
   projectId,
   executionId,
+  onSelectInstance,
 }: {
   item: ControlItem | undefined
   projectId?: string
   executionId?: string
+  onSelectInstance?: (instanceId: string) => void
 }) {
   return item?.nodes.map((node) => (
     <ControlRecordNode
@@ -402,6 +494,7 @@ function ControlRecordNodes({
       item={node}
       projectId={projectId}
       executionId={executionId}
+      onSelectInstance={onSelectInstance}
     />
   ))
 }
@@ -532,14 +625,31 @@ function selectedControlItem(
     : undefined
 }
 
+function selectedControlOptions(
+  report: ControlReport,
+  visible: ControlItem[],
+  selected: ControlItem | undefined,
+): ControlItem[] {
+  if (
+    !selected ||
+    visible.some(
+      (item) => controlOrdinal(report.kind, item) === controlOrdinal(report.kind, selected),
+    )
+  )
+    return visible
+  return [...visible, selected]
+}
+
 function ControlRecordNode({
   item,
   projectId,
   executionId,
+  onSelectInstance,
 }: {
   item: ControlItem['nodes'][number]
   projectId?: string
   executionId?: string
+  onSelectInstance?: (instanceId: string) => void
 }) {
   return (
     <div>
@@ -549,7 +659,12 @@ function ControlRecordNode({
       {item.error_message && (
         <Alert type="error" title={item.error_message} description={item.error_code} />
       )}
-      {item.instance_id && projectId && executionId && (
+      {item.instance_id && onSelectInstance && (
+        <Button type="link" onClick={() => onSelectInstance(item.instance_id!)}>
+          查看实例详情
+        </Button>
+      )}
+      {item.instance_id && projectId && executionId && !onSelectInstance && (
         <ControlInstanceDetail
           projectId={projectId}
           executionId={executionId}
@@ -564,46 +679,190 @@ function ControlInstanceDetail({
   projectId,
   executionId,
   instanceId,
+  initiallyOpen = false,
+  initialAttempt,
+  onSelectAttempt,
+  onSelectInstance,
 }: {
   projectId: string
   executionId: string
   instanceId: string
+  initiallyOpen?: boolean
+  initialAttempt?: number
+  onSelectAttempt?: (attempt: number) => void
+  onSelectInstance?: (instanceId: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(initiallyOpen)
   const [checkpoint, setCheckpoint] = useState<ExecutionCheckpoint | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [revision, setRevision] = useState(0)
   useEffect(() => {
     if (!open) return
     let active = true
     void getWorkflowInstance(projectId, executionId, instanceId)
       .then((value) => {
-        if (active) setCheckpoint(value)
+        if (active) {
+          setCheckpoint(value)
+          setError(null)
+        }
       })
       .catch((reason: unknown) => {
-        if (active) setError(apiErrorMessage(reason))
+        if (active) {
+          setCheckpoint(null)
+          setError(apiErrorMessage(reason))
+        }
       })
     return () => {
       active = false
     }
-  }, [open, projectId, executionId, instanceId])
+  }, [open, projectId, executionId, instanceId, revision])
   return (
     <div>
       <Button type="link" onClick={() => setOpen((value) => !value)}>
         {open ? '收起实例详情' : '查看实例详情'}
       </Button>
-      {open && error && <Alert type="error" title={error} />}
+      {open && error && (
+        <Alert
+          type="error"
+          title={error}
+          action={
+            <Button
+              onClick={() => {
+                setError(null)
+                setRevision((value) => value + 1)
+              }}
+            >
+              重试实例详情
+            </Button>
+          }
+        />
+      )}
+      {open && !error && !checkpoint && <Typography.Text>正在加载实例证据…</Typography.Text>}
       {open && checkpoint && (
         <>
-          <Typography.Text>
-            {checkpoint.node_name} · {checkpoint.status}
-          </Typography.Text>
-          <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />
-          <Payload title="实例请求、响应与校验" value={checkpoint.result} projectId={projectId} />
+          <WorkflowCheckpointEvidence
+            checkpoint={checkpoint}
+            projectId={projectId}
+            initialAttempt={initialAttempt}
+            onSelectAttempt={onSelectAttempt}
+          />
+          <ControlIterations
+            output={checkpoint.output}
+            projectId={projectId}
+            executionId={executionId}
+            nodeId={checkpoint.node_id}
+            onSelectEvidence={(selection) => {
+              if (selection.instanceId) onSelectInstance?.(selection.instanceId)
+            }}
+          />
         </>
       )}
     </div>
   )
 }
+
+export function WorkflowCheckpointEvidence({
+  checkpoint,
+  projectId,
+  initialAttempt,
+  onSelectAttempt,
+}: {
+  checkpoint: ExecutionCheckpoint
+  projectId: string
+  initialAttempt?: number
+  onSelectAttempt?: (attempt: number) => void
+}) {
+  const observations = checkpointObservations(checkpoint)
+  const [attempt, setAttempt] = useRuntimeAttempt(
+    projectId,
+    checkpoint.execution_id,
+    checkpoint.node_id,
+    initialAttempt,
+    observations,
+  )
+  const observation = selectedObservation(observations, attempt)
+  const assertions = reportAssertionEvidence(checkpoint.result.assertions, checkpoint.node_name)
+  return (
+    <section aria-label="实例执行证据">
+      <Typography.Paragraph>
+        {checkpoint.node_name} · {checkpoint.status}
+      </Typography.Paragraph>
+      <Typography.Paragraph type="secondary">
+        实例：{checkpoint.node_id} · 阶段：{checkpoint.phase ?? '未提供'} · 检查点尝试：
+        {checkpoint.attempt ?? '未提供'}
+      </Typography.Paragraph>
+      {assertions.length > 0 && (
+        <AssertionEvidence
+          items={assertions}
+          source={`${checkpoint.node_name} (${checkpoint.node_id})`}
+        />
+      )}
+      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <ObservationPicker
+        observations={observations}
+        selected={observation}
+        onChange={(next) => {
+          setAttempt(next)
+          onSelectAttempt?.(next)
+        }}
+      />
+      <Tabs
+        defaultActiveKey={observations.length ? 'response' : 'output'}
+        items={[
+          {
+            key: 'response',
+            label: '响应',
+            children: (
+              <Payload title="实例响应" value={observation?.response} projectId={projectId} />
+            ),
+          },
+          {
+            key: 'request',
+            label: '请求',
+            children: (
+              <Payload title="实例请求" value={observation?.request} projectId={projectId} />
+            ),
+          },
+          {
+            key: 'mapping',
+            label: '变量映射',
+            children: (
+              <Payload title="实例变量映射" value={observation?.mappings} projectId={projectId} />
+            ),
+          },
+          {
+            key: 'output',
+            label: '输出',
+            children: <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />,
+          },
+          {
+            key: 'raw',
+            label: '原始证据',
+            children: (
+              <Payload title="实例完整结果" value={checkpoint.result} projectId={projectId} />
+            ),
+          },
+        ]}
+      />
+    </section>
+  )
+}
+
+function checkpointObservations(checkpoint: ExecutionCheckpoint): WorkflowNodeObservation[] {
+  const values = checkpoint.result.observations
+  if (!Array.isArray(values)) return []
+  return values.filter(
+    (item): item is WorkflowNodeObservation =>
+      isRecord(item) &&
+      item.kind === 'http' &&
+      Number.isSafeInteger(item.attempt) &&
+      isRecord(item.request) &&
+      typeof item.request.url === 'string' &&
+      typeof item.request.method === 'string',
+  )
+}
+
+export { ControlIterations as WorkflowControlEvidence, Payload as WorkflowEvidencePayload }
 
 function SnapshotTag({ mode }: { mode: RuntimeInspectorProps['mode'] }) {
   if (mode !== 'history') return null

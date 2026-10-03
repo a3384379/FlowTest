@@ -116,6 +116,7 @@ import type {
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
 import WorkflowRunInspector from './WorkflowRunInspector'
+import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowRunTrajectory from './WorkflowRunTrajectory'
 import WorkflowSettingsEditor from './WorkflowSettingsEditor'
 import { useNodeSelectionGuard } from './editor/use-node-selection-guard'
@@ -158,6 +159,8 @@ type DesignerProps = {
   onNodeFocus?: (nodeId: string | null) => void
   runtimeAttempt?: number
   onAttemptFocus?: (nodeId: string, attempt: number) => void
+  runtimeEvidence?: ExecutionEvidenceLocation
+  onEvidenceFocus?: (evidence: ExecutionEvidenceLocation) => void
   focusActions?: ReactNode
   onChange: (definition: WorkflowDefinition) => void
 }
@@ -244,6 +247,8 @@ function WorkflowDesignerReady({
   onNodeFocus,
   runtimeAttempt,
   onAttemptFocus,
+  runtimeEvidence,
+  onEvidenceFocus,
   focusActions,
   onChange,
 }: ReadyDesignerProps) {
@@ -1041,6 +1046,8 @@ function WorkflowDesignerReady({
               runtimeContext={runtimeContext}
               runtimeAttempt={runtimeAttempt}
               onAttemptFocus={onAttemptFocus}
+              runtimeEvidence={runtimeEvidence}
+              onEvidenceFocus={onEvidenceFocus}
               runtimeByNode={runtimeByNode}
               onLocateNode={(nodeId) => void selectObject('node', nodeId)}
               selected={selected}
@@ -1150,6 +1157,8 @@ function DesignerInspector({
   onLocateNode,
   runtimeAttempt,
   onAttemptFocus,
+  runtimeEvidence,
+  onEvidenceFocus,
   selected,
   definition,
   apis,
@@ -1174,6 +1183,8 @@ function DesignerInspector({
   onLocateNode: (nodeId: string) => void
   runtimeAttempt?: number
   onAttemptFocus?: (nodeId: string, attempt: number) => void
+  runtimeEvidence?: ExecutionEvidenceLocation
+  onEvidenceFocus?: (evidence: ExecutionEvidenceLocation) => void
   selected: WorkflowNode | null
   definition: WorkflowDefinition
   apis: ApiDefinition[]
@@ -1201,6 +1212,8 @@ function DesignerInspector({
         context={runtimeContext}
         onLocateNode={onLocateNode}
         initialAttempt={runtimeAttempt}
+        evidence={runtimeEvidence}
+        onSelectEvidence={onEvidenceFocus}
         onSelectAttempt={(attempt) => {
           if (selected) onAttemptFocus?.(selected.id, attempt)
         }}

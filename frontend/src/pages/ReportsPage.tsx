@@ -21,9 +21,13 @@ import {
   Typography,
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
-import { useState } from 'react'
 import ReportExecutionWorkspace from '../features/reports/ReportExecutionWorkspace'
-import { executionAttempt } from '../features/workflows/execution-navigation'
+import {
+  clearExecutionEvidence,
+  executionAttempt,
+  executionEvidence,
+  writeExecutionEvidence,
+} from '../features/workflows/execution-navigation'
 import { iceColors } from '../theme/ice-theme'
 
 import { ReportTrendChart } from '../features/reports/ReportTrendChart'
@@ -45,6 +49,7 @@ export default function ReportsPage() {
       const next = new URLSearchParams(searchParams)
       next.delete('node')
       next.delete('attempt')
+      clearExecutionEvidence(next)
       if (executionId) next.set('execution', executionId)
       else next.delete('execution')
       setSearchParams(next)
@@ -60,10 +65,19 @@ export default function ReportsPage() {
         error={state.detail.error}
         nodeId={searchParams.get('node')}
         attempt={executionAttempt(searchParams)}
+        evidence={executionEvidence(searchParams)}
+        onSelectEvidence={(evidence) => {
+          const next = new URLSearchParams(searchParams)
+          writeExecutionEvidence(next, evidence)
+          setSearchParams(next, { replace: true })
+        }}
         onSelectNode={(nodeId) => {
           const next = new URLSearchParams(searchParams)
           next.set('node', nodeId)
-          next.delete('attempt')
+          if (nodeId !== searchParams.get('node')) {
+            next.delete('attempt')
+            clearExecutionEvidence(next)
+          }
           setSearchParams(next, { replace: true })
         }}
         onSelectAttempt={(nodeId, attempt) => {
@@ -206,9 +220,7 @@ function FailureCategories({ trend }: { trend: ReportState['trend']['data'] }) {
 }
 
 function ExecutionCard({ state }: { state: ReportState }) {
-  const [status, setStatus] = useState<string>('all')
   const items = state.reports.data?.items ?? []
-  const visible = status === 'all' ? items : items.filter((item) => item.status === status)
   return (
     <Card
       title="执行记录"
@@ -216,22 +228,22 @@ function ExecutionCard({ state }: { state: ReportState }) {
       loading={state.reports.isLoading}
       extra={
         <Select
-          aria-label="本页执行状态"
-          value={status}
-          onChange={setStatus}
+          aria-label="执行状态"
+          value={state.statusFilter}
+          onChange={state.setStatusFilter}
           style={{ width: 150 }}
           options={[
-            { value: 'all', label: '本页全部状态' },
-            { value: 'failed', label: '本页失败' },
-            { value: 'passed', label: '本页通过' },
-            { value: 'running', label: '本页运行中' },
-            { value: 'cancelled', label: '本页已取消' },
+            { value: 'all', label: '全部状态' },
+            { value: 'failed', label: '仅失败' },
+            { value: 'passed', label: '仅通过' },
+            { value: 'running', label: '运行中' },
+            { value: 'cancelled', label: '已取消' },
           ]}
         />
       }
     >
       <Typography.Paragraph type="secondary">
-        当前页 {visible.length} / {items.length} 条 · 全部记录 {state.reports.data?.total ?? '—'} 条
+        当前页 {items.length} 条 · 当前筛选共 {state.reports.data?.total ?? '—'} 条
       </Typography.Paragraph>
       <Table
         rowKey="id"
@@ -244,7 +256,7 @@ function ExecutionCard({ state }: { state: ReportState }) {
           onChange: state.setPage,
         }}
         scroll={{ x: 800 }}
-        dataSource={visible}
+        dataSource={items}
         locale={{ emptyText: '暂无执行记录' }}
         columns={executionColumns(state)}
       />
