@@ -68,9 +68,16 @@ export async function listArtifacts(projectId: string): Promise<Page<Artifact>> 
   return response.data
 }
 
-export async function listWorkflows(projectId: string): Promise<Page<Workflow>> {
+export async function listWorkflows(
+  projectId: string,
+  options: { page?: number; pageSize?: number; search?: string } = {},
+): Promise<Page<Workflow>> {
   const response = await apiClient.get<Page<Workflow>>(`/projects/${projectId}/workflows`, {
-    params: { page: 1, page_size: 100 },
+    params: {
+      page: options.page ?? 1,
+      page_size: options.pageSize ?? 100,
+      ...(options.search?.trim() ? { search: options.search.trim() } : {}),
+    },
   })
   return response.data
 }

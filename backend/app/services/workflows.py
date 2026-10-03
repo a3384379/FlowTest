@@ -562,13 +562,14 @@ class WorkflowService:
         self._secrets = secrets
 
     async def list_workflows(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self, *, actor: User, project_id: UUID, page: int, page_size: int, search: str | None = None
     ) -> tuple[list[Workflow], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._workflows.list_workflows(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            search=search.strip() if search else None,
         )
 
     async def create(

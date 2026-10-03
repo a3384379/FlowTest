@@ -24,6 +24,8 @@ type WorkflowTabHookInput = {
   userId: string | undefined
   projectId: string | null
   workflowIds: string[]
+  catalogComplete?: boolean
+  invalidWorkflowIds?: string[]
   activeWorkflowId: string | null
   hasExplicitFocus: boolean
   selectWorkflow: (workflowId: string | null) => void
@@ -100,7 +102,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
       !storageIdentity ||
       restoredSelectionAppliedIdentityRef.current === storageIdentity ||
       !restoredActiveWorkflowId ||
-      !input.workflowIds.includes(restoredActiveWorkflowId)
+      (input.catalogComplete !== false && !input.workflowIds.includes(restoredActiveWorkflowId))
     ) {
       return
     }
@@ -112,6 +114,7 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
     input.hasExplicitFocus,
     input.selectWorkflow,
     input.workflowIds,
+    input.catalogComplete,
     input,
     restoredActiveWorkflowId,
     storageIdentity,
@@ -121,12 +124,24 @@ export function useWorkflowTabs(input: WorkflowTabHookInput) {
   useEffect(() => {
     if (!storageReady) return
     const available = new Set(input.workflowIds)
+    const invalid = new Set(input.invalidWorkflowIds ?? [])
     const selected = input.activeWorkflowId
-    const valid = workflowIds.filter((id) => available.has(id))
-    const next = selected && available.has(selected) ? uniqueIds([...valid, selected]) : valid
+    const valid = workflowIds.filter(
+      (id) => !invalid.has(id) && (input.catalogComplete === false || available.has(id)),
+    )
+    const next = canKeepSelectedTab(selected, available, invalid, input.catalogComplete)
+      ? uniqueIds([...valid, selected!])
+      : valid
     if (sameIds(next, workflowIds)) return
     queueMicrotask(() => setWorkflowIds(next))
-  }, [input.activeWorkflowId, input.workflowIds, storageReady, workflowIds])
+  }, [
+    input.activeWorkflowId,
+    input.workflowIds,
+    input.invalidWorkflowIds,
+    input.catalogComplete,
+    storageReady,
+    workflowIds,
+  ])
 
   useEffect(() => {
     if (!storageReady || !storageKey) return
@@ -232,6 +247,17 @@ function discardDraft(input: WorkflowTabHookInput, workflowId: string): DraftSto
 
 function uniqueIds(ids: string[]): string[] {
   return [...new Set(ids)]
+}
+
+function canKeepSelectedTab(
+  selected: string | null,
+  available: Set<string>,
+  invalid: Set<string>,
+  complete: boolean | undefined,
+): boolean {
+  return Boolean(
+    selected && !invalid.has(selected) && (complete === false || available.has(selected)),
+  )
 }
 
 function sameIds(left: string[], right: string[]): boolean {

@@ -117,6 +117,54 @@ describe('WorkflowsPage', () => {
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
   })
 
+  it('discovers workflows after the first hundred without dropping off-page object tabs', async () => {
+    const catalog = [
+      workflow,
+      ...Array.from({ length: 100 }, (_, index) => ({
+        ...workflow,
+        id: `00000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+        name: `目录流程${index + 2}`,
+      })),
+    ]
+    const later = catalog[100]
+    const requests: { page: number; search: string }[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        const page = Number(params.get('page') ?? 1)
+        const search = params.get('search') ?? ''
+        requests.push({ page, search })
+        const matches = catalog.filter((candidate) => candidate.name.includes(search))
+        return HttpResponse.json({
+          items: matches.slice((page - 1) * 100, page * 100),
+          total: matches.length,
+          page,
+          page_size: 100,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/workflows/:id`, ({ params }) =>
+        HttpResponse.json(catalog.find((candidate) => candidate.id === params.id)),
+      ),
+    )
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: '切换工作流列表' }))
+    expect(await screen.findByText('匹配 101 个流程，每页 100 项')).toBeVisible()
+    const directory = screen.getByRole('navigation', { name: '流程目录分页' })
+    fireEvent.click(within(directory).getByTitle('2'))
+    const next = await screen.findByRole('button', { name: later.name })
+    fireEvent.click(next)
+    expect(await screen.findByRole('tab', { name: later.name })).toBeVisible()
+    expect(screen.getByRole('tab', { name: workflow.name })).toBeVisible()
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索工作流' }), {
+      target: { value: later.name },
+    })
+    expect(await screen.findByText('匹配 1 个流程，每页 100 项')).toBeVisible()
+    expect(screen.getByRole('tab', { name: workflow.name })).toBeVisible()
+    expect(screen.getByRole('tab', { name: later.name })).toHaveAttribute('aria-selected', 'true')
+    expect(requests).toContainEqual({ page: 2, search: '' })
+    expect(requests).toContainEqual({ page: 1, search: later.name })
+  })
+
   it('falls back to an available workflow when the focused workflow was archived', async () => {
     let missingRequests = 0
     server.use(

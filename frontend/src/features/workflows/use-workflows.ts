@@ -85,6 +85,14 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     enabled: Boolean(projectId),
   })
   const canEdit = permissions.data?.capabilities.includes('edit') ?? false
+  const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
+  const [workflowSearch, setWorkflowSearchValue] = useRouteScopedState(projectId, null, '')
+  const [workflowPage, setWorkflowPage] = useRouteScopedState(projectId, null, 1)
+  const [deletedWorkflowIds, setDeletedWorkflowIds] = useRouteScopedState<string[]>(
+    draftScope,
+    null,
+    [],
+  )
   const [workflowSelection, setWorkflowSelection] = useRouteScopedSelection(
     projectId,
     initialWorkflowId ?? null,
@@ -96,7 +104,6 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
   const [draftStorageError, setDraftStorageErrorState] = useState<string | null>(null)
   const draftVersionRef = useRef(0)
   const previousUserIdRef = useRef<string | undefined>(userId)
-  const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
   const scopedMemory = useMemo(
     () => draftSession.workflowScope(draftScope),
     [draftSession, draftScope],
@@ -141,8 +148,13 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     enabled: Boolean(projectId),
   })
   const workflows = useQuery({
-    queryKey: ['workflows', projectId],
-    queryFn: () => listWorkflows(requiredId(projectId)),
+    queryKey: ['workflows', projectId, 'catalog', workflowSearch, workflowPage],
+    queryFn: () =>
+      listWorkflows(requiredId(projectId), {
+        page: workflowPage,
+        pageSize: 100,
+        search: workflowSearch,
+      }),
     enabled: Boolean(projectId),
   })
   const credentials = useQuery({
@@ -171,6 +183,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     workflowSelectionCleared,
     workflows.data,
     Boolean(initialExecutionId),
+    isCompleteWorkflowCatalog(workflowSearch, workflows.data),
   )
   const setDraftStorageError = useCallback(
     (error: string | null, targetId = workflowId) => {
@@ -389,6 +402,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     invalidateWorkflowDraft(targetWorkflowId)
     await runMutation(message.error, async () => {
       await deleteMutation.mutateAsync(targetWorkflowId)
+      setDeletedWorkflowIds([...deletedWorkflowIds, targetWorkflowId])
       const discarded = discardWorkflowDraft(targetWorkflowId)
       if (!discarded.ok) clearMemoryDraft(targetWorkflowId)
       if (targetWorkflowId === workflowId) {
@@ -720,6 +734,13 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     historyDetail: historyExecution.data ?? null,
     liveNodes,
   })
+  const knownWorkflows = knownWorkflowItems(
+    queryClient
+      .getQueriesData<Page<Workflow>>({ queryKey: ['workflows', projectId] })
+      .flatMap(([, page]) => page?.items ?? []),
+    selectedWorkflow,
+    deletedWorkflowIds,
+  )
 
   return {
     projects,
@@ -734,6 +755,16 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     apis,
     artifacts,
     workflows,
+    knownWorkflows,
+    workflowSearch,
+    setWorkflowSearch: (value: string) => {
+      setWorkflowPage(1)
+      setWorkflowSearchValue(value)
+    },
+    workflowPage,
+    setWorkflowPage,
+    workflowCatalogComplete: isCompleteWorkflowCatalog(workflowSearch, workflows.data),
+    deletedWorkflowIds,
     credentials,
     graphqlSchemas,
     grpcDescriptors,
@@ -831,15 +862,22 @@ function useSelectedWorkflow(
   workflowSelectionCleared: boolean,
   workflows: Page<Workflow> | undefined,
   preserveExplicitSelection: boolean,
+  catalogComplete: boolean,
 ) {
   const listed = workflows?.items
   const workflowId = preserveExplicitSelection
     ? workflowSelection
-    : resolveSelectedWorkflowId(workflowSelection, workflowSelectionCleared, workflows)
+    : resolveSelectedWorkflowId(
+        workflowSelection,
+        workflowSelectionCleared,
+        workflows,
+        catalogComplete,
+      )
   const listedWorkflow = listed?.find((item) => item.id === workflowId) ?? null
   const workflowDetail = useQuery({
     queryKey: ['workflow', projectId, workflowId],
     queryFn: () => getWorkflow(requiredId(projectId), requiredId(workflowId)),
+    initialData: listedWorkflow ?? undefined,
     enabled: Boolean(workflows) && canLoadWorkflowDetail(projectId, workflowId, listedWorkflow),
   })
   return { workflowId, selectedWorkflow: listedWorkflow ?? workflowDetail.data ?? null }
@@ -849,17 +887,25 @@ function resolveSelectedWorkflowId(
   selection: string | null,
   cleared: boolean,
   workflows: Page<Workflow> | undefined,
+  catalogComplete: boolean,
 ): string | null {
   if (cleared) return null
   if (!workflows) return selection
   const listed = workflows.items
-  if (
-    selection &&
-    (listed.some((item) => item.id === selection) || listed.length < workflows.total)
-  ) {
+  if (selection && (!catalogComplete || listed.some((workflow) => workflow.id === selection)))
     return selection
-  }
   return listed.at(0)?.id ?? null
+}
+
+function knownWorkflowItems(
+  listed: Workflow[],
+  selected: Workflow | null,
+  deletedIds: string[],
+): Workflow[] {
+  const available = new Map(listed.map((workflow) => [workflow.id, workflow]))
+  if (selected) available.set(selected.id, selected)
+  for (const id of deletedIds) available.delete(id)
+  return [...available.values()]
 }
 
 function workflowDraftIdentity(
@@ -1138,4 +1184,8 @@ function restoreWorkflowEdit(
         editVersion: stored.editVersion,
       }
     : null
+}
+
+function isCompleteWorkflowCatalog(search: string, page: Page<Workflow> | undefined): boolean {
+  return search === '' && Boolean(page && page.items.length === page.total)
 }

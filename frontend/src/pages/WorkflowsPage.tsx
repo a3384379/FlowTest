@@ -39,6 +39,7 @@ import {
   Typography,
 } from 'antd'
 import { useEffect, useState, type ReactNode } from 'react'
+import { useQueries } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import CreateWorkflowDialog from '../features/workflows/CreateWorkflowDialog'
@@ -58,7 +59,7 @@ import {
   reportExecutionPath,
   writeExecutionEvidence,
 } from '../features/workflows/execution-navigation'
-import { listWorkflowControlRecords } from '../features/workflows/workflow-service'
+import { getWorkflow, listWorkflowControlRecords } from '../features/workflows/workflow-service'
 import { useWorkflowTabs } from '../features/workflows/use-workflow-tabs'
 import { useAuthStore } from '../features/auth/auth-store'
 import WorkflowDesigner from '../flow/WorkflowDesigner'
@@ -105,17 +106,26 @@ export default function WorkflowsPage() {
   useEffect(() => {
     const listed = state.workflows.data
     if (initialExecutionId) return
-    if (!initialWorkflowId || !listed || listed.items.length < listed.total) return
+    if (!initialWorkflowId || !listed || !state.workflowCatalogComplete) return
     if (listed.items.some((workflow) => workflow.id === initialWorkflowId)) return
     const next = new URLSearchParams(searchParams)
     next.delete('focus')
     setSearchParams(next, { replace: true })
-  }, [initialExecutionId, initialWorkflowId, searchParams, setSearchParams, state.workflows.data])
+  }, [
+    initialExecutionId,
+    initialWorkflowId,
+    searchParams,
+    setSearchParams,
+    state.workflows.data,
+    state.workflowCatalogComplete,
+  ])
   const userId = useAuthStore((store) => store.user?.id)
   const tabs = useWorkflowTabs({
     userId,
     projectId: state.projectId,
     workflowIds: state.workflows.data?.items.map((item) => item.id) ?? [],
+    catalogComplete: state.workflowCatalogComplete,
+    invalidWorkflowIds: state.deletedWorkflowIds,
     activeWorkflowId: state.workflowId,
     hasExplicitFocus: Boolean(initialWorkflowId || initialExecutionId),
     selectWorkflow: state.setWorkflowSelection,
@@ -1149,24 +1159,33 @@ function WorkflowTabs({
   onCloseOthers: () => void
   onCloseAll: () => void
 }) {
-  const workflows = state.workflows.data?.items ?? []
+  const workflows = state.knownWorkflows
   const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]))
-  const items = workflowIds.flatMap((id) => {
-    const workflow = byId.get(id)
-    if (!workflow) return []
-    const dirty = dirtyIds.includes(workflow.id)
-    return [
-      {
-        key: workflow.id,
-        label: (
-          <span>
-            {workflow.name}
-            {dirty && <Typography.Text type="warning"> ·</Typography.Text>}
-          </span>
-        ),
-        closable: true,
-      },
-    ]
+  const details = useQueries({
+    queries: workflowIds.map((id) => ({
+      queryKey: ['workflow', state.projectId, id],
+      queryFn: () => getWorkflow(state.projectId!, id),
+      enabled:
+        Boolean(state.projectId && state.workflows.data) &&
+        !byId.has(id) &&
+        !state.workflowCatalogComplete,
+      retry: false,
+    })),
+  })
+  const items = workflowIds.map((id, index) => {
+    const workflow = byId.get(id) ?? details[index]?.data
+    const dirty = dirtyIds.includes(id)
+    return {
+      key: id,
+      label: (
+        <span>
+          {workflow?.name ?? `流程 ${id.slice(0, 8)}`}
+          {details[index]?.error && <Typography.Text type="danger"> · 读取失败</Typography.Text>}
+          {dirty && <Typography.Text type="warning"> ·</Typography.Text>}
+        </span>
+      ),
+      closable: true,
+    }
   })
   const execution = state.runtimeExecution ?? state.lastResult?.execution
   if (!items.length && !execution) {
@@ -1303,24 +1322,7 @@ function WorkflowWorkspace({
         />
       }
       list={
-        <Card
-          className="workflow-list-card"
-          title={
-            <WorkflowListTitle
-              onCreate={onCreate}
-              disabled={!state.projectId || !state.apis.data?.items.length}
-            />
-          }
-          loading={state.workflows.isLoading}
-        >
-          <WorkflowTable
-            items={state.workflows.data?.items ?? []}
-            selectedId={state.workflowId}
-            onSelect={onSelectWorkflow}
-            deleting={state.deleting}
-            onDelete={(id) => void state.deleteWorkflow(id)}
-          />
-        </Card>
+        <WorkflowCatalog state={state} onCreate={onCreate} onSelectWorkflow={onSelectWorkflow} />
       }
       runtimeDock={
         <WorkflowExecutionPanels state={state} onRepair={onRepair} forceOpen={historyDockOpen} />
@@ -1661,7 +1663,7 @@ function DraftMetadata({ state, workflow }: { state: WorkflowState; workflow: Wo
 }
 
 function workflowDesignerResources(state: WorkflowState, workflowId: string) {
-  const workflows = pageItems(state.workflows.data)
+  const workflows = state.knownWorkflows
   return {
     environments: state.environments.data ?? [],
     apis: pageItems(state.apis.data),
@@ -1709,25 +1711,46 @@ function WorkflowTable({
   onSelect,
   deleting,
   onDelete,
+  canDelete,
+  query,
+  onSearch,
+  page,
+  total,
+  onPage,
+  loading,
+  error,
+  onReload,
 }: {
   items: Workflow[]
   selectedId: string | null
   onSelect: (id: string) => void
   deleting: boolean
   onDelete: (id: string) => void
+  canDelete: boolean
+  query: string
+  onSearch: (value: string) => void
+  page: number
+  total: number
+  onPage: (page: number) => void
+  loading: boolean
+  error: Error | null
+  onReload: () => void
 }) {
-  const [query, setQuery] = useState('')
-  const visible = items.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()))
   return (
     <div className="workflow-compact-list">
       <Input.Search
         aria-label="搜索工作流"
         placeholder="搜索工作流"
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={(event) => onSearch(event.target.value)}
       />
-      {visible.length === 0 && <Empty description="暂无工作流" />}
-      {visible.map((record) => (
+      <WorkflowCatalogStatus
+        loading={loading}
+        error={error}
+        empty={!items.length}
+        onReload={onReload}
+      />
+      {items.map((record) => (
         <div
           key={record.id}
           className={
@@ -1761,13 +1784,51 @@ function WorkflowTable({
                 icon={<DeleteOutlined />}
                 loading={deleting && record.id === selectedId}
                 aria-label={`删除工作流 ${record.name}`}
+                disabled={!canDelete || deleting}
               />
             </Popconfirm>
           </Space>
         </div>
       ))}
+      <Typography.Text type="secondary">匹配 {total} 个流程，每页 100 项</Typography.Text>
+      <nav aria-label="流程目录分页">
+        <Pagination
+          size="small"
+          current={page}
+          pageSize={100}
+          total={total}
+          showSizeChanger={false}
+          onChange={onPage}
+        />
+      </nav>
     </div>
   )
+}
+
+function WorkflowCatalogStatus({
+  loading,
+  error,
+  empty,
+  onReload,
+}: {
+  loading: boolean
+  error: Error | null
+  empty: boolean
+  onReload: () => void
+}) {
+  if (error)
+    return (
+      <Alert
+        type="error"
+        title="流程目录读取失败"
+        description={apiErrorMessage(error)}
+        action={<Button onClick={onReload}>重新读取目录</Button>}
+      />
+    )
+  if (loading)
+    return <Typography.Paragraph type="secondary">正在读取流程目录…</Typography.Paragraph>
+  if (empty) return <Empty description="当前搜索没有匹配的工作流" />
+  return null
 }
 
 type DisplayNode = Pick<
@@ -2041,4 +2102,42 @@ function showExecutionPanels(state: WorkflowState): boolean {
     state.workspaceMode === 'history' ||
     (state.workspaceMode === 'draft' && Boolean(state.debugResult))
   )
+}
+
+function WorkflowCatalog({
+  state,
+  onCreate,
+  onSelectWorkflow,
+}: {
+  state: WorkflowState
+  onCreate: () => void
+  onSelectWorkflow: (id: string) => void
+}) {
+  return (
+    <Card
+      className="workflow-list-card"
+      title={<WorkflowListTitle onCreate={onCreate} disabled={!canCreateCatalogWorkflow(state)} />}
+    >
+      <WorkflowTable
+        items={state.workflows.data?.items ?? []}
+        selectedId={state.workflowId}
+        onSelect={onSelectWorkflow}
+        deleting={state.deleting}
+        onDelete={(id) => void state.deleteWorkflow(id)}
+        canDelete={state.canEdit}
+        query={state.workflowSearch}
+        onSearch={state.setWorkflowSearch}
+        page={state.workflowPage}
+        total={state.workflows.data?.total ?? 0}
+        onPage={state.setWorkflowPage}
+        loading={state.workflows.isFetching}
+        error={state.workflows.error}
+        onReload={() => void state.workflows.refetch()}
+      />
+    </Card>
+  )
+}
+
+function canCreateCatalogWorkflow(state: WorkflowState): boolean {
+  return Boolean(state.projectId && state.canEdit && state.apis.data?.items.length)
 }

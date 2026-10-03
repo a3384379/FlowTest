@@ -69,6 +69,42 @@ describe('useWorkflowTabs', () => {
     expect(selectWorkflow).toHaveBeenLastCalledWith('one')
   })
 
+  it('keeps and restores off-page tabs while removing only explicitly deleted objects', async () => {
+    const key = workflowTabKey('user-1', 'project-1')
+    writeWorkflowTabs(key, ['one', 'two'], 'two')
+    const selectWorkflow = vi.fn()
+    const rendered = renderHook(
+      ({
+        listed,
+        deleted,
+        active,
+      }: {
+        listed: string[]
+        deleted: string[]
+        active: string | null
+      }) =>
+        useWorkflowTabs({
+          userId: 'user-1',
+          projectId: 'project-1',
+          workflowIds: listed,
+          catalogComplete: false,
+          invalidWorkflowIds: deleted,
+          activeWorkflowId: active,
+          hasExplicitFocus: false,
+          selectWorkflow,
+          saveWorkflowDraft: vi.fn().mockResolvedValue(undefined),
+          searchParams: new URLSearchParams(),
+          setSearchParams: vi.fn(),
+        }),
+      { initialProps: { listed: ['one'], deleted: [] as string[], active: null as string | null } },
+    )
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one', 'two']))
+    await waitFor(() => expect(selectWorkflow).toHaveBeenCalledWith('two'))
+    rendered.rerender({ listed: ['three'], deleted: ['two'], active: 'three' })
+    await waitFor(() => expect(rendered.result.current.workflowIds).toEqual(['one', 'three']))
+    expect(readWorkflowTabs(key)?.workflowIds).toEqual(['one', 'three'])
+  })
+
   it('closes clean tabs and selects the next tab or clears focus', async () => {
     const key = workflowTabKey('user-1', 'project-1')
     writeWorkflowTabs(key, ['one', 'two'], 'one')

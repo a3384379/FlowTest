@@ -24,7 +24,7 @@ from app.models import Base
 from app.models import tasking as tasking_models
 from app.models import test_assets as test_asset_models
 from app.models.access import User
-from app.models.workflows import WorkflowExecution, WorkflowVersion
+from app.models.workflows import Workflow, WorkflowExecution, WorkflowVersion
 from app.services.execution_events import ExecutionEvent
 from app.services.test_plan_runner import TestPlanRunCoordinator as PlanRunCoordinator
 from app.services.workflow_coordinator import WorkflowRunCoordinator
@@ -1403,6 +1403,68 @@ async def test_native_asset_package_enforces_streamed_request_limit(
     assert response.status_code == 413, response.text
     assert response.json()["error"]["code"] == "TEST_ASSET_PACKAGE_TOO_LARGE"
     assert response.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_catalog_search_and_pagination_reach_beyond_first_hundred(
+    tasking_context: TaskingTestContext,
+) -> None:
+    client = tasking_context.client
+    headers = await _login_headers(client)
+    project_id, _environment_id, workflow_id = await _create_published_workflow(client, headers)
+    now = datetime.now(UTC)
+    async with tasking_context.session_maker() as session:
+        source = await session.get(Workflow, UUID(workflow_id))
+        assert source is not None
+        models = [
+            Workflow(
+                project_id=source.project_id,
+                folder_id=None,
+                name="后续检索目标" if index == 0 else f"规模流程-{index:03d}",
+                description="精准说明" if index == 1 else "",
+                draft_definition=source.draft_definition,
+                draft_revision=1,
+                current_version=None,
+                created_by_id=source.created_by_id,
+                updated_at=now + timedelta(seconds=index),
+            )
+            for index in range(125)
+        ]
+        archived = Workflow(
+            project_id=source.project_id,
+            folder_id=None,
+            name="归档后续检索目标",
+            description="",
+            draft_definition=source.draft_definition,
+            draft_revision=1,
+            current_version=None,
+            created_by_id=source.created_by_id,
+            archived_at=now,
+        )
+        session.add_all([*models, archived])
+        await session.commit()
+        target_id = str(models[0].id)
+    root = f"/api/v1/projects/{project_id}/workflows"
+    first = await client.get(root, headers=headers, params={"page_size": 100})
+    assert first.json()["total"] == 126
+    assert target_id not in {row["id"] for row in first.json()["items"]}
+    second = await client.get(root, headers=headers, params={"page": 2, "page_size": 100})
+    assert len(second.json()["items"]) == 26
+    assert target_id in {row["id"] for row in second.json()["items"]}
+    searched = await client.get(root, headers=headers, params={"search": " 后续检索 "})
+    assert searched.json()["total"] == 1
+    assert searched.json()["items"][0]["id"] == target_id
+    description = await client.get(root, headers=headers, params={"search": "精准说明"})
+    assert description.json()["total"] == 1
+    unexpected = await client.get(root, headers=headers, params={"search": "' OR 1=1 --"})
+    assert unexpected.json()["total"] == 0
+    foreign = await client.post("/api/v1/projects", headers=headers, json={"name": "搜索隔离"})
+    isolated = await client.get(
+        f"/api/v1/projects/{foreign.json()['id']}/workflows",
+        headers=headers,
+        params={"search": "后续检索"},
+    )
+    assert isolated.json()["total"] == 0
 
 
 @dataclass(slots=True)
