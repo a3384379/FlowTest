@@ -34,9 +34,13 @@ export async function seedEditor(
   const project = await create('/projects', { name: `流程编辑验收 ${Date.now()}` })
   const root = `/projects/${project.id}`
   const mockTargetUrl = process.env.FLOWTEST_E2E_MOCK_TARGET_URL ?? 'http://mock-target:8080'
+  const mockTargetHost = new URL(mockTargetUrl).hostname
   await create(
     `${root}/security-policy`,
-    { allowed_hosts: ['mock-target'], allowed_private_cidrs: ['172.16.0.0/12'] },
+    {
+      allowed_hosts: [mockTargetHost],
+      allowed_private_cidrs: [process.env.FLOWTEST_E2E_MOCK_TARGET_CIDR ?? '172.16.0.0/12'],
+    },
     'put',
   )
   const environment = await create(`${root}/environments`, {
@@ -91,6 +95,7 @@ export async function seedEditor(
 export async function clickEdge(page: Page, id = 'start-api') {
   const path = page.locator(`.react-flow__edge[data-id="${id}"] .react-flow__edge-interaction`)
   await path.waitFor({ state: 'attached' })
+  await settleCanvas(page)
   const hit = await path.evaluate((element) => {
     const svgPath = element as SVGPathElement
     const transform = svgPath.getScreenCTM()
@@ -110,6 +115,42 @@ export async function clickEdge(page: Page, id = 'start-api') {
   expect(hit, '连线存在可点击且未被节点遮挡的命中区').not.toBeNull()
   await page.mouse.click(hit!.x, hit!.y)
   await expect(page.getByRole('heading', { name: '连接关系', exact: true })).toBeVisible()
+}
+
+export async function settleCanvas(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.locator('.react-flow__node').evaluateAll((nodes) =>
+        nodes.flatMap((node) => {
+          const body = node.querySelector('.flow-node')
+          if (!body) return []
+          const wrapperHeight = node.getBoundingClientRect().height
+          const bodyHeight = body.getBoundingClientRect().height
+          return Math.abs(wrapperHeight - bodyHeight) < 1
+            ? []
+            : [{ node: node.getAttribute('data-id'), wrapperHeight, bodyHeight }]
+        }),
+      ),
+    )
+    .toEqual([])
+  await page.evaluate(async () => {
+    let previous = '',
+      stable = 0
+    const deadline = performance.now() + 5000
+    while (stable < 10) {
+      if (performance.now() > deadline) throw new Error('流程画布测量或视口动画尚未稳定')
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      const current = JSON.stringify({
+        viewport: document.querySelector('.react-flow__viewport')?.getAttribute('style'),
+        nodes: Array.from(document.querySelectorAll('.react-flow__node'), (node) => {
+          const { x, y, width, height } = node.getBoundingClientRect()
+          return { x, y, width, height }
+        }),
+      })
+      stable = current === previous ? stable + 1 : 0
+      previous = current
+    }
+  })
 }
 export async function dragBetween(page: Page, source: Locator, target: Locator) {
   await source.waitFor({ state: 'visible' })

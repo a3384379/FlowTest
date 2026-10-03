@@ -32,6 +32,7 @@ afterEach(() => {
 
 describe('WorkflowsPage', () => {
   beforeEach(() => {
+    let currentWorkflow = workflow
     server.use(
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -61,7 +62,10 @@ describe('WorkflowsPage', () => {
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
       http.get(`/api/v1/projects/${project.id}/workflows`, () =>
-        HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
+        HttpResponse.json({ items: [currentWorkflow], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/workflows/${workflow.id}`, () =>
+        HttpResponse.json(currentWorkflow),
       ),
       http.get(`/api/v1/projects/${project.id}/workflow-executions`, () =>
         HttpResponse.json({
@@ -71,9 +75,10 @@ describe('WorkflowsPage', () => {
           page_size: 20,
         }),
       ),
-      http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/versions`, () =>
-        HttpResponse.json(workflowVersion),
-      ),
+      http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/versions`, () => {
+        currentWorkflow = { ...currentWorkflow, current_version: workflowVersion.version }
+        return HttpResponse.json(workflowVersion)
+      }),
       http.post(`/api/v1/projects/${project.id}/workflows/${workflow.id}/debug`, () =>
         HttpResponse.json(debugResult),
       ),
@@ -93,7 +98,10 @@ describe('WorkflowsPage', () => {
       http.post(
         `/api/v1/projects/${project.id}/workflows/${workflow.id}/executions`,
         async ({ request }) => {
-          expect(await request.json()).toEqual({ environment_id: environment.id, version: 1 })
+          expect(await request.json()).toEqual({
+            environment_id: environment.id,
+            version: currentWorkflow.current_version,
+          })
           return HttpResponse.json(workflowRunningExecution, { status: 202 })
         },
       ),
@@ -118,6 +126,48 @@ describe('WorkflowsPage', () => {
     expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
     expect(screen.getByText(/不会随当前草稿变化/)).toBeVisible()
   })
+
+  it.each(['history', 'draft'])(
+    'clears old control and instance locations when switching to %s',
+    async (destination) => {
+      const evidence = new URLSearchParams({
+        focus: workflow.id,
+        execution: workflowRunningExecution.id,
+        node: 'api',
+        attempt: '2',
+        control_kind: 'iteration',
+        control_ordinal: '7',
+        instance: '__nested_request__:old-run:request',
+        instance_attempt: '2',
+      })
+      const { router } = renderPage(`/projects/${project.id}/workflows?${evidence}`)
+      expect(await screen.findByText('正在查看历史执行快照')).toBeVisible()
+      expect(new URLSearchParams(router.state.location.search).get('instance')).toBe(
+        evidence.get('instance'),
+      )
+      if (destination === 'history')
+        fireEvent.click(
+          await screen.findByTestId(`workflow-history-${workflowExecutionDetail.execution.id}`),
+        )
+      else fireEvent.click(screen.getByText('编排', { exact: true }))
+      await waitFor(() => {
+        const params = new URLSearchParams(router.state.location.search)
+        for (const key of [
+          'node',
+          'attempt',
+          'control_kind',
+          'control_ordinal',
+          'instance',
+          'instance_attempt',
+        ])
+          expect(params.has(key)).toBe(false)
+        expect(params.get('focus')).toBe(workflow.id)
+        expect(params.get('execution')).toBe(
+          destination === 'history' ? workflowExecutionDetail.execution.id : null,
+        )
+      })
+    },
+  )
 
   it('keeps the selected workflow history visible when opening a snapshot from an unfocused catalog', async () => {
     renderPage(`/projects/${project.id}/workflows`)
@@ -560,31 +610,31 @@ function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const router = createMemoryRouter(
+    [
+      {
+        path: '*',
+        element: (
+          <ProjectProvider>
+            <DraftSessionProvider>
+              <WorkflowsPage />
+            </DraftSessionProvider>
+          </ProjectProvider>
+        ),
+      },
+    ],
+    { initialEntries: [initialEntry ?? `/projects/${project.id}/workflows`] },
+  )
+  const rendered = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
-          <RouterProvider
-            router={createMemoryRouter(
-              [
-                {
-                  path: '*',
-                  element: (
-                    <ProjectProvider>
-                      <DraftSessionProvider>
-                        <WorkflowsPage />
-                      </DraftSessionProvider>
-                    </ProjectProvider>
-                  ),
-                },
-              ],
-              { initialEntries: [initialEntry ?? `/projects/${project.id}/workflows`] },
-            )}
-          />
+          <RouterProvider router={router} />
         </QueryClientProvider>
       </AntdApp>
     </ConfigProvider>,
   )
+  return { ...rendered, router }
 }
 
 const debugResult = {
