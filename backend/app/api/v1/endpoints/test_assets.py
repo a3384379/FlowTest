@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, Query, Request, Response, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
 from app.domain.test_assets import VersionChange
-from app.http.test_asset_packages import read_package_payload
+from app.http.test_asset_packages import package_request_contract, read_package_payload
 from app.schemas.common import Page
 from app.schemas.tasking import TestPlanRunDetailResponse
 from app.schemas.test_asset_packages import (
@@ -70,7 +70,11 @@ async def export_test_asset_package(
     )
 
 
-@router.post("/test-assets/import/preview", response_model=PackagePreviewResponse)
+@router.post(
+    "/test-assets/import/preview",
+    response_model=PackagePreviewResponse,
+    openapi_extra=package_request_contract(PackagePreviewRequest),
+)
 async def preview_test_asset_package(
     project_id: UUID,
     request: Request,
@@ -83,7 +87,11 @@ async def preview_test_asset_package(
     )
 
 
-@router.post("/test-assets/import/apply", response_model=PackageApplyResponse)
+@router.post(
+    "/test-assets/import/apply",
+    response_model=PackageApplyResponse,
+    openapi_extra=package_request_contract(PackageApplyRequest),
+)
 async def apply_test_asset_package(
     project_id: UUID,
     request: Request,

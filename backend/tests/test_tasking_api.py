@@ -1406,6 +1406,44 @@ async def test_native_asset_package_enforces_streamed_request_limit(
 
 
 @pytest.mark.asyncio
+async def test_native_asset_import_openapi_declares_resolvable_request_contracts(
+    tasking_context: TaskingTestContext,
+) -> None:
+    response = await tasking_context.client.get("/openapi.json")
+    assert response.status_code == 200, response.text
+    document = response.json()
+    components = document["components"]["schemas"]
+    for operation, model in (
+        ("preview", "PackagePreviewRequest"),
+        ("apply", "PackageApplyRequest"),
+    ):
+        route = f"/api/v1/projects/{{project_id}}/test-assets/import/{operation}"
+        body = document["paths"][route]["post"].get("requestBody")
+        assert body is not None, f"{operation} import request contract is missing"
+        assert body["required"] is True
+        assert body["content"]["application/json"]["schema"]["$ref"] == (
+            f"#/components/schemas/{model}"
+        )
+        assert "package" in components[model]["properties"]
+    assert "expected_preview_fingerprint" in components["PackageApplyRequest"]["required"]
+    for schema in components.values():
+        for reference in _schema_references(schema):
+            if reference.startswith("#/components/schemas/"):
+                assert reference.rsplit("/", 1)[1] in components
+
+
+def _schema_references(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [reference for item in value for reference in _schema_references(item)]
+    if not isinstance(value, dict):
+        return []
+    references = [value["$ref"]] if isinstance(value.get("$ref"), str) else []
+    return references + [
+        reference for item in value.values() for reference in _schema_references(item)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_workflow_catalog_search_and_pagination_reach_beyond_first_hundred(
     tasking_context: TaskingTestContext,
 ) -> None:
