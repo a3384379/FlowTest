@@ -1,3 +1,4 @@
+import CatalogPagination from '../components/CatalogPagination'
 import { CheckOutlined, CloseOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -55,6 +56,9 @@ function AIReviewWorkspace() {
         <AIDisabledAlert loading={state.status.isLoading} enabled={aiStatus?.enabled ?? false} />
       ) : null}
       <AIPolicyCard state={state} />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.jobs} label="AI 任务" />
+      </div>
       <AIWorkspace state={state} onReview={review.open} />
       <CreateAIJobDialog
         open={createOpen}

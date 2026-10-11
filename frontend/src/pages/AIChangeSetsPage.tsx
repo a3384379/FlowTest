@@ -1,3 +1,4 @@
+import CatalogPagination from '../components/CatalogPagination'
 import { AuditOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -58,6 +59,11 @@ function AIChangeSetWorkspace() {
         >
           生成 Draft Change Set
         </Button>
+      </div>
+      <div className="catalog-controls">
+        <CatalogPagination query={state.changeSets} label="变更集" />
+        <CatalogPagination query={state.impacts} label="影响证据" />
+        <CatalogPagination query={state.risks} label="风险证据" />
       </div>
       <AIChangeSetStatus state={state} />
       <Alert

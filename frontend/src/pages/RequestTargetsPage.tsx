@@ -1,3 +1,5 @@
+import CatalogPagination from '../components/CatalogPagination'
+import { useCatalogQuery } from '../lib/catalog-query'
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -107,11 +109,9 @@ function RequestTargetsWorkspace() {
     queryFn: () => listServiceEndpoints(required(projectId), required(environmentId)),
     enabled: Boolean(projectId && environmentId),
   })
-  const apis = useQuery({
-    queryKey: ['request-target-apis', projectId],
-    queryFn: () => listApis(required(projectId), { page: 1, pageSize: 100 }),
-    enabled: Boolean(projectId),
-  })
+  const apis = useCatalogQuery('request-target-apis', projectId, (page) =>
+    listApis(required(projectId), { page, pageSize: 20 }),
+  )
   const secrets = useQuery({
     queryKey: ['request-target-secrets', projectId],
     queryFn: () => listSecrets(required(projectId)),
@@ -281,6 +281,7 @@ function RequestTargetsWorkspace() {
           />
         </Col>
       </Row>
+      <CatalogPagination query={apis} label="API 默认 Service" />
       <ApiServiceCard
         readOnly={!canEdit}
         apis={apiItems}

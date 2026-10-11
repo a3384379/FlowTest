@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -30,7 +31,7 @@ export function useQualityCenter() {
   useEffect(() => {
     currentProject.current = projectId
   }, [projectId])
-  const { canEdit } = useProjectCapabilities()
+  const { canEdit, permissions } = useProjectCapabilities()
   const [params, setParams] = useSearchParams()
   const linkedRiskId = params.get('risk')
   const featureFlags = useQuery({
@@ -44,26 +45,43 @@ export function useQualityCenter() {
     queryFn: () => listQualityGates(required(projectId)),
     enabled: Boolean(projectId),
   })
-  const flaky = useQuery({
-    queryKey: ['flaky-tests', projectId],
-    queryFn: () => listFlakyTests(required(projectId)),
+  const flaky = useCatalogQuery(
+    'flaky-tests',
+    projectId,
+    (page) => listFlakyTests(required(projectId), page, 20),
+    Boolean(projectId),
+    '',
+    {},
+  )
+  const latestRun = useQuery({
+    queryKey: ['quality-runs', projectId, 'latest'],
+    queryFn: () => listQualityRuns(required(projectId), 1, 1),
     enabled: Boolean(projectId),
   })
-  const runs = useQuery({
-    queryKey: ['quality-runs', projectId],
-    queryFn: () => listQualityRuns(required(projectId)),
-    enabled: Boolean(projectId),
-  })
-  const risks = useQuery({
-    queryKey: ['release-risks', projectId],
-    queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: Boolean(projectId && riskEnabled),
-  })
-  const impactRuns = useQuery({
-    queryKey: ['impact-runs', projectId],
-    queryFn: () => listImpactRuns(required(projectId)),
-    enabled: Boolean(projectId && featureFlags.data?.impact_engine),
-  })
+  const runs = useCatalogQuery(
+    'quality-runs',
+    projectId,
+    (page) => listQualityRuns(required(projectId), page, 20),
+    Boolean(projectId),
+    '',
+    {},
+  )
+  const risks = useCatalogQuery(
+    'release-risks',
+    projectId,
+    (page) => listReleaseRisks(required(projectId), page, 20),
+    Boolean(projectId && riskEnabled),
+    '',
+    {},
+  )
+  const impactRuns = useCatalogQuery(
+    'impact-runs',
+    projectId,
+    (page) => listImpactRuns(required(projectId), page, 20),
+    Boolean(projectId && featureFlags.data?.impact_engine),
+    '',
+    {},
+  )
   const activeRiskId = linkedRiskId ?? risks.data?.items.at(0)?.id
   const risk = useQuery({
     queryKey: ['release-risk', projectId, activeRiskId],
@@ -137,10 +155,12 @@ export function useQualityCenter() {
 
   return {
     featureFlags,
+    permissions,
     riskEnabled,
     canEdit,
     linkedRiskId,
     projectId,
+    latestRun,
     gates,
     flaky,
     runs,

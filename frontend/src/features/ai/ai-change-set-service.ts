@@ -45,10 +45,14 @@ export type AIChangeSetInput = {
   title: string
 }
 
-export async function listAIChangeSets(projectId: string): Promise<Page<AIChangeSetSummary>> {
+export async function listAIChangeSets(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<AIChangeSetSummary>> {
   return (
     await apiClient.get<Page<AIChangeSetSummary>>('/ai/change-sets', {
-      params: { project_id: projectId, page: 1, page_size: 100 },
+      params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
 }

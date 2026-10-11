@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
@@ -27,16 +28,22 @@ export function useContractHub(providerServiceId: string | null) {
   const { canEdit, permissions } = useProjectCapabilities()
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
   const enabled = Boolean(projectId && flags.data?.contract_hub)
-  const services = useQuery({
-    queryKey: ['contract-services', projectId],
-    queryFn: () => listContractServices(required(projectId)),
+  const services = useCatalogQuery(
+    'contract-services',
+    projectId,
+    (page) => listContractServices(required(projectId), page, 20),
     enabled,
-  })
-  const pacts = useQuery({
-    queryKey: ['pact-contracts', projectId],
-    queryFn: () => listPactContracts(required(projectId)),
+    '',
+    {},
+  )
+  const pacts = useCatalogQuery(
+    'pact-contracts',
+    projectId,
+    (page) => listPactContracts(required(projectId), page, 20),
     enabled,
-  })
+    '',
+    {},
+  )
   const openapiRuns = useQuery({
     queryKey: ['contract-runs', projectId],
     queryFn: () => listContractRuns(required(projectId)),
@@ -57,11 +64,14 @@ export function useContractHub(providerServiceId: string | null) {
     queryFn: () => getCompatibilityMatrix(required(projectId), required(providerServiceId)),
     enabled: enabled && Boolean(providerServiceId),
   })
-  const checks = useQuery({
-    queryKey: ['deployment-checks', projectId],
-    queryFn: () => listDeploymentChecks(required(projectId)),
+  const checks = useCatalogQuery(
+    'deployment-checks',
+    projectId,
+    (page) => listDeploymentChecks(required(projectId), page, 20),
     enabled,
-  })
+    '',
+    {},
+  )
   const createService = useMutation({
     mutationFn: (input: { service_key: string; display_name: string; description: string }) =>
       createContractService(required(projectId), input),

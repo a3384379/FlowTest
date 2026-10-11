@@ -18,6 +18,21 @@ import ProjectTestProvider from '../test/ProjectTestProvider'
 beforeEach(() => {
   authenticateTestUser(authenticatedUser)
   server.use(
+    http.get(`/api/v1/projects/${project.id}/folders`, () => HttpResponse.json([])),
+    http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+    http.get(
+      `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
+      () => HttpResponse.json([]),
+    ),
+    http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/versions`, () =>
+      HttpResponse.json([{ version: 1 }]),
+    ),
+    http.post(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/preview`, () =>
+      HttpResponse.json({
+        url: `${environment.base_url}/users/me`,
+        target: { environment_name: environment.name },
+      }),
+    ),
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
     ),
@@ -227,7 +242,11 @@ describe('ApiConsolePage', () => {
         within(screen.getByRole('tabpanel', { name: '断言（1）' })).getByText('状态码等于 200'),
       ).toBeVisible()
       await browser.click(screen.getByRole('tab', { name: '执行历史' }))
-      expect(screen.getByText(executionDetail.execution.request_url)).toBeVisible()
+      expect(
+        within(screen.getByLabelText('接口响应与验证')).getByText(
+          executionDetail.execution.request_url,
+        ),
+      ).toBeVisible()
     },
   )
 

@@ -1,3 +1,4 @@
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -24,31 +25,43 @@ export function usePerformanceLab() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const { canEdit, canExecute, permissions } = useProjectCapabilities()
+  const featureFlags = useQuery({
+    queryKey: ['v3-feature-flags'],
+    queryFn: getV3FeatureFlags,
+    enabled: Boolean(projectId),
+  })
+  const featureEnabled = featureFlags.data?.performance_lab === true
+  const catalogsEnabled = Boolean(projectId) && featureEnabled
   const [params, setParams] = useSearchParams()
   const scenarioId = params.get('scenario')
   const runId = params.get('run')
   const [scenarioPage, setScenarioPage] = useRouteScopedState(projectId, null, 1)
   const [runPage, setRunPage] = useRouteScopedState(projectId, null, 1)
+  const latestRun = useQuery({
+    queryKey: ['performance-runs', projectId, 'latest'],
+    queryFn: () => listPerformanceRuns(required(projectId), 1, 1),
+    enabled: catalogsEnabled,
+  })
   const scenarios = useQuery({
     queryKey: ['performance-scenarios', projectId, scenarioPage],
     queryFn: () => listPerformanceScenarios(required(projectId), scenarioPage),
-    enabled: Boolean(projectId),
+    enabled: catalogsEnabled,
   })
   const runs = useQuery({
     queryKey: ['performance-runs', projectId, runPage],
     queryFn: () => listPerformanceRuns(required(projectId), runPage),
-    enabled: Boolean(projectId),
+    enabled: catalogsEnabled,
     refetchInterval: (query) => (query.state.data?.items.some(isPendingRun) ? 2000 : false),
   })
   const scenario = useQuery({
     queryKey: ['performance-scenario', projectId, scenarioId],
     queryFn: () => getPerformanceScenario(required(projectId), required(scenarioId)),
-    enabled: Boolean(projectId && scenarioId && !runId),
+    enabled: Boolean(catalogsEnabled && scenarioId && !runId),
   })
   const runDetail = useQuery({
     queryKey: ['performance-run', projectId, runId],
     queryFn: () => getPerformanceRun(required(projectId), required(runId)),
-    enabled: Boolean(projectId && runId),
+    enabled: Boolean(catalogsEnabled && runId),
     refetchInterval: (query) => (query.state.data && isPendingRun(query.state.data) ? 2000 : false),
   })
   const create = useMutation({
@@ -101,7 +114,7 @@ export function usePerformanceLab() {
   }
 
   async function addScenario(payload: PerformanceScenarioInput) {
-    if (!canEdit || !projectId) return false
+    if (!featureEnabled || !canEdit || !projectId) return false
     const targetProject = projectId
     return withFeedback(
       () => create.mutateAsync({ projectId: targetProject, payload }),
@@ -115,7 +128,7 @@ export function usePerformanceLab() {
     description: string,
     definition: PerformanceDefinition,
   ) {
-    if (!canEdit || !projectId) return false
+    if (!featureEnabled || !canEdit || !projectId) return false
     const targetProject = projectId
     return withFeedback(
       () =>
@@ -131,7 +144,7 @@ export function usePerformanceLab() {
   }
 
   async function publishScenario(targetScenario: string) {
-    if (!canEdit || !projectId) return
+    if (!featureEnabled || !canEdit || !projectId) return
     const targetProject = projectId
     await withFeedback(
       () => publish.mutateAsync({ projectId: targetProject, scenarioId: targetScenario }),
@@ -141,7 +154,7 @@ export function usePerformanceLab() {
   }
 
   async function startRun(targetScenario: string) {
-    if (!canEdit || !projectId) return
+    if (!featureEnabled || !canEdit || !projectId) return
     const targetProject = projectId
     await withFeedback(
       () => run.mutateAsync({ projectId: targetProject, scenarioId: targetScenario }),
@@ -151,10 +164,13 @@ export function usePerformanceLab() {
   }
 
   return {
+    featureFlags,
+    featureEnabled,
     projectId,
-    canEdit,
+    canEdit: canEdit && featureEnabled,
     canExecute,
     permissions,
+    latestRun,
     scenarios,
     runs,
     scenario,

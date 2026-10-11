@@ -1,10 +1,25 @@
-import { Descriptions } from 'antd'
+import { Descriptions, Typography } from 'antd'
 
 type TargetSummary = { url: string; environment: string; source: string }
 
-export default function RequestTargetSummary({ preview }: { preview: unknown }) {
+export default function RequestTargetSummary({
+  preview,
+  compact = false,
+}: {
+  preview: unknown
+  compact?: boolean
+}) {
   const summary = targetSummary(preview)
   if (!summary) return null
+  if (compact)
+    return (
+      <div className="api-target-summary">
+        <Typography.Text>最终地址：{summary.url}</Typography.Text>
+        <Typography.Text type="secondary">
+          实际环境：{summary.environment} · 来源：{summary.source}
+        </Typography.Text>
+      </div>
+    )
   return (
     <Descriptions
       size="small"

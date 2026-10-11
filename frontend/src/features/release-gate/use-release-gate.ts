@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -39,11 +40,19 @@ export function useReleaseGate() {
     queryFn: () => listReleasePolicies(required(projectId)),
     enabled,
   })
-  const decisions = useQuery({
-    queryKey: ['release-decisions', projectId],
-    queryFn: () => listReleaseDecisions(required(projectId)),
+  const latestDecision = useQuery({
+    queryKey: ['release-latest-decision', projectId],
+    queryFn: () => listReleaseDecisions(required(projectId), 1, 1),
     enabled,
   })
+  const decisions = useCatalogQuery(
+    'release-decisions',
+    projectId,
+    (page) => listReleaseDecisions(required(projectId), page, 20),
+    enabled,
+    '',
+    {},
+  )
   const selectedDecision = useQuery({
     queryKey: ['release-decision', projectId, decisionId],
     queryFn: () => getReleaseDecision(required(projectId), required(decisionId)),
@@ -61,26 +70,38 @@ export function useReleaseGate() {
     queryFn: () => listQualityGates(required(projectId)),
     enabled,
   })
-  const qualityRuns = useQuery({
-    queryKey: ['quality-runs', projectId],
-    queryFn: () => listQualityRuns(required(projectId)),
+  const qualityRuns = useCatalogQuery(
+    'quality-runs',
+    projectId,
+    (page) => listQualityRuns(required(projectId), page, 20),
     enabled,
-  })
-  const deploymentChecks = useQuery({
-    queryKey: ['deployment-checks', projectId],
-    queryFn: () => listDeploymentChecks(required(projectId)),
-    enabled: enabled && v3FeatureEnabled(featureFlags.data, 'contract_hub'),
-  })
-  const impactRuns = useQuery({
-    queryKey: ['impact-runs', projectId],
-    queryFn: () => listImpactRuns(required(projectId)),
-    enabled: enabled && v3FeatureEnabled(featureFlags.data, 'impact_engine'),
-  })
-  const releaseRisks = useQuery({
-    queryKey: ['release-risks', projectId],
-    queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: enabled && v3FeatureEnabled(featureFlags.data, 'quality_intelligence'),
-  })
+    '',
+    {},
+  )
+  const deploymentChecks = useCatalogQuery(
+    'deployment-checks',
+    projectId,
+    (page) => listDeploymentChecks(required(projectId), page, 20),
+    enabled && v3FeatureEnabled(featureFlags.data, 'contract_hub'),
+    '',
+    {},
+  )
+  const impactRuns = useCatalogQuery(
+    'impact-runs',
+    projectId,
+    (page) => listImpactRuns(required(projectId), page, 20),
+    enabled && v3FeatureEnabled(featureFlags.data, 'impact_engine'),
+    '',
+    {},
+  )
+  const releaseRisks = useCatalogQuery(
+    'release-risks',
+    projectId,
+    (page) => listReleaseRisks(required(projectId), page, 20),
+    enabled && v3FeatureEnabled(featureFlags.data, 'quality_intelligence'),
+    '',
+    {},
+  )
   const performanceRuns = useQuery({
     queryKey: ['performance-runs', projectId],
     queryFn: () => listPerformanceRuns(required(projectId)),
@@ -115,7 +136,10 @@ export function useReleaseGate() {
     if (!canEdit) return false
     try {
       const decision = await createDecision.mutateAsync(input)
-      await queryClient.invalidateQueries({ queryKey: ['release-decisions', projectId] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['release-decisions', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['release-latest-decision', projectId] }),
+      ])
       void message.success(decision.status === 'pass' ? '发布判断：PASS' : '发布判断：BLOCK')
       return true
     } catch (error) {
@@ -132,6 +156,7 @@ export function useReleaseGate() {
     projectId,
     policies,
     decisions,
+    latestDecision,
     qualityGates,
     qualityRuns,
     deploymentChecks,

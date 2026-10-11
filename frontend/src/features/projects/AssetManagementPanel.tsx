@@ -155,6 +155,7 @@ export function FolderManagementPanel({
           'test-case-options',
           'asset-directory-counts',
           'apis',
+          'api-detail',
           'workflows',
           'project-audit',
         ].map((key) => client.invalidateQueries({ queryKey: [key, projectId] })),

@@ -6,9 +6,74 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import APIWorkbench from './APIWorkbench'
+import type { ApiVersionInput } from './api-service'
 import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 describe('APIWorkbench', () => {
+  it('saves interface variables, duplicate parameters and its exact editing baseline', async () => {
+    const onSave = vi.fn(async (input: ApiVersionInput) => ({
+      ...detail.version,
+      ...input,
+      version: 2,
+    }))
+    render(
+      <APIWorkbench
+        detail={{
+          ...detail,
+          version: {
+            ...detail.version,
+            variables: { module: 'orders' },
+            query_parameters: [
+              { name: 'id', value: '1', enabled: true },
+              { name: 'id', value: '2', enabled: false },
+            ],
+          },
+        }}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(onSave.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        variables: { module: 'orders' },
+        base_version: 1,
+        query_parameters: [
+          { name: 'id', value: '1', enabled: true },
+          { name: 'id', value: '2', enabled: false },
+        ],
+      }),
+    )
+  })
+
+  it('rejects case insensitive duplicate Headers instead of silently saving them', async () => {
+    const onSave = vi.fn()
+    render(
+      <APIWorkbench
+        detail={{
+          ...detail,
+          version: { ...detail.version, headers: { 'X-Module': 'first', 'x-module': 'second' } },
+        }}
+        loading={false}
+        saving={false}
+        previewing={false}
+        onSave={onSave}
+        onPreview={vi.fn()}
+        onRename={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Headers' }))
+    fireEvent.click(screen.getByRole('button', { name: /保存新版本/ }))
+    await waitFor(() =>
+      expect(screen.getByText('Header 名称不能重复（不区分大小写）')).toBeVisible(),
+    )
+    expect(onSave).not.toHaveBeenCalled()
+  })
   afterEach(() => {
     localStorage.clear()
     vi.restoreAllMocks()

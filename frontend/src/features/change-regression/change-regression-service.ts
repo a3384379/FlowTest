@@ -282,11 +282,13 @@ export async function selectChangeRegressionOperation(
 
 export async function listChangeRegressions(
   projectId: string,
+  page = 1,
+  pageSize = 100,
 ): Promise<Page<ChangeRegressionSummary>> {
   return (
     await apiClient.get<Page<ChangeRegressionSummary>>(
       '/projects/' + projectId + '/change-regressions',
-      { params: { page: 1, page_size: 100 } },
+      { params: { page, page_size: pageSize } },
     )
   ).data
 }
@@ -371,10 +373,14 @@ export async function evaluateChangeRegressionRelease(
   ).data
 }
 
-export async function listChangeRegressionPlans(projectId: string): Promise<Page<TestPlan>> {
+export async function listChangeRegressionPlans(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<TestPlan>> {
   return (
     await apiClient.get<Page<TestPlan>>('/projects/' + projectId + '/test-plans', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }

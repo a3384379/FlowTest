@@ -1,9 +1,11 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useRouteScopedSelection, useRouteScopedState } from '../../lib/use-route-scoped-state'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
 import {
   createNotificationWebhook,
@@ -23,6 +25,8 @@ export function useReports(initialExecutionId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
+  const { permissions } = useProjectCapabilities()
+  const canManageNotifications = permissions.data?.effective_role === 'owner'
   const [selectedExecutionId, setSelectedExecutionId] = useRouteScopedSelection(
     projectId,
     initialExecutionId ?? null,
@@ -58,11 +62,14 @@ export function useReports(initialExecutionId?: string) {
     queryFn: () => listNotificationWebhooks(required(projectId)),
     enabled: Boolean(projectId),
   })
-  const deliveries = useQuery({
-    queryKey: ['notification-deliveries', projectId],
-    queryFn: () => listNotificationDeliveries(required(projectId)),
-    enabled: Boolean(projectId),
-  })
+  const deliveries = useCatalogQuery(
+    'notification-deliveries',
+    projectId,
+    (page) => listNotificationDeliveries(required(projectId), page, 20),
+    Boolean(projectId),
+    '',
+    {},
+  )
   const exportReport = useMutation({
     mutationFn: (executionId: string) => exportReportHtml(required(projectId), executionId),
   })
@@ -86,6 +93,7 @@ export function useReports(initialExecutionId?: string) {
   }
 
   async function addWebhook(input: CreateNotificationWebhookInput) {
+    if (!canManageNotifications) return
     try {
       const created = await createWebhook.mutateAsync(input)
       setWebhookOpen(false)
@@ -98,6 +106,7 @@ export function useReports(initialExecutionId?: string) {
   }
 
   async function setWebhookEnabled(id: string, enabled: boolean) {
+    if (!canManageNotifications) return
     try {
       await toggleWebhook.mutateAsync({ id, enabled })
       await refresh('notification-webhooks')
@@ -112,6 +121,8 @@ export function useReports(initialExecutionId?: string) {
 
   return {
     projects,
+    canManageNotifications,
+    permissions,
     projectId,
     setProjectSelection: selectProject,
     reports,

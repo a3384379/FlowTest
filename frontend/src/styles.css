@@ -2123,3 +2123,44 @@ body {
     width: 100%;
   }
 }
+
+.catalog-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.catalog-controls > .full-width {
+  flex: 1 1 240px;
+  width: auto;
+}
+.report-trajectory > .ant-segmented,
+.report-trajectory > .ant-input-group-wrapper {
+  margin-bottom: 10px;
+}
+.test-asset-directory .ant-tree {
+  background: transparent;
+}
+.test-asset-directory .ant-tree-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.api-contract-notice {
+  margin-bottom: 8px;
+}
+.api-target-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+}
+@media (min-width: 1101px) {
+  .api-workspace-main {
+    min-height: 672px;
+    grid-template-rows: minmax(420px, 1.4fr) minmax(240px, 1fr);
+  }
+}

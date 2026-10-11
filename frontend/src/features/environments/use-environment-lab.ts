@@ -1,3 +1,4 @@
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -25,6 +26,12 @@ export function useEnvironmentLab() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const { canEdit, canExecute, permissions } = useProjectCapabilities()
+  const featureFlags = useQuery({
+    queryKey: ['v3-feature-flags'],
+    queryFn: getV3FeatureFlags,
+    enabled: Boolean(projectId),
+  })
+  const featureEnabled = featureFlags.data?.environment_lab === true
   const isSystemAdmin = useAuthStore((state) => Boolean(state.user?.is_system_admin))
   const userId = useAuthStore((state) => state.user?.id)
   const [params, setParams] = useSearchParams()
@@ -34,18 +41,18 @@ export function useEnvironmentLab() {
   const templates = useQuery({
     queryKey: ['environment-templates', userId, templatePage],
     queryFn: () => listEnvironmentTemplates(templatePage),
-    enabled: Boolean(projectId),
+    enabled: Boolean(featureEnabled && projectId),
   })
   const instances = useQuery({
     queryKey: ['environment-instances', projectId, instancePage],
     queryFn: () => listEnvironmentInstances(required(projectId), instancePage),
-    enabled: Boolean(projectId),
+    enabled: Boolean(featureEnabled && projectId),
     refetchInterval: (query) => (query.state.data?.items.some(instancePending) ? 2000 : false),
   })
   const instance = useQuery({
     queryKey: ['environment-instance', projectId, instanceId],
     queryFn: () => getEnvironmentInstance(required(projectId), required(instanceId)),
-    enabled: Boolean(projectId && instanceId),
+    enabled: Boolean(featureEnabled && projectId && instanceId),
     refetchInterval: (query) =>
       query.state.data && instancePending(query.state.data) ? 2000 : false,
   })
@@ -76,7 +83,7 @@ export function useEnvironmentLab() {
   }
 
   async function registerTemplate(input: EnvironmentTemplateInput): Promise<boolean> {
-    if (!isSystemAdmin) return false
+    if (!featureEnabled || !isSystemAdmin) return false
     return mutateWithFeedback(
       () => register.mutateAsync(input),
       '环境模板已签名注册',
@@ -88,7 +95,7 @@ export function useEnvironmentLab() {
     templateId: string,
     manifest: EnvironmentTemplateManifest,
   ): Promise<boolean> {
-    if (!isSystemAdmin) return false
+    if (!featureEnabled || !isSystemAdmin) return false
     return mutateWithFeedback(
       () => version.mutateAsync({ templateId, manifest }),
       '环境模板新版本已签名',
@@ -97,7 +104,7 @@ export function useEnvironmentLab() {
   }
 
   async function disableTemplate(templateId: string): Promise<void> {
-    if (!isSystemAdmin) return
+    if (!featureEnabled || !isSystemAdmin) return
     await mutateWithFeedback(
       () => disable.mutateAsync(templateId),
       '环境模板已停用',
@@ -106,7 +113,7 @@ export function useEnvironmentLab() {
   }
 
   async function startProvision(templateVersionId: string, ttlSeconds: number): Promise<boolean> {
-    if (!canEdit || !projectId) return false
+    if (!featureEnabled || !canEdit || !projectId) return false
     const targetProject = projectId
     return mutateWithFeedback(
       () => provision.mutateAsync({ projectId: targetProject, templateVersionId, ttlSeconds }),
@@ -116,7 +123,7 @@ export function useEnvironmentLab() {
   }
 
   async function startCleanup(targetInstanceId: string): Promise<void> {
-    if (!canEdit || !projectId) return
+    if (!featureEnabled || !canEdit || !projectId) return
     const targetProject = projectId
     await mutateWithFeedback(
       () => cleanup.mutateAsync({ projectId: targetProject, instanceId: targetInstanceId }),
@@ -153,9 +160,11 @@ export function useEnvironmentLab() {
   }
 
   return {
+    featureFlags,
+    featureEnabled,
     projectId,
-    isSystemAdmin,
-    canEdit,
+    isSystemAdmin: isSystemAdmin && featureEnabled,
+    canEdit: canEdit && featureEnabled,
     canExecute,
     permissions,
     templates,

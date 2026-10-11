@@ -1,3 +1,4 @@
+import { type V3FeatureFlags } from '../features/capabilities/capability-service'
 import { updateCanvasDimensions, type CanvasDimensions } from './editor/canvas-dimensions'
 import { workflowLayoutKey } from './editor/layout-preferences'
 import WorkflowContextMenu from './WorkflowContextMenu'
@@ -140,6 +141,7 @@ type DesignerProps = {
   surface?: 'embedded' | 'workspace'
   workflowId?: string
   projectId?: string | null
+  capabilities?: NodeCapabilities
   environmentId?: string | null
   definition: WorkflowDefinition
   apis: ApiDefinition[]
@@ -167,6 +169,8 @@ type DesignerProps = {
   focusActions?: ReactNode
   onChange: (definition: WorkflowDefinition) => void
 }
+
+type NodeCapabilities = { flags?: V3FeatureFlags; loading: boolean; failed: boolean }
 
 export type ProposalGraphStatus = 'added' | 'modified' | 'removed' | 'rewired'
 
@@ -225,6 +229,7 @@ type ReadyDesignerProps = DesignerProps & {
 }
 
 function WorkflowDesignerReady({
+  capabilities,
   projectId,
   environmentId,
   surface = 'embedded',
@@ -769,6 +774,7 @@ function WorkflowDesignerReady({
       <WorkflowShortcutHelp open={shortcutHelp} onClose={() => setShortcutHelp(false)} />
       <DesignerModeToolbar mode={mode}>
         <DesignerToolbar
+          capabilities={capabilities}
           workflowSettings={
             <WorkflowSettingsEditor
               definition={definition}
@@ -1357,6 +1363,7 @@ function workflowReference(workflow: Workflow | undefined) {
 }
 
 function DesignerToolbar({
+  capabilities,
   workflowSettings,
   libraryContainer,
   showDataReferences,
@@ -1426,6 +1433,7 @@ function DesignerToolbar({
   showDataReferences: boolean
   onDataReferences: (value: boolean) => void
   projectId?: string | null
+  capabilities?: NodeCapabilities
   runtimeMode?: 'run' | 'history'
   runtimeNavigation?: ReactNode
   apiSelection?: string
@@ -1630,6 +1638,7 @@ function DesignerToolbar({
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
         items={createNodeLibraryItems({
+          capabilities,
           editable,
           projectId,
           apiSelection,
@@ -1683,6 +1692,7 @@ function DesignerToolbar({
 type NodeLibraryInput = {
   editable: boolean
   projectId?: string | null
+  capabilities?: NodeCapabilities
   apiSelection?: string
   apiSelectionOverride?: ApiDefinition
   apis: ApiDefinition[]
@@ -1727,8 +1737,8 @@ function createNodeLibraryItems(input: NodeLibraryInput): NodeLibraryItem[] {
     resourceControl?: ReactNode,
   ): NodeLibraryItem => ({
     ...nodeRegistryItem(id),
-    disabled: Boolean(unavailableReason),
-    unavailableReason,
+    disabled: Boolean(unavailableReason || nodeFeatureReason(input, id)),
+    unavailableReason: nodeFeatureReason(input, id) ?? unavailableReason,
     resourceControl,
     configurationAction: nodeConfigurationAction(input, id, unavailableReason),
     onAdd,
@@ -2881,4 +2891,20 @@ function mergePublishedWorkflows(
   const byId = new Map(workflows.map((workflow) => [workflow.id, workflow]))
   if (override && override.project_id === projectId) byId.set(override.id, override)
   return [...byId.values()].filter((workflow) => (workflow.current_version ?? 0) > 0)
+}
+
+const nodeFeatureFlags: Partial<Record<NodeRegistryKey, keyof V3FeatureFlags>> = {
+  graphql: 'multi_protocol',
+  grpc: 'multi_protocol',
+  'kafka.produce': 'event_protocols',
+  'kafka.consume': 'event_protocols',
+  'websocket.exchange': 'event_protocols',
+}
+function nodeFeatureReason(input: NodeLibraryInput, id: NodeRegistryKey): string | undefined {
+  const flag = nodeFeatureFlags[id]
+  if (!flag || !input.projectId) return undefined
+  if (input.capabilities?.failed) return '模块能力读取失败，请刷新后重试'
+  if (!input.capabilities) return undefined
+  if (input.capabilities.loading) return '正在读取模块能力'
+  return input.capabilities.flags?.[flag] ? undefined : '模块能力当前关闭，请由管理员启用'
 }

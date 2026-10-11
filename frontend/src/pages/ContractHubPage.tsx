@@ -1,3 +1,4 @@
+import CatalogPagination from '../components/CatalogPagination'
 import {
   ApartmentOutlined,
   CheckCircleOutlined,
@@ -127,6 +128,11 @@ function ContractHubWorkspace() {
           <div className="contract-hub-grid">
             <ServiceGraphPanel graph={state.graph.data} loading={state.graph.isLoading} />
             <FailedEvidencePanel checks={checks} />
+          </div>
+          <div className="catalog-controls">
+            <CatalogPagination query={state.services} label="服务目录" />
+            <CatalogPagination query={state.pacts} label="Pact 契约" />
+            <CatalogPagination query={state.checks} label="兼容判断" />
           </div>
           <UnifiedContractsPanel
             services={services}

@@ -1,3 +1,5 @@
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import CatalogPagination from '../components/CatalogPagination'
 import { DownloadOutlined, PlusOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -36,7 +38,7 @@ export default function QualityCenterPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [riskOpen, setRiskOpen] = useState(false)
   const records = pageItems(state.flaky.data)
-  const latest = firstPageItem(state.runs.data)
+  const latest = firstPageItem(state.latestRun.data)
   return (
     <>
       <div className="page-heading">
@@ -60,12 +62,21 @@ export default function QualityCenterPage() {
           </Button>
         </Space>
       </div>
+      <QueryFailureNotice
+        queries={[state.gates, state.latestRun, state.permissions, state.featureFlags]}
+      />
       <QualityOverview
         gateCount={listItems(state.gates.data).length}
         flakyCount={records.filter((item) => item.flaky_score > 0).length}
         quarantinedCount={records.filter((item) => item.quarantined).length}
         latest={latest}
       />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.flaky} label="Flaky 目录" />
+        <CatalogPagination query={state.runs} label="计划运行／基线" />
+        <CatalogPagination query={state.risks} label="风险记录" />
+        <CatalogPagination query={state.impactRuns} label="影响证据" />
+      </div>
       <QualityRiskReadState state={state} />
       <div className="quality-grid">
         <Card title="质量门禁" loading={state.gates.isLoading}>

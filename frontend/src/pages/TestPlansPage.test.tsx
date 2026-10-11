@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -296,6 +296,100 @@ describe('TestPlansPage', () => {
     await browser.click(screen.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))
   })
+  it('edits scheduling without changing frozen targets, stops future scheduling, and revokes tokens', async () => {
+    let current = { ...plan }
+    let revoked = false
+    const patches: unknown[] = []
+    installMaintenanceHandlers(
+      () => current,
+      () => revoked,
+    )
+    server.use(
+      http.patch(`/api/v1/projects/${project.id}/test-plans/${plan.id}`, async ({ request }) => {
+        const payload = (await request.json()) as Record<string, unknown>
+        expect(payload).not.toHaveProperty('items')
+        patches.push(payload)
+        current = { ...current, ...payload }
+        return HttpResponse.json(current)
+      }),
+      http.delete(`/api/v1/projects/${project.id}/service-tokens/${serviceToken.id}`, () => {
+        revoked = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText(plan.name)
+    await waitFor(() => expect(screen.getByRole('button', { name: '编辑' })).toBeEnabled())
+    await browser.click(screen.getByRole('button', { name: '编辑' }))
+    const dialog = within(
+      (await screen.findByText('编辑测试计划')).closest<HTMLElement>('.ant-modal')!,
+    )
+    await browser.clear(dialog.getByLabelText('计划名称'))
+    await browser.type(dialog.getByLabelText('计划名称'), '工作日回归')
+    await browser.click(dialog.getByLabelText('调度方式'))
+    await browser.click(
+      await screen.findByText('手动', { selector: '.ant-select-item-option-content' }),
+    )
+    await browser.click(dialog.getByRole('button', { name: /保\s*存/ }))
+    await screen.findByText('工作日回归')
+    expect(patches[0]).toMatchObject({ schedule_interval_seconds: null, schedule_cron: null })
+    await browser.click(screen.getByRole('switch', { name: '启停计划 工作日回归' }))
+    await waitFor(() => expect(patches.at(-1)).toEqual({ enabled: false }))
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: '启停计划 工作日回归' })).not.toBeChecked(),
+    )
+    await browser.click(screen.getByRole('button', { name: /撤\s*销/ }))
+    await browser.click(screen.getAllByRole('button', { name: /撤\s*销/ }).at(-1)!)
+    await waitFor(() => expect(revoked).toBe(true))
+    expect(await screen.findByText('已撤销')).toBeVisible()
+  })
+
+  it('links each run item to its actual execution and preserves missing reports', async () => {
+    installMaintenanceHandlers(
+      () => plan,
+      () => false,
+    )
+    const executionId = 'actual-frozen-execution'
+    const item = {
+      id: 'run-item',
+      target_type: 'workflow',
+      target_id: workflow.id,
+      target_version: 1,
+      workflow_id: workflow.id,
+      workflow_version: 1,
+      environment_id: environment.id,
+      status: 'failed',
+      attempts: 2,
+      max_retries: 1,
+      workflow_execution_id: executionId,
+      error_message: '断言未通过',
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs/${queuedRun.id}`, () =>
+        HttpResponse.json({
+          run: { ...queuedRun, status: 'failed' },
+          items: [item, { ...item, id: 'not-started', workflow_execution_id: null }],
+        }),
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '详情' }))
+    const dialog = within(
+      (await screen.findByText('计划运行详情')).closest<HTMLElement>('.ant-modal')!,
+    )
+    expect(await dialog.findByRole('link', { name: '查看报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=${executionId}`,
+    )
+    expect(dialog.getByRole('link', { name: '定位编排' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=${workflow.id}&execution=${executionId}`,
+    )
+    expect(dialog.getByText('尚无执行报告')).toBeInTheDocument()
+    expect(dialog.getAllByText('2 次尝试 · 最多 1 次重试')).toHaveLength(2)
+  })
 })
 
 function renderPage(role: 'owner' | 'viewer' = 'owner') {
@@ -340,4 +434,33 @@ function withoutRawToken(created: CreatedServiceToken): ServiceToken {
   const { token, ...stored } = created
   void token
   return stored
+}
+
+function installMaintenanceHandlers(planValue: () => CreatedTestPlan, revoked: () => boolean) {
+  server.use(
+    http.get('/api/v1/projects', () =>
+      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/workflows`, () =>
+      HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([environment])),
+    http.get(`/api/v1/projects/${project.id}/test-cases`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/test-suites`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/test-plans`, () =>
+      HttpResponse.json({ items: [planValue()], total: 1, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
+      HttpResponse.json({ items: [queuedRun], total: 1, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/service-tokens`, () =>
+      HttpResponse.json([
+        { ...withoutRawToken(serviceToken), revoked_at: revoked() ? '2026-10-11T00:00:00Z' : null },
+      ]),
+    ),
+  )
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, type TestPlan } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
@@ -17,6 +17,9 @@ import {
   listTestPlanRuns,
   listTestPlans,
   runTestPlan,
+  updateTestPlan,
+  revokeServiceToken,
+  type UpdateTestPlanInput,
   type CreateTestPlanInput,
 } from './task-plan-service'
 
@@ -26,6 +29,12 @@ export function useTestPlans() {
   const { projects, projectId, selectProject } = useProjectContext()
   const { canEdit, canManageTokens, permissions } = useProjectCapabilities()
   const [createOpen, setCreateOpen] = useRouteScopedState(projectId, null, false)
+  const [editingPlan, setEditingPlan] = useRouteScopedState<TestPlan | null>(projectId, null, null)
+  const [selectedRunId, setSelectedRunId] = useRouteScopedState<string | null>(
+    projectId,
+    null,
+    null,
+  )
   const [planPage, setPlanPage] = useRouteScopedState(projectId, null, 1)
   const [runPage, setRunPage] = useRouteScopedState(projectId, null, 1)
   const [revealedSecret, setRevealedSecret] = useRouteScopedState<{
@@ -85,6 +94,58 @@ export function useTestPlans() {
   const createToken = useMutation({
     mutationFn: (project: string) => createServiceToken(project),
   })
+  const updatePlan = useMutation({
+    mutationFn: ({
+      project,
+      id,
+      input,
+    }: {
+      project: string
+      id: string
+      input: Partial<UpdateTestPlanInput>
+    }) => updateTestPlan(project, id, input),
+  })
+  const revokeToken = useMutation({
+    mutationFn: ({ project, id }: { project: string; id: string }) =>
+      revokeServiceToken(project, id),
+  })
+
+  async function editPlan(input: UpdateTestPlanInput) {
+    if (!projectId || !canEdit || !editingPlan) return
+    try {
+      await updatePlan.mutateAsync({ project: projectId, id: editingPlan.id, input })
+      setEditingPlan(null)
+      await refresh('test-plans')
+      void message.success('测试计划已更新')
+    } catch (error) {
+      void message.error(apiErrorMessage(error))
+    }
+  }
+
+  async function togglePlan(plan: TestPlan) {
+    if (!projectId || !canEdit) return
+    try {
+      await updatePlan.mutateAsync({
+        project: projectId,
+        id: plan.id,
+        input: { enabled: !plan.enabled },
+      })
+      await refresh('test-plans')
+    } catch (error) {
+      void message.error(apiErrorMessage(error))
+    }
+  }
+
+  async function revoke(tokenId: string) {
+    if (!projectId || !canManageTokens) return
+    try {
+      await revokeToken.mutateAsync({ project: projectId, id: tokenId })
+      await refresh('service-tokens')
+      void message.success('CI Token 已撤销')
+    } catch (error) {
+      void message.error(apiErrorMessage(error))
+    }
+  }
 
   async function addPlan(input: CreateTestPlanInput) {
     if (!projectId || !canEdit) return
@@ -138,6 +199,15 @@ export function useTestPlans() {
 
   return {
     projects,
+    editingPlan,
+    setEditingPlan,
+    editPlan,
+    togglePlan,
+    updatingPlan: updatePlan.isPending,
+    revoke,
+    revokingToken: revokeToken.isPending,
+    selectedRunId,
+    setSelectedRunId,
     projectId,
     canEdit,
     canManageTokens,

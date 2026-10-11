@@ -18,6 +18,7 @@ class AssertionInput(BaseModel):
 
 class ExecuteAPIRequest(BaseModel):
     environment_id: UUID
+    version: int | None = Field(default=None, ge=1)
     service_override: str | None = Field(default=None, max_length=160)
     endpoint_variant: str | None = Field(default=None, max_length=80)
     runtime_variables: dict[VariableName, str] = Field(default_factory=dict)

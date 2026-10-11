@@ -34,6 +34,7 @@ async def execute_api(
             project_id=project_id,
             definition_id=definition_id,
             environment_id=payload.environment_id,
+            version_number=payload.version,
             runtime_variables=payload.runtime_variables,
             runtime_headers=payload.runtime_headers,
             body_override=payload.body_override,

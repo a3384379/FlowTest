@@ -479,6 +479,57 @@ describe('ReportsPage', () => {
     await waitFor(() => expect(reads).toBe(1))
     expect(URL.createObjectURL).toHaveBeenCalled()
   })
+  it('filters and searches failed nodes without changing selected evidence links', async () => {
+    const passed = {
+      ...detail.nodes[0],
+      id: 'passed-node',
+      node_id: 'request',
+      name: '查询请求',
+      status: 'passed',
+      assertion: null,
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json({ ...detail, nodes: [passed, detail.nodes[0]] }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}&node=assert-order`)
+    const browser = userEvent.setup()
+    const trajectory = within(await screen.findByLabelText('执行轨迹'))
+    expect(trajectory.getByRole('button', { name: /查询请求/ })).toBeVisible()
+    const link = screen.getByRole('link', { name: '定位画布' }).getAttribute('href')
+    await browser.click(trajectory.getByText('仅失败节点'))
+    expect(trajectory.queryByRole('button', { name: /查询请求/ })).not.toBeInTheDocument()
+    expect(trajectory.getByRole('button', { name: /校验订单状态/ })).toBeVisible()
+    await browser.type(trajectory.getByLabelText('搜索执行节点'), 'missing')
+    expect(trajectory.getByText('没有匹配的执行节点')).toBeVisible()
+    expect(screen.getByRole('link', { name: '定位画布' })).toHaveAttribute('href', link)
+  })
+
+  it('keeps notification management disabled for an editor', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'editor',
+          capabilities: ['read', 'edit', 'execute'],
+          matrix: {},
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/reports/trends`, () => HttpResponse.json(trend)),
+      http.get(`/api/v1/projects/${project.id}/notification-webhooks`, () =>
+        HttpResponse.json([webhook]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/notification-deliveries`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByRole('switch', { name: `启用 ${webhook.name}` })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /配置通知/ })).toBeDisabled()
+  })
 })
 
 function renderPage(initialEntry?: string) {

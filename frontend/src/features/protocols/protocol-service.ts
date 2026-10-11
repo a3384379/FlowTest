@@ -43,10 +43,14 @@ export type EventDebugResult = {
   duration_ms: number
 }
 
-export async function listGraphQLSchemas(projectId: string): Promise<Page<SchemaArtifact>> {
+export async function listGraphQLSchemas(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<SchemaArtifact>> {
   return (
     await apiClient.get<Page<SchemaArtifact>>('/graphql/schemas', {
-      params: { project_id: projectId, page: 1, page_size: 100 },
+      params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
 }
@@ -75,10 +79,14 @@ export async function executeGraphQL(input: {
   return (await apiClient.post<ProtocolDebugResult>('/graphql/execute', input)).data
 }
 
-export async function listGrpcDescriptors(projectId: string): Promise<Page<SchemaArtifact>> {
+export async function listGrpcDescriptors(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<SchemaArtifact>> {
   return (
     await apiClient.get<Page<SchemaArtifact>>('/grpc/descriptors', {
-      params: { project_id: projectId, page: 1, page_size: 100 },
+      params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
 }
@@ -126,10 +134,12 @@ export async function executeGrpc(input: {
 export async function listEventSources(
   projectId: string,
   kind?: EventSource['kind'],
+  page = 1,
+  pageSize = 100,
 ): Promise<Page<EventSource>> {
   return (
     await apiClient.get<Page<EventSource>>('/event-sources', {
-      params: { project_id: projectId, kind, page: 1, page_size: 100 },
+      params: { project_id: projectId, kind, page, page_size: pageSize },
     })
   ).data
 }
@@ -149,10 +159,12 @@ export async function createEventSource(input: {
 export async function listEventSchemas(
   projectId: string,
   sourceId: string,
+  page = 1,
+  pageSize = 100,
 ): Promise<Page<SchemaArtifact>> {
   return (
     await apiClient.get<Page<SchemaArtifact>>(`/event-sources/${sourceId}/schemas`, {
-      params: { project_id: projectId, page: 1, page_size: 100 },
+      params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
 }

@@ -1,10 +1,13 @@
 import { Alert, Form, Input, Modal, Select } from 'antd'
 
+import ApiResourceSelect from '../api-console/ApiResourceSelect'
+
 import type { ApiDefinition } from '../../lib/api'
 import type { CreateWorkflowInput } from './use-workflows'
 import { WORKFLOW_TEMPLATES } from './workflow-templates'
 
 type Props = {
+  projectId?: string | null
   open: boolean
   submitting: boolean
   apis: ApiDefinition[]
@@ -12,7 +15,14 @@ type Props = {
   onCreate: (input: CreateWorkflowInput) => Promise<void>
 }
 
-export default function CreateWorkflowDialog({ open, submitting, apis, onClose, onCreate }: Props) {
+export default function CreateWorkflowDialog({
+  projectId,
+  open,
+  submitting,
+  apis,
+  onClose,
+  onCreate,
+}: Props) {
   const [form] = Form.useForm<CreateWorkflowInput>()
   const template = Form.useWatch('template', form)
   return (
@@ -46,12 +56,7 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
           label={template === 'async_poll' ? '状态查询 API（GET）' : '初始 API 节点'}
           rules={[{ required: true, message: '请选择接口' }]}
         >
-          <Select
-            showSearch
-            optionFilterProp="label"
-            placeholder={template === 'async_poll' ? '选择只读状态查询接口' : '选择初始接口'}
-            options={apis.map((api) => ({ value: api.id, label: api.name }))}
-          />
+          <ApiResourceSelect projectId={projectId} known={apis} label="初始接口选择" />
         </Form.Item>
         {template === 'async_poll' && (
           <>
@@ -71,12 +76,7 @@ export default function CreateWorkflowDialog({ open, submitting, apis, onClose, 
                 }),
               ]}
             >
-              <Select
-                showSearch
-                optionFilterProp="label"
-                placeholder="选择只提交一次的接口"
-                options={apis.map((api) => ({ value: api.id, label: api.name }))}
-              />
+              <ApiResourceSelect projectId={projectId} known={apis} label="任务提交接口选择" />
             </Form.Item>
             <Alert
               type="info"

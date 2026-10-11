@@ -293,6 +293,21 @@ describe('EnvironmentLabPage', () => {
     await userEvent.setup().click(screen.getAllByTitle('Next Page')[1])
     await waitFor(() => expect(pages).toEqual([1, 2]))
   })
+  it('explains disabled capability and avoids unavailable catalog requests', async () => {
+    let reads = 0
+    installHandlers()
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ environment_lab: false })),
+      http.get('/api/v1/projects/:id/environment-instances', () => {
+        reads += 1
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('环境实验室当前关闭')).toBeVisible()
+    expect(reads).toBe(0)
+    expect(screen.queryByRole('button', { name: '注册环境模板' })).not.toBeInTheDocument()
+  })
 })
 
 function installHandlers({

@@ -68,10 +68,10 @@ export async function createAIJob(input: AIJobInput): Promise<AIJob> {
   return (await apiClient.post<AIJob>('/ai/jobs', input)).data
 }
 
-export async function listAIJobs(projectId: string): Promise<Page<AIJob>> {
+export async function listAIJobs(projectId: string, page = 1, pageSize = 50): Promise<Page<AIJob>> {
   return (
     await apiClient.get<Page<AIJob>>('/ai/jobs', {
-      params: { project_id: projectId, page: 1, page_size: 50 },
+      params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
 }

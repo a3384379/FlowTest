@@ -120,6 +120,7 @@ class MultipartBody(BaseModel):
 
 
 class APIVersionInput(BaseModel):
+    base_version: int | None = Field(default=None, ge=1)
     method: HttpMethod
     path: str = Field(min_length=1, max_length=2048)
     query_parameters: list[RequestParameter] = Field(default_factory=list, max_length=200)

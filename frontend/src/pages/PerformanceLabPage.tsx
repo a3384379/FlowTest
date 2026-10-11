@@ -1,3 +1,4 @@
+import FeatureDisabledNotice from '../components/FeatureDisabledNotice'
 import {
   CheckCircleOutlined,
   ExperimentOutlined,
@@ -63,9 +64,14 @@ export default function PerformanceLabPage() {
   const [versionBase, setVersionBase] = useState<PerformanceScenario | null>(null)
   const scenarios = state.scenarios.data?.items ?? []
   const runs = state.runs.data?.items ?? []
-  const latest = runs.at(0)
+  const latest = latestPerformanceRun(state.latestRun.data)
   return (
     <>
+      <FeatureDisabledNotice
+        flags={state.featureFlags.data}
+        feature="performance_lab"
+        label="性能实验室"
+      />
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>性能实验室</Typography.Title>
@@ -579,7 +585,9 @@ function LabReadErrors({ state }: { state: ReturnType<typeof usePerformanceLab> 
   const reads = [
     { query: state.scenarios, name: '场景目录' },
     { query: state.runs, name: '运行目录' },
+    { query: state.latestRun, name: '最新运行' },
     { query: state.permissions, name: '项目权限' },
+    { query: state.featureFlags, name: '模块能力' },
   ]
   return (
     <>
@@ -899,4 +907,10 @@ function PerformanceRunIdentity({ run }: { run: PerformanceRun }) {
       <Descriptions.Item label="失败代码">{run.error_code ?? '未提供'}</Descriptions.Item>
     </Descriptions>
   )
+}
+
+function latestPerformanceRun(
+  data: { items: PerformanceRun[] } | undefined,
+): PerformanceRun | undefined {
+  return data?.items.at(0)
 }

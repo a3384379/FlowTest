@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useSearchParams } from 'react-router-dom'
@@ -43,21 +44,27 @@ export function useImpactAnalysis() {
     setParams(next)
   }
   const enabled = Boolean(projectId && flags.data?.impact_engine)
-  const mappings = useQuery({
-    queryKey: ['impact-mappings', projectId],
-    queryFn: () => listImpactMappings(required(projectId)),
+  const mappings = useCatalogQuery(
+    'impact-mappings',
+    projectId,
+    (page) => listImpactMappings(required(projectId), page, 20),
     enabled,
-  })
+    '',
+    {},
+  )
   const catalog = useQuery({
     queryKey: ['impact-catalog', projectId],
     queryFn: () => getImpactCatalog(required(projectId)),
     enabled,
   })
-  const runs = useQuery({
-    queryKey: ['impact-runs', projectId],
-    queryFn: () => listImpactRuns(required(projectId)),
+  const runs = useCatalogQuery(
+    'impact-runs',
+    projectId,
+    (page) => listImpactRuns(required(projectId), page, 20),
     enabled,
-  })
+    '',
+    {},
+  )
   const effectiveRunId = selectedRunId ?? runs.data?.items[0]?.id ?? null
   const detail = useQuery({
     queryKey: ['impact-run', projectId, effectiveRunId],

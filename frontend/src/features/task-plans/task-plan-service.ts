@@ -9,6 +9,7 @@ import {
   type TestCase,
   type TestPlan,
   type TestPlanRun,
+  type TestPlanRunDetail,
   type TestSuite,
   type Workflow,
 } from '../../lib/api'
@@ -141,6 +142,39 @@ export async function runTestPlan(
     { headers: { 'Idempotency-Key': idempotencyKey } },
   )
   return response.data
+}
+
+export type UpdateTestPlanInput = Pick<
+  TestPlan,
+  | 'name'
+  | 'description'
+  | 'enabled'
+  | 'schedule_interval_seconds'
+  | 'schedule_cron'
+  | 'schedule_timezone'
+  | 'queue_priority'
+>
+
+export async function updateTestPlan(
+  projectId: string,
+  planId: string,
+  input: Partial<UpdateTestPlanInput>,
+): Promise<TestPlan> {
+  return (await apiClient.patch<TestPlan>(`/projects/${projectId}/test-plans/${planId}`, input))
+    .data
+}
+
+export async function getTestPlanRun(projectId: string, runId: string): Promise<TestPlanRunDetail> {
+  const detail = (
+    await apiClient.get<TestPlanRunDetail>(`/projects/${projectId}/test-plan-runs/${runId}`)
+  ).data
+  if (detail.run.id !== runId || detail.run.project_id !== projectId)
+    throw new Error('运行详情不属于当前项目或运行')
+  return detail
+}
+
+export async function revokeServiceToken(projectId: string, tokenId: string): Promise<void> {
+  await apiClient.delete(`/projects/${projectId}/service-tokens/${tokenId}`)
 }
 
 export async function listTestPlanRuns(projectId: string, page = 1): Promise<Page<TestPlanRun>> {

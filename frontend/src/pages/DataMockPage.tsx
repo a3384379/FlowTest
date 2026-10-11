@@ -1,3 +1,5 @@
+import CatalogPagination from '../components/CatalogPagination'
+import { useCatalogQuery } from '../lib/catalog-query'
 import {
   DeleteOutlined,
   LinkOutlined,
@@ -409,11 +411,14 @@ function MockRouteWorkspace({
     queryKey: ['mock-routes', projectId, service.id],
     queryFn: () => listMockRoutes(projectId, service.id),
   })
-  const logs = useQuery({
-    queryKey: ['mock-logs', projectId, service.id],
-    queryFn: () => listMockLogs(projectId, service.id),
-    refetchInterval: 2_000,
-  })
+  const logs = useCatalogQuery(
+    'mock-logs',
+    projectId,
+    (page) => listMockLogs(projectId, service.id, page, 20),
+    true,
+    service.id,
+    { refetchInterval: 2_000 },
+  )
   const createRouteMutation = useMutation({
     mutationFn: (input: MockRouteInput) => createMockRoute(projectId, service.id, input),
     onSuccess: async () => {
@@ -440,6 +445,7 @@ function MockRouteWorkspace({
       )}
       <Col xs={24} xl={canEdit ? 15 : 24}>
         <QueryFailureNotice queries={[routes, logs]} />
+        <CatalogPagination query={logs} label="Mock 请求日志" />
         <Tabs
           items={[
             {

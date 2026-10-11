@@ -1005,3 +1005,89 @@ async def test_duplicate_query_values_are_preserved(asset_client: AsyncClient) -
     assert response.status_code == 201, response.text
     version = response.json()["version"]
     assert [item["value"] for item in version["query_parameters"]] == ["a", "b"]
+
+
+@pytest.mark.asyncio
+async def test_api_folder_filter_pagination_and_move(asset_client: AsyncClient) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    root = f"/api/v1/projects/{project['id']}"
+    folder = await asset_client.post(f"{root}/folders", headers=headers, json={"name": "订单"})
+    folder_id = folder.json()["id"]
+    for index in range(3):
+        response = await asset_client.post(
+            f"{root}/apis",
+            headers=headers,
+            json={
+                "name": f"接口{index}",
+                "folder_id": folder_id if index < 2 else None,
+                "request": {"method": "GET", "path": f"/orders/{index}"},
+            },
+        )
+        assert response.status_code == 201, response.text
+    for page in (1, 2):
+        result = await asset_client.get(
+            f"{root}/apis",
+            headers=headers,
+            params={"folder_id": folder_id, "page": page, "page_size": 1, "search": "orders"},
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["total"] == 2
+        assert len(result.json()["items"]) == 1
+        assert result.json()["items"][0]["folder_id"] == folder_id
+    unfiled = await asset_client.get(f"{root}/apis", headers=headers, params={"unfiled": True})
+    assert unfiled.json()["total"] == 1
+    asset_id = unfiled.json()["items"][0]["id"]
+    moved = await asset_client.patch(
+        f"{root}/apis/{asset_id}", headers=headers, json={"folder_id": folder_id}
+    )
+    assert moved.status_code == 200, moved.text
+    empty = await asset_client.get(f"{root}/apis", headers=headers, params={"unfiled": True})
+    assert empty.json()["total"] == 0
+    other = await _create_project(asset_client, headers, name="其他项目")
+    foreign = await asset_client.get(
+        f"/api/v1/projects/{other['id']}/apis", headers=headers, params={"folder_id": folder_id}
+    )
+    assert foreign.status_code == 404
+    invalid = await asset_client.get(
+        f"{root}/apis", headers=headers, params={"folder_id": folder_id, "unfiled": True}
+    )
+    assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_api_save_rejects_stale_baseline_and_retains_history(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    root = f"/api/v1/projects/{project['id']}/apis"
+    request = {"method": "GET", "path": "/v1", "variables": {"module": "orders"}}
+    created = await asset_client.post(
+        root, headers=headers, json={"name": "接口", "request": request}
+    )
+    assert created.status_code == 201, created.text
+    asset_id = created.json()["definition"]["id"]
+    saved = await asset_client.post(
+        f"{root}/{asset_id}/versions",
+        headers=headers,
+        json={**request, "base_version": 1, "path": "/v2"},
+    )
+    assert saved.status_code == 201, saved.text
+    stale = await asset_client.post(
+        f"{root}/{asset_id}/versions",
+        headers=headers,
+        json={**request, "base_version": 1, "path": "/stale"},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["code"] == "API_VERSION_CONFLICT"
+    assert stale.json()["error"]["trace_id"]
+    versions = await asset_client.get(f"{root}/{asset_id}/versions", headers=headers)
+    assert sorted(item["version"] for item in versions.json()) == [1, 2]
+    current = await asset_client.get(f"{root}/{asset_id}", headers=headers)
+    assert current.json()["version"]["path"] == "/v2"
+    historical = await asset_client.get(
+        f"{root}/{asset_id}", headers=headers, params={"version": 1}
+    )
+    assert historical.json()["version"]["path"] == "/v1"
+    assert historical.json()["version"]["variables"] == {"module": "orders"}

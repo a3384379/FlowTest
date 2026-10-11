@@ -82,7 +82,17 @@ class APIAssetRepository:
             ).all()
         )
 
-    async def get_definition(self, definition_id: UUID) -> APIDefinition | None:
+    async def get_definition(
+        self, definition_id: UUID, *, for_update: bool = False
+    ) -> APIDefinition | None:
+        if for_update:
+            query = (
+                select(APIDefinition)
+                .where(APIDefinition.id == definition_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            return (await self._session.execute(query)).scalar_one_or_none()
         return await self._session.get(APIDefinition, definition_id)
 
     async def find_imported_definition(
@@ -120,8 +130,14 @@ class APIAssetRepository:
         service_id: UUID | None = None,
         version: int | None = None,
         include_inactive: bool = False,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[APIDefinition], int]:
         filters = [APIDefinition.project_id == project_id]
+        if folder_id is not None:
+            filters.append(APIDefinition.folder_id == folder_id)
+        elif unfiled:
+            filters.append(APIDefinition.folder_id.is_(None))
         selected_version = version if version is not None else APIDefinition.current_version
         if not include_inactive:
             filters.append(APIDefinition.is_active.is_(True))

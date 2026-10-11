@@ -461,3 +461,46 @@ async def _create_execution_assets(
     )
     assert definition.status_code == 201, definition.text
     return project_id, environment_id, definition.json()["definition"]["id"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_execute_uses_selected_version_for_request_and_snapshot(
+    execution_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(execution_client)
+    project_id, environment_id, definition_id = await _create_execution_assets(
+        execution_client, headers
+    )
+    root = f"/api/v1/projects/{project_id}/apis/{definition_id}"
+    original = await execution_client.get(root, headers=headers)
+    saved = await execution_client.post(
+        f"{root}/versions",
+        headers=headers,
+        json={"method": "GET", "path": "/latest", "base_version": 1},
+    )
+    assert saved.status_code == 201, saved.text
+    target = respx.post("http://target.example.com/users").mock(
+        return_value=Response(200, json={"selected": "v1"})
+    )
+    result = await execution_client.post(
+        f"{root}/execute",
+        headers=headers,
+        json={
+            "environment_id": environment_id,
+            "version": 1,
+            "assertions": [{"kind": "status_code", "expected": 200}],
+        },
+    )
+    assert result.status_code == 200, result.text
+    execution = result.json()["execution"]
+    assert execution["api_version_id"] == original.json()["version"]["id"]
+    assert execution["request_method"] == "POST"
+    assert execution["request_url"] == "http://target.example.com/users"
+    assert execution["status"] == "passed"
+    assert target.call_count == 1
+    missing = await execution_client.post(
+        f"{root}/execute", headers=headers, json={"environment_id": environment_id, "version": 999}
+    )
+    assert missing.status_code == 404, missing.text
+    assert target.call_count == 1

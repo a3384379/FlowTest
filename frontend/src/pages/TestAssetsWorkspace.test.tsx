@@ -176,8 +176,8 @@ it('loads the selected server directory page and uses aggregate counts without p
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
   expect(pages).toHaveBeenCalledExactlyOnceWith(1, 20, folder.id)
   const directory = within(screen.getByLabelText('浏览测试资产目录'))
-  expect(directory.getByText('全部测试资产').closest('button')).toHaveTextContent('101')
-  expect(directory.getByText('核心回归').closest('button')).toHaveTextContent('2')
+  expect(directory.getByText('全部测试资产').closest('.ant-tree-treenode')).toHaveTextContent('101')
+  expect(directory.getByText('核心回归').closest('.ant-tree-treenode')).toHaveTextContent('2')
   expect(writes).not.toHaveBeenCalled()
 })
 
@@ -188,9 +188,7 @@ it('clears selection outside the new directory without moving records', async ()
   const toolbar = within(screen.getByText('仅选择当前页').closest<HTMLElement>('.asset-toolbar')!)
   fireEvent.click(unfiled.querySelector<HTMLInputElement>('input[type="checkbox"]')!)
   expect(toolbar.getByText(/批量移动 \(1\)/).closest('button')).toBeEnabled()
-  fireEvent.click(
-    within(screen.getByLabelText('浏览测试资产目录')).getByText('核心回归').closest('button')!,
-  )
+  fireEvent.click(within(screen.getByLabelText('浏览测试资产目录')).getByText('核心回归'))
   expect((await screen.findByText('目录用例')).closest('tr')).toBeVisible()
   expect(screen.queryByText('未分类用例')).not.toBeInTheDocument()
   expect(screen.getByText('跨页用例').closest('tr')).toBeVisible()

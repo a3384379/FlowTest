@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
@@ -37,15 +38,19 @@ export function useAIReview() {
     queryFn: () => getAIStatus(projectId!),
     enabled: Boolean(projectId),
   })
-  const jobs = useQuery({
-    queryKey: ['ai-jobs', projectId],
-    queryFn: () => listAIJobs(projectId!),
-    enabled: Boolean(projectId),
-    refetchInterval: (query) =>
-      query.state.data?.items.some((job) => ['pending', 'running'].includes(job.status))
-        ? 2000
-        : false,
-  })
+  const jobs = useCatalogQuery(
+    'ai-jobs',
+    projectId,
+    (page) => listAIJobs(projectId!, page, 20),
+    Boolean(projectId),
+    '',
+    {
+      refetchInterval: (query) =>
+        query.state.data?.items.some((job) => ['pending', 'running'].includes(job.status))
+          ? 2000
+          : false,
+    },
+  )
   const activeJobId = selectedJobId ?? jobs.data?.items[0]?.id ?? null
   const activeJobStatus = jobs.data?.items.find((job) => job.id === activeJobId)?.status ?? null
   const suggestions = useQuery({

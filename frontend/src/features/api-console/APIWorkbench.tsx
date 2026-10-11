@@ -3,6 +3,8 @@ import RequestTargetSummary from './RequestTargetSummary'
 import { EditOutlined, SaveOutlined } from '@ant-design/icons'
 import {
   Button,
+  Alert,
+  App,
   Card,
   Checkbox,
   Empty,
@@ -14,6 +16,7 @@ import {
   Tabs,
   Tag,
   Typography,
+  Tooltip,
 } from 'antd'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -30,7 +33,7 @@ import {
 } from './bulk-edit'
 import { BulkEditor, DynamicFields } from './StructuredFields'
 import type { ApiVersionInput } from './api-service'
-import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
+import { apiErrorMessage, type ApiDetail, type ApiVersion, type Artifact } from '../../lib/api'
 
 type APIWorkbenchProps = {
   editable?: boolean
@@ -45,6 +48,8 @@ type APIWorkbenchProps = {
   redactionMode?: BulkRedactionMode
   draftScope?: string
   requestActions?: ReactNode
+  versionActions?: ReactNode
+  targetActions?: ReactNode
 }
 
 export type WorkbenchFields = BodyEditorFields & {
@@ -52,6 +57,7 @@ export type WorkbenchFields = BodyEditorFields & {
   path: string
   query_parameters: Array<KeyValueField & { enabled: boolean }>
   headers: KeyValueField[]
+  variables: KeyValueField[]
   auth_kind: ApiVersion['auth_kind']
   auth_config: KeyValueField[]
   extraction_rules: ApiVersion['extraction_rules']
@@ -98,6 +104,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
         <Space>
           <span>{props.detail.definition.name}</span>
           <Tag color="blue">v{props.detail.version.version}</Tag>
+          {props.versionActions}
           {draft.restored && <Tag color="orange">本地未保存</Tag>}
           {draft.serverChanged && (
             <Tag color="orange">服务器有新版本，已保留本地编辑，请核对后保存</Tag>
@@ -132,6 +139,13 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
         </Space>
       }
     >
+      {draft.error && <Alert type="error" showIcon title={draft.error} />}
+      {draft.serverChanged && (
+        <Button disabled={props.editable === false} onClick={draft.reviewConflict}>
+          核对最新版本并更新编辑基线
+        </Button>
+      )}
+      <ApiContractNotice completeness={props.detail.version.contract_completeness} />
       <Form
         form={form}
         disabled={props.editable === false}
@@ -155,6 +169,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
           {props.requestActions}
         </div>
         <div className="api-request-context">
+          {props.targetActions}
           <Typography.Text type="secondary">
             发送与预览使用已保存版本 v{props.detail.version.version}；编辑后请先保存新版本。
           </Typography.Text>
@@ -177,6 +192,12 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
                   onProgrammaticChange={draft.persistCurrent}
                 />
               ),
+              forceRender: true,
+            },
+            {
+              key: 'variables',
+              label: '接口变量',
+              children: <KeyValueFields name="variables" redactionMode={redactionMode} />,
               forceRender: true,
             },
             {
@@ -224,6 +245,7 @@ function useApiDraft(
   form: ReturnType<typeof Form.useForm<WorkbenchFields>>[0],
   props: APIWorkbenchProps & { detail: ApiDetail },
 ) {
+  const { modal } = App.useApp()
   const session = useDraftSession()
   const identity = JSON.stringify([props.draftScope ?? null, props.detail.definition.id])
   const activeIdentity = useRef(identity)
@@ -231,6 +253,7 @@ function useApiDraft(
   const [restored, setRestored] = useState(false)
   const [storageError, setStorageError] = useState(false)
   const [serverChanged, setServerChanged] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     activeIdentity.current = identity
   }, [identity])
@@ -241,7 +264,7 @@ function useApiDraft(
     const draft = restoreApiSessionDraft(session, identity, props)
     if (draft) session.apis.set(identity, draft)
     if (changedIdentity || !draft)
-      form.setFieldsValue(draft?.fields ?? toFields(props.detail.version))
+      form.setFieldsValue({ ...toFields(props.detail.version), ...draft?.fields })
     baseline.current = { identity, version: incomingVersion }
     queueMicrotask(() => {
       setRestored(Boolean(draft))
@@ -269,6 +292,22 @@ function useApiDraft(
     setRestored(true)
   }
   return {
+    error,
+    reviewConflict: () =>
+      modal.confirm({
+        title: '核对最新版本',
+        content: `服务器 v${props.detail.version.version}：${props.detail.version.method} ${props.detail.version.path}。当前输入会保留；确认后以此版本为基线保存。历史版本可从版本选择中查看。`,
+        okText: '已核对，更新基线',
+        cancelText: '继续核对',
+        onOk: () => {
+          const current = session.apis.get(identity)
+          if (current)
+            session.apis.set(identity, { ...current, baseVersion: props.detail.version.version })
+          persist(form.getFieldsValue(true))
+          setServerChanged(false)
+          setError(null)
+        },
+      }),
     restored,
     storageError,
     serverChanged,
@@ -276,7 +315,15 @@ function useApiDraft(
     persistCurrent: () => queueMicrotask(() => persist(form.getFieldsValue(true))),
     onFinish: async (values: WorkbenchFields) => {
       const generation = session.apis.get(identity)?.generation
-      const saved = await props.onSave(toInput(values))
+      const baseVersion = session.apis.get(identity)?.baseVersion ?? props.detail.version.version
+      let saved: ApiVersion
+      try {
+        saved = await props.onSave({ ...toInput(values), base_version: baseVersion })
+        setError(null)
+      } catch (cause) {
+        setError(apiErrorMessage(cause))
+        return
+      }
       const latest = session.apis.get(identity)
       if (latest && latest.generation !== generation) {
         const persisted = writeApiDraft(
@@ -485,32 +532,46 @@ function HeaderFields({
     )
   }
   return (
-    <Form.List name="headers">
-      {(fields, { add, remove }) => (
-        <DynamicFields
-          fields={fields}
-          onAdd={() => add({ name: '', value: '' })}
-          onRemove={remove}
-          onBulkEdit={() => {
-            const headers = (form.getFieldValue('headers') ?? []) as KeyValueField[]
-            setOriginalHeaders(headers)
-            setBulkText(serializeBulkHeaders(headers, redactionMode))
-            setBulkErrors([])
-          }}
-          render={(field) => (
-            <>
-              <Form.Item name={[field.name, 'name']} rules={[{ required: true }]}>
-                <Input placeholder="名称" />
-              </Form.Item>
-              <Form.Item name={[field.name, 'value']}>
-                <Input
-                  type={redactionMode === 'on' ? 'password' : 'text'}
-                  placeholder="值或 {{secret.NAME}}"
-                />
-              </Form.Item>
-            </>
-          )}
-        />
+    <Form.List
+      name="headers"
+      rules={[
+        {
+          validator: async (_, values: KeyValueField[] = []) => {
+            const names = values.map((item) => item?.name?.trim().toLowerCase()).filter(Boolean)
+            if (new Set(names).size !== names.length)
+              throw new Error('Header 名称不能重复（不区分大小写）')
+          },
+        },
+      ]}
+    >
+      {(fields, { add, remove }, { errors }) => (
+        <>
+          <Form.ErrorList errors={errors} />
+          <DynamicFields
+            fields={fields}
+            onAdd={() => add({ name: '', value: '' })}
+            onRemove={remove}
+            onBulkEdit={() => {
+              const headers = (form.getFieldValue('headers') ?? []) as KeyValueField[]
+              setOriginalHeaders(headers)
+              setBulkText(serializeBulkHeaders(headers, redactionMode))
+              setBulkErrors([])
+            }}
+            render={(field) => (
+              <>
+                <Form.Item name={[field.name, 'name']} rules={[{ required: true }]}>
+                  <Input placeholder="名称" />
+                </Form.Item>
+                <Form.Item name={[field.name, 'value']}>
+                  <Input
+                    type={redactionMode === 'on' ? 'password' : 'text'}
+                    placeholder="值或 {{secret.NAME}}"
+                  />
+                </Form.Item>
+              </>
+            )}
+          />
+        </>
       )}
     </Form.List>
   )
@@ -520,7 +581,7 @@ function KeyValueFields({
   name,
   redactionMode,
 }: {
-  name: 'auth_config'
+  name: 'auth_config' | 'variables'
   redactionMode: BulkRedactionMode
 }) {
   return (
@@ -661,6 +722,7 @@ function toFields(version: ApiVersion): WorkbenchFields {
     path: version.path,
     query_parameters: version.query_parameters,
     headers: toKeyValues(version.headers),
+    variables: toKeyValues(version.variables ?? {}),
     ...toBodyFields(version),
     auth_kind: version.auth_kind,
     auth_config: toKeyValues(version.auth_config),
@@ -681,6 +743,7 @@ function toInput(values: WorkbenchFields): ApiVersionInput {
     path: values.path,
     query_parameters: values.query_parameters ?? [],
     headers: toRecord(values.headers),
+    variables: toRecord(values.variables),
     ...body,
     auth: { kind: values.auth_kind, values: toRecord(values.auth_config) },
     extraction_rules: values.extraction_rules ?? [],
@@ -710,4 +773,20 @@ function parseExpected(value: string): unknown {
   } catch {
     return value
   }
+}
+
+function ApiContractNotice({ completeness }: { completeness?: string }) {
+  const label =
+    completeness === 'full'
+      ? '完整契约 · 手工保存会变为部分契约'
+      : completeness === 'partial'
+        ? '部分契约 · 保存仅更新请求配置'
+        : '契约完整度未提供'
+  return (
+    <div className="api-contract-notice">
+      <Tooltip title="手工保存保留请求配置，但不会补全响应与 Schema 证据。需要完整契约时，请使用导入预览核对并维护。">
+        <Tag color="warning">{label}</Tag>
+      </Tooltip>
+    </div>
+  )
 }
