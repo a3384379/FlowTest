@@ -139,6 +139,62 @@ describe('ApiConsolePage', () => {
     expect(screen.getByText('"old snapshot"')).toBeVisible()
   })
 
+  it('executes a selected historical version with a chosen environment while keeping configuration read-only', async () => {
+    let sent: unknown
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([environment, { ...environment, id: 'other-env', name: '其他环境' }]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/versions`, () =>
+        HttpResponse.json([{ version: 2 }, { version: 1 }]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, ({ request }) => {
+        const version = Number(new URL(request.url).searchParams.get('version') ?? 2)
+        return HttpResponse.json({
+          definition: { ...apiDefinition, current_version: 2 },
+          version: {
+            id: `api-v${version}`,
+            api_definition_id: apiDefinition.id,
+            version,
+            method: 'GET',
+            path: `/v${version}/users`,
+            query_parameters: [],
+            variables: [],
+            headers: {},
+            body_kind: 'none',
+            body: null,
+            auth_kind: 'none',
+            auth_config: {},
+            extraction_rules: [],
+            assertions: [],
+          },
+        })
+      }),
+      http.post(
+        `/api/v1/projects/${project.id}/apis/${apiDefinition.id}/execute`,
+        async ({ request }) => {
+          sent = await request.json()
+          return HttpResponse.json(executionDetail)
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: '接口版本' }))
+    await browser.click(screen.getByText('v1（只读）'))
+    expect(await screen.findByDisplayValue('/v1/users')).toBeDisabled()
+    expect(screen.getByRole('button', { name: /保存新版本/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /发送请求/ })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '临时 Service' })).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: 'Endpoint Variant' })).toBeEnabled()
+    await browser.click(screen.getByRole('combobox', { name: '发送环境' }))
+    await browser.click(screen.getByText(environment.name))
+    await browser.click(screen.getByRole('button', { name: /发送请求/ }))
+    expect(await screen.findByText('接口执行通过')).toBeVisible()
+    expect(sent).toMatchObject({ environment_id: environment.id, version: 1 })
+    expect(screen.getByLabelText('请求路径')).toBeDisabled()
+  })
+
   it('allows viewers to read historical evidence while editing and sending remain disabled', async () => {
     authenticateTestUser({ ...user, is_system_admin: false })
     server.use(

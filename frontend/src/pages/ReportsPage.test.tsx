@@ -115,6 +115,13 @@ const artifact: Artifact = {
 describe('ReportsPage', () => {
   beforeEach(() => {
     server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'owner',
+          capabilities: ['read', 'edit', 'execute', 'manage_members'],
+          matrix: { owner: [], editor: [], viewer: [] },
+        }),
+      ),
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
       ),
@@ -479,6 +486,38 @@ describe('ReportsPage', () => {
     await waitFor(() => expect(reads).toBe(1))
     expect(URL.createObjectURL).toHaveBeenCalled()
   })
+  it('allows a system administrator with manage_members to configure and toggle notifications', async () => {
+    let toggled = false
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: 'system_admin',
+          capabilities: ['read', 'edit', 'execute', 'manage_members'],
+          matrix: { owner: [], editor: [], viewer: [] },
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/notification-webhooks`, () =>
+        HttpResponse.json([{ ...webhook, enabled: !toggled }]),
+      ),
+      http.patch(
+        `/api/v1/projects/${project.id}/notification-webhooks/${webhook.id}`,
+        async ({ request }) => {
+          expect(await request.json()).toEqual({ enabled: false })
+          toggled = true
+          return HttpResponse.json({ ...webhook, enabled: false })
+        },
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    const toggle = await screen.findByRole('switch', { name: `启用 ${webhook.name}` })
+    expect(toggle).toBeEnabled()
+    expect(screen.getByRole('button', { name: /配置通知/ })).toBeEnabled()
+    await browser.click(toggle)
+    await waitFor(() => expect(toggle).not.toBeChecked())
+    expect(toggled).toBe(true)
+  })
+
   it('filters and searches failed nodes without changing selected evidence links', async () => {
     const passed = {
       ...detail.nodes[0],

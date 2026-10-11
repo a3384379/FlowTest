@@ -314,7 +314,6 @@ function useConsoleFromRoute(params: URLSearchParams) {
 function canExecuteCurrentApi(state: ConsoleState): boolean {
   return (
     state.canEdit &&
-    state.selectedVersion === null &&
     Boolean(state.apiDetail.data) &&
     !state.viewingHistory &&
     allSelected([state.projectId, state.environmentId, state.apiId])
@@ -366,6 +365,7 @@ function ApiVersionSelector({ state }: { state: ConsoleState }) {
 }
 
 function ApiTargetControls({ state }: { state: ConsoleState }) {
+  const targetDisabled = !state.canEdit || state.viewingHistory
   const inheritedService =
     state.apiDetail.data?.version.service_id ??
     state.environments.data?.find((item) => item.id === state.environmentId)?.default_service_id
@@ -379,6 +379,7 @@ function ApiTargetControls({ state }: { state: ConsoleState }) {
       <Space wrap>
         <Select
           aria-label="发送环境"
+          disabled={targetDisabled}
           value={state.environmentId}
           placeholder={state.environmentPlaceholder}
           status={state.environmentStatus}
@@ -387,6 +388,7 @@ function ApiTargetControls({ state }: { state: ConsoleState }) {
         />
         <Select
           aria-label="临时 Service"
+          disabled={targetDisabled}
           allowClear
           placeholder="继承接口／环境 Service"
           value={state.serviceOverride}
@@ -397,6 +399,7 @@ function ApiTargetControls({ state }: { state: ConsoleState }) {
         />
         <Select
           aria-label="Endpoint Variant"
+          disabled={targetDisabled}
           allowClear
           placeholder="默认 Endpoint"
           value={state.endpointVariant}

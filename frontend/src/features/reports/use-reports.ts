@@ -26,7 +26,7 @@ export function useReports(initialExecutionId?: string) {
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
   const { permissions } = useProjectCapabilities()
-  const canManageNotifications = permissions.data?.effective_role === 'owner'
+  const canManageNotifications = permissions.data?.capabilities.includes('manage_members') ?? false
   const [selectedExecutionId, setSelectedExecutionId] = useRouteScopedSelection(
     projectId,
     initialExecutionId ?? null,
