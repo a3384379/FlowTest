@@ -30,6 +30,8 @@ RUN apt-get update \
         libbrotli1 \
         liblzo2-2 \
         libsodium23 \
+    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' perl-base)" ge '5.36.0-7+deb12u4' \
+    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' libpcre2-8-0)" ge '10.42-1+deb12u2' \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=wal-g /usr/local/bin/wal-g /usr/local/bin/wal-g
