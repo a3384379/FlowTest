@@ -76,6 +76,10 @@ export async function listAIJobs(projectId: string, page = 1, pageSize = 50): Pr
   ).data
 }
 
+export async function getAIJob(jobId: string): Promise<AIJob> {
+  return (await apiClient.get<AIJob>(`/ai/jobs/${jobId}`)).data
+}
+
 export async function listAISuggestions(jobId: string): Promise<AISuggestion[]> {
   return (await apiClient.get<AISuggestion[]>(`/ai/jobs/${jobId}/suggestions`)).data
 }

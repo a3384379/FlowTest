@@ -7,6 +7,7 @@ import {
   apiErrorMessage,
   type ApiDetail,
   type ApiVersion,
+  type Environment,
   type ImportRun,
   type Project,
 } from '../../lib/api'
@@ -46,6 +47,7 @@ import {
 } from './api-service'
 import { getProjectRedactionPolicy } from '../projects/project-service'
 import { useApiExecutions } from './use-api-executions'
+import { invalidateRequestTargets } from '../service-targets/request-target-cache'
 import { useAuthStore } from '../auth/auth-store'
 
 export function useApiConsole(initialApiId?: string, initialExecutionId?: string) {
@@ -99,7 +101,13 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     null,
   )
   const { versions, apiDetail } = useApiVersionQueries(projectId, apiId, selectedVersion)
-  const targetState = useApiRequestTarget(projectId, apiId, environmentId, apiDetail.data?.version)
+  const targetState = useApiRequestTarget(
+    projectId,
+    apiId,
+    environmentId,
+    apiDetail.data?.version,
+    environments.data,
+  )
   const executions = useApiExecutions({
     projectId,
     apiId,
@@ -246,7 +254,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
   async function addEnvironment(input: CreateEnvironmentInput) {
     await withErrorMessage(message.error, async () => {
       const environment = await environmentMutation.mutateAsync(input)
-      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       setEnvironmentSelection(environment.id)
     })
   }
@@ -254,7 +262,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
   async function editEnvironment(environmentId: string, input: Partial<CreateEnvironmentInput>) {
     await withErrorMessage(message.error, async () => {
       await updateEnvironmentMutation.mutateAsync({ environmentId, input })
-      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       void message.success('环境配置已更新')
     })
   }
@@ -262,7 +270,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
   async function archiveEnvironment(targetEnvironmentId: string) {
     await withErrorMessage(message.error, async () => {
       await deleteEnvironmentMutation.mutateAsync(targetEnvironmentId)
-      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       if (targetEnvironmentId === environmentId) setEnvironmentSelection(null)
       void message.success('环境已删除，历史记录仍会保留')
     })
@@ -386,15 +394,17 @@ function useApiRequestTarget(
   apiId: string | null,
   environmentId: string | null,
   version: ApiVersion | undefined,
+  environments: Environment[] | undefined,
 ) {
   const [serviceOverride, setServiceOverride] = useRouteScopedState<string | undefined>(
     projectId,
     apiId,
     undefined,
   )
+  const inheritedService = useResolvedApiService(projectId, apiId, version)
   const [endpointVariant, setEndpointVariant] = useRouteScopedState<string | undefined>(
     projectId,
-    JSON.stringify([apiId, environmentId, serviceOverride]),
+    endpointSelectionScope(apiId, environmentId, serviceOverride, inheritedService, environments),
     undefined,
   )
   const services = useQuery({
@@ -435,6 +445,32 @@ function useApiRequestTarget(
     targetPreview,
     executionOptions: { version: version?.version, serviceOverride, endpointVariant },
   }
+}
+
+function useResolvedApiService(
+  projectId: string | null,
+  apiId: string | null,
+  version: ApiVersion | undefined,
+): ApiVersion['service_id'] {
+  const [resolved, setResolved] = useState({ projectId, apiId, serviceId: version?.service_id })
+  const isCurrentApi = resolved.projectId === projectId && resolved.apiId === apiId
+  const serviceId = version ? version.service_id : isCurrentApi ? resolved.serviceId : undefined
+  if (!isCurrentApi || resolved.serviceId !== serviceId) {
+    setResolved({ projectId, apiId, serviceId })
+  }
+  return serviceId
+}
+
+function endpointSelectionScope(
+  apiId: string | null,
+  environmentId: string | null,
+  serviceOverride: string | undefined,
+  inheritedService: ApiVersion['service_id'],
+  environments: Environment[] | undefined,
+): string {
+  const environment = environments?.find((item) => item.id === environmentId)
+  const service = serviceOverride ?? inheritedService ?? environment?.default_service_id
+  return JSON.stringify([apiId, environmentId, Boolean(serviceOverride), service])
 }
 
 function useProjectRedactionMode(projectId: string | null): 'off' | 'on' {

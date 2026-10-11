@@ -417,9 +417,13 @@ function ApiTargetControls({ state }: { state: ConsoleState }) {
         />
       </Space>
       <QueryFailureNotice queries={[state.targetPreview]} />
-      <RequestTargetSummary compact preview={state.targetPreview.data} />
+      <RequestTargetSummary compact preview={currentRequestPreview(state.targetPreview)} />
     </div>
   )
+}
+
+function currentRequestPreview(preview: ConsoleState['targetPreview']) {
+  return preview.isFetching || preview.isError ? undefined : preview.data
 }
 
 function ApiConsoleHeading({

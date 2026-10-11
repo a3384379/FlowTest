@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { AIJob, AISuggestion } from '../features/ai/ai-service'
 import ProjectTestProvider from '../test/ProjectTestProvider'
@@ -44,6 +44,10 @@ const suggestion: AISuggestion = {
 }
 
 describe('AIAssistantPage', () => {
+  beforeEach(() => {
+    server.use(http.get(`/api/v1/ai/jobs/${job.id}`, () => HttpResponse.json(job)))
+  })
+
   it('keeps pending suggestions readable and disables reviewer and security writes for viewers', async () => {
     let writes = 0
     server.use(
@@ -74,6 +78,42 @@ describe('AIAssistantPage', () => {
     }
     expect(writes).toBe(0)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('reports selected-job status errors and refreshes suggestions after retry', async () => {
+    let available = false
+    server.use(
+      http.get('/api/v1/ai/status', () =>
+        HttpResponse.json({ enabled: true, model: 'review-model', sample_sharing_enabled: false }),
+      ),
+      http.get('/api/v1/ai/jobs', () =>
+        HttpResponse.json({
+          items: [{ ...job, status: 'running' }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get(`/api/v1/ai/jobs/${job.id}`, () =>
+        available
+          ? HttpResponse.json(job)
+          : HttpResponse.json(
+              {
+                error: { code: 'UNAVAILABLE', message: '任务状态暂不可用', trace_id: 'job-trace' },
+              },
+              { status: 503 },
+            ),
+      ),
+      http.get(`/api/v1/ai/jobs/${job.id}/suggestions`, () =>
+        HttpResponse.json(available ? [suggestion] : []),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText('AI 工作区加载失败')).toBeVisible()
+    available = true
+    await userEvent.click(screen.getByRole('button', { name: /重\s*试/ }))
+    expect(await screen.findByText(suggestion.title)).toBeVisible()
+    await waitFor(() => expect(screen.queryByText('AI 工作区加载失败')).not.toBeInTheDocument())
   })
 
   it('does not turn a failed status request into an unopened-feature claim', async () => {

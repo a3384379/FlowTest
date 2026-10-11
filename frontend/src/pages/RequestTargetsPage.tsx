@@ -1,4 +1,5 @@
 import CatalogPagination from '../components/CatalogPagination'
+import { invalidateRequestTargets } from '../features/service-targets/request-target-cache'
 import { useCatalogQuery } from '../lib/catalog-query'
 import { EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
@@ -125,7 +126,7 @@ function RequestTargetsWorkspace() {
   const createService = useMutation({
     mutationFn: (input: ServiceForm) => createRequestService(editable(projectId, canEdit), input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['request-target-services', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       serviceForm.resetFields()
       messageApi.success('请求 Service 已创建')
     },
@@ -134,9 +135,7 @@ function RequestTargetsWorkspace() {
     mutationFn: (input: EndpointForm) =>
       createServiceEndpoint(editable(projectId, canEdit), required(environmentId), input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['request-target-endpoints', projectId, environmentId],
-      })
+      await invalidateRequestTargets(queryClient, projectId)
       endpointForm.resetFields()
       messageApi.success('Endpoint Variant 已创建')
     },
@@ -149,9 +148,7 @@ function RequestTargetsWorkspace() {
         serviceId,
       ),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['request-target-environments', projectId],
-      })
+      await invalidateRequestTargets(queryClient, projectId)
       messageApi.success('环境默认 Service 已更新')
     },
   })
@@ -159,7 +156,7 @@ function RequestTargetsWorkspace() {
     mutationFn: ({ apiId, serviceId }: { apiId: string; serviceId: string | null }) =>
       updateApiDefinition(editable(projectId, canEdit), apiId, { service_id: serviceId }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['request-target-apis', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       messageApi.success('API 默认 Service 已更新')
     },
   })
@@ -177,7 +174,7 @@ function RequestTargetsWorkspace() {
     mutationFn: ({ serviceId, input }: { serviceId: string; input: ServiceEditForm }) =>
       updateRequestService(editable(projectId, canEdit), serviceId, input),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['request-target-services', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       closeEdit(setEditingTarget, setImpactPreview)
       messageApi.success('Service 已更新')
     },
@@ -187,7 +184,7 @@ function RequestTargetsWorkspace() {
     mutationFn: ({ endpointId, input }: { endpointId: string; input: EndpointEditForm }) =>
       updateServiceEndpoint(editable(projectId, canEdit), endpointId, endpointEditPayload(input)),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['request-target-endpoints', projectId] })
+      await invalidateRequestTargets(queryClient, projectId)
       closeEdit(setEditingTarget, setImpactPreview)
       messageApi.success('Endpoint 已更新')
     },
@@ -226,7 +223,7 @@ function RequestTargetsWorkspace() {
         </div>
         <Button
           icon={<ReloadOutlined />}
-          onClick={() => void queryClient.invalidateQueries({ queryKey: ['request-target'] })}
+          onClick={() => void invalidateRequestTargets(queryClient, projectId)}
         >
           刷新
         </Button>
@@ -335,7 +332,13 @@ function ServiceCard({
 }) {
   return (
     <Card title="Service" loading={loading}>
-      <Form<ServiceForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
+      <Form<ServiceForm>
+        name="request-service-create"
+        form={form}
+        layout="vertical"
+        onFinish={onFinish}
+        disabled={readOnly}
+      >
         <Form.Item name="service_key" label="Service Key" rules={[{ required: true }]}>
           <Input placeholder="orders" />
         </Form.Item>
@@ -477,6 +480,7 @@ function EnvironmentEndpointCard({
           <Alert type="info" showIcon title="请先选择环境" />
         )}
         <Form<EndpointForm>
+          name="request-endpoint-create"
           form={endpointForm}
           layout="inline"
           onFinish={onEndpointFinish}
@@ -733,7 +737,13 @@ function ServiceEditFields({
   onFinish: (values: ServiceEditForm) => void
 }) {
   return (
-    <Form<ServiceEditForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
+    <Form<ServiceEditForm>
+      name="request-service-edit"
+      form={form}
+      layout="vertical"
+      onFinish={onFinish}
+      disabled={readOnly}
+    >
       <Row gutter={16}>
         <Col span={12}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
@@ -781,7 +791,13 @@ function EndpointEditFields({
 }) {
   const service = services.find((item) => item.id === endpoint?.service_id)
   return (
-    <Form<EndpointEditForm> form={form} layout="vertical" onFinish={onFinish} disabled={readOnly}>
+    <Form<EndpointEditForm>
+      name="request-endpoint-edit"
+      form={form}
+      layout="vertical"
+      onFinish={onFinish}
+      disabled={readOnly}
+    >
       <Descriptions size="small" column={2}>
         <Descriptions.Item label="Service">
           {service ? `${service.name} · ${service.service_key}` : '-'}

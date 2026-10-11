@@ -3,7 +3,7 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -75,6 +75,27 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it('hides the previous final address when reloading its preview fails', async () => {
+    const { queryClient } = renderPage()
+    const finalAddress = `最终地址：${environment.base_url}/users/me`
+    expect(await screen.findByText(finalAddress)).toBeVisible()
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/preview`, () =>
+        HttpResponse.json(
+          {
+            error: { code: 'UNAVAILABLE', message: '地址预览暂不可用', trace_id: 'preview-trace' },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () =>
+      queryClient.invalidateQueries({ queryKey: ['api-target-preview', project.id] }),
+    )
+    expect(screen.queryByText(finalAddress)).not.toBeInTheDocument()
+    expect(await screen.findByText(/地址预览暂不可用/)).toBeVisible()
+  })
+
   it('shows the selected environment before the project has any API', async () => {
     server.use(
       http.get(`/api/v1/projects/${project.id}/apis`, () =>
@@ -386,7 +407,7 @@ function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <ConfigProvider theme={createIceTheme(true)}>
       <AntdApp>
         <QueryClientProvider client={queryClient}>
@@ -397,4 +418,5 @@ function renderPage(initialEntry?: string) {
       </AntdApp>
     </ConfigProvider>,
   )
+  return { ...view, queryClient }
 }
