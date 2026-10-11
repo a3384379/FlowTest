@@ -11,6 +11,11 @@ import { project, user } from '../../test/fixtures'
 import { server } from '../../test/server'
 
 function harness(section: 'ai' | 'apis' | 'performance') {
+  server.use(
+    http.get('/api/v1/projects', () =>
+      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+    ),
+  )
   authenticateTestUser(user)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   function wrapper({ children }: { children: ReactNode }) {

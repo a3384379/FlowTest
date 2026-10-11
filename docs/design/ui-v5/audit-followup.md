@@ -50,11 +50,11 @@
 | 复审发现 | 修复后的行为 | 回归证据 |
 | --- | --- | --- |
 | 环境更新后最终地址保留旧缓存 | 环境、Service、Endpoint 和 API 绑定编辑统一刷新相关目录与地址预览；先取消旧预览，迟到响应不能覆盖新地址；预览加载或失败时不显示旧地址 | `use-api-console.test.tsx`、`RequestTargetsPage.test.tsx`、`ApiConsolePage.test.tsx` |
-| 历史版本切换后残留不适用的 Variant | Variant 按接口、环境和继承 Service 范围保存；继承 Service 改变时清空；显式 Service 不变时保留合法选择 | `use-api-console.test.tsx` |
+| 历史版本切换后残留不适用的 Variant | Variant 按接口、环境和继承 Service 范围保存；详情加载期间保留已解析的 Service，相同 Service 的版本切换保留选择；继承 Service 改变或解绑时清空；显式 Service 不变时保留合法选择 | `use-api-console.test.tsx` |
 | 页外 AI 任务完成后建议不刷新 | 选中任务通过已有详情接口独立轮询状态，完成后读取建议；状态读取失败可重试，不依赖当前目录页包含该任务 | `use-ai-review.test.tsx`、`AIAssistantPage.test.tsx` |
 | 最新性能摘要停留在排队状态 | 最新运行独立轮询，翻到旧运行页仍可更新到通过、失败或取消终态，并同步 P95 摘要 | `use-performance-lab.test.tsx` |
 | Endpoint 创建与编辑字段 ID 重复 | 四个请求目标表单使用独立名称，弹窗标签关联到实际编辑字段；请求目标刷新按钮刷新真实目录 | `RequestTargetsPage.test.tsx` |
 
-本轮仅修改前端和验证文档，不变更后端、数据库或迁移。独立 Codex max 审计需单独授权外部源码审计调用；在授权与审计完成前不声明该项通过。本地验证、当前提交远程 Required Gate、GitHub 合并和原实例部署分别记录。
+本轮仅修改前端和验证文档，不变更后端、数据库或迁移。用户已授权独立 Codex max 审计和后续修复、复审及提交合并。第一轮独立审计发现一项 P2：未缓存版本的详情加载期间，暂时缺失的 Service 会清空相同 Service 下的 Variant。本地新增回归复现该问题后修复，补充不同 Service、显式覆盖及解绑路径；三个新增 Hook 测试补齐项目目录响应。后续独立复审、本地验证、当前提交远程 Required Gate、GitHub 合并和原实例部署分别记录。
 
-本地最终前端验证：131 个文件、817 项测试通过，语句覆盖率 85.35%、分支 81.44%；完整格式、Lint、类型和构建通过。独立 Compose 预览确认接口请求目标显示和 Endpoint 编辑字段唯一性。后端完整检查、全量 Compose 浏览器矩阵、Windows 包及原 3000 实例部署未在本轮执行。
+第一轮独立审计前的提交验证：131 个文件、817 项测试通过，语句覆盖率 85.35%、分支 81.44%；完整格式、Lint、类型和构建通过，该提交的远程 Required Gate 通过。独立 Compose 预览确认接口请求目标显示和 Endpoint 编辑字段唯一性。新增复审修复的完整验证和远程门禁需按最新提交核对，旧提交证据不代替新提交。后端完整检查、全量 Compose 浏览器矩阵、Windows 包及原 3000 实例部署未在本轮执行。

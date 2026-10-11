@@ -401,9 +401,10 @@ function useApiRequestTarget(
     apiId,
     undefined,
   )
+  const inheritedService = useResolvedApiService(projectId, apiId, version)
   const [endpointVariant, setEndpointVariant] = useRouteScopedState<string | undefined>(
     projectId,
-    endpointSelectionScope(apiId, environmentId, serviceOverride, version, environments),
+    endpointSelectionScope(apiId, environmentId, serviceOverride, inheritedService, environments),
     undefined,
   )
   const services = useQuery({
@@ -446,15 +447,29 @@ function useApiRequestTarget(
   }
 }
 
+function useResolvedApiService(
+  projectId: string | null,
+  apiId: string | null,
+  version: ApiVersion | undefined,
+): ApiVersion['service_id'] {
+  const [resolved, setResolved] = useState({ projectId, apiId, serviceId: version?.service_id })
+  const isCurrentApi = resolved.projectId === projectId && resolved.apiId === apiId
+  const serviceId = version ? version.service_id : isCurrentApi ? resolved.serviceId : undefined
+  if (!isCurrentApi || resolved.serviceId !== serviceId) {
+    setResolved({ projectId, apiId, serviceId })
+  }
+  return serviceId
+}
+
 function endpointSelectionScope(
   apiId: string | null,
   environmentId: string | null,
   serviceOverride: string | undefined,
-  version: ApiVersion | undefined,
+  inheritedService: ApiVersion['service_id'],
   environments: Environment[] | undefined,
 ): string {
   const environment = environments?.find((item) => item.id === environmentId)
-  const service = serviceOverride ?? version?.service_id ?? environment?.default_service_id
+  const service = serviceOverride ?? inheritedService ?? environment?.default_service_id
   return JSON.stringify([apiId, environmentId, Boolean(serviceOverride), service])
 }
 

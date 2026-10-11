@@ -11,6 +11,11 @@ import { apiDefinition, environment, project, user } from '../../test/fixtures'
 import { server } from '../../test/server'
 
 function harness(section: 'ai' | 'apis' | 'performance') {
+  server.use(
+    http.get('/api/v1/projects', () =>
+      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+    ),
+  )
   authenticateTestUser(user)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   function wrapper({ children }: { children: ReactNode }) {
@@ -26,11 +31,13 @@ function harness(section: 'ai' | 'apis' | 'performance') {
 }
 
 it.each([
-  { override: undefined, expectedVariant: undefined },
-  { override: 'new', expectedVariant: 'blue' },
+  { override: undefined, historicalService: 'old-service', expectedVariant: undefined },
+  { override: 'new', historicalService: 'old-service', expectedVariant: 'blue' },
+  { override: undefined, historicalService: 'new-service', expectedVariant: 'blue' },
+  { override: undefined, historicalService: null, expectedVariant: undefined },
 ])(
-  'scopes a variant to the effective service across version changes ($override)',
-  async ({ override, expectedVariant }) => {
+  'scopes a variant to the effective service across version changes ($override, $historicalService)',
+  async ({ override, historicalService, expectedVariant }) => {
     const previews: unknown[] = []
     server.use(
       http.get(`/api/v1/projects/${project.id}/apis`, () =>
@@ -50,7 +57,7 @@ it.each([
             id: `api-v${version}`,
             api_definition_id: apiDefinition.id,
             version,
-            service_id: version === 2 ? 'new-service' : 'old-service',
+            service_id: version === 2 ? 'new-service' : historicalService,
             method: 'GET',
             path: '/users/me',
             headers: {},
@@ -98,7 +105,7 @@ it.each([
     await waitFor(() => expect(result.current.targetPreview.data).toBeDefined())
     act(() => result.current.setSelectedVersion(1))
     await waitFor(() =>
-      expect(result.current.apiDetail.data?.version.service_id).toBe('old-service'),
+      expect(result.current.apiDetail.data?.version.service_id).toBe(historicalService),
     )
     expect(result.current.executionOptions.endpointVariant).toBe(expectedVariant)
     expect(result.current.executionOptions.version).toBe(1)
