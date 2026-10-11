@@ -56,7 +56,15 @@ export default function CreateWorkflowDialog({
           label={template === 'async_poll' ? '状态查询 API（GET）' : '初始 API 节点'}
           rules={[{ required: true, message: '请选择接口' }]}
         >
-          <ApiResourceSelect projectId={projectId} known={apis} label="初始接口选择" />
+          <ApiResourceSelect
+            projectId={projectId}
+            known={apis}
+            label={template === 'async_poll' ? '状态查询 API（GET）' : '初始 API 节点'}
+            onSelection={(api) => form.setFieldValue('apiVersion', api.current_version)}
+          />
+        </Form.Item>
+        <Form.Item name="apiVersion" hidden>
+          <Input type="hidden" />
         </Form.Item>
         {template === 'async_poll' && (
           <>
@@ -76,7 +84,15 @@ export default function CreateWorkflowDialog({
                 }),
               ]}
             >
-              <ApiResourceSelect projectId={projectId} known={apis} label="任务提交接口选择" />
+              <ApiResourceSelect
+                projectId={projectId}
+                known={apis}
+                label="任务提交 API（POST）"
+                onSelection={(api) => form.setFieldValue('submitApiVersion', api.current_version)}
+              />
+            </Form.Item>
+            <Form.Item name="submitApiVersion" hidden preserve={false}>
+              <Input type="hidden" />
             </Form.Item>
             <Alert
               type="info"

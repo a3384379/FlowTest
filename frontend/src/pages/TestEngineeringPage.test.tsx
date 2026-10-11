@@ -255,7 +255,9 @@ describe('TestEngineeringPage', () => {
     const browser = userEvent.setup()
 
     await browser.click(await screen.findByRole('combobox', { name: 'API 契约' }))
-    await browser.click((await screen.findAllByText(`${apiDefinition.name} · v1`)).at(-1)!)
+    await browser.click(
+      await screen.findByText(apiDefinition.name, { selector: '.api-resource-option-name' }),
+    )
     await browser.click(screen.getByRole('combobox', { name: '物化环境' }))
     await browser.click((await screen.findAllByText(environment.name)).at(-1)!)
     await browser.click(await screen.findByRole('combobox', { name: 'Endpoint Variant' }))
@@ -377,7 +379,9 @@ describe('TestEngineeringPage', () => {
     await browser.click(screen.getByRole('button', { name: '只读生成预览' }))
     expect(screen.getByText('请选择 API 契约并生成预览。')).toBeVisible()
     await browser.click(await screen.findByRole('combobox', { name: 'API 契约' }))
-    await browser.click((await screen.findAllByText(`${apiDefinition.name} · v1`)).at(-1)!)
+    await browser.click(
+      await screen.findByText(apiDefinition.name, { selector: '.api-resource-option-name' }),
+    )
     await browser.click(screen.getByRole('combobox', { name: '物化环境' }))
     await browser.click((await screen.findAllByText(environment.name)).at(-1)!)
     await browser.type(screen.getByPlaceholderText('订单创建契约测试'), '待复核 Test Design')

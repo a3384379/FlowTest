@@ -12,7 +12,7 @@ export function useCatalogQuery<T>(
 ) {
   const [page, setPage] = useRouteScopedState(projectId, `${resource}:${scope}`, 1)
   const query = useQuery({
-    queryKey: [resource, projectId, 'catalog', scope, page],
+    queryKey: [resource, projectId, scope, 'catalog', page],
     queryFn: () => load(page),
     enabled: Boolean(projectId && enabled),
     ...options,

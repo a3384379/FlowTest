@@ -44,17 +44,31 @@ it('reaches later pages, retains the selected resource, and resets pages for a s
   )
   const browser = userEvent.setup()
   await browser.click(screen.getByLabelText('测试接口来源'))
-  await screen.findByText(/第一页接口/, { selector: '.ant-select-item-option-content' })
+  await screen.findByText(/第一页接口/, {
+    selector: '.ant-select-item-option-content .api-resource-option-name',
+  })
   await browser.click(screen.getByTitle('2'))
   await browser.click(
-    await screen.findByText(/第二页接口/, { selector: '.ant-select-item-option-content' }),
+    await screen.findByText(/第二页接口/, {
+      selector: '.ant-select-item-option-content .api-resource-option-name',
+    }),
   )
-  expect(screen.getByText(/第二页接口/, { selector: '.ant-select-content' })).toBeVisible()
+  expect(
+    screen.getByText(/第二页接口/, { selector: '.ant-select-content .api-resource-option-name' }),
+  ).toBeVisible()
   await browser.click(screen.getByLabelText('测试接口来源'))
   await browser.type(screen.getByLabelText('测试接口来源'), '搜索')
-  await screen.findByText(/搜索结果接口/, { selector: '.ant-select-item-option-content' })
+  await screen.findByText(/搜索结果接口/, {
+    selector: '.ant-select-item-option-content .api-resource-option-name',
+  })
   await waitFor(() => expect(requests.at(-1)).toEqual({ page: '1', search: '搜索' }))
-  expect(screen.getByText(/第二页接口/, { selector: '.ant-select-content' })).toBeVisible()
+  await browser.clear(screen.getByLabelText('测试接口来源'))
+
+  await waitFor(() =>
+    expect(
+      screen.getByText(/第二页接口/, { selector: '.ant-select-content .api-resource-option-name' }),
+    ).toBeVisible(),
+  )
 })
 
 describe('catalog scope', () => {

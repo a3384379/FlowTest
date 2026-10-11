@@ -75,6 +75,17 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it('shows the selected environment before the project has any API', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText(environment.name, { exact: true })).toBeVisible()
+    expect(screen.getByRole('button', { name: '管理环境' })).toBeEnabled()
+  })
+
   it('pages this API history and opens its frozen request and response without an environment', async () => {
     const frozen = {
       ...executionDetail,

@@ -173,6 +173,7 @@ export default function ApiConsolePage() {
             />
           </Card>
           <Card title="环境管理" className="api-environment-card">
+            <EmptyApiEnvironment state={consoleState} />
             <Typography.Paragraph type="secondary">
               在请求区选择发送环境、Service 和地址版本。
             </Typography.Paragraph>
@@ -306,6 +307,12 @@ function apiDraftScope(userId: string | undefined, projectId: string | null): st
 }
 
 type ConsoleState = ReturnType<typeof useApiConsole>
+
+function EmptyApiEnvironment({ state }: { state: ReturnType<typeof useApiConsole> }) {
+  if (state.apiId) return null
+  const name = state.environments.data?.find((item) => item.id === state.environmentId)?.name
+  return <Typography.Paragraph>{name ?? state.environmentPlaceholder}</Typography.Paragraph>
+}
 
 function useConsoleFromRoute(params: URLSearchParams) {
   return useApiConsole(params.get('focus') ?? undefined, params.get('execution') ?? undefined)

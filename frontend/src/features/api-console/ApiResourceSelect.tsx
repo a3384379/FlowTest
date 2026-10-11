@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Select } from 'antd'
+import { Select, Space, Tag } from 'antd'
 import CatalogPagination from '../../components/CatalogPagination'
 import type { ApiDefinition } from '../../lib/api'
 import { useCatalogQuery } from '../../lib/catalog-query'
@@ -26,7 +26,11 @@ export default function ApiResourceSelect(props: Props) {
         value={props.value}
         disabled={props.disabled}
         options={(props.known ?? []).map((api) => ({ value: api.id, label: api.name }))}
-        onChange={props.onChange}
+        onChange={(id) => {
+          const api = props.known?.find((item) => item.id === id)
+          if (api) props.onSelection?.(api)
+          props.onChange?.(id)
+        }}
       />
     )
   return <ProjectApiResourceSelect {...props} />
@@ -43,14 +47,15 @@ function ProjectApiResourceSelect({
   disabled = false,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const [search, setSearch] = useRouteScopedState(projectId ?? null, label, '')
+  const scope = id ?? label
+  const [search, setSearch] = useRouteScopedState(projectId ?? null, scope, '')
   const [selected, setSelected] = useRouteScopedState<ApiDefinition | undefined>(
     projectId ?? null,
-    label,
+    scope,
     undefined,
   )
   const query = useCatalogQuery(
-    `api-options:${label}`,
+    `api-options:${scope}`,
     projectId ?? null,
     (page) => listApis(projectId!, { page, pageSize: 20, search }),
     open,
@@ -69,7 +74,12 @@ function ProjectApiResourceSelect({
       onOpenChange={setOpen}
       options={[...items.values()].map((item) => ({
         value: item.id,
-        label: `${item.name} · v${item.current_version}`,
+        label: (
+          <Space size={4}>
+            <span className="api-resource-option-name">{item.name}</span>
+            <Tag>v{item.current_version}</Tag>
+          </Space>
+        ),
         disabled: !item.is_active,
       }))}
       onChange={(id) => {
@@ -99,6 +109,6 @@ function apiOptions(
   const items = new Map((page ?? known).map((item) => [item.id, item]))
   if (selected) items.set(selected.id, selected)
   const current = known.find((item) => item.id === value)
-  if (current) items.set(current.id, current)
+  if (current && !items.has(current.id)) items.set(current.id, current)
   return items
 }
