@@ -13,6 +13,8 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
+  Switch,
   Select,
   Space,
   Table,
@@ -26,6 +28,8 @@ import type {
   TestPlanTargetAsset,
 } from '../features/task-plans/task-plan-service'
 import TestPlanTargetSelect from '../features/task-plans/TestPlanTargetSelect'
+import EditTestPlanDialog from '../features/task-plans/EditTestPlanDialog'
+import TestPlanRunDetails from '../features/task-plans/TestPlanRunDetails'
 import type { TestPlanTargetType } from '../features/task-plans/task-plan-service'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
 import { useProjectContext } from '../features/projects/use-project-context'
@@ -136,6 +140,9 @@ function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: str
           total={state.plans.data?.total ?? 0}
           onPageChange={state.setPlanPage}
           onRun={state.execute}
+          onEdit={state.setEditingPlan}
+          onToggle={state.togglePlan}
+          updating={state.updatingPlan}
         />
       </Card>
       <Card title="运行队列" loading={state.runs.isLoading}>
@@ -146,6 +153,7 @@ function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: str
           items={state.runs.data?.items ?? []}
           readOnly={!state.canEdit}
           onCancel={state.cancel}
+          onView={state.setSelectedRunId}
         />
       </Card>
     </div>
@@ -164,6 +172,27 @@ function TokenCard({ state }: { state: TaskState }) {
         locale={{ emptyText: '暂无 CI Token' }}
         columns={[
           { title: '名称', dataIndex: 'name' },
+          { title: '状态', render: (_, token) => (token.revoked_at ? '已撤销' : '有效') },
+          {
+            title: '操作',
+            render: (_, token) => (
+              <Popconfirm
+                title="撤销 CI Token？"
+                description="使用此凭据的 CI 将失去执行权限。"
+                okText="撤销"
+                cancelText="取消"
+                onConfirm={() => state.revoke(token.id)}
+              >
+                <Button
+                  danger
+                  size="small"
+                  disabled={Boolean(token.revoked_at) || state.revokingToken}
+                >
+                  撤销
+                </Button>
+              </Popconfirm>
+            ),
+          },
           { title: '前缀', dataIndex: 'token_prefix', width: 140 },
           {
             title: '权限范围',
@@ -184,6 +213,7 @@ function TokenCard({ state }: { state: TaskState }) {
 function TaskDialogs({ state }: { state: TaskState }) {
   return (
     <>
+      <TaskMaintenanceDialogs state={state} />
       <CreatePlanDialog
         open={state.createOpen}
         workflows={state.workflows.data?.items ?? []}
@@ -215,6 +245,9 @@ function PlanTable({
   total,
   onPageChange,
   onRun,
+  onEdit,
+  onToggle,
+  updating,
 }: {
   items: TestPlan[]
   focusedId?: string
@@ -223,6 +256,9 @@ function PlanTable({
   total: number
   onPageChange: (page: number) => void
   onRun: (id: string) => void
+  onEdit: (plan: TestPlan) => void
+  onToggle: (plan: TestPlan) => Promise<void>
+  updating: boolean
 }) {
   return (
     <Table
@@ -240,6 +276,18 @@ function PlanTable({
       locale={{ emptyText: '暂无测试计划' }}
       columns={[
         { title: '名称', dataIndex: 'name' },
+        {
+          title: '启用',
+          render: (_, plan: TestPlan) => (
+            <Switch
+              aria-label={`启停计划 ${plan.name}`}
+              checked={plan.enabled}
+              loading={updating}
+              disabled={readOnly}
+              onChange={() => void onToggle(plan)}
+            />
+          ),
+        },
         {
           title: '执行项',
           dataIndex: 'items',
@@ -269,16 +317,21 @@ function PlanTable({
         },
         {
           title: '操作',
-          width: 90,
+          width: 150,
           render: (_, plan: TestPlan) => (
-            <Button
-              type="link"
-              disabled={readOnly}
-              icon={<PlayCircleOutlined />}
-              onClick={() => onRun(plan.id)}
-            >
-              运行
-            </Button>
+            <Space>
+              <Button type="link" disabled={readOnly || updating} onClick={() => onEdit(plan)}>
+                编辑
+              </Button>
+              <Button
+                type="link"
+                disabled={readOnly}
+                icon={<PlayCircleOutlined />}
+                onClick={() => onRun(plan.id)}
+              >
+                运行
+              </Button>
+            </Space>
           ),
         },
       ]}
@@ -293,6 +346,7 @@ function RunTable({
   total,
   onPageChange,
   onCancel,
+  onView,
 }: {
   items: TestPlanRun[]
   readOnly: boolean
@@ -300,6 +354,7 @@ function RunTable({
   total: number
   onPageChange: (page: number) => void
   onCancel: (id: string) => void
+  onView: (id: string) => void
 }) {
   return (
     <Table
@@ -331,18 +386,24 @@ function RunTable({
         {
           title: '操作',
           width: 90,
-          render: (_, run: TestPlanRun) =>
-            ['queued', 'running'].includes(run.status) ? (
-              <Button
-                type="link"
-                danger
-                disabled={readOnly}
-                icon={<StopOutlined />}
-                onClick={() => onCancel(run.id)}
-              >
-                取消
+          render: (_, run: TestPlanRun) => (
+            <Space>
+              <Button type="link" onClick={() => onView(run.id)}>
+                详情
               </Button>
-            ) : null,
+              {['queued', 'running'].includes(run.status) && (
+                <Button
+                  type="link"
+                  danger
+                  disabled={readOnly}
+                  icon={<StopOutlined />}
+                  onClick={() => onCancel(run.id)}
+                >
+                  取消
+                </Button>
+              )}
+            </Space>
+          ),
         },
       ]}
     />
@@ -529,4 +590,28 @@ function targetLabel(targetType: TestPlanTargetType) {
 
 function localTime(value: string): string {
   return new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+}
+
+function TaskMaintenanceDialogs({ state }: { state: TaskState }) {
+  return (
+    <>
+      {state.editingPlan && (
+        <EditTestPlanDialog
+          key={state.editingPlan.id}
+          plan={state.editingPlan}
+          saving={state.updatingPlan}
+          onClose={() => state.setEditingPlan(null)}
+          onSave={state.editPlan}
+        />
+      )}
+      {state.projectId && state.selectedRunId && (
+        <TestPlanRunDetails
+          key={state.selectedRunId}
+          projectId={state.projectId}
+          runId={state.selectedRunId}
+          onClose={() => state.setSelectedRunId(null)}
+        />
+      )}
+    </>
+  )
 }

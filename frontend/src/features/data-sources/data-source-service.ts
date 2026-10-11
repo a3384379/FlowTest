@@ -101,10 +101,12 @@ export async function deleteMockRoute(
 export async function listMockLogs(
   projectId: string,
   serviceId: string,
+  page = 1,
+  pageSize = 50,
 ): Promise<Page<MockRequestLog>> {
   const response = await apiClient.get<Page<MockRequestLog>>(
     `/projects/${projectId}/mock-services/${serviceId}/request-logs`,
-    { params: { page: 1, page_size: 50 } },
+    { params: { page, page_size: pageSize } },
   )
   return response.data
 }

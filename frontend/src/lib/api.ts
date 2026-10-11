@@ -628,12 +628,14 @@ export type ApiRequestParameter = {
 export type ApiVersion = {
   id: string
   api_definition_id: string
+  service_id?: string | null
   version: number
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: string
   query_parameters: ApiRequestParameter[]
   headers: Record<string, string>
   variables?: Record<string, string>
+  contract_completeness?: string
   body_kind: 'none' | 'json' | 'raw' | 'form' | 'multipart'
   body: unknown
   auth_kind: 'none' | 'bearer' | 'basic' | 'api_key'
@@ -1545,6 +1547,25 @@ export type TestPlanRun = {
   error_message: string | null
   created_at: string
 }
+
+export type TestPlanRunItem = {
+  id: string
+  target_type: 'workflow' | 'case' | 'suite'
+  target_id: string
+  target_version: number
+  target_snapshot: Record<string, unknown>
+  workflow_id: string
+  environment_id: string
+  workflow_version: number
+  position: number
+  max_retries: number
+  attempts: number
+  status: string
+  workflow_execution_id: string | null
+  error_message: string | null
+}
+
+export type TestPlanRunDetail = { run: TestPlanRun; items: TestPlanRunItem[] }
 
 export type ServiceToken = {
   id: string

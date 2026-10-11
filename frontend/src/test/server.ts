@@ -4,6 +4,22 @@ import { setupServer } from 'msw/node'
 import { project } from './fixtures'
 
 export const server = setupServer(
+  http.get('/api/v1/v3/features', () =>
+    HttpResponse.json({
+      capability_sdk: true,
+      plugin_registry: true,
+      runner_fabric: true,
+      multi_protocol: true,
+      event_protocols: true,
+      performance_lab: true,
+      environment_lab: true,
+      contract_hub: true,
+      impact_engine: true,
+      quality_intelligence: true,
+      integration_flow: true,
+      pact_broker: true,
+    }),
+  ),
   http.get('/api/v1/projects/:projectId/permissions', () =>
     HttpResponse.json({
       effective_role: 'owner',

@@ -1,3 +1,5 @@
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import CatalogPagination from '../components/CatalogPagination'
 import {
   DownloadOutlined,
   EyeOutlined,
@@ -94,8 +96,14 @@ export default function ReportsPage() {
   return (
     <div className="reports-page">
       <ReportHeading state={state} />
+      <QueryFailureNotice
+        queries={[state.reports, state.trend, state.webhooks, state.permissions]}
+      />
       <ReportOverview state={state} />
       <ExecutionCard state={state} />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.deliveries} label="通知投递" />
+      </div>
       <NotificationCard state={state} />
       <ReportDialogs state={state} />
     </div>
@@ -125,7 +133,7 @@ function ReportHeading({ state }: { state: ReportState }) {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          disabled={!state.projectId}
+          disabled={!state.projectId || !state.canManageNotifications}
           onClick={() => state.setWebhookOpen(true)}
         >
           配置通知
@@ -342,6 +350,7 @@ function NotificationCard({ state }: { state: ReportState }) {
               render: (_: unknown, item: NotificationWebhook) => (
                 <Switch
                   checked={item.enabled}
+                  disabled={!state.canManageNotifications}
                   aria-label={`启用 ${item.name}`}
                   onChange={(enabled) => void state.setWebhookEnabled(item.id, enabled)}
                 />

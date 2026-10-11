@@ -1,3 +1,4 @@
+import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { getProjectPermission } from '../projects/project-service'
 import { analyzeGraph } from '../../flow/editor/graph-analysis'
 import { nodeEditorScope } from '../../flow/editor/editor-identity'
@@ -62,7 +63,9 @@ export type CreateWorkflowInput = {
   name: string
   description: string
   apiId: string
+  apiVersion?: number
   submitApiId?: string
+  submitApiVersion?: number
   template?: WorkflowTemplateKind
 }
 export type WorkflowWorkspaceMode = 'draft' | 'run' | 'history'
@@ -79,6 +82,11 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
   const token = useAuthStore((store) => store.token)
   const userId = useAuthStore((store) => store.user?.id)
   const { projects, projectId, selectProject: selectContextProject } = useProjectContext()
+  const featureFlags = useQuery({
+    queryKey: ['v3-feature-flags'],
+    queryFn: getV3FeatureFlags,
+    enabled: Boolean(projectId),
+  })
   const permissions = useQuery({
     queryKey: ['project-permissions', projectId],
     queryFn: () => getProjectPermission(requiredId(projectId)),
@@ -296,9 +304,12 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     mutationFn: (input: CreateWorkflowInput) =>
       createWorkflow(requiredId(projectId), {
         ...input,
-        apiVersion: apis.data?.items.find((api) => api.id === input.apiId)?.current_version,
-        submitApiVersion: apis.data?.items.find((api) => api.id === input.submitApiId)
-          ?.current_version,
+        apiVersion:
+          input.apiVersion ??
+          apis.data?.items.find((api) => api.id === input.apiId)?.current_version,
+        submitApiVersion:
+          input.submitApiVersion ??
+          apis.data?.items.find((api) => api.id === input.submitApiId)?.current_version,
       }),
   })
   const deleteMutation = useMutation({
@@ -709,6 +720,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
   )
 
   return {
+    featureFlags,
     projects,
     projectId,
     selectProject,

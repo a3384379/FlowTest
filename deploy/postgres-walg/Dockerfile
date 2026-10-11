@@ -2,7 +2,7 @@
 
 # WAL-G v3.0.9 release binaries contain fixable Go vulnerabilities. Rebuild the
 # pinned release source with patched Go dependencies until upstream ships them.
-FROM golang:1.27.0-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452 AS wal-g
+FROM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS wal-g
 
 ARG WAL_G_COMMIT=3e493188db28335fb93a45bd680c6ff8fc3028c1
 
@@ -12,8 +12,9 @@ RUN git clone --depth 1 --branch v3.0.9 --single-branch https://github.com/wal-g
 WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go mod edit -go=1.27.0 \
+    go mod edit -go=1.27.2 \
         -require=golang.org/x/crypto@v0.57.0 \
+        -require=golang.org/x/net@v0.60.0 \
         -require=google.golang.org/grpc@v1.83.2 \
     && go mod tidy \
     && CGO_ENABLED=0 go build -mod=readonly -trimpath \
@@ -29,6 +30,8 @@ RUN apt-get update \
         libbrotli1 \
         liblzo2-2 \
         libsodium23 \
+    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' perl-base)" ge '5.36.0-7+deb12u4' \
+    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' libpcre2-8-0)" ge '10.42-1+deb12u2' \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=wal-g /usr/local/bin/wal-g /usr/local/bin/wal-g

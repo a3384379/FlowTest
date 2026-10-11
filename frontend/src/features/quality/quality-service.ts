@@ -119,10 +119,14 @@ export async function createQualityGate(
   return (await apiClient.post<QualityGate>(`/projects/${projectId}/quality-gates`, input)).data
 }
 
-export async function listFlakyTests(projectId: string): Promise<Page<FlakyRecord>> {
+export async function listFlakyTests(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<FlakyRecord>> {
   return (
     await apiClient.get<Page<FlakyRecord>>(`/projects/${projectId}/flaky-tests`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
@@ -139,10 +143,14 @@ export async function setFlakyQuarantine(
   ).data
 }
 
-export async function listQualityRuns(projectId: string): Promise<Page<TestPlanRun>> {
+export async function listQualityRuns(
+  projectId: string,
+  page = 1,
+  pageSize = 20,
+): Promise<Page<TestPlanRun>> {
   return (
     await apiClient.get<Page<TestPlanRun>>(`/projects/${projectId}/test-plan-runs`, {
-      params: { page: 1, page_size: 20 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
@@ -155,10 +163,14 @@ export async function downloadJunit(projectId: string, runId: string): Promise<B
   return new Blob([response.data], { type: 'application/xml' })
 }
 
-export async function listReleaseRisks(projectId: string): Promise<Page<ReleaseRiskSummary>> {
+export async function listReleaseRisks(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<ReleaseRiskSummary>> {
   return (
     await apiClient.get<Page<ReleaseRiskSummary>>(`/projects/${projectId}/release-risks`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }

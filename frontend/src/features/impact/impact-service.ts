@@ -139,10 +139,14 @@ export type ImpactRunInput = {
   schema_diffs: Array<{ baseline_artifact_id: string; current_artifact_id: string }>
 }
 
-export async function listImpactMappings(projectId: string): Promise<Page<ImpactMapping>> {
+export async function listImpactMappings(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<ImpactMapping>> {
   return (
     await apiClient.get<Page<ImpactMapping>>(`/projects/${projectId}/impact/mappings`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
@@ -162,10 +166,14 @@ export async function getImpactCatalog(projectId: string): Promise<ImpactCatalog
   return (await apiClient.get<ImpactCatalog>(`/projects/${projectId}/impact/catalog`)).data
 }
 
-export async function listImpactRuns(projectId: string): Promise<Page<ImpactRunSummary>> {
+export async function listImpactRuns(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<ImpactRunSummary>> {
   return (
     await apiClient.get<Page<ImpactRunSummary>>(`/projects/${projectId}/impact/runs`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }

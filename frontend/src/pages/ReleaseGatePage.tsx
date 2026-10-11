@@ -1,3 +1,5 @@
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import CatalogPagination from '../components/CatalogPagination'
 import { CheckCircleOutlined, CloseCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -36,20 +38,28 @@ export default function ReleaseGatePage() {
   const [decisionOpen, setDecisionOpen] = useState(false)
   return (
     <>
+      <QueryFailureNotice queries={[state.policies, state.latestDecision]} />
       <ReleaseGateHeader
         projectSelected={state.canEdit}
         hasPolicies={Boolean(state.policies.data?.length)}
         onCreatePolicy={() => setPolicyOpen(true)}
         onEvaluate={() => setDecisionOpen(true)}
       />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.decisions} label="门禁判断历史" />
+        <CatalogPagination query={state.qualityRuns} label="质量运行证据" />
+        <CatalogPagination query={state.deploymentChecks} label="契约判断证据" />
+        <CatalogPagination query={state.impactRuns} label="影响证据" />
+        <CatalogPagination query={state.releaseRisks} label="风险证据" />
+      </div>
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>
         <ReleaseOverview
           policyCount={state.policies.data?.length}
           decisionCount={state.decisions.data?.total}
-          latest={state.decisions.data?.items.at(0)}
+          latest={state.latestDecision.data?.items.at(0)}
         />
-        {state.decisions.data?.items[0] && (
-          <LatestDecisionEvidence decision={state.decisions.data.items[0]} />
+        {state.latestDecision.data?.items[0] && (
+          <LatestDecisionEvidence decision={state.latestDecision.data.items[0]} />
         )}
         <PoliciesCard policies={state.policies.data} loading={state.policies.isLoading} />
         <DecisionsCard

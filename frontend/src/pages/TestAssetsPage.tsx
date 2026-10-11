@@ -25,11 +25,13 @@ import {
   Select,
   Space,
   Table,
+  Tree,
+  AutoComplete,
   Tabs,
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -548,11 +550,23 @@ function AssetDirectory({
   onManage: () => void
 }) {
   const entries = [
-    { id: 'all', name: '全部测试资产' },
-    { id: 'unfiled', name: '未分类' },
-    ...folders
-      .map((folder) => ({ ...folder, name: directoryPath(folder, folders) }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    {
+      key: 'all',
+      title: (
+        <span>
+          全部测试资产 <Tag>{assetDirectoryCount(counts, 'all')}</Tag>
+        </span>
+      ),
+    },
+    {
+      key: 'unfiled',
+      title: (
+        <span>
+          未分类 <Tag>{assetDirectoryCount(counts, 'unfiled')}</Tag>
+        </span>
+      ),
+    },
+    ...assetFolderNodes(folders, counts),
   ]
   return (
     <Card
@@ -565,18 +579,18 @@ function AssetDirectory({
       }
     >
       <nav aria-label="浏览测试资产目录">
-        {entries.map((entry) => (
-          <Button
-            key={entry.id}
-            type={selected === entry.id ? 'primary' : 'text'}
-            aria-pressed={selected === entry.id}
-            onClick={() => onBrowse(entry.id)}
-          >
-            <FolderOpenOutlined />
-            <span>{entry.name}</span>
-            <Tag>{assetDirectoryCount(counts, entry.id)}</Tag>
-          </Button>
-        ))}
+        <Tree
+          key={folders.map((folder) => `${folder.id}:${folder.parent_id}`).join(',')}
+          blockNode
+          defaultExpandAll
+          showIcon
+          icon={<FolderOpenOutlined />}
+          treeData={entries}
+          selectedKeys={[selected]}
+          onSelect={(keys) => {
+            if (keys[0]) onBrowse(String(keys[0]))
+          }}
+        />
       </nav>
       <Typography.Paragraph type="secondary">
         数量由服务端统计全部筛选结果；列表按目录分页读取。批量选择只影响当前页。
@@ -593,18 +607,23 @@ function assetDirectoryCount(counts: AssetDirectoryCounts | undefined, id: strin
   return row ? row.cases + row.suites : 0
 }
 
-function directoryPath(folder: Folder, folders: Folder[]): string {
-  const names = [folder.name]
-  const visited = new Set([folder.id])
-  let parentId = folder.parent_id
-  while (parentId && !visited.has(parentId)) {
-    visited.add(parentId)
-    const parent = folders.find((item) => item.id === parentId)
-    if (!parent) break
-    names.unshift(parent.name)
-    parentId = parent.parent_id
-  }
-  return names.join(' / ')
+function assetFolderNodes(
+  folders: Folder[],
+  counts: AssetDirectoryCounts | undefined,
+  parentId: string | null = null,
+): Array<{ key: string; title: ReactNode; children?: ReturnType<typeof assetFolderNodes> }> {
+  return folders
+    .filter((folder) => folder.parent_id === parentId)
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+    .map((folder) => ({
+      key: folder.id,
+      title: (
+        <span>
+          {folder.name} <Tag>{assetDirectoryCount(counts, folder.id)}</Tag>
+        </span>
+      ),
+      children: assetFolderNodes(folders, counts, folder.id),
+    }))
 }
 
 type AssetState = ReturnType<typeof useTestAssets>
@@ -631,14 +650,15 @@ function AssetHeading({ state, onFilter }: { state: AssetState; onFilter: () => 
             state.setSearch(value)
           }}
         />
-        <Input
+        <AutoComplete
+          options={assetTagOptions(state)}
           aria-label="标签筛选"
           allowClear
           placeholder="标签筛选"
           value={state.tag}
-          onChange={(event) => {
+          onChange={(value: string) => {
             onFilter()
-            state.setTag(event.target.value)
+            state.setTag(value)
           }}
         />
       </Space>
@@ -2147,4 +2167,11 @@ function suiteDialogDefaults(current: TestSuite | null): Partial<SuiteFormValues
       current.draft_definition.items.map((item) => [item.test_case_id, item.test_case_version]),
     ),
   }
+}
+
+function assetTagOptions(state: AssetState): Array<{ value: string }> {
+  const tags = [...(state.cases.data?.items ?? []), ...(state.suites.data?.items ?? [])].flatMap(
+    (item) => item.tags,
+  )
+  return [...new Set(tags)].sort().map((value) => ({ value }))
 }

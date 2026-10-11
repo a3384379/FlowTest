@@ -4,7 +4,7 @@ ARG FLOWTEST_DOCKER_CLI_BASE=docker-cli-base-source
 ARG FLOWTEST_ENVIRONMENT_DAEMON_BASE=environment-daemon-source
 
 FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
-FROM golang:1.26.6-alpine3.23@sha256:5978cc992ad5ef96a7469713c8af849c1433824761ce3be2c56381403cd8d9a3 AS go-toolchain
+FROM golang:1.26.9-alpine3.23@sha256:6750308561953d451210ed1a8086d36c8c8bdcbf672d38d9d0d424b8a7a0216c AS go-toolchain
 
 RUN apk add --no-cache git make
 ENV GOTOOLCHAIN=local
@@ -15,9 +15,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
     go mod init flowtest.local/k6-build; \
-    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.2; \
+    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0; \
     GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2; \
-    go version -m /out/k6 | grep -F 'go1.26.6'; \
+    go version -m /out/k6 | grep -F 'go1.26.9'; \
     go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     /out/k6 version | grep -F 'k6 v2.2.0'
 
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
     cp vendor.mod go.mod; \
     cp vendor.sum go.sum; \
-    go get google.golang.org/grpc@v1.83.2; \
+    go get google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0; \
     go mod vendor; \
     grep -Fx '# google.golang.org/grpc v1.83.2' vendor/modules.txt; \
     mv go.mod vendor.mod; \
@@ -48,7 +48,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         GO_STRIP=1 \
         ./scripts/build/binary; \
     install -D build/docker /out/docker; \
-    go version -m /out/docker | grep -F 'go1.26.6'; \
+    go version -m /out/docker | grep -F 'go1.26.9'; \
     /out/docker --version | grep -F 'Docker version 29.7.2'
 
 FROM scratch AS docker-cli-base-source
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.56.0; \
+    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -76,9 +76,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         BUILDFLAGS=-buildvcs=false \
         PREFIX=/out \
         ./hack/make.sh binary-daemon; \
-    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.6'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.9'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
-    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.56.0'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.57.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS containerd-builder
@@ -93,8 +93,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
     git tag v2.3.3; \
     go get \
-        golang.org/x/sync@v0.22.0 \
-        golang.org/x/text@v0.41.0 \
+        golang.org/x/sync@v0.23.0 \
+        golang.org/x/text@v0.42.0 \
+        golang.org/x/net@v0.60.0 \
         google.golang.org/grpc@v1.83.2; \
     go mod download all; \
     go mod vendor; \
@@ -140,18 +141,16 @@ RUN set -eux; \
     ctr --version
 
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
-RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0'
+RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0' 'zlib>=1.3.2-r1'
 
 FROM debian:trixie-slim AS python-base-source
 
-COPY patches/cpython-3.13-cve-2026-82049.patch /tmp/cpython-3.13-cve-2026-82049.patch
-
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.15" \
-    PYTHON_SHA256="1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76"
+    PYTHON_VERSION="3.13.16" \
+    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
 
-# Docker Hub had not published the 3.13.15 slim tag when S12 was cut. Build the
-# signed CPython release using the same inputs as the official Docker image.
+# Build the signed CPython maintenance release with an explicit checksum.
+# 3.13.16 includes the SSLContext and previously backported tarfile fixes.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
@@ -195,9 +194,6 @@ RUN set -eux; \
     mkdir -p /usr/src/python; \
     tar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \
     rm python.tar.xz; \
-    patch --directory=/usr/src/python --strip=1 \
-        < /tmp/cpython-3.13-cve-2026-82049.patch; \
-    rm /tmp/cpython-3.13-cve-2026-82049.patch; \
     cd /usr/src/python; \
     build_arch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
     ./configure \

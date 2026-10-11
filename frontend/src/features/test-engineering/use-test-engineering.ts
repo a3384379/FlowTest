@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { App } from 'antd'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, type ApiDefinition } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
@@ -29,6 +29,11 @@ export function useTestEngineering(initialProposalId: string | null = null) {
   const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null>(
     projectId,
     initialProposalId,
+    null,
+  )
+  const [selectedApi, setSelectedApi] = useRouteScopedState<ApiDefinition | null>(
+    projectId,
+    null,
     null,
   )
   const enabled = Boolean(projectId)
@@ -127,6 +132,9 @@ export function useTestEngineering(initialProposalId: string | null = null) {
   }
 
   return {
+    selectedApi,
+    setSelectedApi,
+    linkedProposal,
     projectId,
     canEdit,
     apis,

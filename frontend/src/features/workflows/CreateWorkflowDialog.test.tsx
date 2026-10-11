@@ -1,3 +1,7 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
+import { apiDefinition, project } from '../../test/fixtures'
+import { server } from '../../test/server'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -5,6 +9,58 @@ import { describe, expect, it, vi } from 'vitest'
 import CreateWorkflowDialog from './CreateWorkflowDialog'
 
 describe('CreateWorkflowDialog', () => {
+  it.each([
+    { state: 'outside the loaded catalog', known: [] },
+    { state: 'newer than the loaded catalog', known: [apiDefinition] },
+  ])('creates a template with the displayed API version $state', async ({ known }) => {
+    const onCreate = vi.fn(async () => {})
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({
+          items: [{ ...apiDefinition, name: '目录之外的接口', current_version: 7 }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <CreateWorkflowDialog
+          projectId={project.id}
+          open
+          submitting={false}
+          apis={known}
+          onClose={() => {}}
+          onCreate={onCreate}
+        />
+      </QueryClientProvider>,
+    )
+    const browser = userEvent.setup()
+    await browser.type(screen.getByLabelText('名称'), '远端接口流程')
+    await browser.click(screen.getByRole('combobox', { name: '初始 API 节点' }))
+    expect(await screen.findByRole('option', { name: '目录之外的接口 · v7' })).toHaveAttribute(
+      'aria-label',
+      '目录之外的接口 · v7',
+    )
+
+    await browser.click(
+      await screen.findByText(/目录之外的接口/, {
+        selector: '.ant-select-item-option-content .api-resource-option-name',
+      }),
+    )
+    expect(screen.getByText('v7', { selector: '.ant-select-content .ant-tag' })).toHaveTextContent(
+      'v7',
+    )
+    await browser.click(screen.getByRole('button', { name: '创建草稿' }))
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ apiId: apiDefinition.id, apiVersion: 7 }),
+      ),
+    )
+  })
+
   it('passes the selected control template into draft creation', async () => {
     const user = userEvent.setup()
     const onCreate = vi.fn(async () => {})
@@ -39,6 +95,7 @@ describe('CreateWorkflowDialog', () => {
         name: '分页检查',
         description: '',
         apiId: '00000000-0000-0000-0000-000000000001',
+        apiVersion: 2,
         template: 'pagination',
       }),
     )
@@ -79,7 +136,9 @@ describe('CreateWorkflowDialog', () => {
         name: '异步任务',
         description: '',
         apiId: query.id,
+        apiVersion: 2,
         submitApiId: submit.id,
+        submitApiVersion: 2,
         template: 'async_poll',
       }),
     )

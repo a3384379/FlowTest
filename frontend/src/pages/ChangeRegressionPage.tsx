@@ -1,3 +1,4 @@
+import CatalogPagination from '../components/CatalogPagination'
 import {
   Alert,
   Button,
@@ -86,6 +87,10 @@ function ChangeRegressionWorkspace() {
           showIcon
           message="低置信度缺失测试只生成 Draft；必须完成逐项 Review 和人工批准后才能执行。"
         />
+        <div className="catalog-controls">
+          <CatalogPagination query={state.plans} label="可选测试计划" />
+          <CatalogPagination query={state.runs} label="回归历史" />
+        </div>
         <Card title="创建变更回归链路">
           <RegressionQueryStatus state={state} />
           <Form

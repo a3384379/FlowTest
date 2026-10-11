@@ -1,3 +1,4 @@
+import FeatureDisabledNotice from '../components/FeatureDisabledNotice'
 import {
   CloudServerOutlined,
   DeleteOutlined,
@@ -70,6 +71,11 @@ export default function EnvironmentLabPage() {
   const instances = state.instances.data?.items ?? []
   return (
     <>
+      <FeatureDisabledNotice
+        flags={state.featureFlags.data}
+        feature="environment_lab"
+        label="环境实验室"
+      />
       <div className="page-heading">
         <div>
           <Space align="center">
@@ -98,7 +104,10 @@ export default function EnvironmentLabPage() {
         title="仅接受平台声明式模板"
         description="禁止上传任意 Compose、命令、脚本和卷挂载；所有镜像必须固定 Digest 并进入管理员白名单。"
       />
-      <EnvironmentOverview totalTemplates={state.templates.data?.total} instances={instances} />
+      <EnvironmentOverview
+        totalTemplates={state.templates.data?.total}
+        instances={instanceRows(state.instances.data)}
+      />
       <ProvisionCard
         templates={templates.filter((item) => item.status === 'active')}
         disabled={!state.canEdit}
@@ -174,7 +183,7 @@ function EnvironmentOverview({
   instances,
 }: {
   totalTemplates: number | undefined
-  instances: EnvironmentInstance[]
+  instances: EnvironmentInstance[] | undefined
 }) {
   return (
     <Row gutter={16} className="performance-overview">
@@ -191,7 +200,7 @@ function EnvironmentOverview({
         <Card>
           <Statistic
             title="本页就绪实例"
-            value={instances.filter((item) => item.status === 'ready').length}
+            value={instances?.filter((item) => item.status === 'ready').length ?? '—'}
             prefix={<CloudServerOutlined />}
           />
         </Card>
@@ -200,7 +209,7 @@ function EnvironmentOverview({
         <Card>
           <Statistic
             title="本页已完成清理"
-            value={instances.filter((item) => item.cleanup_status === 'completed').length}
+            value={instances?.filter((item) => item.cleanup_status === 'completed').length ?? '—'}
           />
         </Card>
       </Col>
@@ -707,6 +716,7 @@ function EnvironmentReadErrors({ state }: { state: ReturnType<typeof useEnvironm
         { query: state.templates, name: '模板目录' },
         { query: state.instances, name: '实例目录' },
         { query: state.permissions, name: '项目权限' },
+        { query: state.featureFlags, name: '模块能力' },
       ]
         .filter((read) => read.query.isError)
         .map((read) => (
@@ -923,4 +933,10 @@ function isVersionDialog(
   state: { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null,
 ): state is { mode: 'version'; template: EnvironmentTemplateVersion } {
   return state?.mode === 'version'
+}
+
+function instanceRows(
+  data: { items: EnvironmentInstance[] } | undefined,
+): EnvironmentInstance[] | undefined {
+  return data?.items
 }

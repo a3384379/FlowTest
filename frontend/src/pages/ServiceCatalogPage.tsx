@@ -181,8 +181,8 @@ function CatalogOverview({ loading, values }: CatalogOverviewProps) {
 function summaryValue(
   values: CatalogOverviewProps['values'],
   key: keyof NonNullable<CatalogOverviewProps['values']>,
-): number {
-  return values ? values[key] : 0
+): number | '—' {
+  return values ? values[key] : '—'
 }
 
 function ServiceTable({

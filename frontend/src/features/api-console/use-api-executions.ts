@@ -6,6 +6,7 @@ import { useAuthStore } from '../auth/auth-store'
 import { apiErrorMessage, type ApiVersion, type ExecutionDetail } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { executeApi, getApiExecution, listExecutions } from './api-service'
+import type { ApiExecutionOptions } from './api-service'
 
 type Input = {
   projectId: string | null
@@ -14,6 +15,7 @@ type Input = {
   environmentId: string | null
   expectedStatus: number
   assertions?: ApiVersion['assertions']
+  target?: ApiExecutionOptions
 }
 
 type RunInput = {
@@ -22,6 +24,7 @@ type RunInput = {
   environmentId: string
   expectedStatus: number
   assertions?: ApiVersion['assertions']
+  target?: ApiExecutionOptions
   scope: string
   identity: string
   sequence: number
@@ -65,6 +68,7 @@ export function useApiExecutions(input: Input) {
         target.environmentId,
         target.expectedStatus,
         target.assertions,
+        target.target,
       ),
     onSuccess: async (value, target) => {
       assertOwnership(value, target.projectId, target.apiId)
@@ -93,6 +97,7 @@ export function useApiExecutions(input: Input) {
       environmentId: required(input.environmentId),
       expectedStatus: input.expectedStatus,
       assertions: input.assertions,
+      target: input.target,
       scope,
       identity,
       sequence,

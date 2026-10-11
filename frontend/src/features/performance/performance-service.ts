@@ -164,10 +164,11 @@ export async function runPerformanceScenario(
 export async function listPerformanceRuns(
   projectId: string,
   page = 1,
+  pageSize = 20,
 ): Promise<Page<PerformanceRun>> {
   return (
     await apiClient.get<Page<PerformanceRun>>(`/projects/${projectId}/performance-runs`, {
-      params: { page, page_size: 20 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }

@@ -176,6 +176,7 @@ export default function WorkflowsPage() {
       />
       <VersionDiffDialog state={state} />
       <CreateWorkflowDialog
+        projectId={state.projectId}
         open={createOpen}
         submitting={state.creating}
         apis={state.apis.data?.items ?? []}
@@ -1561,6 +1562,11 @@ function DraftEditor({
       <DraftAlerts state={state} />
       <WorkflowDesigner
         key={`${workflowId}:${state.workspaceMode}:${state.historyExecutionId ?? ''}`}
+        capabilities={{
+          flags: state.featureFlags.data,
+          loading: state.featureFlags.isPending,
+          failed: state.featureFlags.isError,
+        }}
         surface="workspace"
         workflowId={workflowId}
         projectId={state.projectId}

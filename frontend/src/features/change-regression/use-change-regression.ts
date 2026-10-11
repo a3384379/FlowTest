@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
@@ -28,17 +29,22 @@ export function useChangeRegression(initialRunId?: string) {
   const { canEdit, permissions } = useProjectCapabilities()
   const [selectedRunId, setSelectedRunId] = useRouteScopedSelection(projectId, initialRunId ?? null)
   const enabled = Boolean(projectId)
-  const runs = useQuery({
-    queryKey: ['change-regressions', projectId],
-    queryFn: () => listChangeRegressions(required(projectId)),
+  const runs = useCatalogQuery(
+    'change-regressions',
+    projectId,
+    (page) => listChangeRegressions(required(projectId), page, 20),
     enabled,
-    refetchInterval: 3000,
-  })
-  const plans = useQuery({
-    queryKey: ['change-regression-plans', projectId],
-    queryFn: () => listChangeRegressionPlans(required(projectId)),
+    '',
+    { refetchInterval: 3000 },
+  )
+  const plans = useCatalogQuery(
+    'change-regression-plans',
+    projectId,
+    (page) => listChangeRegressionPlans(required(projectId), page, 20),
     enabled,
-  })
+    '',
+    {},
+  )
   const policies = useQuery({
     queryKey: ['change-regression-policies', projectId],
     queryFn: () => listChangeRegressionPolicies(required(projectId)),

@@ -1,3 +1,4 @@
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
@@ -24,13 +25,17 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
   const { canEdit, permissions } = useProjectCapabilities()
   const { flags, status, impacts, risks } = useAIChangeSources(projectId)
   const [selection, setSelection] = useRouteScopedSelection(projectId, initialChangeSetId)
-  const changeSets = useQuery({
-    queryKey: ['ai-change-sets', projectId],
-    queryFn: () => listAIChangeSets(required(projectId)),
-    enabled: Boolean(projectId),
-    refetchInterval: (query) =>
-      query.state.data?.items.some((item) => item.status === 'generating') ? 1_000 : false,
-  })
+  const changeSets = useCatalogQuery(
+    'ai-change-sets',
+    projectId,
+    (page) => listAIChangeSets(required(projectId), page, 20),
+    Boolean(projectId),
+    '',
+    {
+      refetchInterval: (query) =>
+        query.state.data?.items.some((item) => item.status === 'generating') ? 1_000 : false,
+    },
+  )
   const currentItems = changeSets.data?.items.filter((item) => item.project_id === projectId) ?? []
   const activeId = selection ?? currentItems.at(0)?.id ?? null
   const detail = useQuery({
@@ -120,16 +125,22 @@ function useAIChangeSources(projectId: string | null) {
     queryFn: () => getAIStatus(required(projectId)),
     enabled: Boolean(projectId),
   })
-  const impacts = useQuery({
-    queryKey: ['impact-runs', projectId],
-    queryFn: () => listImpactRuns(required(projectId)),
-    enabled: Boolean(projectId && flags.data?.impact_engine),
-  })
-  const risks = useQuery({
-    queryKey: ['release-risks', projectId],
-    queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: Boolean(projectId && flags.data?.quality_intelligence),
-  })
+  const impacts = useCatalogQuery(
+    'impact-runs',
+    projectId,
+    (page) => listImpactRuns(required(projectId), page, 20),
+    Boolean(projectId && flags.data?.impact_engine),
+    '',
+    {},
+  )
+  const risks = useCatalogQuery(
+    'release-risks',
+    projectId,
+    (page) => listReleaseRisks(required(projectId), page, 20),
+    Boolean(projectId && flags.data?.quality_intelligence),
+    '',
+    {},
+  )
   return { flags, status, impacts, risks }
 }
 

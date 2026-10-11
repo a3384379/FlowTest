@@ -6,6 +6,8 @@ import {
   Card,
   Descriptions,
   Empty,
+  Input,
+  Segmented,
   Select,
   Space,
   Spin,
@@ -15,7 +17,7 @@ import {
 } from 'antd'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { Link } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   apiErrorMessage,
@@ -266,6 +268,9 @@ function ReportTrajectory({
   selectedId?: string
   onSelect: (nodeId: string) => void
 }) {
+  const [filter, setFilter] = useState<'all' | 'failed'>('all')
+  const [search, setSearch] = useState('')
+  const visible = filteredReportNodes(nodes, filter, search)
   const navigation = useRef<HTMLElement>(null)
   useEffect(() => {
     const nav = navigation.current
@@ -281,8 +286,27 @@ function ReportTrajectory({
         <Typography.Text strong>执行轨迹</Typography.Text>
         <Tag>{nodes.length}</Tag>
       </header>
+      <Segmented
+        aria-label="执行节点筛选"
+        value={filter}
+        options={[
+          { label: '全部节点', value: 'all' },
+          { label: '仅失败节点', value: 'failed' },
+        ]}
+        onChange={setFilter}
+      />
+      <Input.Search
+        aria-label="搜索执行节点"
+        placeholder="搜索节点名称或 ID"
+        allowClear
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      <Typography.Text type="secondary">
+        匹配 {visible.length} / {nodes.length} 个节点
+      </Typography.Text>
       <nav ref={navigation}>
-        {nodes.map((node) => (
+        {visible.map((node) => (
           <button
             key={node.id}
             type="button"
@@ -301,6 +325,9 @@ function ReportTrajectory({
           </button>
         ))}
       </nav>
+      {!visible.length && (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的执行节点" />
+      )}
       <Typography.Text type="secondary">选择节点查看当次请求、响应与校验证据。</Typography.Text>
     </aside>
   )
@@ -533,4 +560,17 @@ function ReportStatus({ status }: { status: string }) {
     cancelled: 'warning',
   }
   return <Tag color={colors[status]}>{labels[status] ?? status}</Tag>
+}
+
+function filteredReportNodes(
+  nodes: ReportNode[],
+  filter: 'all' | 'failed',
+  search: string,
+): ReportNode[] {
+  const query = search.trim().toLowerCase()
+  return nodes.filter(
+    (node) =>
+      (filter === 'all' || node.status === 'failed') &&
+      `${node.name} ${node.node_id}`.toLowerCase().includes(query),
+  )
 }

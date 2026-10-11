@@ -184,10 +184,14 @@ export async function getReleaseDecision(
   ).data
 }
 
-export async function listReleaseDecisions(projectId: string): Promise<Page<ReleaseDecision>> {
+export async function listReleaseDecisions(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+): Promise<Page<ReleaseDecision>> {
   return (
     await apiClient.get<Page<ReleaseDecision>>(`/projects/${projectId}/release-decisions`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }

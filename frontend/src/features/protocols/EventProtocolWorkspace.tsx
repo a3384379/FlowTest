@@ -1,3 +1,5 @@
+import CatalogPagination from '../../components/CatalogPagination'
+import { useCatalogQuery } from '../../lib/catalog-query'
 import {
   CloudServerOutlined,
   DatabaseOutlined,
@@ -5,7 +7,7 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   Button,
@@ -66,10 +68,14 @@ export default function EventProtocolWorkspace({
   projectId,
   mode,
   enabled,
+  editable = false,
+  executable = false,
 }: {
   projectId: string
   mode: EventProtocolMode
   enabled: boolean
+  editable?: boolean
+  executable?: boolean
 }) {
   const state = useEventWorkspace(projectId, mode)
   const presentation = EVENT_PRESENTATION[mode]
@@ -77,11 +83,15 @@ export default function EventProtocolWorkspace({
   return (
     <>
       <EventFeatureAlert enabled={enabled} />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.sources} label="事件来源" />
+        <CatalogPagination query={state.schemas} label="事件 Schema" />
+      </div>
       <EventToolbar
         presentation={presentation}
-        canImportSchema={presentation.supportsSchema && Boolean(state.selected)}
+        canImportSchema={editable && presentation.supportsSchema && Boolean(state.selected)}
         onImportSchema={() => state.setSchemaOpen(true)}
-        onCreateSource={() => state.setSourceOpen(true)}
+        onCreateSource={editable ? () => state.setSourceOpen(true) : undefined}
       />
       <div className="protocol-workspace-grid event-protocol-grid">
         <EventSourceInventory
@@ -95,7 +105,7 @@ export default function EventProtocolWorkspace({
           mode={mode}
           source={state.selected}
           schemas={pageItems(state.schemas.data)}
-          enabled={enabled}
+          enabled={enabled && executable}
         />
         <EventSourceInspector source={state.selected} schemas={pageItems(state.schemas.data)} />
       </div>
@@ -119,20 +129,25 @@ function useEventWorkspace(projectId: string, mode: EventProtocolMode) {
   const [selection, setSelection] = useState<string | null>(null)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [schemaOpen, setSchemaOpen] = useState(false)
-  const sources = useQuery({
-    queryKey: ['event-sources', projectId, mode],
-    queryFn: () => listEventSources(projectId, mode),
-  })
+  const sources = useCatalogQuery(
+    'event-sources',
+    projectId,
+    (page) => listEventSources(projectId, mode, page, 20),
+    true,
+    mode,
+  )
   const selected = useMemo(
     () =>
       sources.data?.items.find((item) => item.id === selection) ?? sources.data?.items[0] ?? null,
     [selection, sources.data?.items],
   )
-  const schemas = useQuery({
-    queryKey: ['event-schemas', projectId, selected?.id],
-    queryFn: () => listEventSchemas(projectId, requiredSource(selected).id),
-    enabled: mode === 'kafka' && Boolean(selected),
-  })
+  const schemas = useCatalogQuery(
+    'event-schemas',
+    projectId,
+    (page) => listEventSchemas(projectId, requiredSource(selected).id, page, 20),
+    mode === 'kafka' && Boolean(selected),
+    selected?.id ?? '',
+  )
 
   return {
     selection,
@@ -169,7 +184,7 @@ function EventToolbar({
   presentation: (typeof EVENT_PRESENTATION)[EventProtocolMode]
   canImportSchema: boolean
   onImportSchema: () => void
-  onCreateSource: () => void
+  onCreateSource?: () => void
 }) {
   return (
     <div className="event-protocol-toolbar">
@@ -183,7 +198,12 @@ function EventToolbar({
             导入消息 Schema
           </Button>
         )}
-        <Button type="primary" icon={<PlusOutlined />} onClick={onCreateSource}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={!onCreateSource}
+          onClick={onCreateSource}
+        >
           新建事件源
         </Button>
       </Space>

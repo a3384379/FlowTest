@@ -108,10 +108,12 @@ export async function setNotificationWebhookEnabled(
 
 export async function listNotificationDeliveries(
   projectId: string,
+  page = 1,
+  pageSize = 20,
 ): Promise<Page<NotificationDelivery>> {
   const response = await apiClient.get<Page<NotificationDelivery>>(
     `/projects/${projectId}/notification-deliveries`,
-    { params: { page: 1, page_size: 20 } },
+    { params: { page, page_size: pageSize } },
   )
   return response.data
 }

@@ -168,11 +168,21 @@ describe('ProtocolWorkbenchPage', () => {
 
   it('imports Registry and manual Kafka schemas as immutable versions', async () => {
     const imports: string[] = []
+    const catalog = [{ ...graphqlSchema, id: 'kafka-schema', protocol: 'kafka' as const }]
     installHandlers()
     server.use(
+      http.get('/api/v1/event-sources/:sourceId/schemas', () =>
+        HttpResponse.json({ items: catalog, total: catalog.length, page: 1, page_size: 20 }),
+      ),
       http.post('/api/v1/event-sources/:sourceId/schemas/import', async ({ request }) => {
         const payload = (await request.json()) as Record<string, unknown>
         imports.push(String(payload.subject))
+        catalog.push({
+          ...graphqlSchema,
+          id: 'registry-schema',
+          name: 'Registry 订单',
+          protocol: 'kafka',
+        })
         return HttpResponse.json(
           {
             ...graphqlSchema,
@@ -202,6 +212,10 @@ describe('ProtocolWorkbenchPage', () => {
     await browser.type(screen.getByLabelText('Subject'), 'flowtest.orders-value')
     await browser.click(screen.getByRole('button', { name: '校验并保存' }))
     await waitFor(() => expect(imports).toEqual(['flowtest.orders-value']))
+    await browser.click(screen.getByRole('combobox', { name: 'Kafka Schema' }))
+    await browser.click(
+      await screen.findByText(/Registry 订单/, { selector: '.ant-select-item-option-content' }),
+    )
 
     await browser.click(screen.getByRole('button', { name: /导入消息 Schema/ }))
     await browser.click(screen.getByLabelText('来源'))

@@ -1,3 +1,5 @@
+import ApiResourceSelect from '../features/api-console/ApiResourceSelect'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 import {
   Alert,
   Button,
@@ -158,19 +160,19 @@ function GenerationTargetCard({
   }
   return (
     <Card title="生成来源与物化目标">
+      <QueryFailureNotice
+        queries={[state.apis, state.environments, state.linkedProposal, endpointVariants.query]}
+      />
       <Form<GenerationForm> form={form} layout="vertical" onFinish={createProposal}>
         <Row gutter={16}>
           <Col xs={24} md={6}>
             <Form.Item name="api_definition_id" label="API 契约" rules={[{ required: true }]}>
-              <Select
-                aria-label="API 契约"
-                loading={state.apis.isLoading}
+              <ApiResourceSelect
+                projectId={state.projectId}
+                known={state.apis.data?.items ?? []}
+                label="API 契约"
+                onSelection={state.setSelectedApi}
                 onChange={() => form.setFieldValue('endpoint_variant', undefined)}
-                options={(state.apis.data?.items ?? []).map((api) => ({
-                  value: api.id,
-                  label: `${api.name} · v${api.current_version}`,
-                  disabled: !api.is_active,
-                }))}
               />
             </Form.Item>
           </Col>
@@ -239,7 +241,7 @@ function useEndpointVariants(
 ) {
   const apiDefinitionId = Form.useWatch('api_definition_id', form)
   const environmentId = Form.useWatch('environment_id', form)
-  const selectedApi = state.apis.data?.items.find((api) => api.id === apiDefinitionId)
+  const selectedApi = engineeringApi(state, apiDefinitionId)
   const serviceId = selectedApi?.service_id
   const query = useQuery({
     queryKey: ['test-engineering-endpoints', state.projectId, environmentId],
@@ -247,6 +249,7 @@ function useEndpointVariants(
     enabled: Boolean(state.projectId && environmentId && serviceId),
   })
   return {
+    query,
     required: Boolean(serviceId),
     loading: query.isLoading,
     options: (query.data ?? [])
@@ -693,4 +696,9 @@ function suppressionSummary(scenario: ScenarioCandidate): string {
     .map((mutation) => `${mutation.location}:${mutation.path.replace(/^[^.]+\./, '')}`)
   if (scenario.request.auth_disabled) omitted.unshift('auth:disabled')
   return omitted.join('、')
+}
+
+function engineeringApi(state: ReturnType<typeof useTestEngineering>, id: string | undefined) {
+  if (state.selectedApi?.id === id) return state.selectedApi
+  return state.apis.data?.items.find((api) => api.id === id)
 }

@@ -1,3 +1,7 @@
+import CatalogPagination from '../components/CatalogPagination'
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
+import { useCatalogQuery } from '../lib/catalog-query'
 import {
   ApiOutlined,
   CloudServerOutlined,
@@ -96,6 +100,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
   const [selection, setSelection] = useState<{ mode: SchemaProtocolMode; id: string } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const schemaMode: SchemaProtocolMode = mode === 'grpc' ? 'grpc' : 'graphql'
+  const { canEdit, canExecute, permissions } = useProjectCapabilities()
   const inventory = useProtocolInventory(projectId, schemaMode)
   const credentials = useQuery({
     queryKey: ['credentials', projectId],
@@ -106,7 +111,12 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
 
   return (
     <div className="protocol-page">
-      <ProtocolHeading onImport={eventMode ? undefined : () => setImportOpen(true)} />
+      <QueryFailureNotice queries={[inventory.flags, credentials, permissions]} />
+      <div className="catalog-controls">
+        <CatalogPagination query={inventory.graphql} label="GraphQL Schema" />
+        <CatalogPagination query={inventory.grpc} label="gRPC 描述文件" />
+      </div>
+      <ProtocolHeading onImport={eventMode || !canEdit ? undefined : () => setImportOpen(true)} />
       <WorkflowResourceReturn projectId={projectId} />
       {!eventMode && <ProtocolFeatureAlert enabled={inventory.enabled} />}
       <ProtocolSummary graphql={inventory.graphqlTotal} grpc={inventory.grpcTotal} />
@@ -123,6 +133,8 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
         />
         {eventMode ? (
           <EventProtocolWorkspace
+            editable={canEdit}
+            executable={canExecute}
             projectId={projectId}
             mode={mode}
             enabled={inventory.eventProtocolsEnabled}
@@ -140,7 +152,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
               mode={schemaMode}
               projectId={projectId}
               selected={selected}
-              enabled={inventory.enabled}
+              enabled={inventory.enabled && canExecute}
               credentials={credentials.data ?? []}
             />
             <SchemaInspector asset={selected} />
@@ -164,15 +176,24 @@ function protocolRouteMode(value: string | null): ProtocolMode {
 
 function useProtocolInventory(projectId: string, mode: SchemaProtocolMode) {
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
-  const graphql = useQuery({
-    queryKey: ['graphql-schemas', projectId],
-    queryFn: () => listGraphQLSchemas(projectId),
-  })
-  const grpc = useQuery({
-    queryKey: ['grpc-descriptors', projectId],
-    queryFn: () => listGrpcDescriptors(projectId),
-  })
+  const graphql = useCatalogQuery(
+    'graphql-schemas',
+    projectId,
+    (page) => listGraphQLSchemas(projectId, page, 20),
+    true,
+    '',
+  )
+  const grpc = useCatalogQuery(
+    'grpc-descriptors',
+    projectId,
+    (page) => listGrpcDescriptors(projectId, page, 20),
+    true,
+    '',
+  )
   return {
+    flags,
+    graphql,
+    grpc,
     enabled: flags.data?.multi_protocol === true,
     eventProtocolsEnabled: flags.data?.event_protocols === true,
     items: protocolItems(mode, pageItems(graphql.data), pageItems(grpc.data)),
@@ -221,19 +242,25 @@ function ProtocolHeading({ onImport }: { onImport?: () => void }) {
   )
 }
 
-function ProtocolSummary({ graphql, grpc }: { graphql: number; grpc: number }) {
+function ProtocolSummary({
+  graphql,
+  grpc,
+}: {
+  graphql: number | undefined
+  grpc: number | undefined
+}) {
   return (
     <Row gutter={16} className="protocol-summary">
       <Col span={8}>
         <Card>
           <Typography.Text type="secondary">GraphQL Schema</Typography.Text>
-          <Typography.Title level={3}>{graphql}</Typography.Title>
+          <Typography.Title level={3}>{graphql ?? '—'}</Typography.Title>
         </Card>
       </Col>
       <Col span={8}>
         <Card>
           <Typography.Text type="secondary">gRPC Descriptor</Typography.Text>
-          <Typography.Title level={3}>{grpc}</Typography.Title>
+          <Typography.Title level={3}>{grpc ?? '—'}</Typography.Title>
         </Card>
       </Col>
       <Col span={8}>
@@ -715,9 +742,9 @@ function pageItems(page: { items: SchemaArtifact[] } | undefined): SchemaArtifac
   return []
 }
 
-function pageTotal(page: { total: number } | undefined): number {
+function pageTotal(page: { total: number } | undefined): number | undefined {
   if (page) return page.total
-  return 0
+  return undefined
 }
 
 function selectionId(

@@ -347,6 +347,21 @@ describe('PerformanceLabPage', () => {
     expect(await screen.findByText('第2页场景')).toBeVisible()
     expect(requested).toEqual([1, 2])
   })
+  it('explains disabled capability and avoids unavailable catalog requests', async () => {
+    let reads = 0
+    installHandlers()
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json({ performance_lab: false })),
+      http.get('/api/v1/projects/:id/performance-scenarios', () => {
+        reads += 1
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('性能实验室当前关闭')).toBeVisible()
+    expect(reads).toBe(0)
+    expect(screen.getByRole('button', { name: /新建性能场景/ })).toBeDisabled()
+  })
 })
 
 function installHandlers({

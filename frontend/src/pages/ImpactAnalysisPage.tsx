@@ -1,3 +1,4 @@
+import CatalogPagination from '../components/CatalogPagination'
 import { BranchesOutlined, DeleteOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Alert,
@@ -121,6 +122,10 @@ function ImpactAnalysisWorkspace() {
         title="确定性映射，不执行仓库命令"
         description="仅解析有边界的标准 unified diff 与平台内已登记 Schema 版本；每个推荐资产都保留命中选择器和变更路径。"
       />
+      <div className="catalog-controls">
+        <CatalogPagination query={state.mappings} label="影响映射" />
+        <CatalogPagination query={state.runs} label="分析历史" />
+      </div>
       <ImpactOverview detail={detail} mappingCount={mappings.length} />
       {state.detail.isError ? (
         <Alert

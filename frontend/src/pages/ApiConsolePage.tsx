@@ -26,6 +26,9 @@ import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
+import ApiFolderDirectory from '../features/api-console/ApiFolderDirectory'
+import RequestTargetSummary from '../features/api-console/RequestTargetSummary'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import APIWorkbench from '../features/api-console/APIWorkbench'
 import CreateDialogs from '../features/api-console/CreateDialogs'
@@ -83,7 +86,11 @@ export default function ApiConsolePage() {
   }
 
   async function addApi(input: CreateApiInput) {
-    await consoleState.addApi(input)
+    const folder = consoleState.apiFolder
+    await consoleState.addApi({
+      ...input,
+      folder_id: ['all', 'unfiled'].includes(folder) ? null : folder,
+    })
     setDialog(null)
   }
 
@@ -99,7 +106,16 @@ export default function ApiConsolePage() {
         onImport={() => setImportOpen(true)}
         onArtifacts={() => setArtifactsOpen(true)}
       />
-
+      <QueryFailureNotice
+        queries={[
+          consoleState.apis,
+          consoleState.apiDetail,
+          consoleState.environments,
+          consoleState.versions,
+          consoleState.services,
+          consoleState.endpoints,
+        ]}
+      />
       <div className="api-workspace">
         <aside className="api-workspace-directory" aria-label="接口目录与环境">
           <Card
@@ -115,6 +131,16 @@ export default function ApiConsolePage() {
               />
             }
           >
+            <ApiFolderSection
+              state={consoleState}
+              onSelect={(folder) => {
+                consoleState.setApiFolder(folder)
+                const next = new URLSearchParams(searchParams)
+                next.delete('focus')
+                next.delete('execution')
+                setSearchParams(next)
+              }}
+            />
             <div className="api-directory-filters">
               <Input.Search
                 aria-label="搜索接口"
@@ -147,17 +173,10 @@ export default function ApiConsolePage() {
             />
           </Card>
           <Card title="环境管理" className="api-environment-card">
-            <Select
-              aria-label="当前环境"
-              loading={consoleState.environments.isLoading}
-              placeholder={consoleState.environmentPlaceholder}
-              status={consoleState.environmentStatus}
-              value={consoleState.environmentId}
-              onChange={consoleState.setEnvironmentSelection}
-              disabled={!canCreateAssets}
-              options={projectOptions(consoleState.environments.data)}
-              style={{ width: '100%' }}
-            />
+            <EmptyApiEnvironment state={consoleState} />
+            <Typography.Paragraph type="secondary">
+              在请求区选择发送环境、Service 和地址版本。
+            </Typography.Paragraph>
             <Space wrap>
               <Button
                 type="text"
@@ -178,8 +197,9 @@ export default function ApiConsolePage() {
         </aside>
         <div className="api-workspace-main">
           <APIWorkbench
+            key={apiWorkbenchKey(consoleState)}
             detail={consoleState.apiDetail.data}
-            editable={consoleState.canEdit}
+            editable={apiWorkbenchEditable(consoleState)}
             loading={consoleState.apiDetail.isLoading}
             saving={consoleState.savingVersion}
             previewing={consoleState.previewing}
@@ -188,11 +208,18 @@ export default function ApiConsolePage() {
             onRename={() => setRenameTarget(currentDefinition)}
             artifacts={artifacts}
             redactionMode={consoleState.redactionMode}
-            draftScope={apiDraftScope(userId, consoleState.projectId)}
+            draftScope={
+              consoleState.selectedVersion === null
+                ? apiDraftScope(userId, consoleState.projectId)
+                : undefined
+            }
+            versionActions={<ApiVersionSelector state={consoleState} />}
             requestActions={<RunnerActions state={consoleState} enabled={canExecute} />}
+            targetActions={<ApiTargetControls state={consoleState} />}
           />
           <Card
             title="响应与验证"
+            aria-label="接口响应与验证"
             className="api-response-panel"
             extra={
               <Space>
@@ -281,6 +308,12 @@ function apiDraftScope(userId: string | undefined, projectId: string | null): st
 
 type ConsoleState = ReturnType<typeof useApiConsole>
 
+function EmptyApiEnvironment({ state }: { state: ReturnType<typeof useApiConsole> }) {
+  if (state.apiId) return null
+  const name = state.environments.data?.find((item) => item.id === state.environmentId)?.name
+  return <Typography.Paragraph>{name ?? state.environmentPlaceholder}</Typography.Paragraph>
+}
+
 function useConsoleFromRoute(params: URLSearchParams) {
   return useApiConsole(params.get('focus') ?? undefined, params.get('execution') ?? undefined)
 }
@@ -288,8 +321,104 @@ function useConsoleFromRoute(params: URLSearchParams) {
 function canExecuteCurrentApi(state: ConsoleState): boolean {
   return (
     state.canEdit &&
+    Boolean(state.apiDetail.data) &&
     !state.viewingHistory &&
     allSelected([state.projectId, state.environmentId, state.apiId])
+  )
+}
+
+function apiWorkbenchKey(state: ConsoleState): string {
+  return `${state.projectId}:${state.apiId}:${state.selectedVersion ?? 'current'}`
+}
+function apiWorkbenchEditable(state: ConsoleState): boolean {
+  return state.canEdit && state.selectedVersion === null
+}
+
+function ApiFolderSection({
+  state,
+  onSelect,
+}: {
+  state: ConsoleState
+  onSelect: (folder: string) => void
+}) {
+  if (!state.projectId) return null
+  return (
+    <ApiFolderDirectory
+      key={state.projectId}
+      projectId={state.projectId}
+      editable={state.canEdit}
+      selected={state.apiFolder}
+      definition={selectedApiDefinition(state) ?? undefined}
+      onSelect={onSelect}
+    />
+  )
+}
+
+function ApiVersionSelector({ state }: { state: ConsoleState }) {
+  return (
+    <Select
+      aria-label="接口版本"
+      value={state.selectedVersion ?? 'current'}
+      onChange={(value) => state.setSelectedVersion(value === 'current' ? null : Number(value))}
+      options={[
+        { value: 'current', label: '最新版本（编辑）' },
+        ...(state.versions.data ?? []).map((version) => ({
+          value: version.version,
+          label: `v${version.version}（只读）`,
+        })),
+      ]}
+    />
+  )
+}
+
+function ApiTargetControls({ state }: { state: ConsoleState }) {
+  const targetDisabled = !state.canEdit || state.viewingHistory
+  const inheritedService =
+    state.apiDetail.data?.version.service_id ??
+    state.environments.data?.find((item) => item.id === state.environmentId)?.default_service_id
+  const service = state.services.data?.find((item) =>
+    state.serviceOverride
+      ? item.service_key === state.serviceOverride
+      : item.id === inheritedService,
+  )
+  return (
+    <div className="api-target-controls">
+      <Space wrap>
+        <Select
+          aria-label="发送环境"
+          disabled={targetDisabled}
+          value={state.environmentId}
+          placeholder={state.environmentPlaceholder}
+          status={state.environmentStatus}
+          onChange={state.setEnvironmentSelection}
+          options={projectOptions(state.environments.data)}
+        />
+        <Select
+          aria-label="临时 Service"
+          disabled={targetDisabled}
+          allowClear
+          placeholder="继承接口／环境 Service"
+          value={state.serviceOverride}
+          onChange={state.setServiceOverride}
+          options={(state.services.data ?? [])
+            .filter((item) => item.enabled)
+            .map((item) => ({ value: item.service_key, label: item.name }))}
+        />
+        <Select
+          aria-label="Endpoint Variant"
+          disabled={targetDisabled}
+          allowClear
+          placeholder="默认 Endpoint"
+          value={state.endpointVariant}
+          onChange={state.setEndpointVariant}
+          options={(state.endpoints.data ?? [])
+            .filter((item) => item.enabled && item.service_id === service?.id)
+            .map((item) => ({ value: item.variant, label: item.variant }))}
+        />
+      </Space>
+      <QueryFailureNotice queries={[state.targetPreview]} />
+      <RequestTargetSummary compact preview={state.targetPreview.data} />
+    </div>
   )
 }
 

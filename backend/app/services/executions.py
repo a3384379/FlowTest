@@ -92,12 +92,14 @@ class ExecutionService:
         assertions: tuple[AssertionSpec, ...],
         service_override: str | None = None,
         endpoint_variant: str | None = None,
+        version_number: int | None = None,
     ) -> tuple[APICallExecution, list[AssertionResult]]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         _definition, version = await self._assets.get_detail(
             actor=actor,
             project_id=project_id,
             definition_id=definition_id,
+            version=version_number,
         )
         raw_request = await self._assets.preview(
             actor=actor,
@@ -111,6 +113,7 @@ class ExecutionService:
             service_override=service_override,
             endpoint_variant=endpoint_variant,
             redact=False,
+            version_number=version.version,
         )
         redacted_request = await self._assets.preview(
             actor=actor,
@@ -124,6 +127,7 @@ class ExecutionService:
             service_override=service_override,
             endpoint_variant=endpoint_variant,
             redact=True,
+            version_number=version.version,
         )
         policy = await self._projects.get_security_policy(actor=actor, project_id=project_id)
         await self._outbound_guard.enforce(raw_request.url, policy)

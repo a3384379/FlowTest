@@ -102,10 +102,10 @@ export type PactImportInput =
   | { kind: 'upload'; document: File; consumerVersion: string }
   | { kind: 'broker'; consumer: string; provider: string; consumerVersion: string }
 
-export async function listContractServices(projectId: string) {
+export async function listContractServices(projectId: string, page = 1, pageSize = 100) {
   return (
     await apiClient.get<Page<ServiceCatalogEntry>>(`/projects/${projectId}/contract-hub/services`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
@@ -119,10 +119,10 @@ export async function createContractService(
   ).data
 }
 
-export async function listPactContracts(projectId: string) {
+export async function listPactContracts(projectId: string, page = 1, pageSize = 100) {
   return (
     await apiClient.get<Page<PactContract>>(`/projects/${projectId}/contract-hub/pacts`, {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: pageSize },
     })
   ).data
 }
@@ -193,11 +193,11 @@ export async function runDeploymentCheck(
   ).data
 }
 
-export async function listDeploymentChecks(projectId: string) {
+export async function listDeploymentChecks(projectId: string, page = 1, pageSize = 50) {
   return (
     await apiClient.get<Page<DeploymentCheck>>(
       `/projects/${projectId}/contract-hub/deployment-checks`,
-      { params: { page: 1, page_size: 50 } },
+      { params: { page, page_size: pageSize } },
     )
   ).data
 }

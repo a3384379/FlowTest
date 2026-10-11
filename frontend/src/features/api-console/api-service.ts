@@ -45,6 +45,7 @@ export type CreateEnvironmentInput = {
 
 export type CreateApiInput = {
   name: string
+  folder_id?: string | null
   description: string
   method: HttpMethod
   path: string
@@ -59,12 +60,14 @@ export type ApiVersionInput = Pick<
   | 'path'
   | 'query_parameters'
   | 'headers'
+  | 'variables'
   | 'body_kind'
   | 'body'
   | 'extraction_rules'
   | 'assertions'
 > & {
   auth: { kind: ApiVersion['auth_kind']; values: Record<string, string> }
+  base_version?: number
 }
 
 export async function listProjects(): Promise<Page<Project>> {
@@ -106,7 +109,13 @@ export async function deleteEnvironment(projectId: string, environmentId: string
 
 export async function listApis(
   projectId: string,
-  options: { page?: number; pageSize?: number; search?: string; method?: HttpMethod } = {},
+  options: {
+    page?: number
+    pageSize?: number
+    search?: string
+    method?: HttpMethod
+    folder?: string
+  } = {},
 ): Promise<Page<ApiDefinition>> {
   const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
     params: {
@@ -114,6 +123,10 @@ export async function listApis(
       page_size: options.pageSize ?? 50,
       ...(options.search?.trim() ? { search: options.search.trim() } : {}),
       ...(options.method ? { method: options.method } : {}),
+      ...(options.folder === 'unfiled' ? { unfiled: true } : {}),
+      ...(options.folder && !['all', 'unfiled'].includes(options.folder)
+        ? { folder_id: options.folder }
+        : {}),
     },
   })
   return response.data
@@ -126,7 +139,7 @@ export async function createApi(projectId: string, input: CreateApiInput) {
     {
       name: input.name,
       description: input.description,
-      folder_id: null,
+      folder_id: input.folder_id ?? null,
       request: {
         method: input.method,
         path: input.path,
@@ -156,7 +169,7 @@ export async function getApiDetail(
 export async function updateApiDefinition(
   projectId: string,
   apiId: string,
-  input: { name?: string; service_id?: string | null },
+  input: { name?: string; service_id?: string | null; folder_id?: string | null },
 ): Promise<ApiDefinition> {
   const response = await apiClient.patch<ApiDefinition>(
     `/projects/${projectId}/apis/${apiId}`,
@@ -172,6 +185,16 @@ export async function createApiVersion(
 ): Promise<ApiVersion> {
   return (await apiClient.post<ApiVersion>(`/projects/${projectId}/apis/${apiId}/versions`, input))
     .data
+}
+
+export async function listApiVersions(projectId: string, apiId: string): Promise<ApiVersion[]> {
+  return (await apiClient.get<ApiVersion[]>(`/projects/${projectId}/apis/${apiId}/versions`)).data
+}
+
+export type ApiExecutionOptions = {
+  version?: number
+  serviceOverride?: string
+  endpointVariant?: string
 }
 
 export async function previewApi(
@@ -321,11 +344,15 @@ export async function executeApi(
   environmentId: string,
   expectedStatus: number,
   assertions?: ApiVersion['assertions'],
+  options: ApiExecutionOptions = {},
 ): Promise<ExecutionDetail> {
   const response = await apiClient.post<ExecutionDetail>(
     `/projects/${projectId}/apis/${apiId}/execute`,
     {
       environment_id: environmentId,
+      ...(options.version ? { version: options.version } : {}),
+      ...(options.serviceOverride ? { service_override: options.serviceOverride } : {}),
+      ...(options.endpointVariant ? { endpoint_variant: options.endpointVariant } : {}),
       assertions: assertions?.length
         ? assertions
         : [

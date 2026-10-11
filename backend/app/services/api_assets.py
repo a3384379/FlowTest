@@ -348,14 +348,23 @@ class APIAssetService:
         page_size: int,
         search: str | None = None,
         method: str | None = None,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
     ) -> tuple[list[APIDefinition], int]:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=False)
+        if folder_id is not None and unfiled:
+            raise AppError(
+                code="INVALID_FOLDER_FILTER", message="目录筛选不能同时选择未分组", status_code=422
+            )
+        await self._validate_folder(project_id=project_id, folder_id=folder_id)
         return await self._assets.list_definitions(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
             search=search,
             method=method,
+            folder_id=folder_id,
+            unfiled=unfiled,
         )
 
     async def create_definition(
@@ -413,9 +422,17 @@ class APIAssetService:
         project_id: UUID,
         definition_id: UUID,
         request: APIVersionSpec,
+        base_version: int | None = None,
     ) -> APIVersion:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
-        definition = await self._get_definition(project_id, definition_id)
+        definition = await self._get_definition(project_id, definition_id, for_update=True)
+        if base_version is not None and base_version != definition.current_version:
+            raise AppError(
+                code="API_VERSION_CONFLICT",
+                message="接口已有新版本,请查看最新版本并核对本地编辑后重试",
+                status_code=409,
+                details={"current_version": definition.current_version},
+            )
         next_version = definition.current_version + 1
         service = await self._validate_service(
             project_id=project_id,
@@ -742,8 +759,10 @@ class APIAssetService:
                 code="ENVIRONMENT_NAME_EXISTS", message="环境名称已存在", status_code=409
             )
 
-    async def _get_definition(self, project_id: UUID, definition_id: UUID) -> APIDefinition:
-        definition = await self._assets.get_definition(definition_id)
+    async def _get_definition(
+        self, project_id: UUID, definition_id: UUID, *, for_update: bool = False
+    ) -> APIDefinition:
+        definition = await self._assets.get_definition(definition_id, for_update=for_update)
         if definition is None or definition.project_id != project_id or not definition.is_active:
             raise AppError(code="API_NOT_FOUND", message="API 不存在", status_code=404)
         return definition
