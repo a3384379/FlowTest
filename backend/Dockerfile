@@ -140,7 +140,7 @@ RUN set -eux; \
     ctr --version
 
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
-RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0'
+RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0' 'zlib>=1.3.2-r1'
 
 FROM debian:trixie-slim AS python-base-source
 
