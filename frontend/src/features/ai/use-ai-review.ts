@@ -9,6 +9,7 @@ import { useProjectContext } from '../projects/use-project-context'
 import {
   createAIJob,
   getAIStatus,
+  getAIJob,
   listAIJobs,
   listAISuggestions,
   reviewAISuggestion,
@@ -52,7 +53,14 @@ export function useAIReview() {
     },
   )
   const activeJobId = selectedJobId ?? jobs.data?.items[0]?.id ?? null
-  const activeJobStatus = jobs.data?.items.find((job) => job.id === activeJobId)?.status ?? null
+  const selectedJob = useQuery({
+    queryKey: ['ai-job', projectId, activeJobId],
+    queryFn: () => getAIJob(activeJobId!),
+    enabled: Boolean(projectId && activeJobId),
+    refetchInterval: (query) =>
+      query.state.data && ['pending', 'running'].includes(query.state.data.status) ? 2000 : false,
+  })
+  const activeJobStatus = selectedJob.data?.status ?? null
   const suggestions = useQuery({
     queryKey: ['ai-suggestions', projectId, activeJobId, activeJobStatus],
     queryFn: () => listAISuggestions(activeJobId!),
@@ -103,6 +111,7 @@ export function useAIReview() {
     permissions,
     status,
     jobs,
+    selectedJob,
     selectedJobId: activeJobId,
     selectJob: setSelectedJobId,
     suggestions,

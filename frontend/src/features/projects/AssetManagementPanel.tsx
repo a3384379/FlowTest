@@ -1,3 +1,4 @@
+import { invalidateRequestTargets } from '../service-targets/request-target-cache'
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, KeyOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -97,11 +98,11 @@ function useAssetManagement(projectId: string) {
         [
           ['folders', projectId],
           ['project-configuration', projectId],
-          ['environments', projectId],
           ['secrets', projectId],
           ['project-audit', projectId],
         ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
       )
+      await invalidateRequestTargets(queryClient, projectId)
       void message.success('测试资产配置已保存')
     },
     onError: (error) => void message.error(apiErrorMessage(error)),

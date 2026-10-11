@@ -78,7 +78,13 @@ function AIReviewWorkspace() {
 type AIReviewState = ReturnType<typeof useAIReview>
 
 function AIErrorAlert({ state }: { state: AIReviewState }) {
-  const queries = [state.status, state.jobs, state.suggestions, state.permissions]
+  const queries = [
+    state.status,
+    state.jobs,
+    state.selectedJob,
+    state.suggestions,
+    state.permissions,
+  ]
   const error = queries.find((query) => query.isError)?.error
   if (!error) return null
   return (

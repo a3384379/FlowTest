@@ -1,7 +1,9 @@
+import { useApiConsole } from '../features/api-console/use-api-console'
+import type { ApiVersion } from '../lib/api'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -243,6 +245,120 @@ describe('RequestTargetsPage', () => {
     await waitFor(() => expect(serviceUpdatePayload).toMatchObject({ enabled: false }))
   })
 
+  it('updates the API address and endpoint options after editing a target in another module', async () => {
+    let currentEndpoint = endpoint
+    const version: ApiVersion = {
+      id: 'api-v1',
+      api_definition_id: apiDefinition.id,
+      version: 1,
+      service_id: service.id,
+      method: 'GET',
+      path: '/users/me',
+      headers: {},
+      variables: {},
+      query_parameters: [],
+      body_kind: 'none',
+      body: null,
+      auth_kind: 'none',
+      auth_config: {},
+      extraction_rules: [],
+      assertions: [],
+      created_at: '2026-10-11T00:00:00Z',
+    }
+    server.use(
+      projectHandlers(),
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json([targetEnvironment]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([service])),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [apiDefinition], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({ definition: apiDefinition, version }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/versions`, () =>
+        HttpResponse.json([version]),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
+        () => HttpResponse.json([currentEndpoint]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/executions`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/files`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}/preview`, () =>
+        HttpResponse.json({ url: `${currentEndpoint.base_url}/users/me` }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/services/${service.id}/impact-preview`, () =>
+        HttpResponse.json({
+          strategy: 'request_target_dependency_v1',
+          affected_apis: [],
+          affected_workflows: [],
+          affected_test_plans: [],
+          affected_scheduled_runs: [],
+          affected_release_gates: [],
+        }),
+      ),
+      http.patch(
+        `/api/v1/projects/${project.id}/service-endpoints/${endpoint.id}`,
+        async ({ request }) => {
+          const input = (await request.json()) as { base_url: string }
+          currentEndpoint = { ...endpoint, base_url: input.base_url, revision: 2 }
+          return HttpResponse.json(currentEndpoint)
+        },
+      ),
+    )
+    renderPage(true)
+    const browser = userEvent.setup()
+    await waitFor(() =>
+      expect(screen.getByTestId('api-target-probe')).toHaveTextContent(
+        'https://orders.example.com/users/me',
+      ),
+    )
+    const endpointCard = screen
+      .getByText('环境 Endpoint Variant')
+      .closest<HTMLElement>('.ant-card')!
+    await browser.click(within(endpointCard).getByRole('button', { name: /影响预览 \/ 编辑/ }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByText('Endpoint 影响预览 / 编辑')).toBeVisible())
+    await browser.clear(within(dialog).getByLabelText('Base URL'))
+    await browser.type(within(dialog).getByLabelText('Base URL'), 'https://orders-new.example.com')
+    await browser.click(within(dialog).getByRole('button', { name: '保存变更' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('api-target-probe')).toHaveTextContent(
+        'https://orders-new.example.com/users/me',
+      ),
+    )
+    expect(screen.getByTestId('api-endpoint-probe')).toHaveTextContent(
+      'https://orders-new.example.com',
+    )
+  })
+
+  it('refreshes the displayed catalog when the refresh button is clicked', async () => {
+    let name = service.name
+    server.use(
+      projectHandlers(),
+      http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/services`, () =>
+        HttpResponse.json([{ ...service, name }]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/secrets`, () => HttpResponse.json([])),
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderPage()
+    expect(await screen.findByText(service.name)).toBeVisible()
+    name = 'Updated remote service'
+    await userEvent.click(screen.getByRole('button', { name: /刷新/ }))
+    expect(await screen.findByText(name)).toBeVisible()
+  })
+
   it('shows a standard error envelope when the target data cannot be loaded', async () => {
     server.use(
       projectHandlers(),
@@ -334,18 +450,21 @@ describe('RequestTargetsPage', () => {
   })
 })
 
-function renderPage() {
+function renderPage(withApiProbe = false) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="request-targets">
-          <RequestTargetsPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="request-targets">
+            <RequestTargetsPage />
+            {withApiProbe ? <ApiTargetProbe /> : null}
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }
 
@@ -358,4 +477,14 @@ function projectHandlers() {
 async function chooseOption(browser: ReturnType<typeof userEvent.setup>, label: string) {
   const options = await screen.findAllByText(label)
   await browser.click(options[options.length - 1])
+}
+
+function ApiTargetProbe() {
+  const state = useApiConsole(apiDefinition.id)
+  return (
+    <>
+      <div data-testid="api-target-probe">{state.targetPreview.data?.url}</div>
+      <div data-testid="api-endpoint-probe">{state.endpoints.data?.[0]?.base_url}</div>
+    </>
+  )
 }

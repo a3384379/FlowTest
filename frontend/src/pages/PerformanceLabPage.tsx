@@ -275,7 +275,7 @@ function PerformanceOverview({
       <Col span={6}>
         <Card>
           <Statistic
-            title="本页最近 P95"
+            title="最近一次运行 P95"
             value={latest?.summary.http_req_duration_p95_ms ?? '未提供'}
             suffix="ms"
           />

@@ -41,6 +41,7 @@ export function usePerformanceLab() {
     queryKey: ['performance-runs', projectId, 'latest'],
     queryFn: () => listPerformanceRuns(required(projectId), 1, 1),
     enabled: catalogsEnabled,
+    refetchInterval: (query) => (query.state.data?.items.some(isPendingRun) ? 2000 : false),
   })
   const scenarios = useQuery({
     queryKey: ['performance-scenarios', projectId, scenarioPage],
