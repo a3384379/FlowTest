@@ -40,6 +40,10 @@ describe('CreateWorkflowDialog', () => {
     const browser = userEvent.setup()
     await browser.type(screen.getByLabelText('名称'), '远端接口流程')
     await browser.click(screen.getByRole('combobox', { name: '初始 API 节点' }))
+    expect(await screen.findByRole('option', { name: '目录之外的接口 · v7' })).toHaveAttribute(
+      'aria-label',
+      '目录之外的接口 · v7',
+    )
 
     await browser.click(
       await screen.findByText(/目录之外的接口/, {

@@ -74,6 +74,8 @@ function ProjectApiResourceSelect({
       onOpenChange={setOpen}
       options={[...items.values()].map((item) => ({
         value: item.id,
+        'aria-label': `${item.name} · v${item.current_version}`,
+        title: `${item.name} · v${item.current_version}`,
         label: (
           <Space size={4}>
             <span className="api-resource-option-name">{item.name}</span>
