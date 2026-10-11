@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.56.0 golang.org/x/net@v0.60.0; \
+    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -78,7 +78,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         ./hack/make.sh binary-daemon; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.9'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
-    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.56.0'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.57.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS containerd-builder
@@ -93,8 +93,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
     git tag v2.3.3; \
     go get \
-        golang.org/x/sync@v0.22.0 \
-        golang.org/x/text@v0.41.0 \
+        golang.org/x/sync@v0.23.0 \
+        golang.org/x/text@v0.42.0 \
         golang.org/x/net@v0.60.0 \
         google.golang.org/grpc@v1.83.2; \
     go mod download all; \
