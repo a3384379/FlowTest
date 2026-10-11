@@ -144,14 +144,12 @@ RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0'
 
 FROM debian:trixie-slim AS python-base-source
 
-COPY patches/cpython-3.13-cve-2026-82049.patch /tmp/cpython-3.13-cve-2026-82049.patch
-
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.15" \
-    PYTHON_SHA256="1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76"
+    PYTHON_VERSION="3.13.16" \
+    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
 
-# Docker Hub had not published the 3.13.15 slim tag when S12 was cut. Build the
-# signed CPython release using the same inputs as the official Docker image.
+# Build the signed CPython maintenance release with an explicit checksum.
+# 3.13.16 includes the SSLContext and previously backported tarfile fixes.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
@@ -195,9 +193,6 @@ RUN set -eux; \
     mkdir -p /usr/src/python; \
     tar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \
     rm python.tar.xz; \
-    patch --directory=/usr/src/python --strip=1 \
-        < /tmp/cpython-3.13-cve-2026-82049.patch; \
-    rm /tmp/cpython-3.13-cve-2026-82049.patch; \
     cd /usr/src/python; \
     build_arch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)"; \
     ./configure \

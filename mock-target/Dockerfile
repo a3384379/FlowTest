@@ -2,11 +2,11 @@ FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
 FROM debian:trixie-slim AS python-runtime
 
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.15" \
-    PYTHON_SHA256="1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76"
+    PYTHON_VERSION="3.13.16" \
+    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
 
 # Keep this bootstrap identical to backend/Dockerfile so BuildKit shares the
-# layers until the official Python 3.13.15 slim image is published.
+# layers for the signed Python 3.13.16 maintenance release.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
