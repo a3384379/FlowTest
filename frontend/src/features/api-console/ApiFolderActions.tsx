@@ -27,7 +27,7 @@ function useFolderMove(projectId: string, onMoved: () => void) {
       moveApis(projectId, input.ids, input.folderId),
     onSuccess: async (result) => {
       await Promise.all(
-        ['apis', 'api-directory', 'api-detail'].map((key) =>
+        ['apis', 'api-detail'].map((key) =>
           client.invalidateQueries({ queryKey: [key, projectId] }),
         ),
       )
@@ -108,7 +108,7 @@ export function AddApisToFolderDialog({
   const [method, setMethod] = useState<HttpMethod>()
   const [ids, setIds] = useState<string[]>([])
   const entries = useQuery({
-    queryKey: ['api-directory', projectId, page, search, method],
+    queryKey: ['apis', projectId, 'directory', page, search, method],
     queryFn: () => listApiDirectory(projectId, { page, search, method }),
   })
   const folders = useQuery({

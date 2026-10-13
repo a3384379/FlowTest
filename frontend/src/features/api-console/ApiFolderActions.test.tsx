@@ -79,3 +79,54 @@ it('selects across pages, shows membership, preserves selection on failure and s
   await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
   expect(calls).toEqual(Array(2).fill({ definition_ids: ['api-1', 'api-2'], folder_id: folder.id }))
 })
+
+it('refreshes a cached candidate directory when the shared API namespace is invalidated', async () => {
+  const folder = {
+    id: 'orders',
+    project_id: project.id,
+    parent_id: null,
+    name: '订单',
+    created_at: '',
+    updated_at: '',
+    created_by_id: 'user-id',
+  }
+  let name = '旧名称'
+  let reads = 0
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/folders`, () => HttpResponse.json([folder])),
+    http.get(`/api/v1/projects/${project.id}/apis/directory`, () => {
+      reads += 1
+      return HttpResponse.json({
+        items: [
+          { id: 'api', name, folder_id: null, current_version: 1, method: 'GET', path: '/orders' },
+        ],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      })
+    }),
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 15000 } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <AntdApp>
+        <AddApisToFolderDialog projectId={project.id} folder={folder} onClose={vi.fn()} />
+      </AntdApp>
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText('旧名称')).toBeInTheDocument()
+  view.unmount()
+  name = '新接口名称'
+  await client.invalidateQueries({ queryKey: ['apis', project.id] })
+  render(
+    <QueryClientProvider client={client}>
+      <AntdApp>
+        <AddApisToFolderDialog projectId={project.id} folder={folder} onClose={vi.fn()} />
+      </AntdApp>
+    </QueryClientProvider>,
+  )
+  expect(await screen.findByText('新接口名称')).toBeInTheDocument()
+  expect(reads).toBe(2)
+})

@@ -55,6 +55,7 @@ export default function EnvironmentManager(props: Props) {
   const [dirty, setDirty] = useState(false)
   const [epoch, setEpoch] = useState(0)
   const [operationPending, setOperationPending] = useState(false)
+  const [savedEnvironment, setSavedEnvironment] = useState<Environment>()
   const busy = props.saving || props.deleting || operationPending
   const environment = props.environments.find((item) => item.id === editingId)
   const services = useQuery({
@@ -93,6 +94,7 @@ export default function EnvironmentManager(props: Props) {
             default_service_id: values.default_service_id ?? null,
           })
         : await props.onCreate(input)
+      setSavedEnvironment(saved)
       setEditingId(saved.id)
       setDirty(false)
       setEpoch((value) => value + 1)
@@ -104,6 +106,7 @@ export default function EnvironmentManager(props: Props) {
     setOperationPending(true)
     try {
       await props.onDelete(id)
+      setSavedEnvironment(undefined)
       setEditingId(props.environments.find((item) => item.id !== id)?.id ?? null)
       setDirty(false)
     } finally {
@@ -135,6 +138,7 @@ export default function EnvironmentManager(props: Props) {
             disabled={!props.editable || busy}
             onClick={() =>
               guard(() => {
+                setSavedEnvironment(undefined)
                 setEditingId(null)
                 setEpoch((value) => value + 1)
               })
@@ -151,7 +155,11 @@ export default function EnvironmentManager(props: Props) {
               aria-label={`编辑环境 ${item.name}`}
               aria-pressed={editingId === item.id}
               onClick={() => {
-                if (item.id !== editingId) guard(() => setEditingId(item.id))
+                if (item.id !== editingId)
+                  guard(() => {
+                    setSavedEnvironment(undefined)
+                    setEditingId(item.id)
+                  })
               }}
             >
               {item.name}
@@ -172,7 +180,7 @@ export default function EnvironmentManager(props: Props) {
           <EnvironmentEditorBoundary
             missing={unavailableEnvironment(editingId, environment)}
             key={`${editingId}:${epoch}`}
-            environment={environment}
+            environment={savedEditorEnvironment(savedEnvironment, editingId, environment)}
             editable={props.editable}
             busy={busy}
             services={services.data ?? []}
@@ -241,6 +249,14 @@ function EnvironmentActions({
       </Popconfirm>
     </Space>
   )
+}
+
+function savedEditorEnvironment(
+  saved: Environment | undefined,
+  id: string | null,
+  catalog: Environment | undefined,
+): Environment | undefined {
+  return saved?.id === id ? saved : catalog
 }
 
 function EnvironmentFormStatus({

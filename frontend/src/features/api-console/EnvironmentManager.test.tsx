@@ -19,10 +19,10 @@ function renderManager(
   options: { readonly?: boolean; empty?: boolean; failSave?: boolean; gate?: Promise<void> } = {},
 ) {
   server.use(http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])))
-  const onSave = vi.fn().mockImplementation(async (_id, input) => {
+  const onSave = vi.fn().mockImplementation(async (id, input) => {
     if (options.failSave) throw new Error('save failed')
     await options.gate
-    return { ...other, ...input }
+    return { ...(id === environment.id ? environment : other), ...input }
   })
   const onCreate = vi.fn().mockResolvedValue(other)
   const onDelete = vi.fn().mockResolvedValue(undefined)
@@ -121,6 +121,22 @@ describe('EnvironmentManager', () => {
       }),
     )
     expect(onUse).not.toHaveBeenCalled()
+  })
+  it('uses the returned saved environment while catalog props still contain the old values', async () => {
+    const { onSave } = renderManager()
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '已保存的新名称' } })
+    fireEvent.change(screen.getByLabelText('默认地址'), {
+      target: { value: 'http://new.internal:9090' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByLabelText('名称')).toHaveValue('已保存的新名称'))
+    expect(screen.getByLabelText('默认地址')).toHaveValue('http://new.internal:9090')
+    await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ name: '已保存的新名称', base_url: 'http://new.internal:9090' }),
+    )
   })
   it('keeps the editor locked until saving and catalog refresh both finish', async () => {
     let release!: () => void

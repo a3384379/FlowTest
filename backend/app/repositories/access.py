@@ -283,7 +283,7 @@ class ProjectRepository:
             query = (
                 select(Folder)
                 .where(Folder.id == folder_id)
-                .with_for_update()
+                .with_for_update(read=True, key_share=True)
                 .execution_options(populate_existing=True)
             )
             return (await self._session.execute(query)).scalar_one_or_none()
