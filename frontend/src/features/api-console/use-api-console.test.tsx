@@ -274,3 +274,63 @@ it('does not auto-select the first environment created inside management', async
   expect(localStorage.getItem(`flowtest:environment:v1:${user.id}:${project.id}`)).toBe('')
   localStorage.clear()
 })
+
+it('upserts a created environment already discovered by a background refresh', async () => {
+  localStorage.clear()
+  let phase: 'empty' | 'committed' | 'failed' = 'empty'
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/apis`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () =>
+      phase === 'failed'
+        ? HttpResponse.json(
+            {
+              error: {
+                code: 'UNAVAILABLE',
+                message: '刷新失败',
+                trace_id: 'duplicate-environment',
+              },
+            },
+            { status: 503 },
+          )
+        : HttpResponse.json(phase === 'committed' ? [environment] : []),
+    ),
+    http.post(`/api/v1/projects/${project.id}/environments`, async () => {
+      phase = 'committed'
+      await gate
+      return HttpResponse.json(environment, { status: 201 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+    http.get(`/api/v1/projects/${project.id}/files`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+  )
+  const { client, wrapper } = harness('apis')
+  const { result } = renderHook(() => useApiConsole(), { wrapper })
+  await waitFor(() => expect(result.current.environments.data).toEqual([]))
+  let operation!: Promise<typeof environment>
+  act(() => {
+    operation = result.current.addEnvironment(
+      { name: environment.name, base_url: environment.base_url, variables: {}, headers: {} },
+      false,
+    )
+  })
+  await waitFor(() => expect(phase).toBe('committed'))
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['environments', project.id] })
+  })
+  await waitFor(() => expect(result.current.environments.data).toEqual([environment]))
+  phase = 'failed'
+  await act(async () => {
+    release()
+    await operation
+  })
+  expect(result.current.environments.data).toEqual([environment])
+  expect(result.current.environmentId).toBeNull()
+  localStorage.clear()
+})

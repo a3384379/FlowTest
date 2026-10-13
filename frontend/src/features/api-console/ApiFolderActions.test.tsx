@@ -6,7 +6,7 @@ import { http, HttpResponse } from 'msw'
 import { expect, it, vi } from 'vitest'
 import { project } from '../../test/fixtures'
 import { server } from '../../test/server'
-import { AddApisToFolderDialog } from './ApiFolderActions'
+import { AddApisToFolderDialog, MoveApisDialog } from './ApiFolderActions'
 
 it('selects across pages, shows membership, preserves selection on failure and submits once on retry', async () => {
   const folder = {
@@ -129,4 +129,50 @@ it('refreshes a cached candidate directory when the shared API namespace is inva
   )
   expect(await screen.findByText('新接口名称')).toBeInTheDocument()
   expect(reads).toBe(2)
+})
+
+it('keeps a submitted move open until it finishes and preserves the single API destination', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let submitted = false
+  const onClose = vi.fn()
+  const onMoved = vi.fn()
+  const folder = { id: 'orders', name: '订单', parent_id: null }
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/folders`, () => HttpResponse.json([folder])),
+    http.post(`/api/v1/projects/${project.id}/apis/bulk-move`, async ({ request }) => {
+      expect(await request.json()).toEqual({ definition_ids: ['api'], folder_id: folder.id })
+      submitted = true
+      await gate
+      return HttpResponse.json({ moved_count: 1, items: [] })
+    }),
+  )
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <MoveApisDialog
+            projectId={project.id}
+            ids={['api']}
+            initialFolderId={folder.id}
+            onClose={onClose}
+            onMoved={onMoved}
+          />
+        </AntdApp>
+      </ConfigProvider>
+    </QueryClientProvider>,
+  )
+  const browser = userEvent.setup()
+  await waitFor(() => expect(screen.getByRole('button', { name: '确认移动' })).toBeEnabled())
+  await browser.click(screen.getByRole('button', { name: '确认移动' }))
+  await waitFor(() => expect(submitted).toBe(true))
+  expect(screen.getByRole('button', { name: /取.*消/ })).toBeDisabled()
+  await browser.click(screen.getByRole('button', { name: /取.*消/ }))
+  expect(onClose).not.toHaveBeenCalled()
+  release()
+  await waitFor(() => expect(onMoved).toHaveBeenCalledOnce())
 })

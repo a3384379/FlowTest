@@ -69,7 +69,10 @@ export function MoveApisDialog({
       closable={!mutation.isPending}
       maskClosable={!mutation.isPending}
       keyboard={!mutation.isPending}
-      onCancel={onClose}
+      onCancel={() => {
+        if (!mutation.isPending) onClose()
+      }}
+      cancelButtonProps={{ disabled: mutation.isPending }}
       okButtonProps={{
         disabled: !ids.length || destination === null || folders.isPending || folders.isError,
       }}
@@ -133,7 +136,10 @@ export function AddApisToFolderDialog({
       width={800}
       okText={`移入分组（${ids.length}）`}
       cancelText="取消"
-      onCancel={onClose}
+      onCancel={() => {
+        if (!mutation.isPending) onClose()
+      }}
+      cancelButtonProps={{ disabled: mutation.isPending }}
       closable={!mutation.isPending}
       maskClosable={!mutation.isPending}
       keyboard={!mutation.isPending}

@@ -258,7 +258,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
         setEnvironmentSelection(null)
       const environment = await environmentMutation.mutateAsync(input)
       queryClient.setQueryData<Environment[]>(['environments', projectId], (current) => [
-        ...(current ?? []),
+        ...(current ?? []).filter((item) => item.id !== environment.id),
         environment,
       ])
       await invalidateRequestTargets(queryClient, projectId)
