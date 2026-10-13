@@ -33,6 +33,7 @@ class MoveFixture:
     folder_id: UUID
     definition_id: UUID
     version_id: UUID
+    definition_ids: tuple[UUID, ...]
     marker: str
 
 
@@ -73,7 +74,38 @@ async def _create_assets(sessions: async_sessionmaker[AsyncSession]) -> MoveFixt
                 auth_config={},
             ),
         )
-        return MoveFixture(actor.id, project.id, folder.id, definition.id, version.id, marker)
+        definitions = [definition]
+        for index in range(2):
+            extra, _ = await APIAssetService(session).create_definition(
+                actor=actor,
+                project_id=project.id,
+                folder_id=None,
+                service_id=None,
+                name=f"分页移动接口{index}",
+                description="",
+                request=APIVersionSpec(
+                    method=HttpMethod.GET,
+                    path="/orders",
+                    query_parameters=(),
+                    headers={},
+                    body_kind=BodyKind.NONE,
+                    body=None,
+                    auth_kind=AuthKind.NONE,
+                    auth_config={},
+                ),
+            )
+            extra.created_at = definition.created_at
+            definitions.append(extra)
+        await session.commit()
+        return MoveFixture(
+            actor.id,
+            project.id,
+            folder.id,
+            definition.id,
+            version.id,
+            tuple(item.id for item in definitions),
+            marker,
+        )
 
 
 @pytest.mark.asyncio
@@ -141,6 +173,44 @@ async def test_single_and_bulk_move_share_destination_without_deadlock(
         if bulk is not None and not bulk.done():
             bulk.cancel()
             await asyncio.gather(bulk, return_exceptions=True)
+        async with sessions() as cleanup:
+            project = await cleanup.get(Project, fixture.project_id)
+            assert project is not None and project.name == fixture.marker
+            await cleanup.execute(delete(AuditLog).where(AuditLog.project_id == fixture.project_id))
+            await cleanup.execute(delete(Project).where(Project.id == fixture.project_id))
+            await cleanup.execute(delete(User).where(User.id == fixture.actor_id))
+            await cleanup.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_paged_directory_remains_stable_while_moving_imported_timestamp_ties() -> None:
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    fixture = await _create_assets(sessions)
+    try:
+        async with sessions() as session:
+            actor = await session.get(User, fixture.actor_id)
+            assert actor is not None
+            seen = []
+            for page in range(1, 4):
+                entries, total = await APIAssetService(session).list_directory(
+                    actor=actor,
+                    project_id=fixture.project_id,
+                    page=page,
+                    page_size=1,
+                )
+                assert total == 3
+                seen.append(entries[0].id)
+                await APIAssetService(session).move_definitions(
+                    actor=actor,
+                    project_id=fixture.project_id,
+                    definition_ids=[entries[0].id],
+                    folder_id=fixture.folder_id,
+                )
+            assert len(set(seen)) == 3
+            assert set(seen) == set(fixture.definition_ids)
+    finally:
         async with sessions() as cleanup:
             project = await cleanup.get(Project, fixture.project_id)
             assert project is not None and project.name == fixture.marker

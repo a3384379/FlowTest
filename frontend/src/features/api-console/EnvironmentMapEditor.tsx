@@ -20,6 +20,10 @@ export default function EnvironmentMapEditor({
 }: Props) {
   const [error, setError] = useState('')
   const label = kind === 'variables' ? '变量' : '请求头'
+  function changeRows(rows: Array<{ name: string; value: string }>) {
+    setError('')
+    onChange?.({ format: 'table', rows })
+  }
   function changeFormat() {
     try {
       const parsed = parseEnvironmentMap(value, kind)
@@ -63,12 +67,11 @@ export default function EnvironmentMapEditor({
                 value={row.name}
                 readOnly={readOnly}
                 onChange={(event) =>
-                  onChange?.({
-                    format: 'table',
-                    rows: value.rows.map((item, itemIndex) =>
+                  changeRows(
+                    value.rows.map((item, itemIndex) =>
                       itemIndex === index ? { ...item, name: event.target.value } : item,
                     ),
-                  })
+                  )
                 }
               />
               <Input
@@ -77,12 +80,11 @@ export default function EnvironmentMapEditor({
                 value={row.value}
                 readOnly={readOnly}
                 onChange={(event) =>
-                  onChange?.({
-                    format: 'table',
-                    rows: value.rows.map((item, itemIndex) =>
+                  changeRows(
+                    value.rows.map((item, itemIndex) =>
                       itemIndex === index ? { ...item, value: event.target.value } : item,
                     ),
-                  })
+                  )
                 }
               />
               {!readOnly && (
@@ -90,10 +92,7 @@ export default function EnvironmentMapEditor({
                   icon={<DeleteOutlined />}
                   aria-label={`删除${label} ${index + 1}`}
                   onClick={() =>
-                    onChange?.({
-                      format: 'table',
-                      rows: value.rows.filter((_, itemIndex) => itemIndex !== index),
-                    })
+                    changeRows(value.rows.filter((_, itemIndex) => itemIndex !== index))
                   }
                 />
               )}
@@ -103,9 +102,7 @@ export default function EnvironmentMapEditor({
             <Button
               size="small"
               icon={<PlusOutlined />}
-              onClick={() =>
-                onChange?.({ format: 'table', rows: [...value.rows, { name: '', value: '' }] })
-              }
+              onClick={() => changeRows([...value.rows, { name: '', value: '' }])}
             >
               添加{label}
             </Button>

@@ -43,13 +43,17 @@ export function MoveApisDialog({
   ids,
   onClose,
   onMoved,
+  initialFolderId,
 }: {
   projectId: string
   ids: string[]
   onClose: () => void
   onMoved: () => void
+  initialFolderId?: string | null
 }) {
-  const [destination, setDestination] = useState('unfiled')
+  const [destination, setDestination] = useState<string | null>(() =>
+    initialFolderId === undefined ? null : (initialFolderId ?? 'unfiled'),
+  )
   const folders = useQuery({
     queryKey: ['folders', projectId],
     queryFn: () => listFolders(projectId),
@@ -66,10 +70,13 @@ export function MoveApisDialog({
       maskClosable={!mutation.isPending}
       keyboard={!mutation.isPending}
       onCancel={onClose}
-      okButtonProps={{ disabled: !ids.length || folders.isPending || folders.isError }}
-      onOk={() =>
-        mutation.mutate({ ids, folderId: destination === 'unfiled' ? null : destination })
-      }
+      okButtonProps={{
+        disabled: !ids.length || destination === null || folders.isPending || folders.isError,
+      }}
+      onOk={() => {
+        if (destination !== null)
+          mutation.mutate({ ids, folderId: destination === 'unfiled' ? null : destination })
+      }}
     >
       <QueryFailureNotice queries={[folders]} />
       <Typography.Paragraph>
@@ -79,7 +86,8 @@ export function MoveApisDialog({
         aria-label="接口目标分组"
         className="full-width"
         treeDefaultExpandAll
-        value={destination}
+        value={destination ?? undefined}
+        placeholder="请选择目标分组"
         onChange={setDestination}
         disabled={mutation.isPending}
         treeData={[

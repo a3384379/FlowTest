@@ -1330,3 +1330,40 @@ async def test_bulk_move_viewer_read_only_and_transaction_rollback(
     assert failed.json()["error"]["trace_id"]
     loaded = await asset_client.get(f"{root}/apis", headers=headers)
     assert all(item["folder_id"] is None for item in loaded.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_environment_ordinary_update_preserves_service_without_default_variant(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    environment = await _create_environment(
+        asset_client,
+        headers,
+        project["id"],
+        name="测试环境",
+        base_url="https://api.example.com",
+        variables={},
+        environment_headers={},
+    )
+    root = f"/api/v1/projects/{project['id']}"
+    endpoints = await asset_client.get(
+        f"{root}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+    )
+    endpoint = endpoints.json()[0]
+    renamed = await asset_client.patch(
+        f"{root}/service-endpoints/{endpoint['id']}",
+        headers=headers,
+        json={"variant": "blue"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    saved = await asset_client.patch(
+        f"{root}/environments/{environment['id']}",
+        headers=headers,
+        json={"name": "已改名环境", "headers": {"X-Region": "cn"}},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["default_service_id"] == environment["default_service_id"]
+    assert saved.json()["headers"] == {"X-Region": "cn"}

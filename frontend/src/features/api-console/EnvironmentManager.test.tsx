@@ -5,6 +5,8 @@ import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { Environment } from '../../lib/api'
+import type { UpdateEnvironmentInput } from './api-service'
 import { environment, project } from '../../test/fixtures'
 import { server } from '../../test/server'
 import EnvironmentManager from './EnvironmentManager'
@@ -16,42 +18,64 @@ const other = {
   base_url: 'https://stage.example.test',
 }
 function renderManager(
-  options: { readonly?: boolean; empty?: boolean; failSave?: boolean; gate?: Promise<void> } = {},
+  options: {
+    readonly?: boolean
+    empty?: boolean
+    failSave?: boolean
+    gate?: Promise<void>
+    catalog?: Environment[]
+  } = {},
 ) {
   server.use(http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])))
-  const onSave = vi.fn().mockImplementation(async (id, input) => {
+  let serverCatalog = options.catalog ?? [environment, other]
+  const onSave = vi.fn().mockImplementation(async (id: string, input: UpdateEnvironmentInput) => {
     if (options.failSave) throw new Error('save failed')
     await options.gate
-    return { ...(id === environment.id ? environment : other), ...input }
+    const saved = { ...(serverCatalog.find((item) => item.id === id) ?? environment), ...input }
+    serverCatalog = serverCatalog.map((item) => (item.id === id ? saved : item))
+    return saved
   })
   const onCreate = vi.fn().mockResolvedValue(other)
   const onDelete = vi.fn().mockResolvedValue(undefined)
   const onUse = vi.fn()
   const onClose = vi.fn()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
-    <QueryClientProvider client={client}>
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <AntdApp>
-          <EnvironmentManager
-            projectId={project.id}
-            environments={options.empty ? [] : [environment, other]}
-            sendingEnvironmentId={environment.id}
-            editable={!options.readonly}
-            canUse={!options.readonly}
-            saving={false}
-            deleting={false}
-            onClose={onClose}
-            onCreate={onCreate}
-            onSave={onSave}
-            onDelete={onDelete}
-            onUse={onUse}
-          />
-        </AntdApp>
-      </ConfigProvider>
-    </QueryClientProvider>,
-  )
-  return { onSave, onCreate, onDelete, onUse, onClose }
+  function tree(catalog: Environment[]) {
+    return (
+      <QueryClientProvider client={client}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <AntdApp>
+            <EnvironmentManager
+              projectId={project.id}
+              environments={catalog}
+              sendingEnvironmentId={environment.id}
+              editable={!options.readonly}
+              canUse={!options.readonly}
+              saving={false}
+              deleting={false}
+              onClose={onClose}
+              onCreate={onCreate}
+              onSave={onSave}
+              onDelete={onDelete}
+              onUse={onUse}
+            />
+          </AntdApp>
+        </ConfigProvider>
+      </QueryClientProvider>
+    )
+  }
+  const view = render(tree(options.empty ? [] : serverCatalog))
+  return {
+    onSave,
+    onCreate,
+    onDelete,
+    onUse,
+    onClose,
+    updateCatalog: (catalog: Environment[]) => {
+      serverCatalog = catalog
+      view.rerender(tree(catalog))
+    },
+  }
 }
 
 describe('EnvironmentManager', () => {
@@ -61,12 +85,7 @@ describe('EnvironmentManager', () => {
     await browser.click(screen.getByRole('button', { name: '编辑环境 预发环境' }))
     expect(screen.getByDisplayValue(other.base_url)).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /保存配置/ }))
-    await waitFor(() =>
-      expect(handlers.onSave).toHaveBeenCalledWith(
-        other.id,
-        expect.objectContaining({ base_url: other.base_url }),
-      ),
-    )
+    await waitFor(() => expect(handlers.onSave).toHaveBeenCalledWith(other.id, {}))
     expect(handlers.onUse).not.toHaveBeenCalled()
     await browser.click(screen.getByRole('button', { name: '用此环境调试' }))
     expect(handlers.onUse).toHaveBeenCalledWith(other.id)
@@ -134,9 +153,50 @@ describe('EnvironmentManager', () => {
     expect(screen.getByLabelText('默认地址')).toHaveValue('http://new.internal:9090')
     await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
-    expect(onSave.mock.calls[1][1]).toEqual(
-      expect.objectContaining({ name: '已保存的新名称', base_url: 'http://new.internal:9090' }),
+    expect(onSave.mock.calls[1][1]).toEqual({})
+    expect(screen.getByLabelText('默认地址')).toHaveValue('http://new.internal:9090')
+  })
+
+  it('refreshes untouched fields after saving when the catalog changes again', async () => {
+    const { onSave, updateCatalog } = renderManager()
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '保存名称' } })
+    await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    updateCatalog([
+      {
+        ...environment,
+        name: '保存名称',
+        base_url: 'http://other-team.internal:9080',
+        variables: { region: 'updated' },
+      },
+      other,
+    ])
+    await waitFor(() =>
+      expect(screen.getByLabelText('默认地址')).toHaveValue('http://other-team.internal:9080'),
     )
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '再次改名' } })
+    await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2))
+    expect(onSave.mock.calls[1][1]).toEqual({ name: '再次改名' })
+  })
+  it('preserves dirty edits on refresh and sends only changed fields', async () => {
+    const configured = { ...environment, default_service_id: 'default-service' }
+    const { onSave, updateCatalog } = renderManager({ catalog: [configured, other] })
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '本地名称草稿' } })
+    updateCatalog([
+      {
+        ...configured,
+        base_url: 'http://new-server.internal:9090',
+        variables: { region: 'updated' },
+      },
+      other,
+    ])
+    expect(screen.getByLabelText('名称')).toHaveValue('本地名称草稿')
+    await userEvent.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith(environment.id, { name: '本地名称草稿' }),
+    )
+    expect(onSave.mock.calls[0][1]).not.toHaveProperty('default_service_id')
   })
   it('keeps the editor locked until saving and catalog refresh both finish', async () => {
     let release!: () => void

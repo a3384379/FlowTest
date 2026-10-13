@@ -10,6 +10,7 @@ import {
 import {
   Button,
   Card,
+  Checkbox,
   Dropdown,
   Drawer,
   Empty,
@@ -313,6 +314,24 @@ function ApiDirectorySelection(
   const inPage = selectedIds.filter((id) => props.items.some((item) => item.id === id)).length
   return (
     <>
+      {props.editable && (
+        <Checkbox
+          aria-label="全选本页"
+          disabled={props.loading || !props.items.length}
+          checked={props.items.length > 0 && inPage === props.items.length}
+          indeterminate={inPage > 0 && inPage < props.items.length}
+          onChange={(event) =>
+            setSelectedIds(
+              event.target.checked
+                ? [...new Set([...selectedIds, ...props.items.map((item) => item.id)])]
+                : selectedIds.filter((id) => !props.items.some((item) => item.id === id)),
+            )
+          }
+        >
+          全选本页
+        </Checkbox>
+      )}
+
       {props.editable && selectedIds.length > 0 && (
         <div className="api-bulk-toolbar">
           <Typography.Text>
@@ -495,7 +514,7 @@ function ApiConsoleHeading({
         <Button
           icon={<SettingOutlined />}
           aria-label="管理环境"
-          disabled={!state.projectId || state.environments.isPending || state.environments.isError}
+          disabled={!state.projectId || state.environments.isPending || !state.environments.data}
           onClick={onEnvironments}
         >
           管理环境

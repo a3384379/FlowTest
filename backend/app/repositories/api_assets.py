@@ -222,7 +222,7 @@ class APIAssetRepository:
                 await self._session.scalars(
                     select(APIDefinition)
                     .where(*filters)
-                    .order_by(APIDefinition.created_at.desc())
+                    .order_by(APIDefinition.created_at.desc(), APIDefinition.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )

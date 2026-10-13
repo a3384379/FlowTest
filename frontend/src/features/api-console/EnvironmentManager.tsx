@@ -14,7 +14,7 @@ import {
   Typography,
 } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { Environment } from '../../lib/api'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
@@ -55,9 +55,8 @@ export default function EnvironmentManager(props: Props) {
   const [dirty, setDirty] = useState(false)
   const [epoch, setEpoch] = useState(0)
   const [operationPending, setOperationPending] = useState(false)
-  const [savedEnvironment, setSavedEnvironment] = useState<Environment>()
   const busy = props.saving || props.deleting || operationPending
-  const environment = props.environments.find((item) => item.id === editingId)
+  const { environment, markCreated } = useEditingEnvironment(props.environments, editingId)
   const services = useQuery({
     queryKey: ['request-services', props.projectId],
     queryFn: () => listRequestServices(props.projectId),
@@ -79,7 +78,7 @@ export default function EnvironmentManager(props: Props) {
       },
     })
   }
-  async function save(values: EnvironmentForm) {
+  async function save(values: EnvironmentForm, baseline: EnvironmentForm) {
     setOperationPending(true)
     try {
       const input = {
@@ -89,15 +88,12 @@ export default function EnvironmentManager(props: Props) {
         headers: parseEnvironmentMap(values.headers, 'headers'),
       }
       const saved = environment
-        ? await props.onSave(environment.id, {
-            ...input,
-            default_service_id: values.default_service_id ?? null,
-          })
+        ? await props.onSave(environment.id, environmentChanges(values, baseline))
         : await props.onCreate(input)
-      setSavedEnvironment(saved)
+      if (!environment) markCreated(saved)
       setEditingId(saved.id)
       setDirty(false)
-      setEpoch((value) => value + 1)
+      return saved
     } finally {
       setOperationPending(false)
     }
@@ -106,7 +102,7 @@ export default function EnvironmentManager(props: Props) {
     setOperationPending(true)
     try {
       await props.onDelete(id)
-      setSavedEnvironment(undefined)
+      markCreated(undefined)
       setEditingId(props.environments.find((item) => item.id !== id)?.id ?? null)
       setDirty(false)
     } finally {
@@ -115,7 +111,6 @@ export default function EnvironmentManager(props: Props) {
   }
   function applyEnvironment(id: string) {
     guard(() => {
-      setEpoch((value) => value + 1)
       props.onUse(id)
     })
   }
@@ -138,7 +133,7 @@ export default function EnvironmentManager(props: Props) {
             disabled={!props.editable || busy}
             onClick={() =>
               guard(() => {
-                setSavedEnvironment(undefined)
+                markCreated(undefined)
                 setEditingId(null)
                 setEpoch((value) => value + 1)
               })
@@ -157,7 +152,7 @@ export default function EnvironmentManager(props: Props) {
               onClick={() => {
                 if (item.id !== editingId)
                   guard(() => {
-                    setSavedEnvironment(undefined)
+                    markCreated(undefined)
                     setEditingId(item.id)
                   })
               }}
@@ -180,7 +175,7 @@ export default function EnvironmentManager(props: Props) {
           <EnvironmentEditorBoundary
             missing={unavailableEnvironment(editingId, environment)}
             key={`${editingId}:${epoch}`}
-            environment={savedEditorEnvironment(savedEnvironment, editingId, environment)}
+            environment={environment}
             editable={props.editable}
             busy={busy}
             services={services.data ?? []}
@@ -203,6 +198,7 @@ export default function EnvironmentManager(props: Props) {
                 editable={props.editable}
                 canUse={props.canUse}
                 busy={busy}
+                dirty={dirty}
                 onUse={applyEnvironment}
                 onDelete={remove}
               />
@@ -219,6 +215,7 @@ function EnvironmentActions({
   editable,
   canUse,
   busy,
+  dirty,
   onUse,
   onDelete,
 }: {
@@ -226,13 +223,18 @@ function EnvironmentActions({
   editable: boolean
   canUse: boolean
   busy: boolean
+  dirty: boolean
   onUse: (id: string) => void
   onDelete: (id: string) => Promise<void>
 }) {
   if (!environment) return null
   return (
     <Space wrap>
-      <Button disabled={!canUse || busy} onClick={() => onUse(environment.id)}>
+      <Button
+        disabled={!canUse || busy || dirty}
+        title={dirty ? '请先保存环境配置' : undefined}
+        onClick={() => onUse(environment.id)}
+      >
         用此环境调试
       </Button>
       <Popconfirm
@@ -251,12 +253,34 @@ function EnvironmentActions({
   )
 }
 
-function savedEditorEnvironment(
-  saved: Environment | undefined,
-  id: string | null,
-  catalog: Environment | undefined,
-): Environment | undefined {
-  return saved?.id === id ? saved : catalog
+function useEditingEnvironment(catalog: Environment[], id: string | null) {
+  const [created, markCreated] = useState<Environment>()
+  const current = catalog.find((item) => item.id === id)
+  if (created && current && created.id === current.id) markCreated(undefined)
+  return { environment: current ?? (created?.id === id ? created : undefined), markCreated }
+}
+function environmentChanges(
+  values: EnvironmentForm,
+  baseline: EnvironmentForm,
+): UpdateEnvironmentInput {
+  const patch: UpdateEnvironmentInput = {}
+  if (values.name.trim() !== baseline.name.trim()) patch.name = values.name.trim()
+  if (values.base_url.trim() !== baseline.base_url.trim()) patch.base_url = values.base_url.trim()
+  if ((values.default_service_id ?? null) !== (baseline.default_service_id ?? null))
+    patch.default_service_id = values.default_service_id ?? null
+  const variables = parseEnvironmentMap(values.variables, 'variables')
+  const headers = parseEnvironmentMap(values.headers, 'headers')
+  if (
+    JSON.stringify(sortedEntries(variables)) !==
+    JSON.stringify(sortedEntries(parseEnvironmentMap(baseline.variables, 'variables')))
+  )
+    patch.variables = variables
+  if (
+    JSON.stringify(sortedEntries(headers)) !==
+    JSON.stringify(sortedEntries(parseEnvironmentMap(baseline.headers, 'headers')))
+  )
+    patch.headers = headers
+  return patch
 }
 
 function EnvironmentFormStatus({
@@ -299,19 +323,31 @@ function EnvironmentEditor({
   editable: boolean
   busy: boolean
   services: Array<{ id: string; name: string; enabled: boolean }>
-  onSave: (values: EnvironmentForm) => Promise<void>
+  onSave: (values: EnvironmentForm, baseline: EnvironmentForm) => Promise<Environment>
   onDirty: (value: boolean) => void
   endpointPanel: React.ReactNode
   actions: React.ReactNode
 }) {
   const [form] = Form.useForm<EnvironmentForm>()
   const initial = environmentValues(environment)
+  const baseline = useRef(initial)
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState('basic')
+  useEffect(() => {
+    if (formSignature(form.getFieldsValue(true)) !== formSignature(baseline.current)) return
+    const incoming = environmentValues(environment)
+    form.setFieldsValue(incoming)
+    baseline.current = incoming
+    onDirty(false)
+  }, [environment, form, onDirty])
   async function submit(values: EnvironmentForm) {
     if (!editable || busy) return
     try {
-      await onSave(values)
+      const saved = await onSave(values, baseline.current)
+      const normalized = environmentValues(saved)
+      form.setFieldsValue(normalized)
+      baseline.current = normalized
+      onDirty(false)
       setError('')
     } catch {
       setError('保存失败，修改已保留，请修正后重试。')
@@ -324,7 +360,9 @@ function EnvironmentEditor({
       initialValues={initial}
       layout="vertical"
       disabled={!editable || busy}
-      onValuesChange={(_, values) => onDirty(formSignature(values) !== formSignature(initial))}
+      onValuesChange={(_, values) =>
+        onDirty(formSignature(values) !== formSignature(baseline.current))
+      }
       onFinish={(values) => void submit(values)}
       onFinishFailed={({ errorFields }) =>
         setActiveTab(

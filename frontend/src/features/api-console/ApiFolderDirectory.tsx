@@ -23,7 +23,7 @@ export default function ApiFolderDirectory(props: Props) {
     queryFn: () => listFolders(props.projectId),
   })
   const [managementOpen, setManagementOpen] = useState(false)
-  const [moving, setMoving] = useState<string[] | null>(null)
+  const [moving, setMoving] = useState<ApiDefinition | null>(null)
   const [adding, setAdding] = useState<Folder | null>(null)
   return (
     <div className="api-folder-directory">
@@ -41,7 +41,7 @@ export default function ApiFolderDirectory(props: Props) {
           size="small"
           disabled={!props.editable || !props.definition}
           onClick={() => {
-            if (props.definition) setMoving([props.definition.id])
+            if (props.definition) setMoving(props.definition)
           }}
         >
           移动接口
@@ -95,7 +95,8 @@ export default function ApiFolderDirectory(props: Props) {
       {moving && props.editable && (
         <MoveApisDialog
           projectId={props.projectId}
-          ids={moving}
+          ids={[moving.id]}
+          initialFolderId={moving.folder_id}
           onClose={() => setMoving(null)}
           onMoved={() => setMoving(null)}
         />

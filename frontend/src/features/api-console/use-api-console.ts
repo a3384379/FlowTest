@@ -254,8 +254,13 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
 
   async function addEnvironment(input: CreateEnvironmentInput, selectForExecution = true) {
     return withErrorMessage(message.error, async () => {
-      if (!selectForExecution && !environmentId) setEnvironmentSelection(null)
+      if (!selectForExecution && !environmentId && !environmentSelectionInvalid)
+        setEnvironmentSelection(null)
       const environment = await environmentMutation.mutateAsync(input)
+      queryClient.setQueryData<Environment[]>(['environments', projectId], (current) => [
+        ...(current ?? []),
+        environment,
+      ])
       await invalidateRequestTargets(queryClient, projectId)
       if (selectForExecution) setEnvironmentSelection(environment.id)
       return environment
@@ -265,6 +270,9 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
   async function editEnvironment(environmentId: string, input: UpdateEnvironmentInput) {
     return withErrorMessage(message.error, async () => {
       const environment = await updateEnvironmentMutation.mutateAsync({ environmentId, input })
+      queryClient.setQueryData<Environment[]>(['environments', projectId], (current) =>
+        current?.map((item) => (item.id === environment.id ? environment : item)),
+      )
       await invalidateRequestTargets(queryClient, projectId)
       void message.success('环境配置已更新')
       return environment
