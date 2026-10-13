@@ -15,6 +15,9 @@ from app.schemas.api_assets import (
     APIDefinitionResponse,
     APIDefinitionUpdate,
     APIDetailResponse,
+    APIDirectoryResponse,
+    APIFolderMoveInput,
+    APIFolderMoveResponse,
     APIVersionInput,
     APIVersionResponse,
     EnvironmentCreate,
@@ -73,6 +76,55 @@ async def list_environments(
         actor=current_user, project_id=project_id
     )
     return [EnvironmentResponse.model_validate(environment) for environment in environments]
+
+
+@router.get("/apis/directory", response_model=Page[APIDirectoryResponse])
+async def list_api_directory(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=200),
+    method: HttpMethod | None = None,
+    folder_id: UUID | None = None,
+    unfiled: bool = False,
+) -> Page[APIDirectoryResponse]:
+    entries, total = await APIAssetService(session).list_directory(
+        actor=current_user,
+        project_id=project_id,
+        page=page,
+        page_size=page_size,
+        search=search,
+        method=method.value if method is not None else None,
+        folder_id=folder_id,
+        unfiled=unfiled,
+    )
+    return Page(
+        items=[APIDirectoryResponse.model_validate(item) for item in entries],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/apis/bulk-move", response_model=APIFolderMoveResponse)
+async def move_api_definitions(
+    project_id: UUID,
+    payload: APIFolderMoveInput,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> APIFolderMoveResponse:
+    definitions = await APIAssetService(session).move_definitions(
+        actor=current_user,
+        project_id=project_id,
+        definition_ids=payload.definition_ids,
+        folder_id=payload.folder_id,
+    )
+    return APIFolderMoveResponse(
+        moved_count=len(definitions),
+        items=[APIDefinitionResponse.model_validate(item) for item in definitions],
+    )
 
 
 @router.post(

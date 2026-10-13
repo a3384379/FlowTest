@@ -42,6 +42,7 @@ import {
   type ApiVersionInput,
   type CreateApiInput,
   type CreateEnvironmentInput,
+  type UpdateEnvironmentInput,
   type CreateProjectInput,
   type HttpMethod,
 } from './api-service'
@@ -134,7 +135,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
       input,
     }: {
       environmentId: string
-      input: Partial<CreateEnvironmentInput>
+      input: UpdateEnvironmentInput
     }) => updateEnvironment(requiredId(projectId), environmentId, input),
   })
   const deleteEnvironmentMutation = useMutation({
@@ -251,19 +252,22 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     })
   }
 
-  async function addEnvironment(input: CreateEnvironmentInput) {
-    await withErrorMessage(message.error, async () => {
+  async function addEnvironment(input: CreateEnvironmentInput, selectForExecution = true) {
+    return withErrorMessage(message.error, async () => {
+      if (!selectForExecution && !environmentId) setEnvironmentSelection(null)
       const environment = await environmentMutation.mutateAsync(input)
       await invalidateRequestTargets(queryClient, projectId)
-      setEnvironmentSelection(environment.id)
+      if (selectForExecution) setEnvironmentSelection(environment.id)
+      return environment
     })
   }
 
-  async function editEnvironment(environmentId: string, input: Partial<CreateEnvironmentInput>) {
-    await withErrorMessage(message.error, async () => {
-      await updateEnvironmentMutation.mutateAsync({ environmentId, input })
+  async function editEnvironment(environmentId: string, input: UpdateEnvironmentInput) {
+    return withErrorMessage(message.error, async () => {
+      const environment = await updateEnvironmentMutation.mutateAsync({ environmentId, input })
       await invalidateRequestTargets(queryClient, projectId)
       void message.success('环境配置已更新')
+      return environment
     })
   }
 
@@ -271,7 +275,6 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     await withErrorMessage(message.error, async () => {
       await deleteEnvironmentMutation.mutateAsync(targetEnvironmentId)
       await invalidateRequestTargets(queryClient, projectId)
-      if (targetEnvironmentId === environmentId) setEnvironmentSelection(null)
       void message.success('环境已删除，历史记录仍会保留')
     })
   }
@@ -323,7 +326,10 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
       setApiPage(1)
     },
     apiPage,
-    setApiPage,
+    setApiPage: (page: number) => {
+      if (apiId) setApiSelection(apiId)
+      setApiPage(page)
+    },
     ...executions,
     artifacts,
     redactionMode,
@@ -346,6 +352,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     editEnvironment,
     archiveEnvironment,
     updatingEnvironment: updateEnvironmentMutation.isPending,
+    creatingEnvironment: environmentMutation.isPending,
     deletingEnvironment: deleteEnvironmentMutation.isPending,
     addApi,
     saveVersion: versionMutation.mutateAsync,
@@ -494,12 +501,12 @@ function requiredId(value: string | null): string {
   return value
 }
 
-async function withErrorMessage(
+async function withErrorMessage<T>(
   showError: (content: string) => unknown,
-  operation: () => Promise<void>,
+  operation: () => Promise<T>,
 ) {
   try {
-    await operation()
+    return await operation()
   } catch (error) {
     showError(apiErrorMessage(error))
     throw error

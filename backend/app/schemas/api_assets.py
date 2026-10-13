@@ -154,6 +154,29 @@ class APIDefinitionUpdate(BaseModel):
     service_id: UUID | None = None
 
 
+class APIFolderMoveInput(BaseModel):
+    definition_ids: list[UUID] = Field(min_length=1, max_length=1000)
+    folder_id: UUID | None
+
+    @field_validator("definition_ids")
+    @classmethod
+    def unique_definitions(cls, value: list[UUID]) -> list[UUID]:
+        if len(set(value)) != len(value):
+            raise ValueError("接口不能重复选择")
+        return value
+
+
+class APIDirectoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    folder_id: UUID | None
+    current_version: int
+    method: HttpMethod
+    path: str
+
+
 class APIVersionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -204,6 +227,11 @@ class APIDefinitionResponse(BaseModel):
 class APIDetailResponse(BaseModel):
     definition: APIDefinitionResponse
     version: APIVersionResponse
+
+
+class APIFolderMoveResponse(BaseModel):
+    moved_count: int
+    items: list[APIDefinitionResponse]
 
 
 class PreviewRequest(BaseModel):

@@ -43,6 +43,47 @@ export type CreateEnvironmentInput = {
   headers: Record<string, string>
 }
 
+export type UpdateEnvironmentInput = Partial<CreateEnvironmentInput> & {
+  default_service_id?: string | null
+}
+
+export type ApiDirectoryEntry = Pick<
+  ApiDefinition,
+  'id' | 'name' | 'folder_id' | 'current_version'
+> & {
+  method: HttpMethod
+  path: string
+}
+
+export async function listApiDirectory(
+  projectId: string,
+  options: { page: number; search?: string; method?: HttpMethod },
+): Promise<Page<ApiDirectoryEntry>> {
+  return (
+    await apiClient.get<Page<ApiDirectoryEntry>>(`/projects/${projectId}/apis/directory`, {
+      params: {
+        page: options.page,
+        page_size: 20,
+        search: options.search?.trim() || undefined,
+        method: options.method,
+      },
+    })
+  ).data
+}
+
+export async function moveApis(
+  projectId: string,
+  definitionIds: string[],
+  folderId: string | null,
+): Promise<{ moved_count: number; items: ApiDefinition[] }> {
+  return (
+    await apiClient.post<{ moved_count: number; items: ApiDefinition[] }>(
+      `/projects/${projectId}/apis/bulk-move`,
+      { definition_ids: definitionIds, folder_id: folderId },
+    )
+  ).data
+}
+
 export type CreateApiInput = {
   name: string
   folder_id?: string | null
@@ -93,7 +134,7 @@ export async function createEnvironment(
 export async function updateEnvironment(
   projectId: string,
   environmentId: string,
-  input: Partial<CreateEnvironmentInput>,
+  input: UpdateEnvironmentInput,
 ): Promise<Environment> {
   return (
     await apiClient.patch<Environment>(

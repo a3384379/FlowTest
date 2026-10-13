@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
@@ -103,6 +103,35 @@ class APIAssetRepository:
             APIDefinition.import_key == import_key,
         )
         return (await self._session.execute(query)).scalar_one_or_none()
+
+    async def get_definitions(
+        self, *, project_id: UUID, definition_ids: list[UUID], for_update: bool = False
+    ) -> list[APIDefinition]:
+        query = (
+            select(APIDefinition)
+            .where(
+                APIDefinition.project_id == project_id,
+                APIDefinition.id.in_(definition_ids),
+                APIDefinition.is_active.is_(True),
+            )
+            .order_by(APIDefinition.id)
+            .execution_options(populate_existing=True)
+        )
+        if for_update:
+            query = query.with_for_update()
+        return list((await self._session.scalars(query)).all())
+
+    async def get_selected_versions(
+        self, definitions: list[APIDefinition]
+    ) -> dict[UUID, APIVersion]:
+        if not definitions:
+            return {}
+        query = select(APIVersion).where(
+            tuple_(APIVersion.api_definition_id, APIVersion.version).in_(
+                [(item.id, item.current_version) for item in definitions]
+            )
+        )
+        return {item.api_definition_id: item for item in (await self._session.scalars(query)).all()}
 
     async def list_imported_definitions(
         self, *, project_id: UUID, import_source_key: str

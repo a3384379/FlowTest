@@ -1,83 +1,151 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
+import { http, HttpResponse } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 
-import { environment } from '../../test/fixtures'
-import type { CreateEnvironmentInput } from './api-service'
+import { environment, project } from '../../test/fixtures'
+import { server } from '../../test/server'
 import EnvironmentManager from './EnvironmentManager'
 
-type SaveHandler = (input: Partial<CreateEnvironmentInput>) => Promise<void>
-type DeleteHandler = () => Promise<void>
+const other = {
+  ...environment,
+  id: 'other-env',
+  name: '预发环境',
+  base_url: 'https://stage.example.test',
+}
+function renderManager(
+  options: { readonly?: boolean; empty?: boolean; failSave?: boolean; gate?: Promise<void> } = {},
+) {
+  server.use(http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])))
+  const onSave = vi.fn().mockImplementation(async (_id, input) => {
+    if (options.failSave) throw new Error('save failed')
+    await options.gate
+    return { ...other, ...input }
+  })
+  const onCreate = vi.fn().mockResolvedValue(other)
+  const onDelete = vi.fn().mockResolvedValue(undefined)
+  const onUse = vi.fn()
+  const onClose = vi.fn()
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <EnvironmentManager
+            projectId={project.id}
+            environments={options.empty ? [] : [environment, other]}
+            sendingEnvironmentId={environment.id}
+            editable={!options.readonly}
+            canUse={!options.readonly}
+            saving={false}
+            deleting={false}
+            onClose={onClose}
+            onCreate={onCreate}
+            onSave={onSave}
+            onDelete={onDelete}
+            onUse={onUse}
+          />
+        </AntdApp>
+      </ConfigProvider>
+    </QueryClientProvider>,
+  )
+  return { onSave, onCreate, onDelete, onUse, onClose }
+}
 
 describe('EnvironmentManager', () => {
-  it('loads an environment, saves typed maps, and opens deletion confirmation', async () => {
-    const onSave = vi.fn<SaveHandler>().mockResolvedValue(undefined)
-    const onDelete = vi.fn<DeleteHandler>().mockResolvedValue(undefined)
-    renderManager({ onSave, onDelete })
+  it('edits another environment without changing the sending environment and applies it explicitly', async () => {
+    const handlers = renderManager()
     const browser = userEvent.setup()
-
-    expect(await screen.findByDisplayValue(environment.base_url)).toBeVisible()
-    await browser.clear(screen.getByLabelText('变量 JSON'))
+    await browser.click(screen.getByRole('button', { name: '编辑环境 预发环境' }))
+    expect(screen.getByDisplayValue(other.base_url)).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: /保存配置/ }))
+    await waitFor(() =>
+      expect(handlers.onSave).toHaveBeenCalledWith(
+        other.id,
+        expect.objectContaining({ base_url: other.base_url }),
+      ),
+    )
+    expect(handlers.onUse).not.toHaveBeenCalled()
+    await browser.click(screen.getByRole('button', { name: '用此环境调试' }))
+    expect(handlers.onUse).toHaveBeenCalledWith(other.id)
+    expect(handlers.onClose).not.toHaveBeenCalled()
+  })
+  it('validates JSON, saves typed maps, and retains drafts after save failure', async () => {
+    const { onSave } = renderManager({ failSave: true })
+    const browser = userEvent.setup()
+    await browser.click(screen.getByRole('tab', { name: '变量与请求头' }))
+    await browser.click(screen.getByRole('button', { name: '变量高级 JSON' }))
+    fireEvent.change(screen.getByLabelText('变量 JSON'), { target: { value: '[]' } })
+    await browser.click(screen.getByRole('button', { name: /保存配置/ }))
+    expect(await screen.findByText('变量必须是 JSON 对象')).toBeVisible()
+    expect(onSave).not.toHaveBeenCalled()
     fireEvent.change(screen.getByLabelText('变量 JSON'), { target: { value: '{"region":"cn"}' } })
     await browser.click(screen.getByRole('button', { name: /保存配置/ }))
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith({
-        name: environment.name,
-        base_url: environment.base_url,
-        variables: { region: 'cn' },
-        headers: environment.headers,
+      expect(onSave).toHaveBeenCalledWith(
+        environment.id,
+        expect.objectContaining({ variables: { region: 'cn' } }),
+      ),
+    )
+    expect(await screen.findByText('保存失败，修改已保留，请修正后重试。')).toBeVisible()
+    expect(screen.getByLabelText('变量 JSON')).toHaveValue('{"region":"cn"}')
+  })
+  it('guards changing environments and closing with unsaved changes', async () => {
+    const { onClose } = renderManager()
+    const browser = userEvent.setup()
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '未保存名称' } })
+    await browser.click(screen.getByRole('button', { name: '编辑环境 预发环境' }))
+    expect(await screen.findByRole('button', { name: '丢弃修改并继续' })).toBeInTheDocument()
+    await browser.click(screen.getByRole('button', { name: '继续编辑' }))
+    expect(screen.getByLabelText('名称')).toHaveValue('未保存名称')
+    await browser.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onClose).not.toHaveBeenCalled()
+    await browser.click(await screen.findByRole('button', { name: '丢弃修改并继续' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+  })
+  it('creates a first environment without applying it and disables writes for viewers', async () => {
+    const { onCreate, onUse } = renderManager({ empty: true })
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新环境' } })
+    fireEvent.change(screen.getByLabelText('默认地址'), {
+      target: { value: 'https://new.example.test' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: /创建环境/ }))
+    await waitFor(() =>
+      expect(onCreate).toHaveBeenCalledWith({
+        name: '新环境',
+        base_url: 'https://new.example.test',
+        variables: {},
+        headers: {},
       }),
     )
-
-    await browser.click(screen.getByRole('button', { name: /删除$/ }))
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('删除环境？')
-    expect(onDelete).not.toHaveBeenCalled()
+    expect(onUse).not.toHaveBeenCalled()
   })
-
-  it('keeps the form and reports invalid JSON without saving', async () => {
-    const onSave = vi.fn<SaveHandler>().mockResolvedValue(undefined)
-    renderManager({ onSave })
+  it('keeps the editor locked until saving and catalog refresh both finish', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { onSave } = renderManager({ gate })
     const browser = userEvent.setup()
-    const variables = screen.getByLabelText('变量 JSON')
-    await browser.clear(variables)
-    fireEvent.change(variables, { target: { value: '[]' } })
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '待刷新的配置' } })
     await browser.click(screen.getByRole('button', { name: /保存配置/ }))
-    await waitFor(() => expect(onSave).not.toHaveBeenCalled())
-    expect(screen.getByLabelText('变量 JSON')).toHaveClass('ant-input-status-error')
-  })
-
-  it('explains that a manager needs a selected environment', () => {
-    const onSave = vi.fn<SaveHandler>().mockResolvedValue(undefined)
-    const onDelete = vi.fn<DeleteHandler>().mockResolvedValue(undefined)
-    render(
-      <AntdApp>
-        <EnvironmentManager
-          open
-          saving={false}
-          deleting={false}
-          onClose={vi.fn()}
-          onSave={onSave}
-          onDelete={onDelete}
-        />
-      </AntdApp>,
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: '编辑环境 预发环境' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /新建环境/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '用此环境调试' })).toBeDisabled()
+    release()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '编辑环境 预发环境' })).toBeEnabled(),
     )
-    expect(screen.getByText('请选择环境后管理其配置。')).toBeVisible()
+  })
+  it('allows viewers to browse configurations without writable controls', async () => {
+    renderManager({ readonly: true })
+    await userEvent.click(screen.getByRole('button', { name: '编辑环境 预发环境' }))
+    expect(screen.getByDisplayValue(other.base_url)).toBeDisabled()
+    expect(screen.getByRole('button', { name: /保存配置/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /删除环境/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /新建环境/ })).toBeDisabled()
   })
 })
-
-function renderManager(overrides: { onSave: SaveHandler; onDelete?: DeleteHandler }) {
-  return render(
-    <AntdApp>
-      <EnvironmentManager
-        open
-        environment={environment}
-        saving={false}
-        deleting={false}
-        onClose={vi.fn()}
-        onSave={overrides.onSave}
-        onDelete={overrides.onDelete ?? vi.fn<DeleteHandler>().mockResolvedValue(undefined)}
-      />
-    </AntdApp>,
-  )
-}

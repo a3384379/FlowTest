@@ -3,6 +3,7 @@ import {
   EditOutlined,
   ImportOutlined,
   FolderOutlined,
+  SettingOutlined,
   PlayCircleOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
@@ -25,6 +26,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
 
+import { MoveApisDialog } from '../features/api-console/ApiFolderActions'
 import ArtifactPanel from '../features/api-console/ArtifactPanel'
 import ApiFolderDirectory from '../features/api-console/ApiFolderDirectory'
 import RequestTargetSummary from '../features/api-console/RequestTargetSummary'
@@ -105,6 +107,7 @@ export default function ApiConsolePage() {
         onDialog={setDialog}
         onImport={() => setImportOpen(true)}
         onArtifacts={() => setArtifactsOpen(true)}
+        onEnvironments={() => setEnvironmentManagerOpen(true)}
       />
       <QueryFailureNotice
         queries={[
@@ -117,7 +120,7 @@ export default function ApiConsolePage() {
         ]}
       />
       <div className="api-workspace">
-        <aside className="api-workspace-directory" aria-label="接口目录与环境">
+        <aside className="api-workspace-directory" aria-label="接口目录">
           <Card
             className="api-directory-card"
             title="接口集合"
@@ -159,7 +162,9 @@ export default function ApiConsolePage() {
                 style={{ width: '100%' }}
               />
             </div>
-            <ApiTable
+            <ApiDirectorySelection
+              key={consoleState.projectId}
+              projectId={consoleState.projectId}
               editable={consoleState.canEdit}
               loading={consoleState.apis.isLoading}
               items={apis}
@@ -172,30 +177,9 @@ export default function ApiConsolePage() {
               onPageChange={consoleState.setApiPage}
             />
           </Card>
-          <Card title="环境管理" className="api-environment-card">
-            <EmptyApiEnvironment state={consoleState} />
-            <Typography.Paragraph type="secondary">
-              在请求区选择发送环境、Service 和地址版本。
-            </Typography.Paragraph>
-            <Space wrap>
-              <Button
-                type="text"
-                disabled={!canCreateAssets}
-                onClick={() => setDialog('environment')}
-              >
-                新建环境
-              </Button>
-              <Button
-                type="text"
-                disabled={!consoleState.environmentId}
-                onClick={() => setEnvironmentManagerOpen(true)}
-              >
-                管理环境
-              </Button>
-            </Space>
-          </Card>
         </aside>
         <div className="api-workspace-main">
+          <EmptyApiEnvironment state={consoleState} />
           <APIWorkbench
             key={apiWorkbenchKey(consoleState)}
             detail={consoleState.apiDetail.data}
@@ -281,24 +265,82 @@ export default function ApiConsolePage() {
         onClose={() => setRenameTarget(null)}
         onRename={consoleState.renameApi}
       />
-      <EnvironmentManager
+      <EnvironmentManagerContainer
+        state={consoleState}
         open={environmentManagerOpen}
-        environment={consoleState.environments.data?.find(
-          (item) => item.id === consoleState.environmentId,
-        )}
-        saving={consoleState.updatingEnvironment}
-        deleting={consoleState.deletingEnvironment}
         onClose={() => setEnvironmentManagerOpen(false)}
-        onSave={async (input) => {
-          await consoleState.editEnvironment(consoleState.environmentId ?? '', input)
-          setEnvironmentManagerOpen(false)
-        }}
-        onDelete={async () => {
-          await consoleState.archiveEnvironment(consoleState.environmentId ?? '')
-          setEnvironmentManagerOpen(false)
-        }}
       />
     </div>
+  )
+}
+
+function EnvironmentManagerContainer({
+  state,
+  open,
+  onClose,
+}: {
+  state: ConsoleState
+  open: boolean
+  onClose: () => void
+}) {
+  if (!open || !state.projectId || state.environments.isPending || !state.environments.data)
+    return null
+  return (
+    <EnvironmentManager
+      key={state.projectId}
+      projectId={state.projectId}
+      environments={state.environments.data}
+      catalogFailed={state.environments.isError}
+      sendingEnvironmentId={state.environmentId}
+      editable={state.canEdit}
+      canUse={state.canEdit && !state.viewingHistory}
+      saving={state.updatingEnvironment || state.creatingEnvironment}
+      deleting={state.deletingEnvironment}
+      onClose={onClose}
+      onCreate={(input) => state.addEnvironment(input, false)}
+      onSave={state.editEnvironment}
+      onDelete={state.archiveEnvironment}
+      onUse={state.setEnvironmentSelection}
+    />
+  )
+}
+
+function ApiDirectorySelection(
+  props: Omit<ApiTableProps, 'selectedIds' | 'onSelectionChange'> & { projectId: string | null },
+) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [moving, setMoving] = useState(false)
+  const inPage = selectedIds.filter((id) => props.items.some((item) => item.id === id)).length
+  return (
+    <>
+      {props.editable && selectedIds.length > 0 && (
+        <div className="api-bulk-toolbar">
+          <Typography.Text>
+            已选 {selectedIds.length} 个，本页 {inPage} 个，其他页 {selectedIds.length - inPage} 个
+          </Typography.Text>
+          <Space wrap>
+            <Button size="small" onClick={() => setMoving(true)}>
+              批量移动
+            </Button>
+            <Button size="small" onClick={() => setSelectedIds([])}>
+              清空选择
+            </Button>
+          </Space>
+        </div>
+      )}
+      <ApiTable {...props} selectedIds={selectedIds} onSelectionChange={setSelectedIds} />
+      {moving && props.projectId && props.editable && (
+        <MoveApisDialog
+          projectId={props.projectId}
+          ids={selectedIds}
+          onClose={() => setMoving(false)}
+          onMoved={() => {
+            setMoving(false)
+            setSelectedIds([])
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -432,12 +474,14 @@ function ApiConsoleHeading({
   onDialog,
   onImport,
   onArtifacts,
+  onEnvironments,
 }: {
   state: ConsoleState
   canCreateAssets: boolean
   onDialog: (dialog: DialogState) => void
   onImport: () => void
   onArtifacts: () => void
+  onEnvironments: () => void
 }) {
   return (
     <div className="page-heading">
@@ -448,6 +492,14 @@ function ApiConsoleHeading({
         </Typography.Text>
       </div>
       <Space wrap>
+        <Button
+          icon={<SettingOutlined />}
+          aria-label="管理环境"
+          disabled={!state.projectId || state.environments.isPending || state.environments.isError}
+          onClick={onEnvironments}
+        >
+          管理环境
+        </Button>
         <Button icon={<PlusOutlined />} onClick={() => onDialog('project')}>
           新建项目
         </Button>
@@ -525,6 +577,8 @@ function RunnerContent({
 }
 
 type ApiTableProps = {
+  selectedIds: string[]
+  onSelectionChange: (ids: string[]) => void
   editable: boolean
   loading: boolean
   items: ApiDefinition[]
@@ -538,6 +592,8 @@ type ApiTableProps = {
 }
 
 function ApiTable({
+  selectedIds,
+  onSelectionChange,
   editable,
   loading,
   items,
@@ -551,6 +607,24 @@ function ApiTable({
 }: ApiTableProps) {
   return (
     <Table
+      rowSelection={
+        editable
+          ? {
+              selectedRowKeys: selectedIds,
+              preserveSelectedRowKeys: true,
+              onChange: (keys) => onSelectionChange(keys.map(String)),
+              getCheckboxProps: (record) => ({ 'aria-label': `勾选接口 ${record.name}` }),
+              renderCell: (_, record, __, node) => (
+                <span
+                  onClick={(event) => event.stopPropagation()}
+                  aria-label={`选择 ${record.name}`}
+                >
+                  {node}
+                </span>
+              ),
+            }
+          : undefined
+      }
       rowKey="id"
       size="small"
       className="api-directory-table"

@@ -1,13 +1,13 @@
-import { FolderAddOutlined } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Modal, Select, Space, Tree } from 'antd'
-import { useState } from 'react'
+import { FolderAddOutlined, PlusOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { Button, Modal, Space, Tree } from 'antd'
+import { useState, type ReactNode } from 'react'
 
 import QueryFailureNotice from '../../components/QueryFailureNotice'
-import { apiErrorMessage, type ApiDefinition, type Folder } from '../../lib/api'
+import { type ApiDefinition, type Folder } from '../../lib/api'
 import { listFolders } from '../projects/asset-service'
 import { FolderManagementPanel } from '../projects/AssetManagementPanel'
-import { updateApiDefinition } from './api-service'
+import { AddApisToFolderDialog, MoveApisDialog } from './ApiFolderActions'
 
 type Props = {
   projectId: string
@@ -18,28 +18,13 @@ type Props = {
 }
 
 export default function ApiFolderDirectory(props: Props) {
-  const { message } = App.useApp()
-  const client = useQueryClient()
   const folders = useQuery({
     queryKey: ['folders', props.projectId],
     queryFn: () => listFolders(props.projectId),
   })
   const [managementOpen, setManagementOpen] = useState(false)
-  const [moving, setMoving] = useState<ApiDefinition | null>(null)
-  const [destination, setDestination] = useState<string | null>(null)
-  const mutation = useMutation({
-    mutationFn: ({ id, folderId }: { id: string; folderId: string | null }) =>
-      updateApiDefinition(props.projectId, id, { folder_id: folderId }),
-    onSuccess: async () => {
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ['apis', props.projectId] }),
-        client.invalidateQueries({ queryKey: ['api-detail', props.projectId] }),
-      ])
-      setMoving(null)
-      void message.success('接口已移动')
-    },
-    onError: (error) => void message.error(apiErrorMessage(error)),
-  })
+  const [moving, setMoving] = useState<string[] | null>(null)
+  const [adding, setAdding] = useState<Folder | null>(null)
   return (
     <div className="api-folder-directory">
       <QueryFailureNotice queries={[folders]} />
@@ -54,10 +39,9 @@ export default function ApiFolderDirectory(props: Props) {
         </Button>
         <Button
           size="small"
-          disabled={!props.editable || !props.definition || mutation.isPending}
+          disabled={!props.editable || !props.definition}
           onClick={() => {
-            setMoving(props.definition ?? null)
-            setDestination(props.definition?.folder_id ?? null)
+            if (props.definition) setMoving([props.definition.id])
           }}
         >
           移动接口
@@ -74,7 +58,22 @@ export default function ApiFolderDirectory(props: Props) {
         treeData={[
           { key: 'all', title: '全部接口' },
           { key: 'unfiled', title: '未分组' },
-          ...folderNodes(folders.data ?? [], null),
+          ...folderNodes(folders.data ?? [], null, (folder) => (
+            <span className="api-folder-title">
+              <span>{folder.name}</span>
+              <Button
+                size="small"
+                type="text"
+                icon={<PlusOutlined />}
+                aria-label={`添加接口到分组 ${folder.name}`}
+                disabled={!props.editable}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setAdding(folder)
+                }}
+              />
+            </span>
+          )),
         ]}
       />
       <Modal
@@ -93,28 +92,21 @@ export default function ApiFolderDirectory(props: Props) {
           }}
         />
       </Modal>
-      <Modal
-        open={moving !== null}
-        title={`移动接口：${moving?.name ?? ''}`}
-        okText="移动"
-        cancelText="取消"
-        confirmLoading={mutation.isPending}
-        onCancel={() => setMoving(null)}
-        onOk={() => {
-          if (moving) mutation.mutate({ id: moving.id, folderId: destination })
-        }}
-      >
-        <Select
-          aria-label="接口目标分组"
-          className="full-width"
-          value={destination ?? 'unfiled'}
-          onChange={(value) => setDestination(value === 'unfiled' ? null : value)}
-          options={[
-            { value: 'unfiled', label: '未分组' },
-            ...(folders.data ?? []).map((item) => ({ value: item.id, label: item.name })),
-          ]}
+      {moving && props.editable && (
+        <MoveApisDialog
+          projectId={props.projectId}
+          ids={moving}
+          onClose={() => setMoving(null)}
+          onMoved={() => setMoving(null)}
         />
-      </Modal>
+      )}
+      {adding && props.editable && (
+        <AddApisToFolderDialog
+          projectId={props.projectId}
+          folder={adding}
+          onClose={() => setAdding(null)}
+        />
+      )}
     </div>
   )
 }
@@ -122,8 +114,13 @@ export default function ApiFolderDirectory(props: Props) {
 function folderNodes(
   items: Folder[],
   parentId: string | null,
-): Array<{ key: string; title: string; children: ReturnType<typeof folderNodes> }> {
+  render: (folder: Folder) => ReactNode,
+): Array<{ key: string; title: ReactNode; children: ReturnType<typeof folderNodes> }> {
   return items
     .filter((item) => item.parent_id === parentId)
-    .map((item) => ({ key: item.id, title: item.name, children: folderNodes(items, item.id) }))
+    .map((item) => ({
+      key: item.id,
+      title: render(item),
+      children: folderNodes(items, item.id, render),
+    }))
 }

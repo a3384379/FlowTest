@@ -15,6 +15,7 @@ from app.core.errors import AppError
 from app.core.redaction import redaction_enabled
 from app.domain.api_assets import (
     REDACTED_VALUE,
+    APIDirectoryEntry,
     APIVersionSpec,
     AuthKind,
     HttpMethod,
@@ -33,7 +34,7 @@ from app.domain.test_engineering import (
     OperationContract,
     fingerprint_contract,
 )
-from app.models.access import Folder, User
+from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion, Environment, Secret
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import TestPlanItem
@@ -365,6 +366,77 @@ class APIAssetService:
             method=method,
             folder_id=folder_id,
             unfiled=unfiled,
+        )
+
+    async def list_directory(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        method: str | None = None,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
+    ) -> tuple[list[APIDirectoryEntry], int]:
+        definitions, total = await self.list_definitions(
+            actor=actor,
+            project_id=project_id,
+            page=page,
+            page_size=page_size,
+            search=search,
+            method=method,
+            folder_id=folder_id,
+            unfiled=unfiled,
+        )
+        versions = await self._assets.get_selected_versions(definitions)
+        if len(versions) != len(definitions):
+            raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
+        entries = [
+            APIDirectoryEntry(
+                id=item.id,
+                name=item.name,
+                folder_id=item.folder_id,
+                current_version=item.current_version,
+                method=HttpMethod(versions[item.id].method),
+                path=versions[item.id].path,
+            )
+            for item in definitions
+        ]
+        return entries, total
+
+    async def move_definitions(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        definition_ids: list[UUID],
+        folder_id: UUID | None,
+    ) -> list[APIDefinition]:
+        await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
+        await self._validate_folder(project_id=project_id, folder_id=folder_id, for_update=True)
+        definitions = await self._assets.get_definitions(
+            project_id=project_id,
+            definition_ids=definition_ids,
+            for_update=True,
+        )
+        if len(definitions) != len(definition_ids):
+            raise AppError(
+                code="API_NOT_FOUND", message="所选接口不存在,请刷新后重试", status_code=404
+            )
+        for definition in definitions:
+            definition.folder_id = folder_id
+            self._audit.record(
+                actor_user_id=actor.id,
+                project_id=project_id,
+                action="api.updated",
+                resource_type="api_definition",
+                resource_id=definition.id,
+            )
+        await self._session.commit()
+        return await self._assets.get_definitions(
+            project_id=project_id, definition_ids=definition_ids
         )
 
     async def create_definition(
@@ -767,10 +839,12 @@ class APIAssetService:
             raise AppError(code="API_NOT_FOUND", message="API 不存在", status_code=404)
         return definition
 
-    async def _validate_folder(self, *, project_id: UUID, folder_id: UUID | None) -> None:
+    async def _validate_folder(
+        self, *, project_id: UUID, folder_id: UUID | None, for_update: bool = False
+    ) -> None:
         if folder_id is None:
             return
-        folder = await self._session.get(Folder, folder_id)
+        folder = await self._projects.get_folder(folder_id, for_update=for_update)
         if folder is None or folder.project_id != project_id:
             raise AppError(code="FOLDER_NOT_FOUND", message="目录不存在", status_code=404)
 
