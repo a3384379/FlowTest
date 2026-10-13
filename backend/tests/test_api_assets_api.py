@@ -1056,6 +1056,140 @@ async def test_api_folder_filter_pagination_and_move(asset_client: AsyncClient) 
 
 
 @pytest.mark.asyncio
+async def test_bulk_move_preserves_versions_and_directory_metadata(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    root = f"/api/v1/projects/{project['id']}"
+    folder = (
+        await asset_client.post(f"{root}/folders", headers=headers, json={"name": "订单"})
+    ).json()
+    created = []
+    for index in range(2):
+        result = await asset_client.post(
+            f"{root}/apis",
+            headers=headers,
+            json={
+                "name": f"接口{index}",
+                "request": {"method": "GET", "path": f"/orders/{index}"},
+            },
+        )
+        assert result.status_code == 201, result.text
+        created.append(result.json())
+    ids = [item["definition"]["id"] for item in created]
+    moved = await asset_client.post(
+        f"{root}/apis/bulk-move",
+        headers=headers,
+        json={
+            "definition_ids": ids,
+            "folder_id": folder["id"],
+        },
+    )
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["moved_count"] == 2
+    for item in created:
+        loaded = await asset_client.get(f"{root}/apis/{item['definition']['id']}", headers=headers)
+        assert loaded.json()["definition"]["folder_id"] == folder["id"]
+        assert loaded.json()["definition"]["current_version"] == 1
+        assert loaded.json()["version"] == item["version"]
+    directory = await asset_client.get(
+        f"{root}/apis/directory",
+        headers=headers,
+        params={
+            "folder_id": folder["id"],
+            "page_size": 1,
+            "page": 2,
+            "search": "orders",
+            "method": "GET",
+        },
+    )
+    assert directory.status_code == 200, directory.text
+    assert directory.json()["total"] == 2
+    entry = directory.json()["items"][0]
+    assert entry["method"] == "GET" and entry["path"].startswith("/orders/")
+    assert set(entry) == {"id", "name", "folder_id", "current_version", "method", "path"}
+    unfiled = await asset_client.post(
+        f"{root}/apis/bulk-move",
+        headers=headers,
+        json={
+            "definition_ids": ids,
+            "folder_id": None,
+        },
+    )
+    assert unfiled.status_code == 200
+    assert all(item["folder_id"] is None for item in unfiled.json()["items"])
+    version = await asset_client.post(
+        f"{root}/apis/{ids[0]}/versions",
+        headers=headers,
+        json={"method": "POST", "path": "/updated", "base_version": 1},
+    )
+    assert version.status_code == 201, version.text
+    latest = await asset_client.get(
+        f"{root}/apis/directory",
+        headers=headers,
+        params={"search": "updated", "method": "POST", "unfiled": True},
+    )
+    assert latest.json()["total"] == 1
+    assert latest.json()["items"][0]["current_version"] == 2
+    assert latest.json()["items"][0]["path"] == "/updated"
+
+
+@pytest.mark.asyncio
+async def test_bulk_move_rejects_entire_invalid_batch(asset_client: AsyncClient) -> None:
+    from uuid import uuid4
+
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    other = await _create_project(asset_client, headers, name="其他项目")
+    root = f"/api/v1/projects/{project['id']}"
+    folder = (
+        await asset_client.post(f"{root}/folders", headers=headers, json={"name": "订单"})
+    ).json()
+    foreign_root = f"/api/v1/projects/{other['id']}"
+    foreign_folder = (
+        await asset_client.post(f"{foreign_root}/folders", headers=headers, json={"name": "其他"})
+    ).json()
+    own = (
+        await asset_client.post(
+            f"{root}/apis",
+            headers=headers,
+            json={"name": "订单", "request": {"method": "GET", "path": "/orders"}},
+        )
+    ).json()["definition"]["id"]
+    foreign = (
+        await asset_client.post(
+            f"{foreign_root}/apis",
+            headers=headers,
+            json={"name": "其他", "request": {"method": "GET", "path": "/other"}},
+        )
+    ).json()["definition"]["id"]
+    for invalid_id in (foreign, str(uuid4())):
+        result = await asset_client.post(
+            f"{root}/apis/bulk-move",
+            headers=headers,
+            json={"definition_ids": [own, invalid_id], "folder_id": folder["id"]},
+        )
+        assert result.status_code == 404, result.text
+        assert result.json()["error"]["trace_id"]
+        detail = await asset_client.get(f"{root}/apis/{own}", headers=headers)
+        assert detail.json()["definition"]["folder_id"] is None
+    invalid_target = await asset_client.post(
+        f"{root}/apis/bulk-move",
+        headers=headers,
+        json={"definition_ids": [own], "folder_id": foreign_folder["id"]},
+    )
+    assert invalid_target.status_code == 404
+    for payload in (
+        {"definition_ids": [], "folder_id": None},
+        {"definition_ids": [own, own], "folder_id": None},
+        {"definition_ids": [own]},
+    ):
+        invalid = await asset_client.post(f"{root}/apis/bulk-move", headers=headers, json=payload)
+        assert invalid.status_code == 422, invalid.text
+
+
+@pytest.mark.asyncio
 async def test_api_save_rejects_stale_baseline_and_retains_history(
     asset_client: AsyncClient,
 ) -> None:
@@ -1091,3 +1225,145 @@ async def test_api_save_rejects_stale_baseline_and_retains_history(
     )
     assert historical.json()["version"]["path"] == "/v1"
     assert historical.json()["version"]["variables"] == {"module": "orders"}
+
+
+@pytest.mark.asyncio
+async def test_bulk_move_viewer_read_only_and_transaction_rollback(
+    asset_client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from uuid import UUID
+
+    from app.services.audit import AuditService
+
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    root = f"/api/v1/projects/{project['id']}"
+    folder = (
+        await asset_client.post(f"{root}/folders", headers=headers, json={"name": "订单"})
+    ).json()
+    ids = []
+    for index in range(2):
+        created = await asset_client.post(
+            f"{root}/apis",
+            headers=headers,
+            json={
+                "name": f"接口{index}",
+                "request": {"method": "GET", "path": f"/orders/{index}"},
+            },
+        )
+        ids.append(created.json()["definition"]["id"])
+    viewer = await asset_client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={
+            "email": "asset-viewer@example.com",
+            "display_name": "Viewer",
+            "password": "viewer-password-123!",
+            "is_system_admin": False,
+        },
+    )
+    assert viewer.status_code == 201, viewer.text
+    member = await asset_client.put(
+        f"{root}/members/{viewer.json()['id']}",
+        headers=headers,
+        json={"user_id": viewer.json()["id"], "role": "viewer"},
+    )
+    assert member.status_code == 200, member.text
+    login = await asset_client.post(
+        "/api/v1/auth/login",
+        json={"email": "asset-viewer@example.com", "password": "viewer-password-123!"},
+    )
+    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    changed = await asset_client.post(
+        "/api/v1/auth/change-password",
+        headers=viewer_headers,
+        json={
+            "current_password": "viewer-password-123!",
+            "new_password": "changed-viewer-password-123!",
+        },
+    )
+    assert changed.status_code == 204, changed.text
+    directory = await asset_client.get(f"{root}/apis/directory", headers=viewer_headers)
+    assert directory.status_code == 200, directory.text
+    denied = await asset_client.post(
+        f"{root}/apis/bulk-move",
+        headers=viewer_headers,
+        json={"definition_ids": ids, "folder_id": folder["id"]},
+    )
+    assert denied.status_code == 403, denied.text
+    original_record = AuditService.record
+    calls = 0
+
+    def fail_second_record(
+        self: AuditService,
+        *,
+        actor_user_id: UUID | None,
+        project_id: UUID | None,
+        action: str,
+        resource_type: str,
+        resource_id: UUID | None,
+        organization_id: UUID | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("Synthetic batch failure")
+        original_record(
+            self,
+            actor_user_id=actor_user_id,
+            project_id=project_id,
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            organization_id=organization_id,
+            details=details,
+        )
+
+    monkeypatch.setattr(AuditService, "record", fail_second_record)
+    failed = await asset_client.post(
+        f"{root}/apis/bulk-move",
+        headers=headers,
+        json={"definition_ids": ids, "folder_id": folder["id"]},
+    )
+    assert failed.status_code == 500, failed.text
+    assert failed.json()["error"]["trace_id"]
+    loaded = await asset_client.get(f"{root}/apis", headers=headers)
+    assert all(item["folder_id"] is None for item in loaded.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_environment_ordinary_update_preserves_service_without_default_variant(
+    asset_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(asset_client)
+    project = await _create_project(asset_client, headers)
+    environment = await _create_environment(
+        asset_client,
+        headers,
+        project["id"],
+        name="测试环境",
+        base_url="https://api.example.com",
+        variables={},
+        environment_headers={},
+    )
+    root = f"/api/v1/projects/{project['id']}"
+    endpoints = await asset_client.get(
+        f"{root}/environments/{environment['id']}/service-endpoints",
+        headers=headers,
+    )
+    endpoint = endpoints.json()[0]
+    renamed = await asset_client.patch(
+        f"{root}/service-endpoints/{endpoint['id']}",
+        headers=headers,
+        json={"variant": "blue"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    saved = await asset_client.patch(
+        f"{root}/environments/{environment['id']}",
+        headers=headers,
+        json={"name": "已改名环境", "headers": {"X-Region": "cn"}},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["default_service_id"] == environment["default_service_id"]
+    assert saved.json()["headers"] == {"X-Region": "cn"}

@@ -278,7 +278,15 @@ class ProjectRepository:
     async def delete(self, entity: ProjectMember | Folder) -> None:
         await self._session.delete(entity)
 
-    async def get_folder(self, folder_id: UUID) -> Folder | None:
+    async def get_folder(self, folder_id: UUID, *, for_update: bool = False) -> Folder | None:
+        if for_update:
+            query = (
+                select(Folder)
+                .where(Folder.id == folder_id)
+                .with_for_update(read=True, key_share=True)
+                .execution_options(populate_existing=True)
+            )
+            return (await self._session.execute(query)).scalar_one_or_none()
         return await self._session.get(Folder, folder_id)
 
     async def list_folders(self, project_id: UUID) -> list[Folder]:

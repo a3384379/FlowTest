@@ -56,11 +56,18 @@ async function createIsolatedProject(request: APIRequestContext, suffix: string)
 }
 
 async function createEnvironment(page: import('@playwright/test').Page, name: string) {
-  await page.getByRole('button', { name: '新建环境' }).click()
-  const dialog = page.getByRole('dialog', { name: '新建环境' })
-  await dialog.getByLabel('环境名称').fill(name)
-  await dialog.getByLabel('基础 URL').fill('http://mock-target.test:8080')
-  await dialog.getByRole('button', { name: /确\s*定/ }).click()
+  await page.getByRole('button', { name: '管理环境', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '管理环境', exact: true })
+  await dialog.getByLabel('名称', { exact: true }).fill(name)
+  await dialog.getByLabel('默认地址', { exact: true }).fill('http://mock-target.test:8080')
+  await dialog.getByRole('button', { name: /创建环境$/ }).click()
+  await expect(dialog.getByRole('button', { name: '用此环境调试', exact: true })).toBeEnabled()
+  await expect(dialog.getByText('发送中', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: '用此环境调试', exact: true }).click()
+  await expect(dialog.getByRole('button', { name: `编辑环境 ${name}`, exact: true })).toContainText(
+    '发送中',
+  )
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   await expect(page.getByText(name, { exact: true })).toBeVisible()
 }
 

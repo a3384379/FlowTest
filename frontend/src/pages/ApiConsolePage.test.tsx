@@ -3,7 +3,7 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -75,6 +75,141 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it('retains cross-page checkbox selection without changing the active API', async () => {
+    const payloads: unknown[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        return HttpResponse.json({
+          items: [
+            {
+              ...apiDefinition,
+              id: page === 1 ? apiDefinition.id : 'page-two-api',
+              name: page === 1 ? apiDefinition.name : '第二页接口',
+            },
+          ],
+          total: 51,
+          page,
+          page_size: 50,
+        })
+      }),
+      http.post(`/api/v1/projects/${project.id}/apis/bulk-move`, async ({ request }) => {
+        payloads.push(await request.json())
+        return HttpResponse.json({ moved_count: 2, items: [] })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    const active = await screen.findByRole('button', { name: `选择接口 ${apiDefinition.name}` })
+    await browser.click(screen.getByRole('checkbox', { name: `勾选接口 ${apiDefinition.name}` }))
+    expect(active).toHaveAttribute('aria-pressed', 'true')
+    await browser.click(screen.getByTitle('2'))
+    await browser.click(await screen.findByRole('checkbox', { name: '勾选接口 第二页接口' }))
+    expect(screen.getByText(apiDefinition.name, { exact: true })).toBeVisible()
+    expect(screen.getByText('已选 2 个，本页 1 个，其他页 1 个')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '批量移动' }))
+    expect(screen.getByRole('button', { name: '确认移动' })).toBeDisabled()
+    await browser.click(screen.getByRole('combobox', { name: '接口目标分组' }))
+    await browser.click(screen.getAllByText('未分组').at(-1)!)
+    await browser.click(screen.getByRole('button', { name: '确认移动' }))
+    await waitFor(() =>
+      expect(payloads).toEqual([
+        { definition_ids: [apiDefinition.id, 'page-two-api'], folder_id: null },
+      ]),
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '批量移动' })).not.toBeInTheDocument(),
+    )
+  })
+  it('keeps unsaved environment edits open when a catalog refresh fails', async () => {
+    const { queryClient } = renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '管理环境' }))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '保留的环境草稿' } })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '暂不可用', trace_id: 'environment-refresh' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['environments', project.id] })
+    })
+    expect(await screen.findByText('环境列表暂时无法刷新，当前修改已保留。')).toBeVisible()
+    expect(screen.getByLabelText('名称')).toHaveValue('保留的环境草稿')
+  })
+
+  it('retains a successfully created environment when catalog refresh fails', async () => {
+    let created = false
+    const newEnvironment = {
+      ...environment,
+      id: 'created-env',
+      name: '新建后刷新失败',
+      base_url: 'http://new.internal:9090',
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environments`, () =>
+        created
+          ? HttpResponse.json(
+              { error: { code: 'UNAVAILABLE', message: '暂不可用', trace_id: 'create-refresh' } },
+              { status: 503 },
+            )
+          : HttpResponse.json([]),
+      ),
+      http.post(`/api/v1/projects/${project.id}/environments`, () => {
+        created = true
+        return HttpResponse.json(newEnvironment, { status: 201 })
+      }),
+    )
+    renderPage()
+    const management = screen.getByLabelText('管理环境')
+    await waitFor(() => expect(management).toBeEnabled())
+    fireEvent.click(management)
+    const manager = within(screen.getByRole('dialog', { hidden: true }))
+    fireEvent.change(manager.getByLabelText('名称'), { target: { value: newEnvironment.name } })
+    fireEvent.change(manager.getByLabelText('默认地址'), {
+      target: { value: newEnvironment.base_url },
+    })
+    fireEvent.click(manager.getByText('创建环境', { exact: true }).closest('button')!)
+    expect(await manager.findByText('环境列表暂时无法刷新，当前修改已保留。')).toBeVisible()
+    expect(manager.getByLabelText('名称')).toHaveValue(newEnvironment.name)
+    await waitFor(() =>
+      expect(manager.getByLabelText(`编辑环境 ${newEnvironment.name}`)).toBeEnabled(),
+    )
+    expect(
+      screen.queryByText('正在编辑的环境已失效，请选择其他环境或新建环境。'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('发送环境')).toHaveDisplayValue('')
+    fireEvent.click(manager.getByLabelText('Close'))
+    expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
+    fireEvent.click(management)
+    expect(screen.getByLabelText('名称')).toHaveValue(newEnvironment.name)
+  })
+  it('selects or clears the current page without changing the active API', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({
+          items: [apiDefinition, { ...apiDefinition, id: 'second-api', name: '另一个接口' }],
+          total: 2,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByRole('checkbox', { name: '勾选接口 另一个接口' })
+    await browser.click(screen.getByRole('checkbox', { name: '全选本页' }))
+    expect(screen.getByText('已选 2 个，本页 2 个，其他页 0 个')).toBeVisible()
+    expect(screen.getByRole('button', { name: `选择接口 ${apiDefinition.name}` })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    await browser.click(screen.getByRole('checkbox', { name: '全选本页' }))
+    expect(screen.queryByRole('button', { name: '批量移动' })).not.toBeInTheDocument()
+  })
   it('hides the previous final address when reloading its preview fails', async () => {
     const { queryClient } = renderPage()
     const finalAddress = `最终地址：${environment.base_url}/users/me`

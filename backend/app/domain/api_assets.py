@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
+from uuid import UUID
 
 from app.domain.scopes import HeaderScope, ResolvedValue, VariableScope, resolve_variables
 
@@ -17,6 +18,16 @@ class HttpMethod(StrEnum):
     PUT = "PUT"
     PATCH = "PATCH"
     DELETE = "DELETE"
+
+
+@dataclass(frozen=True, slots=True)
+class APIDirectoryEntry:
+    id: UUID
+    name: str
+    folder_id: UUID | None
+    current_version: int
+    method: HttpMethod
+    path: str
 
 
 class BodyKind(StrEnum):

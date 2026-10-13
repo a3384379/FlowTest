@@ -195,3 +195,142 @@ it.each([false, true])(
     expect(result.current.targetPreview.data?.url).toBe('http://new-synthetic-target/users/me')
   },
 )
+
+it('keeps management creation separate and leaves a deleted sending environment invalid', async () => {
+  localStorage.clear()
+  let catalog = [environment]
+  const added = { ...environment, id: 'new-env', name: '新环境' }
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/apis`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () => HttpResponse.json(catalog)),
+    http.post(`/api/v1/projects/${project.id}/environments`, () => {
+      catalog = [...catalog, added]
+      return HttpResponse.json(added, { status: 201 })
+    }),
+    http.delete(`/api/v1/projects/${project.id}/environments/${environment.id}`, () => {
+      catalog = [added]
+      return new HttpResponse(null, { status: 204 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+    http.get(
+      `/api/v1/projects/${project.id}/environments/${environment.id}/service-endpoints`,
+      () => HttpResponse.json([]),
+    ),
+    http.get(`/api/v1/projects/${project.id}/files`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+  )
+  const { wrapper } = harness('apis')
+  const { result } = renderHook(() => useApiConsole(), { wrapper })
+  await waitFor(() => expect(result.current.environmentId).toBe(environment.id))
+  await act(async () => {
+    await result.current.addEnvironment(
+      { name: added.name, base_url: added.base_url, variables: {}, headers: {} },
+      false,
+    )
+  })
+  expect(result.current.environmentId).toBe(environment.id)
+  await act(async () => {
+    await result.current.archiveEnvironment(environment.id)
+  })
+  expect(result.current.environmentId).toBeNull()
+  expect(result.current.environmentSelectionInvalid).toBe(true)
+  expect(result.current.environmentPlaceholder).toBe('原环境已失效，请重新选择')
+  localStorage.clear()
+})
+
+it('does not auto-select the first environment created inside management', async () => {
+  localStorage.clear()
+  let created = false
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/apis`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () =>
+      HttpResponse.json(created ? [environment] : []),
+    ),
+    http.post(`/api/v1/projects/${project.id}/environments`, () => {
+      created = true
+      return HttpResponse.json(environment, { status: 201 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+    http.get(`/api/v1/projects/${project.id}/files`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+  )
+  const { wrapper } = harness('apis')
+  const { result } = renderHook(() => useApiConsole(), { wrapper })
+  await waitFor(() => expect(result.current.environments.data).toEqual([]))
+  await act(async () => {
+    await result.current.addEnvironment(
+      { name: environment.name, base_url: environment.base_url, variables: {}, headers: {} },
+      false,
+    )
+  })
+  expect(result.current.environments.data).toEqual([environment])
+  expect(result.current.environmentId).toBeNull()
+  expect(localStorage.getItem(`flowtest:environment:v1:${user.id}:${project.id}`)).toBe('')
+  localStorage.clear()
+})
+
+it('upserts a created environment already discovered by a background refresh', async () => {
+  localStorage.clear()
+  let phase: 'empty' | 'committed' | 'failed' = 'empty'
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/apis`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/environments`, () =>
+      phase === 'failed'
+        ? HttpResponse.json(
+            {
+              error: {
+                code: 'UNAVAILABLE',
+                message: '刷新失败',
+                trace_id: 'duplicate-environment',
+              },
+            },
+            { status: 503 },
+          )
+        : HttpResponse.json(phase === 'committed' ? [environment] : []),
+    ),
+    http.post(`/api/v1/projects/${project.id}/environments`, async () => {
+      phase = 'committed'
+      await gate
+      return HttpResponse.json(environment, { status: 201 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/services`, () => HttpResponse.json([])),
+    http.get(`/api/v1/projects/${project.id}/files`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+  )
+  const { client, wrapper } = harness('apis')
+  const { result } = renderHook(() => useApiConsole(), { wrapper })
+  await waitFor(() => expect(result.current.environments.data).toEqual([]))
+  let operation!: Promise<typeof environment>
+  act(() => {
+    operation = result.current.addEnvironment(
+      { name: environment.name, base_url: environment.base_url, variables: {}, headers: {} },
+      false,
+    )
+  })
+  await waitFor(() => expect(phase).toBe('committed'))
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ['environments', project.id] })
+  })
+  await waitFor(() => expect(result.current.environments.data).toEqual([environment]))
+  phase = 'failed'
+  await act(async () => {
+    release()
+    await operation
+  })
+  expect(result.current.environments.data).toEqual([environment])
+  expect(result.current.environmentId).toBeNull()
+  localStorage.clear()
+})
