@@ -164,23 +164,27 @@ describe('ApiConsolePage', () => {
       }),
     )
     renderPage()
-    const browser = userEvent.setup()
-    await waitFor(() => expect(screen.getByRole('button', { name: '管理环境' })).toBeEnabled())
-    await browser.click(screen.getByRole('button', { name: '管理环境' }))
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: newEnvironment.name } })
-    fireEvent.change(screen.getByLabelText('默认地址'), {
+    const management = screen.getByLabelText('管理环境')
+    await waitFor(() => expect(management).toBeEnabled())
+    fireEvent.click(management)
+    const manager = within(screen.getByRole('dialog', { hidden: true }))
+    fireEvent.change(manager.getByLabelText('名称'), { target: { value: newEnvironment.name } })
+    fireEvent.change(manager.getByLabelText('默认地址'), {
       target: { value: newEnvironment.base_url },
     })
-    await browser.click(screen.getByRole('button', { name: /创建环境/ }))
-    expect(await screen.findByText('环境列表暂时无法刷新，当前修改已保留。')).toBeVisible()
-    expect(screen.getByLabelText('名称')).toHaveValue(newEnvironment.name)
-    expect(screen.getByRole('button', { name: `编辑环境 ${newEnvironment.name}` })).toBeEnabled()
+    fireEvent.click(manager.getByText('创建环境', { exact: true }).closest('button')!)
+    expect(await manager.findByText('环境列表暂时无法刷新，当前修改已保留。')).toBeVisible()
+    expect(manager.getByLabelText('名称')).toHaveValue(newEnvironment.name)
+    await waitFor(() =>
+      expect(manager.getByLabelText(`编辑环境 ${newEnvironment.name}`)).toBeEnabled(),
+    )
     expect(
       screen.queryByText('正在编辑的环境已失效，请选择其他环境或新建环境。'),
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '发送环境' })).toHaveDisplayValue('')
-    await browser.click(screen.getByRole('button', { name: 'Close' }))
-    await browser.click(screen.getByRole('button', { name: '管理环境' }))
+    expect(screen.getByLabelText('发送环境')).toHaveDisplayValue('')
+    fireEvent.click(manager.getByLabelText('Close'))
+    expect(screen.queryByRole('dialog', { hidden: true })).not.toBeInTheDocument()
+    fireEvent.click(management)
     expect(screen.getByLabelText('名称')).toHaveValue(newEnvironment.name)
   })
   it('selects or clears the current page without changing the active API', async () => {

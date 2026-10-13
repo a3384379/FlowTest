@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -204,24 +204,22 @@ describe('EnvironmentManager', () => {
       release = resolve
     })
     const { onSave } = renderManager({ gate })
-    const browser = userEvent.setup()
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '待刷新的配置' } })
-    await browser.click(screen.getByRole('button', { name: /保存配置/ }))
+    // These state checks use labels/text instead of expensive CSS-aware role-name scans.
+    fireEvent.click(screen.getByText('保存配置', { exact: true }).closest('button')!)
     await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
-    expect(screen.getByRole('button', { name: '编辑环境 预发环境' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /新建环境/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '用此环境调试' })).toBeDisabled()
-    release()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '编辑环境 预发环境' })).toBeEnabled(),
-    )
+    expect(screen.getByLabelText('编辑环境 预发环境')).toBeDisabled()
+    expect(screen.getByText('新建环境', { exact: true }).closest('button')).toBeDisabled()
+    expect(screen.getByText('用此环境调试', { exact: true }).closest('button')).toBeDisabled()
+    await act(async () => release())
+    await waitFor(() => expect(screen.getByLabelText('编辑环境 预发环境')).toBeEnabled())
   })
   it('allows viewers to browse configurations without writable controls', async () => {
     renderManager({ readonly: true })
-    await userEvent.click(screen.getByRole('button', { name: '编辑环境 预发环境' }))
+    fireEvent.click(screen.getByLabelText('编辑环境 预发环境'))
     expect(screen.getByDisplayValue(other.base_url)).toBeDisabled()
-    expect(screen.getByRole('button', { name: /保存配置/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /删除环境/ })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /新建环境/ })).toBeDisabled()
+    expect(screen.getByText('保存配置', { exact: true }).closest('button')).toBeDisabled()
+    expect(screen.getByText('删除环境', { exact: true }).closest('button')).toBeDisabled()
+    expect(screen.getByText('新建环境', { exact: true }).closest('button')).toBeDisabled()
   })
 })
