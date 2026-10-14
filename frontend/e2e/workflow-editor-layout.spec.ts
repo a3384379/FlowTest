@@ -113,6 +113,35 @@ for (const viewport of viewports) {
   })
 }
 
+for (const viewport of [
+  { width: 375, height: 812 },
+  { width: 1280, height: 800 },
+]) {
+  test(`专注模式节点查看按钮可实际点击：${viewport.width}`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport)
+    await seedEditor(page)
+    await page.locator('.react-flow__node[data-id=api]').click()
+    await page.getByRole('button', { name: '专注模式', exact: true }).click()
+
+    const toolbar = page.getByTestId('workflow-focus-toolbar')
+    const canvas = page.getByTestId('workflow-canvas-stage')
+    const inspector = page.getByLabel('节点与连线配置', { exact: true })
+    await expect(inspector).toBeHidden()
+    const toolbarBox = await requiredBox(toolbar)
+    expect((await requiredBox(canvas)).y).toBeGreaterThanOrEqual(
+      toolbarBox.y + toolbarBox.height - 1,
+    )
+    await expect(page.getByText('查看详情', { exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: '查看配置', exact: true }).click()
+    await expect(inspector).toBeVisible()
+    await expect(page.getByRole('button', { name: '退出专注模式', exact: true })).toHaveCount(0)
+    await page.screenshot({
+      animations: 'disabled',
+      path: testInfo.outputPath('node-inspection.png'),
+    })
+  })
+}
+
 async function requiredBox(locator: Locator) {
   const box = await locator.boundingBox()
   expect(box).not.toBeNull()
