@@ -1,4 +1,10 @@
-import { CopyOutlined, DeleteOutlined, EditOutlined, NodeIndexOutlined } from '@ant-design/icons'
+import {
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  NodeIndexOutlined,
+} from '@ant-design/icons'
 import { EdgeToolbar, NodeToolbar, Position } from '@xyflow/react'
 import { Button, Space, Tag } from 'antd'
 import type { MouseEvent, PointerEvent } from 'react'
@@ -9,20 +15,25 @@ type ActionProps = {
   editable: boolean
 }
 
+export type NodeInspectionMode = 'configuration' | 'execution'
+
 function stopCanvasEvent(event: MouseEvent | PointerEvent) {
   event.stopPropagation()
 }
 
 export function WorkflowNodeActions({
   visible,
+  inspectionMode,
   canCopy,
   onCopy,
   ...actions
 }: ActionProps & {
   visible: boolean
+  inspectionMode: NodeInspectionMode
   canCopy: boolean
   onCopy: () => void
 }) {
+  const inspectionLabel = inspectionMode === 'execution' ? '查看运行结果' : '查看配置'
   return (
     <NodeToolbar
       isVisible={visible}
@@ -34,8 +45,13 @@ export function WorkflowNodeActions({
       onClick={stopCanvasEvent}
     >
       <Space.Compact>
-        <Button size="small" icon={<EditOutlined />} onClick={actions.onConfigure}>
-          配置
+        <Button
+          size="small"
+          icon={<EyeOutlined />}
+          aria-label={inspectionLabel}
+          onClick={actions.onConfigure}
+        >
+          {inspectionLabel}
         </Button>
         <Button size="small" icon={<CopyOutlined />} disabled={!canCopy} onClick={onCopy}>
           复制
