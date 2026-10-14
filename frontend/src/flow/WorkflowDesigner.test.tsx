@@ -34,6 +34,79 @@ describe('WorkflowDesigner', () => {
     vi.clearAllMocks()
   })
 
+  it.each([
+    { view: 'editable', editable: true, runtimeMode: undefined, label: '查看配置' },
+    { view: 'readonly', editable: false, runtimeMode: undefined, label: '查看配置' },
+    { view: 'run', editable: true, runtimeMode: 'run' as const, label: '查看运行结果' },
+    { view: 'history', editable: true, runtimeMode: 'history' as const, label: '查看运行结果' },
+  ])(
+    'opens the selected node inspection from focus mode in $view view',
+    ({ editable, runtimeMode, label }) => {
+      const onChange = vi.fn()
+      const definition = structuredClone(workflowDefinition)
+      render(
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <WorkflowDesigner
+            definition={definition}
+            apis={[]}
+            artifacts={[]}
+            credentials={[]}
+            statuses={{}}
+            editable={editable}
+            runtimeMode={runtimeMode}
+            surface="workspace"
+            onChange={onChange}
+          />
+        </ConfigProvider>,
+      )
+      fireEvent.click(screen.getByTestId('rf__node-start'))
+      const inspect = screen.getByLabelText(label)
+      expect(inspect).toBeEnabled()
+      expect(screen.queryAllByText('查看详情')).toHaveLength(0)
+      fireEvent.click(screen.getByText('专注模式', { exact: true }).closest('button')!)
+      expect(screen.getByLabelText('节点与连线配置')).not.toBeVisible()
+      fireEvent.click(inspect)
+      expect(screen.getByLabelText('节点与连线配置')).toBeVisible()
+      expect(screen.getByText(runtimeMode ? '运行详情' : '节点配置', { exact: true })).toBeVisible()
+      expect(screen.queryByText('退出专注模式', { exact: true })).not.toBeInTheDocument()
+      if (!editable || runtimeMode)
+        expect(screen.queryByText('应用节点配置', { exact: true })).not.toBeInTheDocument()
+      expect(onChange).not.toHaveBeenCalled()
+      expect(definition).toEqual(workflowDefinition)
+    },
+  )
+
+  it.each(['{Enter}', ' '])(
+    'preserves unapplied input when opening node inspection with %s',
+    async (key) => {
+      const onChange = vi.fn()
+      const browser = userEvent.setup()
+      render(
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <WorkflowDesigner
+            definition={workflowDefinition}
+            apis={[]}
+            artifacts={[]}
+            credentials={[]}
+            statuses={{}}
+            editable
+            surface="workspace"
+            onChange={onChange}
+          />
+        </ConfigProvider>,
+      )
+      fireEvent.click(screen.getByTestId('rf__node-end'))
+      fireEvent.change(screen.getByDisplayValue('结束'), { target: { value: '尚未应用的名称' } })
+      fireEvent.click(screen.getByText('专注模式', { exact: true }).closest('button')!)
+      const inspect = screen.getByLabelText('查看配置')
+      inspect.focus()
+      await browser.keyboard(key)
+      expect(screen.getByLabelText('节点与连线配置')).toBeVisible()
+      expect(screen.getByDisplayValue('尚未应用的名称')).toBeVisible()
+      expect(onChange).not.toHaveBeenCalled()
+    },
+  )
+
   it('offers project-scoped configuration links for missing prerequisites and keeps node addition disabled', async () => {
     render(
       <MemoryRouter initialEntries={['/projects/project-one/workflows?focus=flow-one']}>
@@ -727,6 +800,7 @@ describe('WorkflowDesigner', () => {
         typeLabel: node.type,
         status: '',
         runtimeLabel: '',
+        inspectionMode: 'configuration' as const,
       },
     }))
 

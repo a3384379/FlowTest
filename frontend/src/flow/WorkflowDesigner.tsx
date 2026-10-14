@@ -28,7 +28,11 @@ import {
 import './workflow-editor.css'
 import WorkflowEdgeInspector from './WorkflowEdgeInspector'
 import WorkflowShortcutHelp from './WorkflowShortcutHelp'
-import { WorkflowEdgeActions, WorkflowNodeActions } from './WorkflowSelectionActions'
+import {
+  WorkflowEdgeActions,
+  WorkflowNodeActions,
+  type NodeInspectionMode,
+} from './WorkflowSelectionActions'
 import { useWorkflowEditor } from './editor/use-workflow-editor'
 import { useCanvasHotkeys } from './editor/use-canvas-hotkeys'
 import {
@@ -180,6 +184,7 @@ type NodeData = Record<string, unknown> & {
   typeLabel: string
   status: string
   runtimeLabel: string
+  inspectionMode: NodeInspectionMode
   summary?: string
   regions?: RegionPreview[]
   canCopy?: boolean
@@ -341,6 +346,7 @@ function WorkflowDesignerReady({
       node,
       displayNodeStatus(node.id, statuses, proposalNodeStatuses),
       runtimeByNode.get(node.id),
+      runtimeMode,
     ),
     measured: dimensions.get(node.id),
     // Release the estimate after measurement so runtime content can resize the node.
@@ -352,6 +358,7 @@ function WorkflowDesignerReady({
         node,
         displayNodeStatus(node.id, statuses, proposalNodeStatuses),
         runtimeByNode.get(node.id),
+        runtimeMode,
       ).data,
       canCopy: canvasEditable && resolveEffectiveNodeType(node) !== 'start',
       ...nodePresentation(node, definition),
@@ -2138,6 +2145,7 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
     <>
       <WorkflowNodeActions
         visible={Boolean(selected)}
+        inspectionMode={data.inspectionMode}
         editable={Boolean(data.canDelete)}
         canCopy={Boolean(data.canCopy)}
         onConfigure={data.onConfigure ?? (() => undefined)}
@@ -2193,7 +2201,6 @@ function NodeFooter({ data }: { data: NodeData }) {
         {statusLabel(data.status)}
         {data.runtimeLabel && <small>{data.runtimeLabel}</small>}
       </span>
-      <span>{data.regions?.length ? '内部步骤见配置' : '查看详情'}</span>
     </footer>
   )
 }
@@ -2266,6 +2273,7 @@ function toCanvasNode(
   node: WorkflowNode,
   status = 'pending',
   runtime?: WorkflowNodeExecution,
+  runtimeMode?: DesignerProps['runtimeMode'],
 ): CanvasNode {
   return {
     id: node.id,
@@ -2279,6 +2287,7 @@ function toCanvasNode(
         controlCapabilityLabel(node.capability_id) ?? nodeTypeLabel(resolveEffectiveNodeType(node)),
       status,
       runtimeLabel: runtimeLabel(runtime),
+      inspectionMode: runtimeMode ? 'execution' : 'configuration',
       canCopy: false,
       canDelete: false,
       onConfigure: () => undefined,

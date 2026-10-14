@@ -958,10 +958,6 @@
   box-shadow: 0 10px 28px rgb(31 42 68 / 12%);
 }
 
-.workflow-editor-workspace.is-focus .workflow-toolbar-primary {
-  flex-wrap: nowrap;
-}
-
 .workflow-editor-workspace.is-focus .workflow-node-library {
   position: fixed !important;
   inset: 0 !important;
@@ -973,15 +969,6 @@
 .workflow-focus-commands {
   padding-right: 12px;
   border-right: 1px solid var(--workflow-border);
-}
-
-.workflow-editor-workspace.is-focus .workflow-split-body {
-  position: absolute;
-  inset: 0;
-}
-
-.workflow-editor-workspace.is-focus .workflow-canvas-diagnostics {
-  margin-top: 82px !important;
 }
 
 .workflow-designer .flow-node {
