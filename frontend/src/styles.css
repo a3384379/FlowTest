@@ -1962,6 +1962,7 @@ body {
 
 .event-protocol-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -2632,5 +2633,13 @@ body {
 }
 .protocol-contract-type {
   margin: 0 0 0 24px;
+  overflow-wrap: anywhere;
+}
+
+.event-protocol-toolbar > .ant-space {
+  max-width: 100%;
+  min-width: 0;
+}
+.event-protocol-toolbar .ant-typography {
   overflow-wrap: anywhere;
 }

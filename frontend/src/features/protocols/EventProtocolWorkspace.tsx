@@ -256,11 +256,11 @@ function EventToolbar({
 }) {
   return (
     <div className="event-protocol-toolbar">
-      <Space>
+      <Space wrap>
         <Tag color={presentation.color}>{presentation.label}</Tag>
         <Typography.Text type="secondary">{presentation.boundary}</Typography.Text>
       </Space>
-      <Space>
+      <Space wrap>
         {canImportSchema && (
           <Button icon={<ImportOutlined />} onClick={onImportSchema}>
             导入消息 Schema
