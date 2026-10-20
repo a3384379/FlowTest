@@ -571,9 +571,19 @@ class APIAssetService:
         change_folder: bool,
         service_id: UUID | None,
         change_service: bool,
+        base_version: int | None = None,
     ) -> APIDefinition:
         await self._project_service.authorize(actor=actor, project_id=project_id, editing=True)
-        definition = await self._get_definition(project_id, definition_id)
+        definition = await self._get_definition(
+            project_id, definition_id, for_update=change_service or base_version is not None
+        )
+        if base_version is not None and base_version != definition.current_version:
+            raise AppError(
+                code="API_VERSION_CONFLICT",
+                message="接口已有新版本,请读取最新版本并重新分析候选",
+                status_code=409,
+                details={"current_version": definition.current_version},
+            )
         if name is not None:
             definition.name = name.strip()
         if description is not None:

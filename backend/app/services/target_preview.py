@@ -176,7 +176,17 @@ class TargetPreviewService:
         if isinstance(change, PreviewEnvironmentChange):
             await self._environment(project_id, change.environment_id)
         else:
-            await self._definition(project_id, change.api_id)
+            definition = await self._definition(project_id, change.api_id)
+            if (
+                change.base_version is not None
+                and change.base_version != definition.current_version
+            ):
+                raise AppError(
+                    code="API_VERSION_CONFLICT",
+                    message="接口已有新版本,请读取最新版本并重新分析候选",
+                    status_code=409,
+                    details={"current_version": definition.current_version},
+                )
         if change.service_id is not None:
             await self._service(project_id, change.service_id)
             if isinstance(change, PreviewEnvironmentChange):

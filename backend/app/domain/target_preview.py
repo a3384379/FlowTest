@@ -30,6 +30,7 @@ class PreviewEnvironmentChange:
 class PreviewAPIChange:
     api_id: UUID
     service_id: UUID | None
+    base_version: int | None = None
 
 
 type PreviewChange = (

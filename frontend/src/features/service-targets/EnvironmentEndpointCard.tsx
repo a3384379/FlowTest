@@ -104,7 +104,7 @@ function EnvironmentBinding(props: Props) {
         aria-label="环境默认服务"
         allowClear
         style={{ width: '100%', minWidth: 0 }}
-        value={props.selected.default_service_id ?? undefined}
+        value={props.selected.default_service_id ?? null}
         options={props.serviceOptions}
         onChange={(value?: string) => props.onDefaultChange(value ?? null)}
         loading={props.defaultSubmitting}

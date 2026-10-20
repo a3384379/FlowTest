@@ -59,9 +59,10 @@ class APICandidate(BaseModel):
     kind: Literal["api_binding"]
     api_id: UUID
     service_id: UUID | None
+    base_version: int | None = Field(default=None, ge=1)
 
     def to_change(self) -> PreviewAPIChange:
-        return PreviewAPIChange(self.api_id, self.service_id)
+        return PreviewAPIChange(self.api_id, self.service_id, self.base_version)
 
 
 type TargetCandidate = Annotated[
