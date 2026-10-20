@@ -1,12 +1,9 @@
-import { useQueries } from '@tanstack/react-query'
 import { Alert, Modal, Space, Typography } from 'antd'
 import { useState } from 'react'
-import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { apiErrorMessage } from '../../lib/api'
 import type { ApiDefinition, Environment, RequestService } from '../../lib/api'
 import TargetResolutionPreview from './TargetResolutionPreview'
-import TargetImpactPanel from './TargetImpactPanel'
-import { getServiceTargetImpactPreview, type TargetPreviewChange } from './service-target-service'
+import { type TargetPreviewChange } from './service-target-service'
 
 export type BindingCandidate = (
   | { kind: 'environment'; environment: Environment; serviceId: string | null }
@@ -36,16 +33,6 @@ export default function BindingReviewModal({
 }) {
   const [ready, setReady] = useState(false)
   const { originalId, change, label, initialApi } = candidateDetails(candidate)
-  const serviceIds = [
-    ...new Set([originalId, candidate.serviceId].filter((id): id is string => Boolean(id))),
-  ]
-  const impacts = useQueries({
-    queries: serviceIds.map((id) => ({
-      queryKey: ['request-target-service-impact', projectId, id],
-      queryFn: () => getServiceTargetImpactPreview(projectId, id),
-      retry: false,
-    })),
-  })
   const stale = candidate.kind === 'environment' && candidate.environment.id !== environmentId
   function serviceName(id: string | null | undefined) {
     return id
@@ -66,8 +53,7 @@ export default function BindingReviewModal({
       onCancel={onCancel}
       onOk={onSave}
       okButtonProps={{
-        disabled:
-          readOnly || stale || !ready || impacts.some((item) => !item.isSuccess || item.isFetching),
+        disabled: readOnly || stale || !ready,
       }}
     >
       <Space orientation="vertical" className="full-width">
@@ -83,15 +69,6 @@ export default function BindingReviewModal({
         <Typography.Paragraph>
           当前生效：{serviceName(originalId)} → 待保存候选：{serviceName(candidate.serviceId)}
         </Typography.Paragraph>
-        <QueryFailureNotice queries={impacts} />
-        {impacts.map((impact, index) => (
-          <section key={serviceIds[index]}>
-            <Typography.Title level={5}>
-              服务引用范围：{serviceName(serviceIds[index])}
-            </Typography.Title>
-            <TargetImpactPanel impact={impact.data} />
-          </section>
-        ))}
         <TargetResolutionPreview
           projectId={projectId}
           environmentId={environmentId}

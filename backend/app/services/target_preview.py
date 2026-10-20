@@ -10,6 +10,7 @@ from app.core.errors import AppError
 from app.domain.api_assets import QueryParameterSpec
 from app.domain.import_execution import render_import_query
 from app.domain.scopes import HeaderScope, ResolvedValue
+from app.domain.target_dependencies import CandidateDependencyPreview, TargetDependencyReader
 from app.domain.target_preview import (
     PreviewAPIChange,
     PreviewEndpointChange,
@@ -25,8 +26,10 @@ from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.service_targets import Service, ServiceEndpoint
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
+from app.repositories.target_dependencies import TargetDependencyRepository
 from app.services.projects import ProjectService
 from app.services.request_targets import RequestTargetResolver
+from app.services.target_dependencies import CandidateDependencyAnalyzer
 
 
 class _CandidateTargets(ServiceTargetRepository):
@@ -99,11 +102,26 @@ class _RoutingOnlyResolver(RequestTargetResolver):
 
 
 class TargetPreviewService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self, session: AsyncSession, *, dependency_reader: TargetDependencyReader | None = None
+    ) -> None:
         self._session = session
         self._projects = ProjectService(session)
         self._targets = ServiceTargetRepository(session)
         self._assets = APIAssetRepository(session)
+        self._dependencies: TargetDependencyReader = (
+            dependency_reader
+            if dependency_reader is not None
+            else TargetDependencyRepository(session)
+        )
+
+    async def impact_preview(
+        self, *, actor: User, project_id: UUID, command: TargetPreviewCommand
+    ) -> CandidateDependencyPreview:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._candidate_targets(project_id, command)
+        catalog = await self._dependencies.load(project_id, command)
+        return CandidateDependencyAnalyzer(catalog).analyze(command)
 
     async def preview(
         self, *, actor: User, project_id: UUID, command: TargetPreviewCommand

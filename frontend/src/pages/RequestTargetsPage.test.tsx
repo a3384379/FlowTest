@@ -62,6 +62,20 @@ describe('RequestTargetsPage', () => {
     localStorage.clear()
     authenticateTestUser(user)
     server.use(
+      http.post(`/api/v1/projects/${project.id}/request-targets/impact-preview`, () =>
+        HttpResponse.json({
+          scope_kind: 'endpoint',
+          scope_id: endpoint.id,
+          complete: true,
+          trace_id: 'impact-test',
+          diagnostics: [],
+          affected_apis: [],
+          affected_workflows: [],
+          affected_test_plans: [],
+          affected_scheduled_runs: [],
+          affected_release_gates: [],
+        }),
+      ),
       http.post(`/api/v1/projects/${project.id}/request-targets/preview`, () =>
         HttpResponse.json({
           before: unavailableResolution,

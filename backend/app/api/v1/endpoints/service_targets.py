@@ -13,7 +13,12 @@ from app.schemas.service_targets import (
     ServiceTargetImpactPreviewResponse,
     ServiceUpdate,
 )
-from app.schemas.target_preview import TargetPreviewRequest, TargetPreviewResponse
+from app.schemas.target_preview import (
+    TargetImpactRequest,
+    TargetImpactResponse,
+    TargetPreviewRequest,
+    TargetPreviewResponse,
+)
 from app.services.service_targets import ServiceTargetService
 from app.services.target_preview import TargetPreviewService
 
@@ -31,6 +36,19 @@ async def preview_request_target(
         actor=current_user, project_id=project_id, command=payload.to_command()
     )
     return TargetPreviewResponse.model_validate(result, from_attributes=True)
+
+
+@router.post("/request-targets/impact-preview", response_model=TargetImpactResponse)
+async def preview_candidate_impact(
+    project_id: UUID,
+    payload: TargetImpactRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> TargetImpactResponse:
+    result = await TargetPreviewService(session).impact_preview(
+        actor=current_user, project_id=project_id, command=payload.to_command()
+    )
+    return TargetImpactResponse.model_validate(result)
 
 
 @router.get("/services", response_model=list[ServiceResponse])

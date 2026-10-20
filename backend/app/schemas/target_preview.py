@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
+from app.core.context import get_trace_id
 from app.domain.target_preview import (
     PreviewAPIChange,
     PreviewChange,
@@ -63,12 +64,23 @@ class APICandidate(BaseModel):
         return PreviewAPIChange(self.api_id, self.service_id)
 
 
+type TargetCandidate = Annotated[
+    ServiceCandidate | EndpointCandidate | EnvironmentCandidate | APICandidate,
+    Field(discriminator="kind"),
+]
+
+
+class TargetImpactRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    change: TargetCandidate
+
+    def to_command(self) -> TargetPreviewCommand:
+        return TargetPreviewCommand(change=self.change.to_change())
+
+
 class TargetPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    change: Annotated[
-        ServiceCandidate | EndpointCandidate | EnvironmentCandidate | APICandidate,
-        Field(discriminator="kind"),
-    ]
+    change: TargetCandidate
     environment_id: UUID | None = None
     api_id: UUID | None = None
     api_version: int | None = Field(default=None, ge=1)
@@ -110,3 +122,33 @@ class TargetPreviewResponse(BaseModel):
     after: PreviewResolutionResponse
     persisted: Literal[False]
     network_checked: Literal[False]
+
+
+class CandidateDependencyItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    name: str
+    reason: str
+    available: bool
+
+
+class CandidateDependencyDiagnosticResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    code: str
+    message: str
+    resource_id: UUID | None
+    node_id: str | None
+
+
+class TargetImpactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    scope_kind: Literal["service", "endpoint", "environment_default", "api_binding"]
+    scope_id: UUID
+    complete: bool
+    diagnostics: tuple[CandidateDependencyDiagnosticResponse, ...]
+    affected_apis: tuple[CandidateDependencyItemResponse, ...]
+    affected_workflows: tuple[CandidateDependencyItemResponse, ...]
+    affected_test_plans: tuple[CandidateDependencyItemResponse, ...]
+    affected_scheduled_runs: tuple[CandidateDependencyItemResponse, ...]
+    affected_release_gates: tuple[CandidateDependencyItemResponse, ...]
+    trace_id: str = Field(default_factory=get_trace_id)

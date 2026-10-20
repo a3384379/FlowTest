@@ -726,7 +726,7 @@ function RequestTargetEditModal({
       }}
       destroyOnHidden
     >
-      <TargetImpactPanel impact={impact} />
+      {!review && <TargetImpactPanel projectId={projectId} impact={impact} />}
       {isService ? (
         <ServiceEditFields
           readOnly={fieldsReadonly}

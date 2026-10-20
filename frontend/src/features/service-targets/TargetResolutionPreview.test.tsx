@@ -6,7 +6,7 @@ import zhCN from 'antd/locale/zh_CN'
 import { http, HttpResponse } from 'msw'
 import { useState } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { server } from '../../test/server'
 import { project } from '../../test/fixtures'
 import TargetResolutionPreview from './TargetResolutionPreview'
@@ -70,6 +70,171 @@ function show(change: TargetPreviewChange) {
 }
 
 describe('read-only request target candidate resolution', () => {
+  beforeEach(() => {
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/request-targets/impact-preview`, () =>
+        HttpResponse.json({
+          scope_kind: 'endpoint',
+          scope_id: endpointId,
+          complete: true,
+          trace_id: 'impact-test',
+          diagnostics: [],
+          affected_apis: [],
+          affected_workflows: [],
+          affected_test_plans: [],
+          affected_scheduled_runs: [],
+          affected_release_gates: [],
+        }),
+      ),
+    )
+  })
+  it('keeps candidate dependency analysis separate from URL context and labels partial results honestly', async () => {
+    let impactCalls = 0
+    const urlInputs: TargetPreviewInput[] = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [context], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/request-targets/preview`, async ({ request }) => {
+        urlInputs.push((await request.json()) as TargetPreviewInput)
+        return HttpResponse.json(response('https://current.example.test/health'))
+      }),
+      http.post(
+        `/api/v1/projects/${project.id}/request-targets/impact-preview`,
+        async ({ request }) => {
+          impactCalls += 1
+          expect(await request.json()).toEqual({ change: candidate })
+          return HttpResponse.json({
+            scope_kind: 'endpoint',
+            scope_id: endpointId,
+            complete: false,
+            trace_id: 'partial-impact-trace',
+            diagnostics: [
+              {
+                code: 'WORKFLOW_REFERENCE_UNAVAILABLE',
+                message: '固定子流程版本缺失',
+                resource_id: 'missing-child',
+                node_id: 'child-node',
+              },
+            ],
+            affected_apis: Array.from({ length: 21 }, (_, index) => ({
+              id: `api-${index}`,
+              name: `依赖接口${index}`,
+              reason: '固定版本引用此服务',
+              available: index !== 0,
+            })),
+            affected_workflows: [],
+            affected_test_plans: [],
+            affected_scheduled_runs: [],
+            affected_release_gates: [],
+          })
+        },
+      ),
+    )
+    show(candidate)
+    await screen.findByText('影响范围不完整，数量仅表示已识别结果')
+    expect(screen.getByText('接口 · 已识别 21 项')).toBeInTheDocument()
+    expect(screen.getByText('依赖接口0（已归档或不可用）').closest('a')).toBeNull()
+    expect(screen.getByRole('link', { name: '依赖接口1' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/apis?focus=api-1`,
+    )
+    expect(screen.getByText(/固定子流程版本缺失/)).toHaveTextContent('child-node')
+    expect(screen.getByText(/partial-impact-trace/)).toBeInTheDocument()
+    expect(screen.queryByText('依赖接口20')).not.toBeInTheDocument()
+    await userEvent.click(
+      within(screen.getByText('本次候选的依赖范围').closest('.page-alert')!).getByTitle('下一页'),
+    )
+    expect(await screen.findByText('依赖接口10')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: '预览节点服务覆盖' }), {
+      target: { value: 'billing' },
+    })
+    await waitFor(() => expect(urlInputs.at(-1)?.service_override).toBe('billing'))
+    fireEvent.change(screen.getByRole('spinbutton', { name: '预览固定接口版本' }), {
+      target: { value: '2' },
+    })
+    await waitFor(() => expect(urlInputs.at(-1)?.api_version).toBe(2))
+    expect(impactCalls).toBe(1)
+    await waitFor(() => expect(screen.getByTestId('preview-ready')).toHaveTextContent('true'))
+  })
+
+  it('waits for dependency analysis, retries failures, and ignores a late previous candidate graph', async () => {
+    let release: () => void = () => {}
+    let completed = false
+    let fail = true
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({ items: [context], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/request-targets/preview`, () =>
+        HttpResponse.json(response('https://current.example.test/health')),
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/request-targets/impact-preview`,
+        async ({ request }) => {
+          const input = (await request.json()) as { change: TargetPreviewChange }
+          if (input.change.kind === 'endpoint' && input.change.base_url === candidate.base_url) {
+            await pending
+            completed = true
+            return HttpResponse.json({
+              scope_kind: 'endpoint',
+              scope_id: endpointId,
+              complete: true,
+              diagnostics: [],
+              trace_id: 'old',
+              affected_apis: [
+                { id: 'old-api', name: '迟到的旧候选引用', reason: '旧', available: true },
+              ],
+              affected_workflows: [],
+              affected_test_plans: [],
+              affected_scheduled_runs: [],
+              affected_release_gates: [],
+            })
+          }
+          if (fail)
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'IMPACT_TEMPORARY',
+                  message: '依赖读取失败',
+                  details: null,
+                  trace_id: 'failure-trace',
+                },
+              },
+              { status: 503 },
+            )
+          return HttpResponse.json({
+            scope_kind: 'endpoint',
+            scope_id: endpointId,
+            complete: true,
+            diagnostics: [],
+            trace_id: 'new',
+            affected_apis: [],
+            affected_workflows: [],
+            affected_test_plans: [],
+            affected_scheduled_runs: [],
+            affected_release_gates: [],
+          })
+        },
+      ),
+    )
+    const view = show(candidate)
+    await screen.findByText('https://current.example.test/health')
+    expect(screen.getByTestId('preview-ready')).toHaveTextContent('false')
+    view.change({ ...candidate, base_url: 'https://next.example.test' })
+    await screen.findByText(/依赖读取失败/)
+    expect(screen.getByTestId('preview-ready')).toHaveTextContent('false')
+    fail = false
+    await userEvent.click(screen.getByRole('button', { name: '重新分析依赖' }))
+    await waitFor(() => expect(screen.getByTestId('preview-ready')).toHaveTextContent('true'))
+    release()
+    await waitFor(() => expect(completed).toBe(true))
+    expect(screen.queryByText('迟到的旧候选引用')).not.toBeInTheDocument()
+  })
+
   it('keeps a late response for the previous candidate out of the current review', async () => {
     let release: () => void = () => {}
     let completed = false

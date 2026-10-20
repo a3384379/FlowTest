@@ -96,6 +96,36 @@ export type TargetPreviewInput = {
   endpoint_variant?: string
 }
 
+export type TargetCandidateImpact = {
+  scope_kind: TargetPreviewChange['kind']
+  scope_id: string
+  complete: boolean
+  trace_id: string
+  diagnostics: Array<{
+    code: string
+    message: string
+    resource_id: string | null
+    node_id: string | null
+  }>
+  affected_apis: Array<ImpactItem & { available: boolean }>
+  affected_workflows: Array<ImpactItem & { available: boolean }>
+  affected_test_plans: Array<ImpactItem & { available: boolean }>
+  affected_scheduled_runs: Array<ImpactItem & { available: boolean }>
+  affected_release_gates: Array<ImpactItem & { available: boolean }>
+}
+
+export async function previewTargetImpact(
+  projectId: string,
+  change: TargetPreviewChange,
+): Promise<TargetCandidateImpact> {
+  return (
+    await apiClient.post<TargetCandidateImpact>(
+      `/projects/${projectId}/request-targets/impact-preview`,
+      { change },
+    )
+  ).data
+}
+
 export type TargetPreviewResolution = {
   status: 'resolved' | 'unavailable'
   url: string | null

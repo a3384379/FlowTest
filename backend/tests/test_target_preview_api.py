@@ -367,6 +367,13 @@ async def test_preview_authorizes_viewer_without_granting_writes(
     )
     assert preview.status_code == 200, preview.text
     assert preview.json()["persisted"] is False
+    impact = await fixture.client.post(
+        f"{fixture.root}/request-targets/impact-preview",
+        headers=headers,
+        json={"change": {"kind": "service", "service_id": fixture.service_id, "enabled": False}},
+    )
+    assert impact.status_code == 200, impact.text
+    assert impact.json()["complete"] is True and impact.json()["trace_id"]
     denied = await fixture.client.patch(
         f"{fixture.root}/services/{fixture.service_id}",
         headers=headers,

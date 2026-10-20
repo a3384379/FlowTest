@@ -1,16 +1,20 @@
 import { Alert, Button, Card, Col, Input, InputNumber, Row, Select, Space, Typography } from 'antd'
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import CatalogPagination from '../../components/CatalogPagination'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { useCatalogQuery } from '../../lib/catalog-query'
 import { listApis } from '../api-console/api-service'
 import {
   previewRequestTarget,
+  previewTargetImpact,
+  type TargetCandidateImpact,
   type TargetPreviewChange,
   type TargetPreviewInput,
   type TargetPreviewResolution,
 } from './service-target-service'
+
+import TargetImpactPanel from './TargetImpactPanel'
 
 type Props = {
   projectId: string
@@ -46,11 +50,19 @@ export default function TargetResolutionPreview({
     retry: false,
     refetchOnWindowFocus: false,
   })
-  const ready = resolution.isSuccess && !resolution.isFetching
+  const impact = useQuery({
+    queryKey: ['request-target-candidate-impact', projectId, change],
+    queryFn: () => previewTargetImpact(projectId, change),
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
+  const ready =
+    resolution.isSuccess && !resolution.isFetching && impact.isSuccess && !impact.isFetching
   useEffect(() => onReady(ready), [onReady, ready])
   const options = apiOptions(apis.data?.items, initialApi)
   return (
     <Space orientation="vertical" className="full-width">
+      <DependencyResult projectId={projectId} impact={impact} />
       <Alert
         type="info"
         showIcon
@@ -132,6 +144,26 @@ export default function TargetResolutionPreview({
         )
       )}
     </Space>
+  )
+}
+
+function DependencyResult({
+  projectId,
+  impact,
+}: {
+  projectId: string
+  impact: UseQueryResult<TargetCandidateImpact, Error>
+}) {
+  return (
+    <>
+      <QueryFailureNotice queries={[impact]} />
+      {impact.isError && <Button onClick={() => void impact.refetch()}>重新分析依赖</Button>}
+      {impact.isFetching ? (
+        <Typography.Text>正在分析本次候选的依赖</Typography.Text>
+      ) : (
+        impact.data && <TargetImpactPanel projectId={projectId} candidate={impact.data} />
+      )}
+    </>
   )
 }
 
