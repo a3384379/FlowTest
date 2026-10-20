@@ -644,12 +644,22 @@ def _workflow_uses_service(
     version_refs: set[tuple[str, int]],
     current_versions: dict[str, int],
 ) -> bool:
-    nodes = definition.get("nodes")
-    if not isinstance(nodes, list):
-        return False
     return any(
-        _node_uses_service(node, service_key, version_refs, current_versions) for node in nodes
+        _node_uses_service(node, service_key, version_refs, current_versions)
+        for node in _definition_nodes(definition)
     )
+
+
+def _definition_nodes(definition: dict[str, object]) -> list[object]:
+    main = definition.get("nodes")
+    nodes: list[object] = list(main) if isinstance(main, list) else []
+    regions = definition.get("regions")
+    if not isinstance(regions, list):
+        return nodes
+    for region in regions:
+        if isinstance(region, dict) and isinstance(region.get("nodes"), list):
+            nodes.extend(region["nodes"])
+    return nodes
 
 
 def _node_uses_service(

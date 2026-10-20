@@ -710,6 +710,60 @@ async def test_service_endpoint_resolution_and_snapshot(
     }
     assert {item["id"] for item in orders_impact.json()["affected_workflows"]} == {workflow_id}
     assert orders_impact.json()["affected_test_plans"] == []
+    region_definition = {
+        "schema_version": "4.0",
+        "run_policy": {"request_budget": 5, "max_runtime_seconds": 90},
+        "nodes": [
+            pinned_definition["nodes"][0],
+            {
+                "id": "group",
+                "type": "capability",
+                "name": "步骤组",
+                "position": {"x": 180, "y": 0},
+                "capability_id": "flow.control.group",
+                "capability_version": "1.0.0",
+                "configuration": {"body": {"kind": "inline", "region_id": "body"}},
+                "bindings": [],
+            },
+            pinned_definition["nodes"][2],
+        ],
+        "edges": [
+            {"id": "start-group", "source": "start", "target": "group"},
+            {"id": "group-end", "source": "group", "target": "end"},
+        ],
+        "regions": [
+            {
+                "id": "body",
+                "owner_node_id": "group",
+                "role": "body",
+                "nodes": [
+                    {
+                        **pinned_definition["nodes"][1],
+                        "config": {
+                            "api_definition_id": definition_id,
+                            "api_version": 2,
+                        },
+                    }
+                ],
+                "entry_node_id": "request",
+                "exit_node_ids": ["request"],
+            }
+        ],
+    }
+    region_workflow = await asset_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "步骤组内的固定服务请求", "definition": region_definition},
+    )
+    assert region_workflow.status_code == 201, region_workflow.text
+    region_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{auth_id}/impact-preview",
+        headers=headers,
+    )
+    assert region_impact.status_code == 200, region_impact.text
+    assert region_workflow.json()["id"] in {
+        item["id"] for item in region_impact.json()["affected_workflows"]
+    }
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,
