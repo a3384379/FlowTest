@@ -72,7 +72,7 @@ export default function ReportFilters({ projectId, state, onRefresh }: Props) {
           onChange={(value) => state.setFilter('source', value)}
           options={[
             { value: '', label: '全部来源' },
-            { value: 'workflow', label: '流程直接运行' },
+            { value: 'workflow', label: '流程运行 / 未记录来源' },
             { value: 'case', label: '用例直接运行' },
             { value: 'plan', label: '计划运行' },
             { value: 'preview', label: '沙箱预览' },
@@ -90,7 +90,8 @@ export default function ReportFilters({ projectId, state, onRefresh }: Props) {
       </Space>
       <Typography.Paragraph type="secondary" style={{ margin: '12px 0 0' }}>
         列表、总数、趋势和失败分类共用以上范围；按执行开始时间统计，最多 90
-        天。对象选项来自本项目全部执行历史（含已归档对象），显示当前名称。记录按开始时间倒序排列。
+        天。对象选项来自本项目全部执行历史（含已归档对象），显示当前名称。记录按开始时间倒序排列。缺少正式来源且无法关联的旧记录归入“流程运行
+        / 未记录来源”，不推断到具体计划。
       </Typography.Paragraph>
       {state.error && <Alert type="error" showIcon title={state.error} />}
     </Card>

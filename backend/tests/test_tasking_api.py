@@ -366,6 +366,28 @@ async def test_test_plan_ci_retry_webhook_cancel_and_schedule(
     assert detail.json()["items"][0]["workflow_execution_id"]
     assert len(target.calls) == 2
 
+    reports_root = f"/api/v1/projects/{project_id}/reports"
+    planned = await context.client.get(
+        f"{reports_root}/executions",
+        headers=headers,
+        params={"source": "plan", "source_plan_id": plan_id},
+    )
+    assert planned.status_code == 200, planned.text
+    assert planned.json()["total"] == 2
+    assert {row["status"] for row in planned.json()["items"]} == {"passed", "failed"}
+    trends = await context.client.get(
+        f"{reports_root}/trends",
+        headers=headers,
+        params={"source": "plan", "source_plan_id": plan_id},
+    )
+    assert trends.json()["summary"]["total"] == 2
+    assert trends.json()["summary"]["failed"] == 1
+    assert trends.json()["summary"]["pass_rate"] == 50
+    direct_reports = await context.client.get(
+        f"{reports_root}/executions", headers=headers, params={"source": "workflow"}
+    )
+    assert direct_reports.json()["total"] == 0
+
     body = b'{"source":"deployment"}'
     timestamp = str(int(datetime.now(UTC).timestamp()))
     invalid = await context.client.post(
