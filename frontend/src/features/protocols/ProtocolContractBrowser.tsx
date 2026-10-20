@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import ProtocolContractTree from './ProtocolContractTree'
+import { useProtocolStructure } from './use-protocol-structure'
 import { Button, Collapse, Empty, Pagination, Space, Spin, Tag, Typography } from 'antd'
 import { useState } from 'react'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import {
-  inspectProtocolStructure,
   type ProtocolInputExample,
   type ProtocolStructureEntry,
   type ProtocolStructureResponse,
@@ -31,22 +31,8 @@ export default function ProtocolContractBrowser({
   const [page, setPage] = useState(1)
   const [open, setOpen] = useState(true)
   const current = paths[paths.length - 1]
-  const structure = useQuery({
-    queryKey: [
-      'protocol-structure',
-      asset.project_id,
-      asset.protocol,
-      asset.id,
-      asset.version,
-      asset.content_sha256,
-      current.key,
-      page,
-    ],
-    queryFn: () => inspectProtocolStructure(asset, current.key, page),
-    enabled: open,
-    staleTime: Infinity,
-    retry: false,
-  })
+  const viewing = current.key !== 'root'
+  const structure = useProtocolStructure(asset, current.key, page, open && viewing)
   function navigate(path: Path) {
     setPaths((values) => [...values, path])
     setPage(1)
@@ -81,19 +67,27 @@ export default function ProtocolContractBrowser({
       <Typography.Paragraph className="protocol-contract-path">
         {paths.map((path) => path.label).join(' / ')}
       </Typography.Paragraph>
-      <QueryFailureNotice queries={[structure]} />
-      {structure.isPending && <Spin aria-label="加载契约结构" />}
-      {structure.data && !structure.isError && (
-        <ContractView data={structure.data.view} navigate={navigate} onExample={onExample} />
-      )}
-      <Pagination
-        size="small"
-        current={page}
-        pageSize={25}
-        total={structure.data?.view.total ?? 0}
-        onChange={setPage}
-        showSizeChanger={false}
-        hideOnSinglePage
+      <ProtocolContractTree
+        asset={asset}
+        enabled={open}
+        onSelect={(entry, ancestors) => {
+          setPaths([
+            ...ancestors.map((key) => ({
+              key,
+              label: key === 'root' ? '契约结构' : key.replace(/^\w+:/, ''),
+            })),
+            entry,
+          ])
+          setPage(1)
+        }}
+      />
+      <ContractDetails
+        query={structure}
+        viewing={viewing}
+        page={page}
+        setPage={setPage}
+        navigate={navigate}
+        onExample={onExample}
       />
     </>
   )
@@ -105,6 +99,42 @@ export default function ProtocolContractBrowser({
     />
   )
 }
+function ContractDetails({
+  query,
+  viewing,
+  page,
+  setPage,
+  navigate,
+  onExample,
+}: {
+  query: ReturnType<typeof useProtocolStructure>
+  viewing: boolean
+  page: number
+  setPage: (page: number) => void
+  navigate: (path: Path) => void
+  onExample: (example: ProtocolInputExample) => void
+}) {
+  if (!viewing) return null
+  return (
+    <>
+      <QueryFailureNotice queries={[query]} />
+      {query.isPending && <Spin aria-label="加载契约结构" />}
+      {query.data && !query.isError && (
+        <ContractView data={query.data.view} navigate={navigate} onExample={onExample} />
+      )}
+      <Pagination
+        size="small"
+        current={page}
+        pageSize={25}
+        total={query.data?.view.total ?? 0}
+        onChange={setPage}
+        showSizeChanger={false}
+        hideOnSinglePage
+      />
+    </>
+  )
+}
+
 function ContractView({
   data,
   navigate,

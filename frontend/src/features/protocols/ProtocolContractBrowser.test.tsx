@@ -134,9 +134,11 @@ describe('ProtocolContractBrowser', () => {
       }),
     )
     const view = renderBrowser()
-    expect(await screen.findByText('query · ReadRoot')).toBeInTheDocument()
+    expect(
+      await screen.findByRole('button', { name: '查看契约query · ReadRoot' }),
+    ).toBeInTheDocument()
     expect(requests).toEqual(['root:0'])
-    await userEvent.click(screen.getByRole('button', { name: 'query · ReadRoot' }))
+    await userEvent.click(screen.getByRole('button', { name: '查看契约query · ReadRoot' }))
     await screen.findByText('[Order!]!')
     await userEvent.click(screen.getByTitle('Next Page'))
     await waitFor(() => expect(requests).toContain('operation:query:25'))
@@ -151,6 +153,48 @@ describe('ProtocolContractBrowser', () => {
     await userEvent.click(screen.getByRole('button', { name: '返回上层' }))
     expect(await screen.findByText('Filter!')).toBeInTheDocument()
   })
+  it('expands contract branches lazily and stops recursive expansion without generating input or executing', async () => {
+    const requests: string[] = []
+    server.use(
+      http.get('/api/v1/protocol-assets/:id/structure', ({ request }) => {
+        const node = new URL(request.url).searchParams.get('node') ?? 'root'
+        requests.push(node)
+        const entry =
+          node === 'root'
+            ? {
+                key: 'type:User',
+                label: 'User',
+                kind: 'type',
+                type_label: '',
+                required: false,
+                description: '',
+                expandable: true,
+              }
+            : {
+                key: 'type:User',
+                label: 'friend',
+                kind: 'field',
+                type_label: 'User',
+                required: false,
+                description: '递归引用',
+                expandable: true,
+              }
+        return HttpResponse.json(response(node, { entries: [entry], total: 1 }))
+      }),
+    )
+    const view = renderBrowser()
+    await userEvent.click(await screen.findByRole('button', { name: '展开契约User' }))
+    expect(await screen.findByRole('button', { name: '展开契约friend' })).toBeDisabled()
+    expect(screen.getByText('引用或层级上限')).toBeInTheDocument()
+    expect(requests).toEqual(['root', 'type:User'])
+    expect(view.onExample).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '收起契约User' }))
+    expect(screen.queryByRole('button', { name: '展开契约friend' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '展开契约User' }))
+    expect(await screen.findByRole('button', { name: '展开契约friend' })).toBeDisabled()
+    expect(requests).toEqual(['root', 'type:User'])
+  })
+
   it('refuses mismatched frozen identity and keeps scoped read failures explicit', async () => {
     server.use(
       http.get('/api/v1/protocol-assets/:id/structure', () =>

@@ -2609,3 +2609,28 @@ body {
     padding: 12px;
   }
 }
+.protocol-contract-tree {
+  margin: 12px 0;
+  max-height: 400px;
+  overflow: auto;
+}
+.protocol-contract-branches {
+  list-style: none;
+  padding: 0 0 0 8px;
+  margin: 0;
+}
+.protocol-contract-branches > li {
+  padding: 6px 0;
+  border-left: 1px solid var(--ft-border-subtle);
+}
+.protocol-contract-branches .ant-btn-link {
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  padding: 0;
+}
+.protocol-contract-type {
+  margin: 0 0 0 24px;
+  overflow-wrap: anywhere;
+}

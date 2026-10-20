@@ -885,34 +885,64 @@ describe('ProtocolWorkbenchPage', () => {
           page_size: 20,
         }),
       ),
-      http.get('/api/v1/protocol-assets/:id/structure', () =>
-        HttpResponse.json({
+      http.get('/api/v1/protocol-assets/:id/structure', ({ request }) => {
+        const node = new URL(request.url).searchParams.get('node') ?? 'root'
+        const entries =
+          node === 'root'
+            ? [
+                {
+                  key: 'service:audit.Orders',
+                  label: 'audit.Orders',
+                  kind: 'service',
+                  type_label: '',
+                  required: false,
+                  description: '',
+                  expandable: true,
+                },
+              ]
+            : node === 'service:audit.Orders'
+              ? [
+                  {
+                    key: 'method:audit.Orders/Get',
+                    label: 'Get',
+                    kind: 'method',
+                    type_label: 'unary',
+                    required: false,
+                    description: '',
+                    expandable: true,
+                  },
+                ]
+              : []
+        return HttpResponse.json({
           artifact_id: grpcDescriptor.id,
           project_id: project.id,
           protocol: 'grpc',
           version: 1,
           content_sha256: grpcDescriptor.content_sha256,
           view: {
-            node: 'root',
+            node,
             label: '真实方法',
-            entries: [],
-            total: 0,
+            entries,
+            total: entries.length,
             offset: 0,
             limit: 25,
             notice: '样例只保证契约结构',
             document: null,
             document_format: null,
-            example: {
-              operation: null,
-              variables: null,
-              service: 'audit.Orders',
-              method: 'Get',
-              call_type: 'unary',
-              request: { orderId: 'from-contract' },
-            },
+            example:
+              node === 'method:audit.Orders/Get'
+                ? {
+                    operation: null,
+                    variables: null,
+                    service: 'audit.Orders',
+                    method: 'Get',
+                    call_type: 'unary',
+                    request: { orderId: 'from-contract' },
+                  }
+                : null,
           },
-        }),
-      ),
+        })
+      }),
       http.post('/api/v1/grpc/execute', async ({ request }) => {
         payloads.push((await request.json()) as (typeof payloads)[number])
         return HttpResponse.json({
@@ -926,6 +956,8 @@ describe('ProtocolWorkbenchPage', () => {
     )
     renderPage('?mode=grpc')
     expect(await screen.findByRole('button', { name: /执行 gRPC/ })).toBeDisabled()
+    await userEvent.click(await screen.findByRole('button', { name: '查看契约audit.Orders' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Get', exact: true }))
     await userEvent.click(await screen.findByRole('button', { name: '将样例填入请求草稿' }))
     expect(screen.getByLabelText('gRPC Request')).toHaveValue(
       JSON.stringify({ orderId: 'from-contract' }, null, 2),
