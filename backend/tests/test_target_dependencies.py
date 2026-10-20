@@ -7,6 +7,7 @@ from app.domain.api_assets import JsonValue
 from app.domain.target_dependencies import (
     DependencyAPI,
     DependencyAPIVersion,
+    DependencyCaseRef,
     DependencyCaseVersion,
     DependencyEndpoint,
     DependencyEnvironment,
@@ -14,6 +15,7 @@ from app.domain.target_dependencies import (
     DependencyPlanItem,
     DependencyReleasePolicy,
     DependencyService,
+    DependencySuiteVersion,
     DependencyWorkflow,
     DependencyWorkflowVersion,
     TargetDependencyCatalog,
@@ -321,3 +323,26 @@ def test_missing_candidate_and_catalog_boundaries_never_return_complete_zero() -
         "CATALOG_LIMIT",
         "CANDIDATE_SOURCE_UNAVAILABLE",
     }
+
+
+def test_reference_budget_also_limits_case_and_suite_expansion() -> None:
+    data = catalog()
+    suite_id = uuid4()
+    cases = tuple(DependencyCaseVersion(uuid4(), 1, {}) for _ in range(100))
+    suite = DependencySuiteVersion(
+        suite_id, 1, tuple(DependencyCaseRef(item.case_id, 1) for item in cases)
+    )
+    plan = DependencyPlan(
+        uuid4(),
+        "有界套件计划",
+        True,
+        False,
+        (DependencyPlanItem("suite", suite_id, 1, None, None, None),),
+    )
+    data = replace(data, case_versions=cases, suite_versions=(suite,), plans=(plan,))
+    result = CandidateDependencyAnalyzer(data, max_comparisons=5).analyze(
+        TargetPreviewCommand(PreviewServiceChange(data.services[0].id))
+    )
+    assert not result.complete
+    assert any(item.code == "REFERENCE_SCAN_LIMIT" for item in result.diagnostics)
+    assert len(result.diagnostics) < 10

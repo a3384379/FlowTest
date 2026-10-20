@@ -85,6 +85,7 @@ class _CandidateScan:
         self.apis = {item.id: item for item in catalog.apis}
         self.api_versions = {(item.api_id, item.version): item for item in catalog.api_versions}
         self.environments = {item.id: item for item in catalog.environments}
+        self.inherited_service_ids = {item.default_service_id for item in catalog.environments}
         self.service_ids = {item.key: item.id for item in catalog.services}
         self.workflows = {item.id: item for item in catalog.workflows}
         self.definitions: dict[WorkflowRef, dict[str, JsonValue]] = {
@@ -284,12 +285,12 @@ class _CandidateScan:
         self.parsed[reference] = definition
         return definition
 
-    def _comparison_available(self, workflow_id: UUID, node_id: str) -> bool:
+    def _comparison_available(self, resource_id: UUID, node_id: str | None = None) -> bool:
         if self.remaining_comparisons <= 0:
             self.diagnostic(
                 "REFERENCE_SCAN_LIMIT",
                 "引用比较超过本次分析边界, 已识别结果不完整",
-                workflow_id,
+                resource_id,
                 node_id,
             )
             return False
@@ -370,10 +371,7 @@ class _CandidateScan:
 
     def _inherited_service_matches(self, environment_id: UUID | None) -> bool:
         if environment_id is None:
-            return any(
-                item.default_service_id == self.scope.service_id
-                for item in self.catalog.environments
-            )
+            return self.scope.service_id in self.inherited_service_ids
         environment = self.environments.get(environment_id)
         if environment is None:
             self.diagnostic(
@@ -387,6 +385,8 @@ class _CandidateScan:
     def _plan_matches(self, plan: DependencyPlan) -> bool:
         matched = False
         for item in plan.items:
+            if not self._comparison_available(plan.id):
+                break
             for target in self._run_targets(item):
                 if target.environment_id not in self.environments:
                     self.diagnostic(
@@ -424,11 +424,14 @@ class _CandidateScan:
                 "SUITE_VERSION_UNAVAILABLE", "计划引用的套件版本未完整读入", item.target_id
             )
             return ()
-        return tuple(
-            target
-            for member in members
-            if (target := self._case_target(member.case_id, member.version)) is not None
-        )
+        targets: list[_RunTarget] = []
+        for member in members:
+            if not self._comparison_available(item.target_id):
+                break
+            target = self._case_target(member.case_id, member.version)
+            if target is not None:
+                targets.append(target)
+        return tuple(targets)
 
     def _case_target(self, case_id: UUID, version: int) -> _RunTarget | None:
         raw = self.cases.get((case_id, version))
