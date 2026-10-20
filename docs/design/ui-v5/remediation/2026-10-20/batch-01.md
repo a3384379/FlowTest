@@ -90,3 +90,9 @@ GitHub复审补修：所有客户端缺少或传null审核快照也必须409拒�
 - 未进行正式环境部署、Windows分发包、容量或全部可选外部协议/Runner系统验收。
 - 未把本地检查当作 GitHub 最新提交的 Required Gate；PR、合并、合并后CI需要另行记录真实结果。
 - 52项待实施与1项受限修复继续以问题ID跟踪；全站设计目标仍以原审计和详细方案为准。
+
+## 9. 门禁发现的阻塞依赖
+
+GitHub安全门禁发现基线锁定的MCP 2.0.0命中CVE-2026-59951。[SDK官方公告](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-84m7-p3x7-pcfv)确认2.2.0修复。本批仅把MCP及mcp-types锁定到2.2.0，并将最低SDK约束设为2.2，不顺带升级其他库。
+
+本地 `uv run --frozen pip-audit` 通过，未发现已知漏洞；项目自身不在PyPI的跳过说明属于工具正常输出。升级后Ruff及mypy425个文件通过，后端全量1733通过、13跳过，覆盖率90.77%。该本地检查不替代容器、Windows及最新PR门禁。
