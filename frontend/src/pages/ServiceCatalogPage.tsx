@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Empty,
+  Descriptions,
   Form,
   Input,
   Modal,
@@ -13,31 +14,26 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import type { ServiceCatalogEntry, ServiceGraph } from '../features/contracts/contract-hub-service'
 import {
   type ServiceCatalogInput,
   useServiceCatalog,
 } from '../features/services/use-service-catalog'
-import { projectPath } from '../features/projects/project-routing'
-import { apiErrorMessage } from '../lib/api'
+import { contractServicePath } from '../features/services/contract-service-location'
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useProjectContext } from '../features/projects/use-project-context'
 
 export default function ServiceCatalogPage() {
+  const { projectId } = useProjectContext()
+  return <ServiceCatalogWorkspace key={projectId ?? 'none'} />
+}
+
+function ServiceCatalogWorkspace() {
   const state = useServiceCatalog()
-  const [searchParams] = useSearchParams()
-  const [query, setQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
-  const focusedId = focusedServiceId(searchParams.get('focus'))
-  const serviceItems = state.services.data?.items
-  const filtered = useMemo(() => filterServices(serviceItems ?? [], query), [query, serviceItems])
-  const error = firstError([
-    state.featureFlags.error,
-    state.services.error,
-    state.summary.error,
-    state.graph.error,
-  ])
   const featureResolved = state.featureFlags.isSuccess
 
   return (
@@ -60,13 +56,15 @@ export default function ServiceCatalogPage() {
         </Button>
       </div>
 
-      {error && (
+      <QueryFailureNotice
+        queries={[state.featureFlags, state.services, state.summary, state.graph]}
+      />
+      {state.scopeError && (
         <Alert
           type="error"
           showIcon
-          title="服务目录加载失败"
-          description={apiErrorMessage(error)}
-          className="service-catalog-alert"
+          title={state.scopeError}
+          action={<Button onClick={state.resetScope}>重置目录范围</Button>}
         />
       )}
       <FeatureNotice resolved={featureResolved} enabled={state.featureEnabled} />
@@ -75,27 +73,26 @@ export default function ServiceCatalogPage() {
         loading={state.featureFlags.isLoading || state.summary.isLoading}
         values={state.summary.data}
       />
-      <Card
-        title="服务资产"
-        loading={state.services.isLoading || state.graph.isLoading}
-        extra={
-          <Input.Search
-            aria-label="搜索服务"
-            allowClear
-            placeholder="搜索名称、标识或描述"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        }
+      <div
+        className={`service-catalog-workspace${state.selection.id || state.selection.error ? ' has-selection' : ''}`}
       >
-        <CatalogContent
-          enabled={state.featureEnabled}
-          projectId={state.projectId}
-          items={filtered}
-          graph={state.graph.data}
-          focusedId={focusedId}
-        />
-      </Card>
+        <section aria-label="服务目录列表" className="service-catalog-list">
+          <Card title="服务资产" loading={state.services.isLoading}>
+            <Input.Search
+              key={`${state.projectId}:${state.search}`}
+              aria-label="搜索服务"
+              allowClear
+              placeholder="搜索全部服务名称、标识或描述"
+              defaultValue={state.search}
+              maxLength={200}
+              onSearch={state.setSearch}
+              style={{ marginBottom: 16 }}
+            />
+            <CatalogContent state={state} />
+          </Card>
+        </section>
+        <ServiceDetails state={state} />
+      </div>
       <CreateServiceDialog
         open={createOpen}
         submitting={state.creating}
@@ -121,21 +118,10 @@ function FeatureNotice({ resolved, enabled }: { resolved: boolean; enabled: bool
   )
 }
 
-function CatalogContent({
-  enabled,
-  projectId,
-  items,
-  graph,
-  focusedId,
-}: {
-  enabled: boolean
-  projectId: string | null
-  items: ServiceCatalogEntry[]
-  graph: ServiceGraph | undefined
-  focusedId: string | null
-}) {
-  if (!enabled) return <Empty description="功能未启用" />
-  return <ServiceTable projectId={projectId} items={items} graph={graph} focusedId={focusedId} />
+function CatalogContent({ state }: { state: ReturnType<typeof useServiceCatalog> }) {
+  if (!state.featureEnabled) return <Empty description="功能未启用" />
+  if (state.scopeError || state.services.isError) return null
+  return <ServiceTable state={state} />
 }
 
 type CatalogOverviewProps = {
@@ -185,82 +171,210 @@ function summaryValue(
   return values ? values[key] : '—'
 }
 
-function ServiceTable({
-  projectId,
-  items,
-  graph,
-  focusedId,
-}: {
-  projectId: string | null
-  items: ServiceCatalogEntry[]
-  graph: ServiceGraph | undefined
-  focusedId: string | null
-}) {
-  if (!items.length) return <Empty description="暂无匹配服务" />
-  const profiles = serviceProfiles(graph)
+function ServiceTable({ state }: { state: ReturnType<typeof useServiceCatalog> }) {
+  const profiles = serviceProfiles(state.graph.data)
   return (
     <Table
       rowKey="id"
-      pagination={{ pageSize: 10 }}
-      dataSource={items}
-      rowClassName={(record) => (record.id === focusedId ? 'service-catalog-row-focused' : '')}
+      dataSource={state.services.data?.items ?? []}
+      locale={{ emptyText: '暂无匹配服务' }}
+      pagination={{
+        current: state.page,
+        pageSize: 20,
+        total: state.services.data?.total ?? 0,
+        showSizeChanger: false,
+        onChange: state.setPage,
+        showTotal: (total) => `匹配 ${total} 个服务`,
+      }}
+      rowClassName={(record) =>
+        record.id === state.selection.id ? 'service-catalog-row-focused' : ''
+      }
       columns={[
         {
           title: '服务',
-          render: (_, service) => (
+          render: (_: unknown, service: ServiceCatalogEntry) => (
             <Space orientation="vertical" size={0}>
-              <Typography.Text strong>{service.display_name}</Typography.Text>
+              <Button
+                type="link"
+                style={{
+                  padding: 0,
+                  maxWidth: '100%',
+                  whiteSpace: 'normal',
+                  height: 'auto',
+                  textAlign: 'left',
+                }}
+                onClick={() => state.selectService(service.id)}
+              >
+                {service.display_name}
+              </Button>
               <Typography.Text type="secondary" code>
                 {service.service_key}
+              </Typography.Text>
+              <Typography.Text type="secondary">
+                {dependencyRole(profiles.get(service.id))}
               </Typography.Text>
             </Space>
           ),
         },
         {
-          title: '描述',
-          dataIndex: 'description',
-          ellipsis: true,
-          render: (value: string) => value || '—',
-        },
-        {
-          title: '契约类型',
-          width: 180,
-          render: (_, service) => (
-            <ContractKindTags kinds={profiles.get(service.id)?.kinds ?? []} />
+          title: '契约',
+          width: 110,
+          render: (_: unknown, service: ServiceCatalogEntry) => (
+            <ContractKindTags kinds={profiles.get(service.id)?.kinds} />
           ),
         },
+      ]}
+    />
+  )
+}
+
+function ServiceDetails({ state }: { state: ReturnType<typeof useServiceCatalog> }) {
+  const selected =
+    state.featureEnabled && state.selected.isSuccess ? state.selected.data : undefined
+  return (
+    <section aria-label="选中服务详情" className="service-catalog-detail">
+      <Card
+        title="服务详情"
+        loading={state.featureEnabled && Boolean(state.selection.id) && state.selected.isPending}
+        extra={
+          (state.selection.id || state.selection.error) && (
+            <Button onClick={() => state.selectService(null)}>返回服务列表</Button>
+          )
+        }
+      >
+        {state.selection.error && <Alert type="error" showIcon title={state.selection.error} />}
+        <QueryFailureNotice queries={[state.selected]} />
+        {!state.selection.id && !state.selection.error && (
+          <Empty description="选择一个服务查看详情" />
+        )}
+        {selected && <ServiceDetailsContent state={state} service={selected} />}
+      </Card>
+    </section>
+  )
+}
+
+function ServiceDetailsContent({
+  state,
+  service,
+}: {
+  state: ReturnType<typeof useServiceCatalog>
+  service: ServiceCatalogEntry
+}) {
+  const profile = serviceProfiles(state.graph.data).get(service.id)
+  return (
+    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+      <Typography.Title level={4} style={{ margin: 0 }}>
+        {service.display_name}
+      </Typography.Title>
+      <Descriptions
+        column={1}
+        size="small"
+        bordered
+        items={[
+          {
+            key: 'id',
+            label: '目录服务 ID',
+            children: (
+              <Typography.Text code copyable>
+                {service.id}
+              </Typography.Text>
+            ),
+          },
+          {
+            key: 'key',
+            label: '服务标识',
+            children: <Typography.Text code>{service.service_key}</Typography.Text>,
+          },
+          { key: 'description', label: '描述', children: service.description || '未填写' },
+          {
+            key: 'kinds',
+            label: '已知契约',
+            children: <ContractKindTags kinds={profile?.kinds} />,
+          },
+          {
+            key: 'role',
+            label: '依赖角色',
+            children: profile ? dependencyRole(profile) : '摘要未提供',
+          },
+          {
+            key: 'updated',
+            label: '更新时间（北京时间）',
+            children: formatShanghaiTime(service.updated_at),
+          },
+        ]}
+      />
+      <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+        这是契约目录服务；请求目标 Service 使用独立身份。下方展示已登记的 Pact
+        依赖及最近已知验证，不能据此推断部署安全。OpenAPI 的固定版本与完整验证记录请进入契约页面。
+      </Typography.Paragraph>
+      <Space wrap>
+        <Link to={contractServicePath(state.projectId!, 'contracts', service.id)}>
+          查看服务契约
+        </Link>
+        <Link to={contractServicePath(state.projectId!, 'impact', service.id)}>查看服务影响</Link>
+      </Space>
+      <ServiceDependencies
+        service={service}
+        graph={state.graph.data}
+        onSelect={state.selectService}
+      />
+    </Space>
+  )
+}
+
+function ServiceDependencies({
+  service,
+  graph,
+  onSelect,
+}: {
+  service: ServiceCatalogEntry
+  graph?: ServiceGraph
+  onSelect: (id: string) => void
+}) {
+  if (!graph) return <Typography.Text type="secondary">依赖摘要尚未提供</Typography.Text>
+  const edges = graph.edges.filter(
+    (edge) => edge.consumer_service_id === service.id || edge.provider_service_id === service.id,
+  )
+  const names = new Map(graph.nodes.map((node) => [node.id, node.display_name]))
+  return (
+    <Table
+      size="small"
+      dataSource={edges}
+      rowKey={(edge) => `${edge.consumer_service_id}:${edge.provider_service_id}`}
+      title={() => '已登记 Pact 依赖'}
+      locale={{ emptyText: '未记录 Pact 依赖' }}
+      pagination={{ pageSize: 5, hideOnSinglePage: true }}
+      columns={[
         {
-          title: '依赖角色',
-          width: 140,
-          render: (_, service) => dependencyRole(profiles.get(service.id)),
-        },
-        {
-          title: '相关依赖',
-          width: 110,
-          render: (_, service) => profiles.get(service.id)?.edgeCount ?? 0,
-        },
-        {
-          title: '更新时间',
-          dataIndex: 'updated_at',
-          width: 170,
-          render: (value: string) => formatShanghaiTime(value),
-        },
-        {
-          title: '操作',
-          width: 130,
-          render: (_, service) =>
-            projectId ? (
-              <Space>
-                <Link
-                  to={`${projectPath(projectId, 'contracts')}?focus=contract_service:${service.id}`}
-                >
-                  契约
-                </Link>
-                <Link to={`${projectPath(projectId, 'impact')}?service_id=${service.id}`}>
-                  影响
-                </Link>
+          title: '关联服务',
+          render: (_: unknown, edge: ServiceGraph['edges'][number]) => {
+            const upstream = edge.provider_service_id === service.id
+            const id = upstream ? edge.consumer_service_id : edge.provider_service_id
+            return (
+              <Space orientation="vertical" size={0}>
+                <Button type="link" onClick={() => onSelect(id)}>
+                  {names.get(id) ?? id}
+                </Button>
+                <Typography.Text type="secondary">
+                  {upstream ? '调用本服务' : '本服务调用'}
+                </Typography.Text>
               </Space>
-            ) : null,
+            )
+          },
+        },
+        {
+          title: '已知文档 / 消费者版本',
+          render: (_: unknown, edge: ServiceGraph['edges'][number]) =>
+            `${edge.pact_contract_count} / ${edge.latest_consumer_version}`,
+        },
+        {
+          title: '最近验证',
+          dataIndex: 'latest_status',
+          render: (status: ServiceGraph['edges'][number]['latest_status']) => (
+            <Tag color={status === 'passed' ? 'green' : status === 'failed' ? 'red' : undefined}>
+              {status === 'passed' ? '通过' : status === 'failed' ? '失败' : '待验证'}
+            </Tag>
+          ),
         },
       ]}
     />
@@ -305,7 +419,8 @@ function updateProfile(
   profiles.set(serviceId, { ...profile, [role]: true, edgeCount: profile.edgeCount + 1 })
 }
 
-function ContractKindTags({ kinds }: { kinds: Array<'openapi' | 'pact'> }) {
+function ContractKindTags({ kinds }: { kinds?: Array<'openapi' | 'pact'> }) {
+  if (!kinds) return <Tag>摘要未提供</Tag>
   if (!kinds.length) return <Tag>待关联</Tag>
   return (
     <Space size={4} wrap>
@@ -385,25 +500,6 @@ function CreateServiceDialog({
       </Form>
     </Modal>
   )
-}
-
-function filterServices(items: ServiceCatalogEntry[], query: string): ServiceCatalogEntry[] {
-  const normalized = query.trim().toLocaleLowerCase('zh-CN')
-  if (!normalized) return items
-  return items.filter((item) =>
-    [item.display_name, item.service_key, item.description].some((value) =>
-      value.toLocaleLowerCase('zh-CN').includes(normalized),
-    ),
-  )
-}
-
-function focusedServiceId(value: string | null): string | null {
-  if (!value?.startsWith('contract_service:')) return null
-  return value.slice('contract_service:'.length) || null
-}
-
-function firstError(errors: unknown[]): unknown {
-  return errors.find((error) => error !== null && error !== undefined)
 }
 
 function formatShanghaiTime(value: string): string {

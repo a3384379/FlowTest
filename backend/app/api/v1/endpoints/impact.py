@@ -132,12 +132,14 @@ async def list_impact_runs(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    contract_service_id: UUID | None = None,
 ) -> Page[ImpactRunSummaryResponse]:
     models, total = await _service(session).list_runs(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        contract_service_id=contract_service_id,
     )
     return Page(
         items=[ImpactRunSummaryResponse.model_validate(item) for item in models],
@@ -153,9 +155,13 @@ async def get_impact_run(
     run_id: UUID,
     session: SessionDependency,
     current_user: CurrentUser,
+    contract_service_id: UUID | None = None,
 ) -> ImpactRunDetailResponse:
     bundle = await _service(session).get_run(
-        actor=current_user, project_id=project_id, run_id=run_id
+        actor=current_user,
+        project_id=project_id,
+        run_id=run_id,
+        contract_service_id=contract_service_id,
     )
     return impact_run_response(bundle)
 

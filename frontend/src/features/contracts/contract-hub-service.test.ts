@@ -49,7 +49,7 @@ describe('contract hub service', () => {
     })
 
     expect(get).toHaveBeenNthCalledWith(1, '/projects/project-1/contract-hub/services', {
-      params: { page: 1, page_size: 100 },
+      params: { page: 1, page_size: 100, search: '' },
     })
     expect(get).toHaveBeenNthCalledWith(
       5,

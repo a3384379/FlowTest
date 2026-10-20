@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
+import { useEffect, useRef } from 'react'
+import { useServiceCatalogScope } from './service-catalog-scope'
+import { useContractServiceContext } from './use-contract-service-context'
 
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 import {
@@ -20,7 +23,16 @@ export type ServiceCatalogInput = {
 export function useServiceCatalog() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const { projectId, currentProject } = useProjectContext()
+  const catalogScope = useServiceCatalogScope()
+  const { search, page, scopeError } = catalogScope
   const hasProject = Boolean(projectId)
   const canEdit = currentProject !== null && currentProject.role !== 'viewer'
   const featureFlags = useQuery({
@@ -30,10 +42,11 @@ export function useServiceCatalog() {
   })
   const featureEnabled = featureFlags.data?.contract_hub === true
   const services = useQuery({
-    queryKey: ['contract-services', projectId],
-    queryFn: () => listContractServices(required(projectId)),
-    enabled: hasProject && featureEnabled,
+    queryKey: ['contract-services', projectId, search, page],
+    queryFn: () => listContractServices(required(projectId), page, 20, search),
+    enabled: hasProject && featureEnabled && !scopeError,
   })
+  const { selected } = useContractServiceContext(projectId, hasProject && featureEnabled)
   const summary = useQuery({
     queryKey: ['contract-hub-summary', projectId],
     queryFn: () => getContractHubSummary(required(projectId)),
@@ -56,10 +69,10 @@ export function useServiceCatalog() {
         queryClient.invalidateQueries({ queryKey: ['contract-hub-summary', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['contract-service-graph', projectId] }),
       ])
-      void message.success('服务已登记')
+      if (mounted.current) void message.success('服务已登记')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (mounted.current) void message.error(apiErrorMessage(error))
       return false
     }
   }
@@ -67,6 +80,8 @@ export function useServiceCatalog() {
   return {
     projectId,
     canEdit,
+    ...catalogScope,
+    selected,
     featureFlags,
     featureEnabled,
     services,

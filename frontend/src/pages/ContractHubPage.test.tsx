@@ -173,6 +173,40 @@ const unsafeCheck: DeploymentCheck = {
 }
 
 describe('ContractHubPage', () => {
+  it.each(['contractServiceId=', 'focus=contract_service:'])(
+    'resolves an off-page service locator %s without selecting another provider',
+    async (locator) => {
+      installHandlers()
+      const requested: string[] = []
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
+          HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+        ),
+        http.get(`/api/v1/projects/${project.id}/contract-hub/services/${providerId}`, () =>
+          HttpResponse.json(services[1]),
+        ),
+        http.get(
+          `/api/v1/projects/${project.id}/contract-hub/compatibility/:serviceId`,
+          ({ params }) => {
+            requested.push(String(params.serviceId))
+            return HttpResponse.json(matrix)
+          },
+        ),
+      )
+      renderPage(`/projects/${project.id}/contracts?${locator}${providerId}`)
+      expect(await screen.findByText('服务上下文：订单服务')).toBeInTheDocument()
+      await waitFor(() => expect(requested).toContain(providerId))
+      expect(new Set(requested)).toEqual(new Set([providerId]))
+      expect(
+        screen.getByRole('combobox', { name: '提供方服务' }).closest('.ant-select'),
+      ).toHaveTextContent('订单服务')
+      expect(screen.getByRole('link', { name: '返回该服务详情' })).toHaveAttribute(
+        'href',
+        `/projects/${project.id}/services?contractServiceId=${providerId}`,
+      )
+    },
+  )
+
   it('keeps contract evidence readable while disabling writer operations for viewers', async () => {
     installHandlers()
     let writes = 0
@@ -493,6 +527,9 @@ function installHandlers({ empty = false }: { empty?: boolean } = {}) {
   server.use(
     http.get('/api/v1/v3/features', () => HttpResponse.json({ contract_hub: true })),
     http.get('/api/v1/projects', () => HttpResponse.json(page([project]))),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId`, ({ params }) =>
+      HttpResponse.json(services.find((item) => item.id === params.serviceId)),
+    ),
     http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
       HttpResponse.json(page(empty ? [] : services)),
     ),

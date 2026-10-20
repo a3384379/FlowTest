@@ -700,3 +700,98 @@ def _compiled_proto_with_extra_field() -> bytes:
         ),
         entrypoint="sample.proto",
     ).canonical_content
+
+
+@pytest.mark.asyncio
+async def test_impact_service_scope_uses_frozen_exact_contract_service_key(
+    impact_context: ImpactContext,
+) -> None:
+    from app.models.contracts import ServiceCatalogEntry
+    from app.models.impact import CoverageSnapshot, ImpactRun, TestSelection
+
+    client = impact_context.client
+    headers = await _login_headers(client)
+    project_id = await _create_project(client, headers, "Service-scoped impacts")
+    foreign_project = await _create_project(client, headers, "Other service scope")
+    async with impact_context.sessions() as session:
+        actor_id = await session.scalar(select(User.id).where(User.email == ADMIN_EMAIL))
+        assert actor_id is not None
+        services = [
+            ServiceCatalogEntry(
+                project_id=UUID(project_id),
+                service_key=key,
+                display_name=key,
+                description="",
+                created_by_id=actor_id,
+            )
+            for key in ("orders", "orders-next", "unused")
+        ]
+        session.add_all(services)
+        await session.flush()
+        runs: list[ImpactRun] = []
+        for index in range(27):
+            key = "orders" if index < 23 else "orders-next" if index < 26 else None
+            run = ImpactRun(
+                project_id=UUID(project_id),
+                title=f"真实冻结服务范围{index}",
+                source_fingerprint="a" * 64,
+                source_summary={},
+                change_count=1,
+                changes=[{"service_key": key}],
+                graph={"nodes": [], "edges": []},
+                summary={},
+                created_by_id=actor_id,
+            )
+            session.add(run)
+            await session.flush()
+            session.add_all(
+                [
+                    TestSelection(
+                        project_id=UUID(project_id),
+                        impact_run_id=run.id,
+                        selected_assets=[],
+                        explanations=[],
+                        created_by_id=actor_id,
+                    ),
+                    CoverageSnapshot(
+                        project_id=UUID(project_id),
+                        impact_run_id=run.id,
+                        total_changes=1,
+                        covered_changes=0,
+                        coverage_percent=0,
+                        matrix=[],
+                        gaps=[],
+                        created_by_id=actor_id,
+                    ),
+                ]
+            )
+            runs.append(run)
+        await session.commit()
+        service_id, unused_id = str(services[0].id), str(services[2].id)
+        related, unrelated = str(runs[0].id), str(runs[-1].id)
+    root = f"/api/v1/projects/{project_id}/impact/runs"
+    first = await client.get(root, headers=headers, params={"contract_service_id": service_id})
+    second = await client.get(
+        root, headers=headers, params={"contract_service_id": service_id, "page": 2}
+    )
+    assert first.status_code == second.status_code == 200
+    assert first.json()["total"] == second.json()["total"] == 23
+    assert len(first.json()["items"]) == 20 and len(second.json()["items"]) == 3
+    assert len({item["id"] for item in first.json()["items"] + second.json()["items"]}) == 23
+    empty = await client.get(root, headers=headers, params={"contract_service_id": unused_id})
+    assert empty.json()["items"] == [] and empty.json()["total"] == 0
+    good = await client.get(
+        f"{root}/{related}", headers=headers, params={"contract_service_id": service_id}
+    )
+    wrong = await client.get(
+        f"{root}/{unrelated}", headers=headers, params={"contract_service_id": service_id}
+    )
+    assert good.status_code == 200 and wrong.status_code == 404
+    foreign = await client.get(
+        f"/api/v1/projects/{foreign_project}/impact/runs",
+        headers=headers,
+        params={"contract_service_id": service_id},
+    )
+    assert foreign.status_code == 404 and foreign.json()["error"]["trace_id"]
+    all_runs = await client.get(root, headers=headers)
+    assert all_runs.json()["total"] == 27

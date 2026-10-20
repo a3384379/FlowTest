@@ -643,3 +643,55 @@ def _openapi_document() -> bytes:
             },
         }
     ).encode()
+
+
+@pytest.mark.asyncio
+async def test_service_catalog_search_pagination_and_exact_project_detail(
+    contract_hub_context: ContractHubContext,
+) -> None:
+    from uuid import uuid4
+
+    client = contract_hub_context.client
+    headers = await _login_headers(client)
+    project_id = await _create_project(client, headers)
+    root = f"/api/v1/projects/{project_id}/contract-hub/services"
+    identifiers: list[str] = []
+    for index in range(105):
+        created = await client.post(
+            root,
+            headers=headers,
+            json={
+                "service_key": f"catalog-{index:03}",
+                "display_name": f"分页服务{index:03}",
+                "description": "末页精确描述" if index == 104 else "分页范围",
+            },
+        )
+        assert created.status_code == 201, created.text
+        identifiers.append(created.json()["id"])
+    first = await client.get(root, headers=headers, params={"page_size": 100})
+    second = await client.get(root, headers=headers, params={"page_size": 100, "page": 2})
+    assert first.status_code == second.status_code == 200
+    assert first.json()["total"] == second.json()["total"] == 105
+    assert [item["id"] for item in second.json()["items"]] == identifiers[100:]
+    for search in ("catalog-104", "分页服务104", "末页精确"):
+        result = await client.get(root, headers=headers, params={"search": search})
+        assert result.status_code == 200
+        assert result.json()["total"] == 1
+        assert result.json()["items"][0]["id"] == identifiers[-1]
+    for search in ("%", "_", "does-not-exist"):
+        empty = await client.get(root, headers=headers, params={"search": search})
+        assert empty.json()["total"] == 0 and empty.json()["items"] == []
+    outside = await client.get(root, headers=headers, params={"page": 200})
+    assert outside.json()["total"] == 105 and outside.json()["items"] == []
+    detail = await client.get(f"{root}/{identifiers[-1]}", headers=headers)
+    assert detail.status_code == 200 and detail.json()["service_key"] == "catalog-104"
+    other_project = await _create_project(client, headers)
+    hidden = await client.get(
+        f"/api/v1/projects/{other_project}/contract-hub/services/{identifiers[-1]}", headers=headers
+    )
+    missing = await client.get(f"{root}/{uuid4()}", headers=headers)
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json()["error"]["code"] == "SERVICE_CATALOG_ENTRY_NOT_FOUND"
+    assert hidden.json()["error"]["trace_id"]
+    invalid = await client.get(root, headers=headers, params={"search": "x" * 201})
+    assert invalid.status_code == 422 and invalid.json()["error"]["trace_id"]

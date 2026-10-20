@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contracts import (
@@ -11,6 +11,7 @@ from app.models.contracts import (
     PactProviderVerification,
     ServiceCatalogEntry,
 )
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 class ContractHubRepository:
@@ -57,6 +58,36 @@ class ContractHubRepository:
                 )
             ).all()
         )
+
+    async def page_services(
+        self, *, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[ServiceCatalogEntry], int]:
+        query = select(ServiceCatalogEntry.id.label("item_id")).where(
+            ServiceCatalogEntry.project_id == project_id
+        )
+        if search:
+            query = query.where(
+                or_(
+                    ServiceCatalogEntry.display_name.icontains(search, autoescape=True),
+                    ServiceCatalogEntry.service_key.icontains(search, autoescape=True),
+                    ServiceCatalogEntry.description.icontains(search, autoescape=True),
+                )
+            )
+        ranked = query.add_columns(
+            func.row_number()
+            .over(order_by=(ServiceCatalogEntry.display_name, ServiceCatalogEntry.id))
+            .label("position")
+        ).cte()
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(ServiceCatalogEntry, page.c.total)
+                .select_from(page)
+                .outerjoin(ServiceCatalogEntry, ServiceCatalogEntry.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
 
     def add_pact(self, model: PactContractVersion) -> None:
         self._session.add(model)

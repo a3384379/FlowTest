@@ -102,6 +102,29 @@ class ContractHubService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._repository.list_services(project_id=project_id)
 
+    async def page_services(
+        self, *, actor: User, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[ServiceCatalogEntry], int]:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        search = search.strip()
+        if len(search) > 200:
+            raise AppError(
+                code="SERVICE_CATALOG_SEARCH_INVALID",
+                message="服务搜索词超过200字符",
+                status_code=422,
+            )
+        return await self._repository.page_services(
+            project_id=project_id, search=search, offset=offset, limit=limit
+        )
+
+    async def get_service(
+        self, *, actor: User, project_id: UUID, service_id: UUID
+    ) -> ServiceCatalogEntry:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._project_service(project_id, service_id)
+
     async def import_pact(
         self,
         *,

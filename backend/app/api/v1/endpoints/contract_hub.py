@@ -56,18 +56,34 @@ async def list_service_catalog_entries(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[ServiceCatalogResponse]:
-    models = await _service(session).list_services(actor=current_user, project_id=project_id)
-    start = (page - 1) * page_size
+    models, total = await _service(session).page_services(
+        actor=current_user,
+        project_id=project_id,
+        search=search,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
     return Page(
-        items=[
-            ServiceCatalogResponse.model_validate(item)
-            for item in models[start : start + page_size]
-        ],
-        total=len(models),
+        items=[ServiceCatalogResponse.model_validate(item) for item in models],
+        total=total,
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/services/{service_id}", response_model=ServiceCatalogResponse)
+async def get_service_catalog_entry(
+    project_id: UUID,
+    service_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ServiceCatalogResponse:
+    model = await _service(session).get_service(
+        actor=current_user, project_id=project_id, service_id=service_id
+    )
+    return ServiceCatalogResponse.model_validate(model)
 
 
 @router.post(

@@ -32,6 +32,9 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
+import ContractServiceContextNotice from '../features/services/ContractServiceContextNotice'
+import { contractServiceLocation } from '../features/services/contract-service-location'
+import { useContractServiceContext } from '../features/services/use-contract-service-context'
 
 import type { ContractRun } from '../lib/api'
 import type {
@@ -64,13 +67,27 @@ export default function ContractHubPage() {
 function ContractHubWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') === 'automation' ? 'automation' : 'hub'
-  const [providerId, setProviderId] = useState<string | null>(null)
+  const { projectId } = useProjectContext()
+  const providerId = contractServiceLocation(searchParams).id
+  function setProviderId(id: string) {
+    const next = new URLSearchParams(searchParams)
+    next.set('contractServiceId', id)
+    next.delete('focus')
+    setSearchParams(next)
+  }
   const state = useContractHub(providerId)
+  const serviceContext = useContractServiceContext(
+    projectId,
+    Boolean(state.flags.data?.contract_hub),
+  )
   const services = pageItems(state.services.data)
   const pacts = pageItems(state.pacts.data)
   const openapiRuns = pageItems(state.openapiRuns.data)
   const checks = pageItems(state.checks.data)
-  const providers = providerServices(services, pacts)
+  const providers = appendSelectedProvider(
+    providerServices(services, pacts),
+    serviceContext.selected.data,
+  )
   const [serviceDialog, setServiceDialog] = useState(false)
   const [pactDialog, setPactDialog] = useState<'upload' | 'broker' | null>(null)
   const [openapiDialog, setOpenapiDialog] = useState(false)
@@ -106,6 +123,11 @@ function ContractHubWorkspace() {
             onVerify={() => setVerificationDialog(true)}
           />
           <ContractHubStatus state={state} />
+          <ContractServiceContextNotice
+            projectId={projectId}
+            context={serviceContext}
+            description="兼容矩阵按该服务作为提供方读取；项目契约目录仍显示全部项目资产。"
+          />
           <Alert
             showIcon
             type="info"
@@ -115,10 +137,10 @@ function ContractHubWorkspace() {
           />
           <ContractOverview summary={state.summary.data} loading={state.summary.isLoading} />
           <CompatibilityPanel
-            readOnly={!state.canEdit}
+            readOnly={!state.canEdit || !serviceContext.ready}
             providers={providers}
             providerId={providerId}
-            matrix={state.matrix.data}
+            matrix={serviceContext.ready ? state.matrix.data : undefined}
             checks={checks}
             loading={state.matrix.isLoading}
             checking={state.checking}
@@ -880,4 +902,8 @@ function formatDate(value: string): string {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value))
+}
+
+function appendSelectedProvider(items: ServiceCatalogEntry[], selected?: ServiceCatalogEntry) {
+  return selected && !items.some((item) => item.id === selected.id) ? [...items, selected] : items
 }

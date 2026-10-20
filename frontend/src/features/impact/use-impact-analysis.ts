@@ -6,6 +6,7 @@ import { useEffect, useRef } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
+import { useContractServiceContext } from '../services/use-contract-service-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 import {
@@ -36,14 +37,30 @@ export function useImpactAnalysis() {
   const { canEdit, permissions } = useProjectCapabilities()
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
   const [params, setParams] = useSearchParams()
+  const routeScope = params.toString()
+  const currentScope = useRef(routeScope)
+  useEffect(() => {
+    currentScope.current = routeScope
+  }, [routeScope])
   const selectedRunId = params.get('run')
-  function setSelectedRunId(id: string | null) {
+  function setSelectedRunId(id: string | null, clearService = false) {
     const next = new URLSearchParams(params)
     if (id) next.set('run', id)
     else next.delete('run')
+    if (clearService) {
+      next.delete('contractServiceId')
+      next.delete('service_id')
+      if (next.get('focus')?.startsWith('contract_service:')) next.delete('focus')
+    }
     setParams(next)
   }
-  const enabled = Boolean(projectId && flags.data?.impact_engine)
+  const serviceContext = useContractServiceContext(
+    projectId,
+    flags.data?.impact_engine === true,
+    true,
+  )
+  const enabled = serviceContext.enabled
+  const serviceId = serviceContext.selection.id ?? undefined
   const mappings = useCatalogQuery(
     'impact-mappings',
     projectId,
@@ -60,16 +77,16 @@ export function useImpactAnalysis() {
   const runs = useCatalogQuery(
     'impact-runs',
     projectId,
-    (page) => listImpactRuns(required(projectId), page, 20),
-    enabled,
-    '',
+    (page) => listImpactRuns(required(projectId), page, 20, serviceId),
+    serviceContext.ready,
+    serviceId,
     {},
   )
   const effectiveRunId = selectedRunId ?? runs.data?.items[0]?.id ?? null
   const detail = useQuery({
-    queryKey: ['impact-run', projectId, effectiveRunId],
-    queryFn: () => getImpactRun(required(projectId), required(effectiveRunId)),
-    enabled: enabled && Boolean(effectiveRunId),
+    queryKey: impactRunKey(projectId, effectiveRunId, serviceId),
+    queryFn: () => getImpactRun(required(projectId), required(effectiveRunId), serviceId),
+    enabled: serviceContext.ready && Boolean(effectiveRunId),
   })
   const createMapping = useMutation({
     mutationFn: (input: MappingInput) => createImpactMapping(required(projectId), input),
@@ -101,8 +118,18 @@ export function useImpactAnalysis() {
     if (!canEdit || !enabled) return false
     return withFeedback(async () => {
       const created = await createRun.mutateAsync(input)
-      if (currentProject.current === projectId) setSelectedRunId(created.id)
-      queryClient.setQueryData(['impact-run', projectId, created.id], created)
+      const outsideService = Boolean(
+        serviceId &&
+        !created.changes.some(
+          (change) => change.service_key === serviceContext.selected.data?.service_key,
+        ),
+      )
+      if (currentProject.current === projectId && currentScope.current === routeScope)
+        setSelectedRunId(created.id, outsideService)
+      queryClient.setQueryData(
+        impactRunKey(projectId, created.id, outsideService ? undefined : serviceId),
+        created,
+      )
       await invalidate('impact-runs')
     }, '影响分析完成，推荐集合与覆盖证据已保存')
   }
@@ -125,6 +152,7 @@ export function useImpactAnalysis() {
   return {
     canEdit: canEdit && enabled,
     flags,
+    serviceContext,
     permissions,
     projectId,
     mappings,
@@ -144,4 +172,8 @@ export function useImpactAnalysis() {
 function required(value: string | null): string {
   if (!value) throw new Error('请选择项目')
   return value
+}
+
+function impactRunKey(projectId: string | null, runId: string | null, serviceId?: string) {
+  return serviceId ? ['impact-run', projectId, runId, serviceId] : ['impact-run', projectId, runId]
 }

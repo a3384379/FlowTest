@@ -102,11 +102,24 @@ export type PactImportInput =
   | { kind: 'upload'; document: File; consumerVersion: string }
   | { kind: 'broker'; consumer: string; provider: string; consumerVersion: string }
 
-export async function listContractServices(projectId: string, page = 1, pageSize = 100) {
+export async function listContractServices(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+  search = '',
+) {
   return (
     await apiClient.get<Page<ServiceCatalogEntry>>(`/projects/${projectId}/contract-hub/services`, {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, search },
     })
+  ).data
+}
+
+export async function getContractService(projectId: string, serviceId: string) {
+  return (
+    await apiClient.get<ServiceCatalogEntry>(
+      `/projects/${projectId}/contract-hub/services/${serviceId}`,
+    )
   ).data
 }
 
