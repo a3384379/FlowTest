@@ -59,3 +59,9 @@ GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最
 在隔离Compose页面、原独立Chromium测试会话中重新走通真实团队创建→按名称搜索团队→按邮箱搜索成员→添加团队成员→按名称搜索并授权团队，结果均通过。证据日志：`remediation-project-directory-ci-browser-r2.log`。首轮脚本最后一步误用了带图标按钮的完整名称，改用实际可访问名称后复跑整条路径通过；没有将失败首轮算通过。此浏览器专项不等同于CI的完整S14和Compose套件，后者由最新HEAD门禁确认。
 
 多协议合并后main `4a27c3b`的Full Regression已确认Compose、后端、基础设施、升级和Windows通过，前端仍待终态；其安全扫描同样被本次新Vite公告阻断。将由包含修补版的后续main重新验证，不将该次回归写成全绿。
+
+### 取消流程测试的确定性时序
+
+最新门禁的 `test_running_workflow_can_be_cancelled` 在立即启动第二次执行后，未确认Runner已进入目标请求便发起强制取消；SQLite后台写入与取消写入冲突，报 `database is locked`。本地原用例单次检查通过，未把偶发通过当作远程故障消失。
+
+测试改为受控的请求开始事件和阻塞响应：确认请求实际进入运行阶段后，分别检查普通取消、强制取消和协调器关闭；不再用固定5秒响应或0.1秒等待猜测状态。保留原有状态、审计原因、检查点尝试和input_hash断言，新增强制执行创建成功断言；不增加SQLite重试或超时，不改变生产取消逻辑。整个 `tests/test_workflows_api.py` 的26项及相关Ruff检查通过，最新远程门禁仍须重新完成。
