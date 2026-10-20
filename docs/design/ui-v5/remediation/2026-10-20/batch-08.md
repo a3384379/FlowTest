@@ -93,3 +93,19 @@ PR #138主分支的Full Regression 39466805365最终失败：前端940通过、2
 - 继续审计发现套件展开未受全局比较预算约束。公开分析合同先复现100个无效用例在预算5时仍全展开；将计划成员与套件成员计入同一预算并将环境默认服务匹配预索引，防止乘积扫描。修复前失败、修复后两个文件28项通过。补修后的完整后端Ruff/格式/mypy437文件/pytest通过：1820项、13跳过、2项既有警告、90.96%，后端树`94dba6b4f2ffb6f7750a8c12cb5e8f55edd69b93`。日志`remediation-target-suite-budget-before.log`、`remediation-target-suite-budget-after.log`、`remediation-target-suite-budget-backend-full.log`。
 - 真实手机发现长内容将操作区推至屏幕之外。提交`0904dee8b3183f27e3c7e2241ea9091c5507eb1c`将两类确认弹窗居中，并限定内容滚动。手机390×926时保存按钮由y=2209移至y=840，弹窗y=30、高866，文档宽390；桌面1280×926也保持操作可见。更新后4个具名前端文件23项、格式、lint/TypeScript及构建通过；未重复宣称布局补修后的本机全量前端覆盖率已运行，最新HEAD的远端完整检查独立确认。前端树`1e5c441457db48fa7f34d4734f602d9d6eeb71d7`。
 - 最新真实浏览器依赖验收新增独立合成流程`c979d7ad-89bc-4e97-bc9c-7936489cd258`和禁用计划`abba866a-e958-48b9-b941-28ff13495e65`。地址候选识别草稿/发布v1、固定计划和禁用定时；接口绑定候选只识别草稿，固定计划排除。结果完整、诊断空，没有执行目标。证据`remediation-target-live-dependencies.log`；最新版截图`remediation-target-modal-final-desktop.png`、`remediation-target-modal-final-mobile.png`。最早弹窗截图仅是发现布局问题的证据，不能当作最终效果。
+
+## 审查补修：接口绑定确认的版本基线
+
+PR #139审查指出，预览后另一编辑者发布接口版本时，原绑定保存会复制确认时的新当前版本。公开HTTP回归先因旧预览合同不接受新令牌而返回422；改用既有预览请求后，真正复现旧候选被接受并生成未审阅v3、连带改写名称。未将最早的合同拒绝当作行为复现。
+
+补修提交`f45e698a3d7c99c1fd8ad42685a63c4d195deae1`：接口候选的URL解析、依赖分析和最终PATCH均带同一`base_version`。服务端在原行锁内验证当前版本，和既有版本发布共用API记录锁；检查先于名称、分组、绑定、版本及审计写入。版本不符返回标准409/API_VERSION_CONFLICT和trace ID，不自动采用其他编辑者的修改。令牌绑定被修改的API，不取用户另选URL预览接口或固定历史版本的版本号。可选字段保持既有API调用兼容，无数据库迁移。
+
+页面显示锁定版本；冲突保留候选并禁用确认，显式“读取最新版本并重新分析”才读取最新定义、保留服务选择、重新开始解析。取消后的迟到读取不改写或关闭新会话。该测试另复现未绑定接口的Select以undefined运行时会在取消后残留候选；接口与环境默认绑定现使用受控null，取消后继续显示服务器值。
+
+已验证：六个相关后端文件86项通过；四个前端文件24项通过；Ruff及两处修改服务的显式C901检查、mypy437文件、lint/类型及构建通过。真实PostgreSQL三项并发测试通过：同基线的绑定和发布仅一方成功，另一方409，最终只存在v1/v2，并核对胜方路径和原v1不变。测试运行镜像原无pytest-asyncio/pytest-cov，最初运行只在工具层失败；随后仅在临时测试目录准备项目锁定的pytest-asyncio1.4.0及其元数据，使用镜像原pytest9.1.1执行，没有改产品依赖或启用覆盖率收集。最终日志`remediation-target-binding-postgres-concurrency-r4.log`。其他证据：`remediation-target-binding-version-before-r2.log`、`remediation-target-version-final-backend-targeted.log`、`remediation-target-binding-ui-version-after-r4.log`。
+
+本次补修`f45e698`完整make check全部通过：后端1822项、14跳过、2项既有警告、覆盖率90.95%；前端147文件954项、无未处理异常，覆盖率85.68% / 81.81% / 85.12% / 88.18%，格式/类型/lint/构建通过。日志`remediation-request-targets-make-check-r3.log`。后端树`17ccbfa3d6cea48e7ec9357cff2443e05a38b068`，前端树`bba7a0ad3538610e106633ebaf772027034ba48e`。其后仅补手机版式，将版本提示的刷新按钮移到说明下方，防止文字被横向挤窄；当前HEAD远端门禁独立确认。
+
+真实浏览器并发链路：合成接口预览基线v2后，另一个请求发布v3（新路径`/health/parallel-review`，仍绑定结算服务）；旧候选确认返回409并显示trace，确认按钮禁用，PG读取保持v3且未生成额外版本。显式读取最新版本后显示v3、新路径和同一服务选择；确认保存为v4后，真实API预览与新候选相同。v1、v2、v3的路径与绑定保持，原已发布流程仍固定APIv2。证据`remediation-target-version-live-publication.log`、`remediation-target-version-live-conflict-postcondition.log`、`remediation-target-version-live-save-postcondition.log`。只操作独立审计合成数据，没有发起目标执行。
+
+最后的版本提示纵向布局仅改变说明/按钮排版，四个具名前端文件24项、lint/TypeScript及构建通过。390×926截图已复核：版本说明保持正常行宽、刷新位于说明下方，保存/取消保持可见，文档宽390；截图`remediation-target-version-notice-final-mobile.png`，几何记录`remediation-target-version-notice-mobile-geometry.log`。此验收候选只打开后取消，没有在v4后增加API版本。该小版式调整后的本机全量覆盖率未重复运行；f45全量结果与最新HEAD远端全量门禁分开记录。

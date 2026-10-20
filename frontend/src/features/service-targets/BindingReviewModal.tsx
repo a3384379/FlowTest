@@ -136,11 +136,15 @@ function APIRevisionNotice({
     <Alert
       type="info"
       title={`已锁定接口当前版本 v${candidate.api.current_version}`}
-      description="预览和保存使用同一基线版本。其他人发布或重新绑定后，保存会拒绝过期候选；读取最新版本会保留服务选择，并重新开始解析。"
-      action={
-        <Button disabled={disabled} loading={refreshing} onClick={onRefresh}>
-          读取最新版本并重新分析
-        </Button>
+      description={
+        <Space orientation="vertical" className="full-width">
+          <Typography.Paragraph style={{ marginBottom: 0 }}>
+            预览和保存使用同一基线版本。其他人发布或重新绑定后，保存会拒绝过期候选；读取最新版本会保留服务选择，并重新开始解析。
+          </Typography.Paragraph>
+          <Button disabled={disabled} loading={refreshing} onClick={onRefresh}>
+            读取最新版本并重新分析
+          </Button>
+        </Space>
       }
     />
   )
