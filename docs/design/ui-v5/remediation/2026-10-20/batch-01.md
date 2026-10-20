@@ -96,3 +96,5 @@ GitHub复审补修：所有客户端缺少或传null审核快照也必须409拒�
 GitHub安全门禁发现基线锁定的MCP 2.0.0命中CVE-2026-59951。[SDK官方公告](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-84m7-p3x7-pcfv)确认2.2.0修复。本批仅把MCP及mcp-types锁定到2.2.0，并将最低SDK约束设为2.2，不顺带升级其他库。
 
 本地 `uv run --frozen pip-audit` 通过，未发现已知漏洞；项目自身不在PyPI的跳过说明属于工具正常输出。升级后Ruff及mypy425个文件通过，后端全量1733通过、13跳过，覆盖率90.77%。该本地检查不替代容器、Windows及最新PR门禁。
+
+镜像扫描随后发现环境守护进程中的两个可修复高危项：containerd 2.3.3与libexpat 2.8.5。按[containerd官方公告](https://github.com/containerd/containerd/security/advisories/GHSA-p7v4-vr35-mj6f)将独立二进制及dockerd内嵌模块提升至2.3.4，源码固定到该签名标签对应提交 `db8809540e1a7a9da5d518876894933ff55692ab`，构建时校验模块版本；将libexpat最低版本提升到[Alpine稳定仓库已提供的2.9.0-r0](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libexpat)。不新增扫描忽略项，不调整安全门槛。镜像构建与扫描结果按最新PR门禁单独验收。

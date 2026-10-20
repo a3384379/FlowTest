@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0; \
+    go get github.com/containerd/containerd/v2@v2.3.4 google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -77,6 +77,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         PREFIX=/out \
         ./hack/make.sh binary-daemon; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.9'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'github.com/containerd/containerd/v2' | grep -F 'v2.3.4'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.57.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
@@ -88,10 +89,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     set -eux; \
     git init; \
     git remote add origin https://github.com/containerd/containerd.git; \
-    git fetch --depth 1 origin aad11006b869517fcd3009450b6f82da282e1a9b; \
+    git fetch --depth 1 origin db8809540e1a7a9da5d518876894933ff55692ab; \
     git checkout --detach FETCH_HEAD; \
-    test "$(git rev-parse HEAD)" = aad11006b869517fcd3009450b6f82da282e1a9b; \
-    git tag v2.3.3; \
+    test "$(git rev-parse HEAD)" = db8809540e1a7a9da5d518876894933ff55692ab; \
+    git tag v2.3.4; \
     go get \
         golang.org/x/sync@v0.23.0 \
         golang.org/x/text@v0.42.0 \
@@ -100,8 +101,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download all; \
     go mod vendor; \
     make \
-        VERSION=v2.3.3 \
-        REVISION=aad11006b869517fcd3009450b6f82da282e1a9b \
+        VERSION=v2.3.4 \
+        REVISION=db8809540e1a7a9da5d518876894933ff55692ab \
         bin/containerd bin/ctr bin/containerd-shim-runc-v2; \
     go version -m bin/containerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
     go version -m bin/ctr | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
@@ -141,7 +142,8 @@ RUN set -eux; \
     ctr --version
 
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
-RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.8.5-r0' 'zlib>=1.3.2-r1'
+RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.9.0-r0' 'zlib>=1.3.2-r1' \
+    && apk info --exists 'libexpat>=2.9.0-r0'
 
 FROM debian:trixie-slim AS python-base-source
 
