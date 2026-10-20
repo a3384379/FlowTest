@@ -1,7 +1,15 @@
 import CatalogPagination from '../components/CatalogPagination'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
-import { useCatalogQuery } from '../lib/catalog-query'
+import {
+  useProtocolLocation,
+  type ProtocolMode,
+  type SchemaProtocolMode,
+} from '../features/protocols/protocol-location'
+import {
+  useProtocolCatalog,
+  useSelectedProtocolAsset,
+} from '../features/protocols/use-protocol-catalog'
 import {
   ApiOutlined,
   CloudServerOutlined,
@@ -19,6 +27,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Row,
   Segmented,
@@ -29,16 +38,14 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 
 import { getV3FeatureFlags } from '../features/capabilities/capability-service'
 import { listCredentials } from '../features/data-sources/data-source-service'
 import { useProjectContext } from '../features/projects/use-project-context'
-import EventProtocolWorkspace, {
-  type EventProtocolMode,
-} from '../features/protocols/EventProtocolWorkspace'
+import EventProtocolWorkspace from '../features/protocols/EventProtocolWorkspace'
 import {
   createGraphQLSchema,
   createGrpcDescriptor,
@@ -47,15 +54,23 @@ import {
   importGrpcReflection,
   listGraphQLSchemas,
   listGrpcDescriptors,
+  getGraphQLSchema,
+  getGrpcDescriptor,
   type ProtocolDebugResult,
   type SchemaArtifact,
 } from '../features/protocols/protocol-service'
-import type { Credential } from '../lib/api'
+import { apiErrorWithTrace, type Credential } from '../lib/api'
+import { DraftContext, useDraftSession } from '../features/drafts/draft-session'
+import ProtocolHeadersEditor from '../features/protocols/ProtocolHeadersEditor'
+import { useProtocolRequestDraft } from '../features/protocols/use-protocol-request-draft'
+import {
+  protocolRequestHeaders,
+  type GraphQLRequestDraft,
+  type GrpcRequestDraft,
+} from '../features/protocols/protocol-request-draft'
 
 const { TextArea } = Input
 
-type SchemaProtocolMode = 'graphql' | 'grpc'
-type ProtocolMode = SchemaProtocolMode | EventProtocolMode
 type ImportMode =
   | 'graphql_sdl'
   | 'graphql_introspection'
@@ -84,38 +99,88 @@ message GetUserReply { string id = 1; string name = 2; }`
 
 export default function ProtocolWorkbenchPage() {
   const { projectId } = useProjectContext()
+  const draftSession = useDraftSession()
 
   if (!projectId) return <Empty description="请先选择项目" />
-  return <ProjectProtocolWorkbench projectId={projectId} />
+  return (
+    <DraftContext.Provider value={draftSession}>
+      <ProjectProtocolWorkbench key={projectId} projectId={projectId} />
+    </DraftContext.Provider>
+  )
 }
 
-function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
-  const [params, setParams] = useSearchParams()
-  const mode = protocolRouteMode(params.get('mode'))
-  const setMode = (next: ProtocolMode) => {
-    const updated = new URLSearchParams(params)
-    updated.set('mode', next)
-    setParams(updated, { replace: true })
-  }
-  const [selection, setSelection] = useState<{ mode: SchemaProtocolMode; id: string } | null>(null)
+function useProtocolWorkbench(projectId: string) {
+  const location = useProtocolLocation()
+  const { mode, setMode } = location
   const [importOpen, setImportOpen] = useState(false)
   const schemaMode: SchemaProtocolMode = mode === 'grpc' ? 'grpc' : 'graphql'
   const { canEdit, canExecute, permissions } = useProjectCapabilities()
-  const inventory = useProtocolInventory(projectId, schemaMode)
+  const inventory = useProtocolInventory(projectId, schemaMode, location)
   const credentials = useQuery({
     queryKey: ['credentials', projectId],
     queryFn: () => listCredentials(projectId),
   })
-  const selected = useSelectedAsset(inventory.items, selectionId(selection, schemaMode))
+  const selection = useSelectedProtocolAsset(
+    projectId,
+    schemaMode === 'graphql' ? 'graphql-schemas' : 'grpc-descriptors',
+    location.id,
+    inventory.items,
+    (id) =>
+      schemaMode === 'graphql' ? getGraphQLSchema(projectId, id) : getGrpcDescriptor(projectId, id),
+    location.selectAsset,
+    !location.error && (mode === 'graphql' || mode === 'grpc'),
+  )
+  const selected = selection.selected
   const eventMode = mode === 'kafka' || mode === 'websocket'
+  return {
+    location,
+    mode,
+    schemaMode,
+    importOpen,
+    setImportOpen,
+    canEdit,
+    canExecute,
+    permissions,
+    inventory,
+    credentials,
+    selection,
+    selected,
+    eventMode,
+    setMode,
+  }
+}
+
+type ProtocolWorkspaceState = ReturnType<typeof useProtocolWorkbench>
+
+function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
+  const state = useProtocolWorkbench(projectId)
+  const {
+    location,
+    mode,
+    schemaMode,
+    importOpen,
+    setImportOpen,
+    canEdit,
+    permissions,
+    inventory,
+    credentials,
+    selection,
+    eventMode,
+    setMode,
+  } = state
 
   return (
     <div className="protocol-page">
-      <QueryFailureNotice queries={[inventory.flags, credentials, permissions]} />
-      <div className="catalog-controls">
-        <CatalogPagination query={inventory.graphql} label="GraphQL Schema" />
-        <CatalogPagination query={inventory.grpc} label="gRPC 描述文件" />
-      </div>
+      <QueryFailureNotice queries={[inventory.flags, credentials, permissions, selection.query]} />
+      {location.error && (
+        <Alert
+          type="error"
+          showIcon
+          title={location.error}
+          action={<Button onClick={location.reset}>重置协议范围</Button>}
+        />
+      )}
+      <ProtocolCatalogControls state={state} />
       <ProtocolHeading onImport={eventMode || !canEdit ? undefined : () => setImportOpen(true)} />
       <WorkflowResourceReturn projectId={projectId} />
       {!eventMode && <ProtocolFeatureAlert enabled={inventory.enabled} />}
@@ -131,33 +196,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
           ]}
           onChange={setMode}
         />
-        {eventMode ? (
-          <EventProtocolWorkspace
-            editable={canEdit}
-            executable={canExecute}
-            projectId={projectId}
-            mode={mode}
-            enabled={inventory.eventProtocolsEnabled}
-          />
-        ) : (
-          <div className="protocol-workspace-grid">
-            <SchemaInventory
-              mode={schemaMode}
-              items={inventory.items}
-              loading={inventory.loading}
-              selectedId={assetId(selected)}
-              onSelect={(item) => setSelection({ mode: schemaMode, id: item.id })}
-            />
-            <ProtocolEditor
-              mode={schemaMode}
-              projectId={projectId}
-              selected={selected}
-              enabled={inventory.enabled && canExecute}
-              credentials={credentials.data ?? []}
-            />
-            <SchemaInspector asset={selected} />
-          </div>
-        )}
+        <ProtocolBody projectId={projectId} state={state} />
       </Card>
       <SchemaImportDialog
         open={importOpen}
@@ -170,25 +209,85 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
   )
 }
 
-function protocolRouteMode(value: string | null): ProtocolMode {
-  return value === 'grpc' || value === 'kafka' || value === 'websocket' ? value : 'graphql'
+function ProtocolCatalogControls({ state }: { state: ProtocolWorkspaceState }) {
+  const { eventMode, schemaMode, inventory } = state
+  if (eventMode || state.location.error) return null
+  return (
+    <div className="catalog-controls">
+      <CatalogPagination
+        query={schemaMode === 'graphql' ? inventory.graphql : inventory.grpc}
+        label={schemaMode === 'graphql' ? 'GraphQL Schema' : 'gRPC 描述文件'}
+      />
+    </div>
+  )
 }
 
-function useProtocolInventory(projectId: string, mode: SchemaProtocolMode) {
+function ProtocolBody({ projectId, state }: { projectId: string; state: ProtocolWorkspaceState }) {
+  const { location, mode, canEdit, canExecute, inventory, schemaMode, selected, credentials } =
+    state
+  if (location.error) return null
+  if (mode === 'kafka' || mode === 'websocket')
+    return (
+      <EventProtocolWorkspace
+        editable={canEdit}
+        executable={canExecute}
+        projectId={projectId}
+        mode={mode}
+        enabled={inventory.eventProtocolsEnabled}
+      />
+    )
+  return (
+    <div className="protocol-workspace-grid">
+      <div>
+        {selected && (
+          <Typography.Paragraph>
+            {selected.name} · v{selected.version}
+          </Typography.Paragraph>
+        )}
+        <SchemaInventory
+          mode={schemaMode}
+          items={inventory.items}
+          loading={inventory.loading}
+          selectedId={assetId(selected)}
+          onSelect={(item) => location.selectAsset(item.id)}
+        />
+      </div>
+      <ProtocolEditor
+        mode={schemaMode}
+        projectId={projectId}
+        selected={selected}
+        enabled={inventory.enabled && canExecute}
+        credentials={credentials.data ?? []}
+      />
+      <SchemaInspector asset={selected} />
+    </div>
+  )
+}
+
+function useProtocolInventory(
+  projectId: string,
+  mode: SchemaProtocolMode,
+  location: ReturnType<typeof useProtocolLocation>,
+) {
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
-  const graphql = useCatalogQuery(
+  const schemaMode = location.mode === 'graphql' || location.mode === 'grpc'
+  const graphql = useProtocolCatalog(
     'graphql-schemas',
     projectId,
-    (page) => listGraphQLSchemas(projectId, page, 20),
-    true,
     '',
+    mode === 'graphql' && schemaMode ? location.page : 1,
+    location.setPage,
+    (page) => listGraphQLSchemas(projectId, page, 20),
+    !location.error,
   )
-  const grpc = useCatalogQuery(
+  const grpc = useProtocolCatalog(
     'grpc-descriptors',
     projectId,
-    (page) => listGrpcDescriptors(projectId, page, 20),
-    true,
     '',
+    mode === 'grpc' && schemaMode ? location.page : 1,
+    location.setPage,
+    (page) => listGrpcDescriptors(projectId, page, 20),
+    !location.error,
   )
   return {
     flags,
@@ -199,7 +298,7 @@ function useProtocolInventory(projectId: string, mode: SchemaProtocolMode) {
     items: protocolItems(mode, pageItems(graphql.data), pageItems(grpc.data)),
     graphqlTotal: pageTotal(graphql.data),
     grpcTotal: pageTotal(grpc.data),
-    loading: [graphql.isLoading, grpc.isLoading].some(Boolean),
+    loading: (mode === 'graphql' ? graphql : grpc).isLoading,
   }
 }
 
@@ -296,7 +395,7 @@ function SchemaInventory({
         rowKey="id"
         loading={loading}
         dataSource={items}
-        pagination={{ pageSize: 8, hideOnSinglePage: true }}
+        pagination={false}
         rowClassName={(item) => (item.id === selectedId ? 'selected-row' : '')}
         onRow={(item) => ({ onClick: () => onSelect(item) })}
         columns={[
@@ -363,27 +462,40 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
       active.current = false
     }
   }, [])
-  const [endpoint, setEndpoint] = useState('https://api.example.com/graphql')
-  const [operation, setOperation] = useState('query User($id: ID!) { user(id: $id) { id name } }')
-  const [variables, setVariables] = useState('{"id":"42"}')
+  const { draft, patch, reset } = useProtocolRequestDraft<GraphQLRequestDraft>(
+    `${projectId}:graphql:${selected.id}:${selected.version}:${selected.content_sha256}`,
+    {
+      mode: 'graphql',
+      endpoint: 'https://api.example.com/graphql',
+      operation: 'query User($id: ID!) { user(id: $id) { id name } }',
+      operationName: '',
+      variables: '{"id":"42"}',
+      authorization: '',
+      headers: [],
+      timeoutSeconds: 30,
+    },
+  )
+  const { endpoint, operation, variables } = draft
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
   const mutation = useMutation({
-    mutationFn: (input: { endpoint: string; operation: string; variables: string }) =>
+    mutationFn: (input: GraphQLRequestDraft) =>
       executeGraphQL({
         project_id: projectId,
         schema_id: selected.id,
         endpoint: input.endpoint,
         operation: input.operation,
+        operation_name: input.operationName || undefined,
         variables: parseObject(input.variables, 'Variables'),
-        headers: {},
-        timeout_seconds: 30,
+        headers: protocolRequestHeaders('graphql', input.headers, input.authorization),
+        timeout_seconds: input.timeoutSeconds,
       }),
     onMutate: () => ++generation.current,
     onSuccess: (value, _input, revision) => {
       if (active.current && revision === generation.current) setResult(value)
     },
     onError: (error, _input, revision) => {
-      if (active.current && revision === generation.current) void message.error(error.message)
+      if (active.current && revision === generation.current)
+        void message.error(apiErrorWithTrace(error))
     },
   })
   function changeRequest(change: () => void) {
@@ -403,27 +515,62 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
                 <Input
                   aria-label="GraphQL Endpoint"
                   value={endpoint}
-                  onChange={(event) => changeRequest(() => setEndpoint(event.target.value))}
+                  onChange={(event) => changeRequest(() => patch({ endpoint: event.target.value }))}
                   prefix={<CloudServerOutlined />}
                 />
                 <TextArea
                   aria-label="GraphQL Operation"
                   rows={10}
                   value={operation}
-                  onChange={(event) => changeRequest(() => setOperation(event.target.value))}
+                  onChange={(event) =>
+                    changeRequest(() => patch({ operation: event.target.value }))
+                  }
                 />
                 <TextArea
                   aria-label="GraphQL Variables"
                   rows={5}
                   value={variables}
-                  onChange={(event) => changeRequest(() => setVariables(event.target.value))}
+                  onChange={(event) =>
+                    changeRequest(() => patch({ variables: event.target.value }))
+                  }
                 />
+                <Input
+                  aria-label="GraphQL Operation Name"
+                  value={draft.operationName}
+                  placeholder="操作名称（可选）"
+                  onChange={(event) =>
+                    changeRequest(() => patch({ operationName: event.target.value }))
+                  }
+                />
+                <label>
+                  GraphQL超时（秒）
+                  <InputNumber
+                    aria-label="GraphQL超时"
+                    min={1}
+                    max={300}
+                    value={draft.timeoutSeconds}
+                    onChange={(value) =>
+                      changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+                    }
+                  />
+                </label>
+                <ProtocolHeadersEditor
+                  mode="graphql"
+                  rows={draft.headers}
+                  authorization={draft.authorization}
+                  onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
+                  onChange={(headers) => changeRequest(() => patch({ headers }))}
+                />
+                <Typography.Text type="secondary">
+                  请求草稿只保留在当前会话，按协议与固定版本隔离；不会写入浏览器持久存储。
+                </Typography.Text>
+                <Button onClick={() => changeRequest(reset)}>重置GraphQL请求草稿</Button>
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   disabled={!enabled}
                   loading={mutation.isPending}
-                  onClick={() => mutation.mutate({ endpoint, operation, variables })}
+                  onClick={() => mutation.mutate(draft)}
                 >
                   执行 GraphQL
                 </Button>
@@ -448,22 +595,26 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
     }
   }, [])
   const methods = descriptorMethods(selected)
-  const [endpoint, setEndpoint] = useState('grpc.example.com:443')
-  const [methodKey, setMethodKey] = useState(methods[0]?.value)
-  const [request, setRequest] = useState('{"id":"42"}')
-  const [tlsMode, setTlsMode] = useState<'plaintext' | 'tls' | 'mtls'>('tls')
   const mtlsCredentials = credentials.filter((credential) => credential.kind === 'grpc_mtls')
-  const [credentialId, setCredentialId] = useState<string | undefined>(mtlsCredentials.at(0)?.id)
+  const { draft, patch, reset } = useProtocolRequestDraft<GrpcRequestDraft>(
+    `${projectId}:grpc:${selected.id}:${selected.version}:${selected.content_sha256}`,
+    {
+      mode: 'grpc',
+      endpoint: 'grpc.example.com:443',
+      methodKey: methods[0]?.value,
+      request: '{"id":"42"}',
+      tlsMode: 'tls',
+      credentialId: mtlsCredentials.at(0)?.id,
+      authorization: '',
+      metadata: [],
+      timeoutSeconds: 30,
+    },
+  )
+  const { endpoint, methodKey, request, tlsMode, credentialId } = draft
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
   const selectedMethod = methods.find((item) => item.value === methodKey) ?? methods[0]
   const mutation = useMutation({
-    mutationFn: (input: {
-      endpoint: string
-      request: string
-      tlsMode: typeof tlsMode
-      credentialId: string | undefined
-      method: typeof selectedMethod
-    }) => {
+    mutationFn: (input: GrpcRequestDraft & { method: typeof selectedMethod }) => {
       if (!input.method) throw new Error('Descriptor 中没有可调用方法')
       return executeGrpc({
         project_id: projectId,
@@ -472,11 +623,11 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
         service: input.method.service,
         method: input.method.method,
         request: parseObject(input.request, 'Request'),
-        metadata: {},
+        metadata: protocolRequestHeaders('grpc', input.metadata, input.authorization),
         call_type: input.method.callType,
         tls_mode: input.tlsMode,
         credential_id: input.tlsMode === 'mtls' ? input.credentialId : undefined,
-        timeout_seconds: 30,
+        timeout_seconds: input.timeoutSeconds,
       })
     },
     onMutate: () => ++generation.current,
@@ -484,7 +635,8 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
       if (active.current && revision === generation.current) setResult(value)
     },
     onError: (error, _input, revision) => {
-      if (active.current && revision === generation.current) void message.error(error.message)
+      if (active.current && revision === generation.current)
+        void message.error(apiErrorWithTrace(error))
     },
   })
   function changeRequest(change: () => void) {
@@ -504,14 +656,14 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                 <Input
                   aria-label="gRPC Endpoint"
                   value={endpoint}
-                  onChange={(event) => changeRequest(() => setEndpoint(event.target.value))}
+                  onChange={(event) => changeRequest(() => patch({ endpoint: event.target.value }))}
                   prefix={<CloudServerOutlined />}
                 />
                 <Select
                   aria-label="gRPC Method"
                   value={selectedMethod?.value}
                   options={methods}
-                  onChange={(value) => changeRequest(() => setMethodKey(value))}
+                  onChange={(value) => changeRequest(() => patch({ methodKey: value }))}
                   placeholder="选择 Service / Method"
                 />
                 <Segmented<'plaintext' | 'tls' | 'mtls'>
@@ -521,7 +673,7 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                     { label: '明文', value: 'plaintext' },
                     { label: 'mTLS', value: 'mtls' },
                   ]}
-                  onChange={(value) => changeRequest(() => setTlsMode(value))}
+                  onChange={(value) => changeRequest(() => patch({ tlsMode: value }))}
                 />
                 {tlsMode === 'mtls' && (
                   <Select
@@ -531,7 +683,7 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                       value: credential.id,
                       label: credential.name,
                     }))}
-                    onChange={(value) => changeRequest(() => setCredentialId(value))}
+                    onChange={(value) => changeRequest(() => patch({ credentialId: value }))}
                     placeholder="选择 mTLS Credential"
                   />
                 )}
@@ -539,8 +691,31 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                   aria-label="gRPC Request"
                   rows={10}
                   value={request}
-                  onChange={(event) => changeRequest(() => setRequest(event.target.value))}
+                  onChange={(event) => changeRequest(() => patch({ request: event.target.value }))}
                 />
+                <label>
+                  gRPC超时（秒）
+                  <InputNumber
+                    aria-label="gRPC超时"
+                    min={1}
+                    max={300}
+                    value={draft.timeoutSeconds}
+                    onChange={(value) =>
+                      changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+                    }
+                  />
+                </label>
+                <ProtocolHeadersEditor
+                  mode="grpc"
+                  rows={draft.metadata}
+                  authorization={draft.authorization}
+                  onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
+                  onChange={(metadata) => changeRequest(() => patch({ metadata }))}
+                />
+                <Typography.Text type="secondary">
+                  请求草稿只保留在当前会话，TLS/mTLS与凭据引用保持独立；不会读取凭据明文。
+                </Typography.Text>
+                <Button onClick={() => changeRequest(reset)}>重置gRPC请求草稿</Button>
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
@@ -548,10 +723,7 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                   loading={mutation.isPending}
                   onClick={() =>
                     mutation.mutate({
-                      endpoint,
-                      request,
-                      tlsMode,
-                      credentialId,
+                      ...draft,
                       method: selectedMethod,
                     })
                   }
@@ -695,7 +867,7 @@ function SchemaImportDialog({
       message.success('协议 Schema 已保存为不可变版本')
       onClose()
     },
-    onError: (error) => void message.error(error.message),
+    onError: (error) => void message.error(apiErrorWithTrace(error)),
   })
   const sourceOptions =
     mode === 'graphql'
@@ -780,13 +952,6 @@ function SchemaImportDialog({
   )
 }
 
-function useSelectedAsset(items: SchemaArtifact[], selectedId: string | null) {
-  return useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
-    [items, selectedId],
-  )
-}
-
 function protocolItems(
   mode: SchemaProtocolMode,
   graphql: SchemaArtifact[],
@@ -804,14 +969,6 @@ function pageItems(page: { items: SchemaArtifact[] } | undefined): SchemaArtifac
 function pageTotal(page: { total: number } | undefined): number | undefined {
   if (page) return page.total
   return undefined
-}
-
-function selectionId(
-  selection: { mode: SchemaProtocolMode; id: string } | null,
-  mode: SchemaProtocolMode,
-): string | null {
-  if (selection?.mode === mode) return selection.id
-  return null
 }
 
 function assetId(asset: SchemaArtifact | null): string | null {

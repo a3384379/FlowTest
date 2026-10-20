@@ -26,7 +26,10 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
+import QueryFailureNotice from '../../components/QueryFailureNotice'
+import { useProtocolLocation } from './protocol-location'
+import { useProtocolCatalog, useSelectedProtocolAsset } from './use-protocol-catalog'
 
 import {
   consumeKafkaMessages,
@@ -36,6 +39,7 @@ import {
   importEventRegistrySchema,
   listEventSchemas,
   listEventSources,
+  getEventSource,
   produceKafkaMessage,
   type EventDebugResult,
   type EventSource,
@@ -82,6 +86,7 @@ export default function EventProtocolWorkspace({
 
   return (
     <>
+      <QueryFailureNotice queries={[state.selectionQuery]} />
       <EventFeatureAlert enabled={enabled} />
       <div className="catalog-controls">
         <CatalogPagination query={state.sources} label="事件来源" />
@@ -94,12 +99,19 @@ export default function EventProtocolWorkspace({
         onCreateSource={editable ? () => state.setSourceOpen(true) : undefined}
       />
       <div className="protocol-workspace-grid event-protocol-grid">
-        <EventSourceInventory
-          items={pageItems(state.sources.data)}
-          loading={state.sources.isLoading}
-          selectedId={state.selected?.id ?? null}
-          onSelect={(source) => state.setSelection(source.id)}
-        />
+        <div>
+          {state.selected && (
+            <Typography.Paragraph>
+              {state.selected.name} · v{state.selected.version}
+            </Typography.Paragraph>
+          )}
+          <EventSourceInventory
+            items={pageItems(state.sources.data)}
+            loading={state.sources.isLoading}
+            selectedId={state.selected?.id ?? null}
+            onSelect={(source) => state.setSelection(source.id)}
+          />
+        </div>
         <EventConsole
           projectId={projectId}
           mode={mode}
@@ -126,21 +138,28 @@ export default function EventProtocolWorkspace({
 }
 
 function useEventWorkspace(projectId: string, mode: EventProtocolMode) {
-  const [selection, setSelection] = useState<string | null>(null)
+  const location = useProtocolLocation()
   const [sourceOpen, setSourceOpen] = useState(false)
   const [schemaOpen, setSchemaOpen] = useState(false)
-  const sources = useCatalogQuery(
+  const sources = useProtocolCatalog(
     'event-sources',
     projectId,
-    (page) => listEventSources(projectId, mode, page, 20),
-    true,
     mode,
+    location.page,
+    location.setPage,
+    (page) => listEventSources(projectId, mode, page, 20),
+    !location.error,
   )
-  const selected = useMemo(
-    () =>
-      sources.data?.items.find((item) => item.id === selection) ?? sources.data?.items[0] ?? null,
-    [selection, sources.data?.items],
+  const selection = useSelectedProtocolAsset(
+    projectId,
+    `event-sources:${mode}`,
+    location.id,
+    pageItems(sources.data),
+    (id) => getEventSource(projectId, id, mode),
+    location.selectAsset,
+    !location.error,
   )
+  const selected = selection.selected
   const schemas = useCatalogQuery(
     'event-schemas',
     projectId,
@@ -150,8 +169,8 @@ function useEventWorkspace(projectId: string, mode: EventProtocolMode) {
   )
 
   return {
-    selection,
-    setSelection,
+    selectionQuery: selection.query,
+    setSelection: location.selectAsset,
     sourceOpen,
     setSourceOpen,
     schemaOpen,
@@ -230,7 +249,7 @@ function EventSourceInventory({
         rowKey="id"
         loading={loading}
         dataSource={items}
-        pagination={{ pageSize: 8, hideOnSinglePage: true }}
+        pagination={false}
         rowClassName={(item) => (item.id === selectedId ? 'selected-row' : '')}
         onRow={(item) => ({ onClick: () => onSelect(item) })}
         columns={[

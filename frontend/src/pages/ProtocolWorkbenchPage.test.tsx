@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { App as AntdApp, message as staticMessage } from 'antd'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import type { EventSource, SchemaArtifact } from '../features/protocols/protocol-service'
 import type { Credential } from '../lib/api'
@@ -75,6 +76,104 @@ const websocketSource: EventSource = {
 }
 
 describe('ProtocolWorkbenchPage', () => {
+  it('restores an off-page immutable schema from the link without changing selection on pagination', async () => {
+    installHandlers()
+    const selected = {
+      ...graphqlSchema,
+      id: '00000000-0000-4000-8000-000000000812',
+      name: '页外固定GraphQL',
+      version: 3,
+    }
+    const pages: string[] = []
+    server.use(
+      http.get('/api/v1/graphql/schemas', ({ request }) => {
+        const page = new URL(request.url).searchParams.get('page') ?? '1'
+        pages.push(page)
+        return HttpResponse.json({
+          items: [graphqlSchema],
+          total: 60,
+          page: Number(page),
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/graphql/schemas/${selected.id}`, () => HttpResponse.json(selected)),
+    )
+    renderPage(`?mode=graphql&graphqlSchema=${selected.id}&graphqlPage=2`)
+    expect(await screen.findByText('页外固定GraphQL · v3')).toBeVisible()
+    const pager = screen.getByText('GraphQL Schema共 60 项').closest('ul')!
+    await userEvent.click(within(pager).getByTitle('Next Page'))
+    await waitFor(() => expect(pages.at(-1)).toBe('3'))
+    expect(screen.getByText('页外固定GraphQL · v3')).toBeVisible()
+    expect(screen.getByTestId('protocol-location')).toHaveTextContent(
+      `graphqlSchema=${selected.id}`,
+    )
+    expect(screen.getByTestId('protocol-location')).toHaveTextContent('graphqlPage=3')
+    await userEvent.click(screen.getByRole('button', { name: '协议测试后退' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('protocol-location')).toHaveTextContent('graphqlPage=2'),
+    )
+    expect(screen.getByText('页外固定GraphQL · v3')).toBeVisible()
+  })
+
+  it('keeps unavailable or invalid protocol links explicit instead of falling back to the first asset', async () => {
+    installHandlers()
+    const absent = '00000000-0000-4000-8000-000000000899'
+    server.use(
+      http.get(`/api/v1/graphql/schemas/${absent}`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'SCHEMA_ARTIFACT_NOT_FOUND',
+              message: '协议版本不存在',
+              details: null,
+              trace_id: 'missing-schema-trace',
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    )
+    renderPage(`?mode=graphql&graphqlSchema=${absent}`)
+    expect(await screen.findByText(/协议版本不存在/)).toBeVisible()
+    expect(screen.getByText(/missing-schema-trace/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /执行 GraphQL/ })).not.toBeInTheDocument()
+  })
+
+  it('restores the exact event source using its own mode and link parameters', async () => {
+    installHandlers()
+    const selected = {
+      ...websocketSource,
+      id: '00000000-0000-4000-8000-000000000813',
+      name: '页外固定WebSocket',
+      version: 7,
+    }
+    server.use(http.get(`/api/v1/event-sources/${selected.id}`, () => HttpResponse.json(selected)))
+    renderPage(
+      `?mode=websocket&websocketSource=${selected.id}&websocketPage=2&graphqlSchema=${graphqlSchema.id}`,
+    )
+    expect(await screen.findByText('页外固定WebSocket · v7')).toBeVisible()
+    expect(screen.queryByLabelText('GraphQL Operation')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('WebSocket Message')).toBeInTheDocument()
+  })
+
+  it('restores request drafts separately for each protocol and fixed asset version', async () => {
+    installHandlers()
+    renderPage()
+    await screen.findByLabelText('GraphQL Variables')
+    fireEvent.change(screen.getByLabelText('GraphQL Variables'), {
+      target: { value: '{"id":"007"}' },
+    })
+    await userEvent.click(screen.getByText('gRPC', { selector: '.ant-segmented-item-label' }))
+    await screen.findByLabelText('gRPC Request')
+    fireEvent.change(screen.getByLabelText('gRPC Request'), {
+      target: { value: '{"message":"grpc-only"}' },
+    })
+    await userEvent.click(screen.getByText('GraphQL', { selector: '.ant-segmented-item-label' }))
+    expect(await screen.findByLabelText('GraphQL Variables')).toHaveValue('{"id":"007"}')
+    await userEvent.click(screen.getByText('gRPC', { selector: '.ant-segmented-item-label' }))
+    expect(await screen.findByLabelText('gRPC Request')).toHaveValue('{"message":"grpc-only"}')
+  })
+
   it('does not mount a global notification when an import finishes after workspace unmount', async () => {
     installHandlers()
     let release!: () => void
@@ -164,7 +263,12 @@ describe('ProtocolWorkbenchPage', () => {
     const pending = new Promise<void>((resolve) => {
       release = resolve
     })
-    const second = { ...graphqlSchema, id: 'second-schema', name: '订单 GraphQL', version: 3 }
+    const second = {
+      ...graphqlSchema,
+      id: '00000000-0000-4000-8000-000000000811',
+      name: '订单 GraphQL',
+      version: 3,
+    }
     server.use(
       http.get('/api/v1/graphql/schemas', () =>
         HttpResponse.json({ items: [graphqlSchema, second], total: 2, page: 1, page_size: 20 }),
@@ -753,14 +857,29 @@ const grpcCredential: Credential = {
   updated_at: '2026-08-12T00:00:00Z',
 }
 
-function renderPage() {
+function RouteProbe() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  return (
+    <>
+      <output data-testid="protocol-location">{location.search}</output>
+      <button onClick={() => navigate(-1)}>协议测试后退</button>
+    </>
+  )
+}
+
+function renderPage(search = '') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="protocols">
+        <ProjectTestProvider
+          section="protocols"
+          initialEntry={`/projects/${project.id}/protocols${search}`}
+        >
+          <RouteProbe />
           <ProtocolWorkbenchPage />
         </ProjectTestProvider>
       </QueryClientProvider>

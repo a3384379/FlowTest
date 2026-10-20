@@ -55,6 +55,32 @@ export async function listGraphQLSchemas(
   ).data
 }
 
+export async function getGraphQLSchema(projectId: string, id: string): Promise<SchemaArtifact> {
+  return (
+    await apiClient.get<SchemaArtifact>(`/graphql/schemas/${id}`, {
+      params: { project_id: projectId },
+    })
+  ).data
+}
+export async function getGrpcDescriptor(projectId: string, id: string): Promise<SchemaArtifact> {
+  return (
+    await apiClient.get<SchemaArtifact>(`/grpc/descriptors/${id}`, {
+      params: { project_id: projectId },
+    })
+  ).data
+}
+export async function getEventSource(
+  projectId: string,
+  id: string,
+  kind: EventSource['kind'],
+): Promise<EventSource> {
+  return (
+    await apiClient.get<EventSource>(`/event-sources/${id}`, {
+      params: { project_id: projectId, kind },
+    })
+  ).data
+}
+
 export async function createGraphQLSchema(input: {
   project_id: string
   name: string

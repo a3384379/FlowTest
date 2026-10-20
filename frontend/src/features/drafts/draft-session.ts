@@ -1,3 +1,4 @@
+import type { ProtocolRequestDraft } from '../protocols/protocol-request-draft'
 import type { WorkflowNodeEditorDraft } from '../../flow/editor/node-edit-session'
 import { createContext, useContext, useState } from 'react'
 import type { WorkbenchFields } from '../api-console/APIWorkbench'
@@ -14,6 +15,7 @@ type ApiDraft = {
   baseVersion: number
 }
 export class DraftSession {
+  readonly protocolRequests = new Map<string, ProtocolRequestDraft>()
   readonly suiteForms = new Map<string, { values: Partial<SuiteFormValues>; generation: number }>()
   readonly nodeEditors = new Map<string, WorkflowNodeEditorDraft>()
   readonly nodeEditorActions = new Map<string, () => Promise<boolean>>()
