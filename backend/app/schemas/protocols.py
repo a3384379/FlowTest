@@ -136,3 +136,70 @@ class ProtocolDebugResponse(BaseModel):
     schema_version: int
     schema_hash: str
     duration_ms: int = Field(ge=0)
+
+
+class ProtocolInputExample(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    operation: str | None
+    variables: dict[str, JsonValue] | None
+    service: str | None
+    method: str | None
+    call_type: Literal["unary", "server_streaming"] | None
+    request: dict[str, JsonValue] | None
+
+
+class ProtocolStructureEntry(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    label: str
+    kind: str
+    type_label: str
+    required: bool
+    description: str
+    expandable: bool
+
+
+class ProtocolStructureView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    node: str
+    label: str
+    entries: list[ProtocolStructureEntry]
+    total: int
+    offset: int
+    limit: int
+    example: ProtocolInputExample | None
+    notice: str | None
+    document: str | None
+    document_format: Literal["text", "base64"] | None
+
+
+class ProtocolStructureResponse(BaseModel):
+    artifact_id: UUID
+    project_id: UUID
+    protocol: Literal["graphql", "grpc"]
+    version: int
+    content_sha256: str
+    view: ProtocolStructureView
+
+
+class GraphQLErrorLocationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    operation: str = Field(min_length=1, max_length=2 * 1024 * 1024)
+    operation_name: str | None = Field(default=None, min_length=1, max_length=160)
+    path: list[
+        Annotated[str, Field(min_length=1, max_length=512)]
+        | Annotated[int, Field(ge=0, strict=True)]
+    ] = Field(min_length=1, max_length=20)
+
+
+class ProtocolStructureLocation(BaseModel):
+    artifact_id: UUID
+    project_id: UUID
+    version: int
+    content_sha256: str
+    node: str

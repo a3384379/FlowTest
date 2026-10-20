@@ -4,6 +4,7 @@ from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.domain.event_protocols import EventSourceKind
+from app.domain.protocols import ProtocolKind
 from app.schemas.common import Page
 from app.schemas.event_protocols import (
     EventDebugResponse,
@@ -18,6 +19,7 @@ from app.schemas.event_protocols import (
 from app.schemas.protocols import SchemaArtifactResponse
 from app.services.event_debug import EventDebugService
 from app.services.event_sources import EventSourceService
+from app.services.protocol_assets import ProtocolAssetService
 
 router = APIRouter()
 
@@ -44,6 +46,23 @@ async def list_event_sources(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/event-sources/{source_id}", response_model=EventSourceResponse)
+async def get_event_source(
+    source_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    kind: EventSourceKind | None = None,
+) -> EventSourceResponse:
+    source = await EventSourceService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        source_id=source_id,
+        kind=kind,
+    )
+    return EventSourceResponse.model_validate(source)
 
 
 @router.post(
@@ -91,6 +110,31 @@ async def list_event_schemas(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get(
+    "/event-sources/{source_id}/schemas/{artifact_id}", response_model=SchemaArtifactResponse
+)
+async def get_event_schema(
+    source_id: UUID,
+    artifact_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SchemaArtifactResponse:
+    await EventSourceService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        source_id=source_id,
+        kind=EventSourceKind.KAFKA,
+    )
+    artifact = await ProtocolAssetService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind.KAFKA,
+    )
+    return SchemaArtifactResponse.model_validate(artifact)
 
 
 @router.post(

@@ -115,3 +115,9 @@ PR #139审查指出，预览后另一编辑者发布接口版本时，原绑定�
 `9798cdea45b492988fcd63e96494ba633f8e21e4` 的 PR Validation [39481664884](https://github.com/a3384379/FlowTest/actions/runs/39481664884) 未通过：服务目录综合测试超过既有60秒上限，其他953项前端测试通过；其余后端、Compose、Windows与升级作业通过。这不是合并成功。
 
 将该测试拆为目录证据/旧链接定位和服务端搜索两个独立场景，限定目录与详情的DOM查询范围。搜索和清空均等待服务端返回的匹配总数实际进入页面，再校验选中ID仍固定；恢复对清空后结果的正向断言。保持原有超时、覆盖率和CI标准。修正后的8项服务目录测试本地通过，日志`remediation-service-ci-timeout-targeted-r1.log`。最新HEAD的远端门禁仍需独立确认，不能把本地通过替代远端结果。
+
+### 最终交付回执
+
+已核对最终HEAD `d90db72b1d2b7e2da4161a23ba4a6e1110655d2b` 的正式Required Gate成功（[PR Validation 39489056918](https://github.com/a3384379/FlowTest/actions/runs/39489056918)），所有审查线程已解决、无后续分页。使用匹配该SHA的合并命令，PR #139于2026-10-20 20:46:59 UTC合并到main，提交`722d72f196d58b5f1693dd15a0daa474faa8fd0e`。
+
+合并后已启动[Full Regression 39494968109](https://github.com/a3384379/FlowTest/actions/runs/39494968109)，确认运行head为上述main合并提交；当前等待其结果。PR门禁成功与合并后回归分开记录，不将旧失败运行或尚未完成的回归记为成功。

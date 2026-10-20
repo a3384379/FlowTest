@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
@@ -8,11 +9,15 @@ from app.domain.protocols import ProtocolKind
 from app.schemas.common import Page
 from app.schemas.protocols import (
     GraphQLDebugRequest,
+    GraphQLErrorLocationRequest,
     GraphQLSchemaCreate,
     GrpcDebugRequest,
     GrpcDescriptorCreate,
     GrpcReflectionCreate,
     ProtocolDebugResponse,
+    ProtocolStructureLocation,
+    ProtocolStructureResponse,
+    ProtocolStructureView,
     SchemaArtifactResponse,
 )
 from app.services.grpc_reflection import GrpcReflectionService
@@ -20,6 +25,57 @@ from app.services.protocol_assets import ProtocolAssetService
 from app.services.protocol_debug import ProtocolDebugService
 
 router = APIRouter()
+
+
+@router.get("/protocol-assets/{artifact_id}/structure", response_model=ProtocolStructureResponse)
+async def inspect_protocol_structure(
+    artifact_id: UUID,
+    project_id: UUID,
+    protocol: Literal["graphql", "grpc"],
+    session: SessionDependency,
+    current_user: CurrentUser,
+    node: str = Query(default="root", min_length=1, max_length=1024),
+    offset: int = Query(default=0, ge=0, le=50000),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> ProtocolStructureResponse:
+    artifact, view = await ProtocolAssetService(session).structure(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind(protocol),
+        node=node,
+        offset=offset,
+        limit=limit,
+    )
+    return ProtocolStructureResponse(
+        artifact_id=artifact.id,
+        project_id=artifact.project_id,
+        protocol=protocol,
+        version=artifact.version,
+        content_sha256=artifact.content_sha256,
+        view=ProtocolStructureView.model_validate(view),
+    )
+
+
+@router.post(
+    "/graphql/schemas/{artifact_id}/locate-error", response_model=ProtocolStructureLocation
+)
+async def locate_graphql_error(
+    artifact_id: UUID,
+    payload: GraphQLErrorLocationRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProtocolStructureLocation:
+    artifact, node = await ProtocolAssetService(session).locate_graphql_error(
+        actor=current_user, artifact_id=artifact_id, payload=payload
+    )
+    return ProtocolStructureLocation(
+        artifact_id=artifact.id,
+        project_id=artifact.project_id,
+        version=artifact.version,
+        content_sha256=artifact.content_sha256,
+        node=node,
+    )
 
 
 @router.get("/graphql/schemas", response_model=Page[SchemaArtifactResponse])
@@ -43,6 +99,22 @@ async def list_graphql_schemas(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/graphql/schemas/{artifact_id}", response_model=SchemaArtifactResponse)
+async def get_graphql_schema(
+    artifact_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SchemaArtifactResponse:
+    artifact = await ProtocolAssetService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind.GRAPHQL,
+    )
+    return SchemaArtifactResponse.model_validate(artifact)
 
 
 @router.post(
@@ -83,6 +155,22 @@ async def list_grpc_descriptors(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/grpc/descriptors/{artifact_id}", response_model=SchemaArtifactResponse)
+async def get_grpc_descriptor(
+    artifact_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SchemaArtifactResponse:
+    artifact = await ProtocolAssetService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind.GRPC,
+    )
+    return SchemaArtifactResponse.model_validate(artifact)
 
 
 @router.post(

@@ -1954,7 +1954,7 @@ body {
 
 .protocol-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.8fr) minmax(480px, 1.7fr) minmax(260px, 0.8fr);
+  grid-template-columns: minmax(200px, 0.7fr) minmax(340px, 1.5fr) minmax(280px, 1fr);
   gap: 16px;
   margin-top: 16px;
   min-height: 620px;
@@ -1962,6 +1962,7 @@ body {
 
 .event-protocol-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -2016,9 +2017,9 @@ body {
   margin: 18px 0;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1200px) {
   .protocol-workspace-grid {
-    grid-template-columns: 260px minmax(440px, 1fr);
+    grid-template-columns: minmax(180px, 0.6fr) minmax(0, 1.4fr);
   }
 
   .protocol-inspector {
@@ -2521,4 +2522,124 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 8px;
+}
+
+.protocol-header-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+@media (max-width: 640px) {
+  .protocol-header-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .protocol-header-row > .ant-input:nth-of-type(2) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+}
+
+.protocol-contract-path {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.protocol-contract-fields {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.protocol-contract-fields li {
+  border-bottom: 1px solid var(--border-color, #dbe8f5);
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.protocol-contract-fields .ant-btn-link {
+  padding: 0;
+  height: auto;
+  text-align: left;
+  white-space: normal;
+}
+.protocol-contract-source {
+  max-height: 420px;
+  overflow: auto;
+}
+.protocol-contract-view {
+  margin: 12px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.protocol-inspector .ant-collapse {
+  margin: 16px 0;
+}
+
+.protocol-workspace-grid > * {
+  min-width: 0;
+}
+.protocol-inspector > .ant-typography {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.protocol-inventory .ant-table-cell {
+  overflow-wrap: anywhere;
+}
+.protocol-page .page-heading > div:first-child {
+  min-width: 0;
+}
+.protocol-page .page-heading .ant-typography {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 860px) {
+  .protocol-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .protocol-inspector {
+    grid-column: auto;
+  }
+  .protocol-summary {
+    row-gap: 12px;
+  }
+  .protocol-workspace > .ant-card-body {
+    padding: 12px;
+  }
+  .protocol-editor,
+  .protocol-inspector,
+  .protocol-inventory {
+    padding: 12px;
+  }
+}
+.protocol-contract-tree {
+  margin: 12px 0;
+  max-height: 400px;
+  overflow: auto;
+}
+.protocol-contract-branches {
+  list-style: none;
+  padding: 0 0 0 8px;
+  margin: 0;
+}
+.protocol-contract-branches > li {
+  padding: 6px 0;
+  border-left: 1px solid var(--ft-border-subtle);
+}
+.protocol-contract-branches .ant-btn-link {
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  padding: 0;
+}
+.protocol-contract-type {
+  margin: 0 0 0 24px;
+  overflow-wrap: anywhere;
+}
+
+.event-protocol-toolbar > .ant-space {
+  max-width: 100%;
+  min-width: 0;
+}
+.event-protocol-toolbar .ant-typography {
+  overflow-wrap: anywhere;
 }

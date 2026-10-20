@@ -1,3 +1,4 @@
+import type { ProtocolRequestDraft } from '../protocols/protocol-request-draft'
 import type { WorkflowNodeEditorDraft } from '../../flow/editor/node-edit-session'
 import { createContext, useContext, useState } from 'react'
 import type { WorkbenchFields } from '../api-console/APIWorkbench'
@@ -14,6 +15,16 @@ type ApiDraft = {
   baseVersion: number
 }
 export class DraftSession {
+  readonly protocolRequests = new Map<string, ProtocolRequestDraft>()
+  clearProtocolRequests() {
+    if (this.protocolRequests.size === 0) return
+    this.protocolRequests.clear()
+    for (const key of this.unsafe) {
+      if (key.startsWith('protocol-request:')) this.unsafe.delete(key)
+    }
+    this.revision += 1
+    this.listeners.forEach((listener) => listener())
+  }
   readonly suiteForms = new Map<string, { values: Partial<SuiteFormValues>; generation: number }>()
   readonly nodeEditors = new Map<string, WorkflowNodeEditorDraft>()
   readonly nodeEditorActions = new Map<string, () => Promise<boolean>>()
