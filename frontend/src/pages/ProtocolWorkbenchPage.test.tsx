@@ -957,7 +957,7 @@ describe('ProtocolWorkbenchPage', () => {
     renderPage('?mode=grpc')
     expect(await screen.findByRole('button', { name: /执行 gRPC/ })).toBeDisabled()
     await userEvent.click(await screen.findByRole('button', { name: '查看契约audit.Orders' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Get', exact: true }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Get' }))
     await userEvent.click(await screen.findByRole('button', { name: '将样例填入请求草稿' }))
     expect(screen.getByLabelText('gRPC Request')).toHaveValue(
       JSON.stringify({ orderId: 'from-contract' }, null, 2),
