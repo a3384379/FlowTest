@@ -1954,7 +1954,7 @@ body {
 
 .protocol-workspace-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.8fr) minmax(480px, 1.7fr) minmax(260px, 0.8fr);
+  grid-template-columns: minmax(200px, 0.7fr) minmax(340px, 1.5fr) minmax(280px, 1fr);
   gap: 16px;
   margin-top: 16px;
   min-height: 620px;
@@ -2016,9 +2016,9 @@ body {
   margin: 18px 0;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1200px) {
   .protocol-workspace-grid {
-    grid-template-columns: 260px minmax(440px, 1fr);
+    grid-template-columns: minmax(180px, 0.6fr) minmax(0, 1.4fr);
   }
 
   .protocol-inspector {
@@ -2571,4 +2571,41 @@ body {
 }
 .protocol-inspector .ant-collapse {
   margin: 16px 0;
+}
+
+.protocol-workspace-grid > * {
+  min-width: 0;
+}
+.protocol-inspector > .ant-typography {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+.protocol-inventory .ant-table-cell {
+  overflow-wrap: anywhere;
+}
+.protocol-page .page-heading > div:first-child {
+  min-width: 0;
+}
+.protocol-page .page-heading .ant-typography {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 860px) {
+  .protocol-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .protocol-inspector {
+    grid-column: auto;
+  }
+  .protocol-summary {
+    row-gap: 12px;
+  }
+  .protocol-workspace > .ant-card-body {
+    padding: 12px;
+  }
+  .protocol-editor,
+  .protocol-inspector,
+  .protocol-inventory {
+    padding: 12px;
+  }
 }

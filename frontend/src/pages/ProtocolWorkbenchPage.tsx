@@ -329,13 +329,13 @@ function ProtocolHeading({ onImport }: { onImport?: () => void }) {
   return (
     <div className="page-heading">
       <div>
-        <Space align="center">
+        <Space align="center" wrap>
           <Typography.Title level={2}>多协议接口工作台</Typography.Title>
           <Tag color="blue">协议资产与调试</Tag>
         </Space>
-        <Typography.Text type="secondary">
+        <Typography.Paragraph type="secondary">
           统一管理 GraphQL、gRPC、Kafka 与 WebSocket，并将协议资产版本固定到执行 Snapshot。
-        </Typography.Text>
+        </Typography.Paragraph>
       </div>
       <Space>
         <Link to="../apis">
