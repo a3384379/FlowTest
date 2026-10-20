@@ -25,6 +25,7 @@ import {
 import { contractServicePath } from '../features/services/contract-service-location'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import { useProjectContext } from '../features/projects/use-project-context'
+import ServiceContractVersions from '../features/services/ServiceContractVersions'
 
 export default function ServiceCatalogPage() {
   const { projectId } = useProjectContext()
@@ -34,10 +35,11 @@ export default function ServiceCatalogPage() {
 function ServiceCatalogWorkspace() {
   const state = useServiceCatalog()
   const [createOpen, setCreateOpen] = useState(false)
+  const hasSelection = Boolean(state.selection.id || state.selection.error)
   const featureResolved = state.featureFlags.isSuccess
 
   return (
-    <>
+    <div className={`service-catalog-page${hasSelection ? ' has-selection' : ''}`}>
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>服务目录</Typography.Title>
@@ -49,7 +51,7 @@ function ServiceCatalogWorkspace() {
           type="primary"
           icon={<PlusOutlined />}
           disabled={!state.projectId || !state.featureEnabled || !state.canEdit}
-          title={!state.canEdit ? '查看者无权登记服务' : undefined}
+          title={createPermissionHint(state)}
           onClick={() => setCreateOpen(true)}
         >
           新建服务
@@ -57,7 +59,13 @@ function ServiceCatalogWorkspace() {
       </div>
 
       <QueryFailureNotice
-        queries={[state.featureFlags, state.services, state.summary, state.graph]}
+        queries={[
+          state.permissions,
+          state.featureFlags,
+          state.services,
+          state.summary,
+          state.graph,
+        ]}
       />
       {state.scopeError && (
         <Alert
@@ -95,13 +103,14 @@ function ServiceCatalogWorkspace() {
       </div>
       <CreateServiceDialog
         open={createOpen}
+        canEdit={state.canEdit && state.featureEnabled}
         submitting={state.creating}
         onClose={() => setCreateOpen(false)}
         onCreate={async (input) => {
           if (await state.addService(input)) setCreateOpen(false)
         }}
       />
-    </>
+    </div>
   )
 }
 
@@ -229,8 +238,6 @@ function ServiceTable({ state }: { state: ReturnType<typeof useServiceCatalog> }
 }
 
 function ServiceDetails({ state }: { state: ReturnType<typeof useServiceCatalog> }) {
-  const selected =
-    state.featureEnabled && state.selected.isSuccess ? state.selected.data : undefined
   return (
     <section aria-label="选中服务详情" className="service-catalog-detail">
       <Card
@@ -242,14 +249,24 @@ function ServiceDetails({ state }: { state: ReturnType<typeof useServiceCatalog>
           )
         }
       >
-        {state.selection.error && <Alert type="error" showIcon title={state.selection.error} />}
-        <QueryFailureNotice queries={[state.selected]} />
-        {!state.selection.id && !state.selection.error && (
-          <Empty description="选择一个服务查看详情" />
-        )}
-        {selected && <ServiceDetailsContent state={state} service={selected} />}
+        <ServiceDetailsBody state={state} />
       </Card>
     </section>
+  )
+}
+
+function ServiceDetailsBody({ state }: { state: ReturnType<typeof useServiceCatalog> }) {
+  const selected =
+    state.featureEnabled && state.selected.isSuccess ? state.selected.data : undefined
+  return (
+    <>
+      {state.selection.error && <Alert type="error" showIcon title={state.selection.error} />}
+      <QueryFailureNotice queries={[state.selected]} />
+      {!state.selection.id && !state.selection.error && (
+        <Empty description="选择一个服务查看详情" />
+      )}
+      {selected && <ServiceDetailsContent state={state} service={selected} />}
+    </>
   )
 }
 
@@ -305,7 +322,7 @@ function ServiceDetailsContent({
       />
       <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
         这是契约目录服务；请求目标 Service 使用独立身份。下方展示已登记的 Pact
-        依赖及最近已知验证，不能据此推断部署安全。OpenAPI 的固定版本与完整验证记录请进入契约页面。
+        依赖及最近已知验证，不能据此推断部署安全。下方版本记录来自固定的契约导入；完整验证记录请进入契约页面。
       </Typography.Paragraph>
       <Space wrap>
         <Link to={contractServicePath(state.projectId!, 'contracts', service.id)}>
@@ -313,6 +330,7 @@ function ServiceDetailsContent({
         </Link>
         <Link to={contractServicePath(state.projectId!, 'impact', service.id)}>查看服务影响</Link>
       </Space>
+      <ServiceContractVersions projectId={state.projectId!} serviceId={service.id} />
       <ServiceDependencies
         service={service}
         graph={state.graph.data}
@@ -443,11 +461,13 @@ function dependencyRole(profile: ServiceProfile | undefined): string {
 function CreateServiceDialog({
   open,
   submitting,
+  canEdit,
   onClose,
   onCreate,
 }: {
   open: boolean
   submitting: boolean
+  canEdit: boolean
   onClose: () => void
   onCreate: (input: ServiceCatalogInput) => Promise<void>
 }) {
@@ -459,6 +479,7 @@ function CreateServiceDialog({
       okText="登记服务"
       cancelText="取消"
       confirmLoading={submitting}
+      okButtonProps={{ disabled: !canEdit }}
       onCancel={onClose}
       onOk={() => form.submit()}
       afterOpenChange={(visible) => {
@@ -466,6 +487,7 @@ function CreateServiceDialog({
       }}
     >
       <Form
+        disabled={!canEdit}
         form={form}
         layout="vertical"
         preserve={false}
@@ -512,4 +534,10 @@ function formatShanghaiTime(value: string): string {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(value))
+}
+
+function createPermissionHint(state: ReturnType<typeof useServiceCatalog>): string | undefined {
+  if (state.permissions.isPending) return '正在读取项目权限'
+  if (state.permissions.isError) return '权限读取失败，请重试'
+  return state.canEdit ? undefined : '当前权限不能登记服务'
 }

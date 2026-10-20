@@ -86,6 +86,7 @@ class FakeBroker:
 class ContractHubContext:
     client: AsyncClient
     broker: FakeBroker
+    sessions: async_sessionmaker[AsyncSession]
 
 
 @pytest.fixture
@@ -128,7 +129,7 @@ async def contract_hub_context(
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://test",
     ) as client:
-        yield ContractHubContext(client=client, broker=broker)
+        yield ContractHubContext(client=client, broker=broker, sessions=sessions)
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -695,3 +696,82 @@ async def test_service_catalog_search_pagination_and_exact_project_detail(
     assert hidden.json()["error"]["trace_id"]
     invalid = await client.get(root, headers=headers, params={"search": "x" * 201})
     assert invalid.status_code == 422 and invalid.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_service_contract_version_catalog_is_complete_and_role_accurate(
+    contract_hub_context: ContractHubContext,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+    from uuid import UUID, uuid4
+
+    from sqlalchemy import select
+
+    from app.models.contracts import ContractRun
+
+    client = contract_hub_context.client
+    headers = await _login_headers(client)
+    project_id = await _create_project(client, headers)
+    root = f"/api/v1/projects/{project_id}/contract-hub"
+    provider = await client.post(
+        f"{root}/services",
+        headers=headers,
+        json={"service_key": "orders-api", "display_name": "Orders API"},
+    )
+    unused = await client.post(
+        f"{root}/services",
+        headers=headers,
+        json={"service_key": "unused", "display_name": "未关联服务"},
+    )
+    assert provider.status_code == unused.status_code == 201
+    provider_id = provider.json()["id"]
+    async with contract_hub_context.sessions() as session:
+        actor = await session.scalar(select(User.id).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        for index in range(106):
+            session.add(
+                ContractRun(
+                    project_id=UUID(project_id),
+                    provider_service_id=UUID(provider_id) if index < 105 else None,
+                    provider_version=str(index) if index else None,
+                    source_name=f"固定来源{index:03}",
+                    source_type="upload",
+                    source_sha256="a" * 64,
+                    schema_document={},
+                    diff_summary={},
+                    coverage={},
+                    created_by_id=actor,
+                    status="failed" if index == 1 else "completed",
+                    created_at=datetime(2026, 9, 1, tzinfo=UTC) + timedelta(minutes=index),
+                )
+            )
+        await session.commit()
+    uploaded = await _upload_pact(client, headers, root)
+    assert uploaded.status_code == 201
+    endpoint = f"{root}/services/{provider_id}/versions"
+    first = await client.get(endpoint, headers=headers, params={"page_size": 100})
+    second = await client.get(endpoint, headers=headers, params={"page_size": 100, "page": 2})
+    assert first.status_code == second.status_code == 200, first.text
+    assert first.json()["total"] == second.json()["total"] == 106
+    assert len(first.json()["items"]) == 100 and len(second.json()["items"]) == 6
+    items = first.json()["items"] + second.json()["items"]
+    assert len({(item["kind"], item["id"]) for item in items}) == 106
+    assert not any(item["source_name"] == "固定来源105" for item in items)
+    assert any(item["version"] is None for item in items)
+    assert any(item["status"] == "failed" for item in items)
+    assert all(item["created_at"].endswith("Z") for item in items)
+    pact = next(item for item in items if item["kind"] == "pact")
+    assert pact["version"] == uploaded.json()["consumer_version"]
+    assert pact["service_role"] == "provider"
+    consumer = await client.get(
+        f"{root}/services/{uploaded.json()['consumer_service_id']}/versions", headers=headers
+    )
+    assert (
+        consumer.json()["total"] == 1 and consumer.json()["items"][0]["service_role"] == "consumer"
+    )
+    empty = await client.get(f"{root}/services/{unused.json()['id']}/versions", headers=headers)
+    assert empty.json()["items"] == [] and empty.json()["total"] == 0
+    outside = await client.get(endpoint, headers=headers, params={"page": 1000})
+    assert outside.json()["items"] == [] and outside.json()["total"] == 106
+    missing = await client.get(f"{root}/services/{uuid4()}/versions", headers=headers)
+    assert missing.status_code == 404 and missing.json()["error"]["trace_id"]

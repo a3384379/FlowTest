@@ -2441,3 +2441,9 @@ body {
     display: none;
   }
 }
+
+@media (max-width: 767px) {
+  .service-catalog-page.has-selection .service-catalog-overview {
+    display: none;
+  }
+}

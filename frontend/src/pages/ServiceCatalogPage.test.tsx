@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -235,9 +235,57 @@ describe('ServiceCatalogPage', () => {
     expect(catalogReads).toBe(0)
   })
 
+  it('uses fresh capabilities and preserves the draft while revoked editing disables submit', async () => {
+    installFeatureHandler(true)
+    let editable = true
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: editable ? 'owner' : 'viewer',
+          capabilities: editable ? ['read', 'edit'] : ['read'],
+          matrix: {},
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json(summary(0)),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+        HttpResponse.json({ nodes: [], edges: [] }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/contract-hub/services`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    const { queryClient } = renderPage()
+    const open = screen.getByRole('button', { name: /新建服务/ })
+    await waitFor(() => expect(open).toBeEnabled())
+    await userEvent.click(open)
+    const dialog = within(screen.getByRole('dialog', { name: '新建服务' }))
+    fireEvent.change(dialog.getByLabelText('服务标识'), { target: { value: 'audit-revoked' } })
+    fireEvent.change(dialog.getByLabelText('显示名称'), { target: { value: '权限撤销时保留草稿' } })
+    editable = false
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['project-permissions', project.id] })
+    })
+    const submit = dialog.getByRole('button', { name: '登记服务' })
+    await waitFor(() => expect(submit).toBeDisabled())
+    expect(dialog.getByLabelText('显示名称')).toBeDisabled()
+    expect(dialog.getByLabelText('显示名称')).toHaveValue('权限撤销时保留草稿')
+    fireEvent.click(submit)
+    expect(writes).toBe(0)
+  })
+
   it('keeps the catalog read-only for project viewers', async () => {
     installFeatureHandler(true)
     server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'], matrix: {} }),
+      ),
       http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
@@ -252,7 +300,7 @@ describe('ServiceCatalogPage', () => {
 
     const createButton = await screen.findByRole('button', { name: /新建服务/ })
     expect(createButton).toBeDisabled()
-    expect(createButton).toHaveAttribute('title', '查看者无权登记服务')
+    await waitFor(() => expect(createButton).toHaveAttribute('title', '当前权限不能登记服务'))
     expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
 })
@@ -266,7 +314,7 @@ function renderPage(search = '', visibleProject = project) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <ProjectTestProvider
@@ -278,10 +326,14 @@ function renderPage(search = '', visibleProject = project) {
       </QueryClientProvider>
     </AntdApp>,
   )
+  return { ...view, queryClient }
 }
 
 function installFeatureHandler(enabled: boolean): void {
   server.use(
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId/versions`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+    ),
     http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId`, ({ params }) =>
       HttpResponse.json(initialServices.find((item) => item.id === params.serviceId)),
     ),

@@ -12,6 +12,7 @@ import {
   listContractServices,
 } from '../contracts/contract-hub-service'
 import { useProjectContext } from '../projects/use-project-context'
+import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { apiErrorMessage } from '../../lib/api'
 
 export type ServiceCatalogInput = {
@@ -30,11 +31,11 @@ export function useServiceCatalog() {
       mounted.current = false
     }
   }, [])
-  const { projectId, currentProject } = useProjectContext()
+  const { projectId } = useProjectContext()
+  const { canEdit, permissions } = useProjectCapabilities()
   const catalogScope = useServiceCatalogScope()
   const { search, page, scopeError } = catalogScope
   const hasProject = Boolean(projectId)
-  const canEdit = currentProject !== null && currentProject.role !== 'viewer'
   const featureFlags = useQuery({
     queryKey: ['v3-feature-flags'],
     queryFn: getV3FeatureFlags,
@@ -62,6 +63,7 @@ export function useServiceCatalog() {
   })
 
   async function addService(input: ServiceCatalogInput): Promise<boolean> {
+    if (!canEdit || !featureEnabled) return false
     try {
       await createService.mutateAsync(input)
       await Promise.all([
@@ -80,6 +82,7 @@ export function useServiceCatalog() {
   return {
     projectId,
     canEdit,
+    permissions,
     ...catalogScope,
     selected,
     featureFlags,

@@ -30,6 +30,18 @@ class ServiceCatalogResponse(BaseModel):
     updated_at: datetime
 
 
+class ServiceContractVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    kind: Literal["openapi", "pact"]
+    version: str | None
+    source_name: str
+    service_role: Literal["provider", "consumer", "both"]
+    status: Literal["completed", "failed"]
+    created_at: datetime
+
+
 class PactBrokerImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -123,6 +123,30 @@ export async function getContractService(projectId: string, serviceId: string) {
   ).data
 }
 
+export type ServiceContractVersion = {
+  id: string
+  kind: 'openapi' | 'pact'
+  version: string | null
+  source_name: string
+  service_role: 'provider' | 'consumer' | 'both'
+  status: 'completed' | 'failed'
+  created_at: string
+}
+
+export async function listServiceContractVersions(
+  projectId: string,
+  serviceId: string,
+  page = 1,
+  pageSize = 20,
+) {
+  return (
+    await apiClient.get<Page<ServiceContractVersion>>(
+      `/projects/${projectId}/contract-hub/services/${serviceId}/versions`,
+      { params: { page, page_size: pageSize } },
+    )
+  ).data
+}
+
 export async function createContractService(
   projectId: string,
   input: { service_key: string; display_name: string; description: string },

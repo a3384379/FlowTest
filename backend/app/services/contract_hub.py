@@ -17,6 +17,7 @@ from app.domain.contract_hub import (
     normalize_contract_origin,
     service_key_for_name,
 )
+from app.domain.service_catalog import ServiceContractVersion
 from app.models.access import User
 from app.models.contracts import (
     ContractRun,
@@ -124,6 +125,16 @@ class ContractHubService:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._project_service(project_id, service_id)
+
+    async def service_versions(
+        self, *, actor: User, project_id: UUID, service_id: UUID, offset: int, limit: int
+    ) -> tuple[list[ServiceContractVersion], int]:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._project_service(project_id, service_id)
+        return await self._repository.page_service_versions(
+            project_id=project_id, service_id=service_id, offset=offset, limit=limit
+        )
 
     async def import_pact(
         self,
