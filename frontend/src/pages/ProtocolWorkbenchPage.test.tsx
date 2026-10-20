@@ -1091,22 +1091,66 @@ describe('ProtocolWorkbenchPage', () => {
     expect(screen.queryByText('协议 Schema 已保存为不可变版本')).not.toBeInTheDocument()
   })
 
-  it('blocks mTLS execution when the referenced credential disappears after refresh', async () => {
-    installHandlers(true, [grpcCredential])
-    const view = renderPage('?mode=grpc')
-    await screen.findByLabelText('gRPC Request')
-    await userEvent.click(screen.getByText('mTLS', { selector: '.ant-segmented-item-label' }))
-    expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeEnabled()
-    server.use(http.get('/api/v1/credentials', () => HttpResponse.json([])))
+  it('blocks protocol writes and runs when previously loaded permissions can no longer be read', async () => {
+    installHandlers()
+    const view = renderPage()
+    expect(await screen.findByRole('button', { name: /执行 GraphQL/ })).toBeEnabled()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'FORBIDDEN',
+              message: '项目权限读取已撤销',
+              trace_id: 'protocol-permission-read',
+            },
+          },
+          { status: 403 },
+        ),
+      ),
+    )
     await act(async () => {
-      await view.queryClient.invalidateQueries({ queryKey: ['credentials', project.id] })
+      await view.queryClient.invalidateQueries({ queryKey: ['project-permissions', project.id] })
     })
-    await waitFor(() => expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeDisabled())
-    expect(screen.getByText('所选mTLS凭据不可用，请重新选择。')).toBeVisible()
-    expect(
-      screen.getByLabelText('gRPC mTLS Credential').closest('.ant-select-content'),
-    ).toHaveTextContent('不可用凭据')
+    await waitFor(() => expect(screen.getByRole('button', { name: /执行 GraphQL/ })).toBeDisabled())
+    expect(screen.queryByRole('button', { name: /导入协议 Schema/ })).not.toBeInTheDocument()
+    expect(screen.getByText('项目权限读取已撤销')).toBeInTheDocument()
   })
+
+  it.each(['removed', 'unreadable'])(
+    'blocks mTLS execution when credential refresh is %s',
+    async (reason) => {
+      installHandlers(true, [grpcCredential])
+      const view = renderPage('?mode=grpc')
+      await screen.findByLabelText('gRPC Request')
+      await userEvent.click(screen.getByText('mTLS', { selector: '.ant-segmented-item-label' }))
+      expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeEnabled()
+      server.use(
+        http.get('/api/v1/credentials', () =>
+          reason === 'removed'
+            ? HttpResponse.json([])
+            : HttpResponse.json(
+                {
+                  error: {
+                    code: 'FORBIDDEN',
+                    message: '凭据读取已撤销',
+                    trace_id: 'credential-read-revoked',
+                  },
+                },
+                { status: 403 },
+              ),
+        ),
+      )
+      await act(async () => {
+        await view.queryClient.invalidateQueries({ queryKey: ['credentials', project.id] })
+      })
+      await waitFor(() => expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeDisabled())
+      expect(screen.getByText('所选mTLS凭据不可用，请重新选择。')).toBeVisible()
+      expect(
+        screen.getByLabelText('gRPC mTLS Credential').closest('.ant-select-content'),
+      ).toHaveTextContent('不可用凭据')
+    },
+  )
 
   it('imports gRPC Reflection and exposes mTLS credentials without values', async () => {
     let reflected = false

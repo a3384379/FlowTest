@@ -142,8 +142,8 @@ function useProtocolWorkbench(projectId: string) {
     schemaMode,
     importOpen,
     setImportOpen,
-    canEdit,
-    canExecute,
+    canEdit: canEdit && permissions.isSuccess,
+    canExecute: canExecute && permissions.isSuccess,
     permissions,
     inventory,
     credentials,
@@ -212,7 +212,7 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
           mode={schemaMode}
           projectId={projectId}
           onClose={() => setImportOpen(false)}
-          credentials={credentials.data ?? []}
+          credentials={credentials.isSuccess ? credentials.data : []}
         />
       )}
     </div>
@@ -268,7 +268,7 @@ function ProtocolBody({ projectId, state }: { projectId: string; state: Protocol
         projectId={projectId}
         selected={selected}
         enabled={inventory.enabled && canExecute}
-        credentials={credentials.data ?? []}
+        credentials={credentials.isSuccess ? credentials.data : []}
       />
     </div>
   )
