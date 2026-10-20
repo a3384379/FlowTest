@@ -240,7 +240,7 @@ Runner证据走项目只读分页/详情接口，保留项目授权与跨项目�
 
 报告列表、趋势、分类和全范围汇总共享时间、状态、流程、环境、用例、计划及来源筛选；URL 保存范围和页码，历史来源兼容且不改写快照。未完成记录不计失败，空分母显示未提供。详见[报告统一查询范围整改](batch-05.md)。
 
-首批22项、报告范围及用例范围经 [PR #133](https://github.com/a3384379/FlowTest/pull/133)、[PR #136](https://github.com/a3384379/FlowTest/pull/136)、[PR #137](https://github.com/a3384379/FlowTest/pull/137) 合并主分支，服务目录 [PR #138](https://github.com/a3384379/FlowTest/pull/138) 也已按最新提交正式门禁合并，请求目标 [PR #139](https://github.com/a3384379/FlowTest/pull/139) 已按最新提交正式门禁合并为 `722d72f196d58b5f1693dd15a0daa474faa8fd0e`，目前30项已合并。多协议3项已本地完成，尚未计作合并；不等同于33项均已合并。
+首批22项、报告范围及用例范围经 [PR #133](https://github.com/a3384379/FlowTest/pull/133)、[PR #136](https://github.com/a3384379/FlowTest/pull/136)、[PR #137](https://github.com/a3384379/FlowTest/pull/137) 合并主分支，服务目录 [PR #138](https://github.com/a3384379/FlowTest/pull/138)、请求目标 [PR #139](https://github.com/a3384379/FlowTest/pull/139) 及多协议 [PR #140](https://github.com/a3384379/FlowTest/pull/140) 均已按最新提交正式门禁合并，目前33项已合并。项目治理2项已完成本地验收，等待独立[PR #141](https://github.com/a3384379/FlowTest/pull/141)的最新提交门禁；不等同于35项均已合并。
 
 ### F-CASE-04
 
@@ -265,4 +265,8 @@ Runner证据走项目只读分页/详情接口，保留项目授权与跨项目�
 
 ## 项目治理当前边界
 
-F-PRJ-01/02完成本地整改：审计分页/动作URL、身份和资源详情、受权定位、组织范围成员搜索、团队搜索、身份摘要及明确失败重试。管理员、普通Owner和Viewer相关公开行为与数据库分页边界完成验证，普通Owner真实浏览器未请求全局用户目录；手机长选择项和键盘详情补修通过。精确源码、两轮完整检查及未交付边界详见[项目治理整改](batch-10.md)。当前35本地完成、30已合并；前置多协议PR和本批GitHub交付分别记账。
+F-PRJ-01/02完成本地整改：审计分页/动作URL、身份和资源详情、受权定位、组织范围成员搜索、团队搜索、身份摘要及明确失败重试。管理员、普通Owner和Viewer相关公开行为与数据库分页边界完成验证，普通Owner真实浏览器未请求全局用户目录；手机长选择项和键盘详情补修通过。精确源码、两轮完整检查及未交付边界详见[项目治理整改](batch-10.md)。当前35本地完成、33已合并；项目治理PR和合并后回归分开记账。
+
+## 多协议合并回执
+
+PR #140最终HEAD `c163ba5975cc3ec7eaec5fba8dc6e6cc96a21ac0` 的正式Required Gate通过，审查线程无未解决项，按匹配SHA合并为main `4a27c3b14743be4d0df756f83238766a294adee8`。合并后[Full Regression 39505978249](https://github.com/a3384379/FlowTest/actions/runs/39505978249)已启动并核对精确head，结果等待完成。项目治理同步该main后，两侧应用源码树与最终本地完整验证逐一一致。
