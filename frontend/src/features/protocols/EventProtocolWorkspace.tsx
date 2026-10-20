@@ -29,6 +29,9 @@ import {
 import { useState } from 'react'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { useProtocolLocation } from './protocol-location'
+import { useProtocolDebugResult } from './use-protocol-debug-result'
+import { useProtocolRequestDraft } from './use-protocol-request-draft'
+import type { KafkaRequestDraft, WebSocketRequestDraft } from './protocol-request-draft'
 import { useProtocolCatalog, useSelectedProtocolAsset } from './use-protocol-catalog'
 
 import {
@@ -289,9 +292,20 @@ function EventConsole({
       </div>
     )
   return mode === 'kafka' ? (
-    <KafkaConsole projectId={projectId} source={source} schemas={schemas} enabled={enabled} />
+    <KafkaConsole
+      key={`${projectId}:kafka:${source.id}:${source.version}:${source.config_sha256}`}
+      projectId={projectId}
+      source={source}
+      schemas={schemas}
+      enabled={enabled}
+    />
   ) : (
-    <WebSocketConsole projectId={projectId} source={source} enabled={enabled} />
+    <WebSocketConsole
+      key={`${projectId}:websocket:${source.id}:${source.version}:${source.config_sha256}`}
+      projectId={projectId}
+      source={source}
+      enabled={enabled}
+    />
   )
 }
 
@@ -306,46 +320,53 @@ function KafkaConsole({
   schemas: SchemaArtifact[]
   enabled: boolean
 }) {
-  const { message } = App.useApp()
-  const [topic, setTopic] = useState('flowtest.orders')
-  const [payload, setPayload] = useState('{"id":"order-42"}')
-  const [schemaId, setSchemaId] = useState<string>()
-  const [result, setResult] = useState<EventDebugResult | null>(null)
+  const state = useProtocolDebugResult<EventDebugResult>()
+  const { draft, patch, reset } = useProtocolRequestDraft<KafkaRequestDraft>(
+    `${projectId}:kafka:${source.id}:${source.version}:${source.config_sha256}`,
+    { mode: 'kafka', topic: 'flowtest.orders', payload: '{"id":"order-42"}' },
+  )
+  const { topic, payload, schemaId } = draft
+  function changeRequest(change: () => void) {
+    state.invalidate()
+    change()
+  }
   const produce = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: KafkaRequestDraft) =>
       produceKafkaMessage(source.id, {
         project_id: projectId,
-        topic,
-        value: parseJson(payload, '消息'),
-        schema_id: schemaId,
+        topic: input.topic,
+        value: parseJson(input.payload, '消息'),
+        schema_id: input.schemaId,
         correlation_header: 'flowtest-correlation-id',
         correlation_id: 'order-42',
         timeout_seconds: 30,
       }),
-    onSuccess: setResult,
-    onError: (error) => void message.error(error.message),
+    onMutate: state.begin,
+    onSuccess: (value, _input, revision) => state.accept(value, revision),
+    onError: (error, _input, revision) => state.fail(error, revision),
   })
   const consume = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: KafkaRequestDraft) =>
       consumeKafkaMessages(source.id, {
         project_id: projectId,
-        topic,
+        topic: input.topic,
         offset: 'earliest',
         maximum_messages: 10,
-        schema_id: schemaId,
+        schema_id: input.schemaId,
         correlation_header: 'flowtest-correlation-id',
         correlation_id: 'order-42',
         timeout_seconds: 30,
       }),
-    onSuccess: setResult,
-    onError: (error) => void message.error(error.message),
+    onMutate: state.begin,
+    onSuccess: (value, _input, revision) => state.accept(value, revision),
+    onError: (error, _input, revision) => state.fail(error, revision),
   })
   const request = (
     <Space orientation="vertical" className="protocol-form" size="middle">
       <Input
         aria-label="Kafka Topic"
         value={topic}
-        onChange={(event) => setTopic(event.target.value)}
+        onChange={(event) => changeRequest(() => patch({ topic: event.target.value }))}
         prefix={<DatabaseOutlined />}
       />
       <Select
@@ -357,21 +378,22 @@ function KafkaConsole({
           label: `${schema.name} · v${schema.version}`,
         }))}
         placeholder="JSON 或选择固定 Schema"
-        onChange={setSchemaId}
+        onChange={(value) => changeRequest(() => patch({ schemaId: value }))}
       />
       <TextArea
         aria-label="Kafka Message"
         rows={10}
         value={payload}
-        onChange={(event) => setPayload(event.target.value)}
+        onChange={(event) => changeRequest(() => patch({ payload: event.target.value }))}
       />
+      <Button onClick={() => changeRequest(reset)}>重置Kafka请求草稿</Button>
       <Space>
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}
           disabled={!enabled}
           loading={produce.isPending}
-          onClick={() => produce.mutate()}
+          onClick={() => produce.mutate(draft)}
         >
           Produce
         </Button>
@@ -379,7 +401,7 @@ function KafkaConsole({
           icon={<PlayCircleOutlined />}
           disabled={!enabled}
           loading={consume.isPending}
-          onClick={() => consume.mutate()}
+          onClick={() => consume.mutate(draft)}
         >
           Consume（最多 10 条）
         </Button>
@@ -391,7 +413,11 @@ function KafkaConsole({
       <Tabs
         items={[
           { key: 'request', label: '消息', children: request },
-          { key: 'result', label: 'Exchange', children: <EventResult result={result} /> },
+          {
+            key: 'result',
+            label: 'Exchange',
+            children: <EventResult result={state.result} source={source} />,
+          },
         ]}
       />
     </div>
@@ -407,24 +433,35 @@ function WebSocketConsole({
   source: EventSource
   enabled: boolean
 }) {
-  const { message } = App.useApp()
-  const [payloadKind, setPayloadKind] = useState<'json' | 'text'>('json')
-  const [payload, setPayload] = useState('{"id":"order-42","action":"subscribe"}')
-  const [correlation, setCorrelation] = useState('id')
-  const [result, setResult] = useState<EventDebugResult | null>(null)
+  const state = useProtocolDebugResult<EventDebugResult>()
+  const { draft, patch, reset } = useProtocolRequestDraft<WebSocketRequestDraft>(
+    `${projectId}:websocket:${source.id}:${source.version}:${source.config_sha256}`,
+    {
+      mode: 'websocket',
+      payloadKind: 'json',
+      payload: '{"id":"order-42","action":"subscribe"}',
+      correlation: 'id',
+    },
+  )
+  const { payloadKind, payload, correlation } = draft
+  function changeRequest(change: () => void) {
+    state.invalidate()
+    change()
+  }
   const exchange = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: WebSocketRequestDraft) =>
       exchangeWebSocketMessage(source.id, {
         project_id: projectId,
-        payload_kind: payloadKind,
-        message: payloadKind === 'json' ? parseJson(payload, '消息') : payload,
-        correlation_expression: correlation || undefined,
-        correlation_value: correlation ? 'order-42' : undefined,
+        payload_kind: input.payloadKind,
+        message: input.payloadKind === 'json' ? parseJson(input.payload, '消息') : input.payload,
+        correlation_expression: input.correlation || undefined,
+        correlation_value: input.correlation ? 'order-42' : undefined,
         maximum_messages: 10,
         timeout_seconds: 30,
       }),
-    onSuccess: setResult,
-    onError: (error) => void message.error(error.message),
+    onMutate: state.begin,
+    onSuccess: (value, _input, revision) => state.accept(value, revision),
+    onError: (error, _input, revision) => state.fail(error, revision),
   })
   return (
     <div className="protocol-editor">
@@ -442,47 +479,62 @@ function WebSocketConsole({
                     { label: 'JSON', value: 'json' },
                     { label: 'Text', value: 'text' },
                   ]}
-                  onChange={setPayloadKind}
+                  onChange={(value: 'json' | 'text') =>
+                    changeRequest(() => patch({ payloadKind: value }))
+                  }
                 />
                 <TextArea
                   aria-label="WebSocket Message"
                   rows={10}
                   value={payload}
-                  onChange={(event) => setPayload(event.target.value)}
+                  onChange={(event) => changeRequest(() => patch({ payload: event.target.value }))}
                 />
                 <Input
                   aria-label="Correlation Expression"
                   value={correlation}
-                  onChange={(event) => setCorrelation(event.target.value)}
+                  onChange={(event) =>
+                    changeRequest(() => patch({ correlation: event.target.value }))
+                  }
                   placeholder="JMESPath，例如 id"
                 />
+                <Button onClick={() => changeRequest(reset)}>重置WebSocket请求草稿</Button>
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   disabled={!enabled}
                   loading={exchange.isPending}
-                  onClick={() => exchange.mutate()}
+                  onClick={() => exchange.mutate(draft)}
                 >
                   Connect → Send → Await → Close
                 </Button>
               </Space>
             ),
           },
-          { key: 'result', label: 'Exchange', children: <EventResult result={result} /> },
+          {
+            key: 'result',
+            label: 'Exchange',
+            children: <EventResult result={state.result} source={source} />,
+          },
         ]}
       />
     </div>
   )
 }
 
-function EventResult({ result }: { result: EventDebugResult | null }) {
+function EventResult({ result, source }: { result: EventDebugResult | null; source: EventSource }) {
   if (!result) return <Empty description="尚未执行" />
   return (
     <div>
       <Space>
-        <Tag color="success">有界执行</Tag>
+        <Tag color="blue">有界执行</Tag>
+        <Tag>
+          {source.name} · v{source.version}
+        </Tag>
         <Tag>{result.duration_ms} ms</Tag>
       </Space>
+      <Typography.Paragraph copyable>
+        {source.id} · {source.config_sha256}
+      </Typography.Paragraph>
       <pre className="protocol-result">{JSON.stringify(result.output, null, 2)}</pre>
     </div>
   )

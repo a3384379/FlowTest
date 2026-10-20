@@ -229,6 +229,7 @@ function ProtocolBody({ projectId, state }: { projectId: string; state: Protocol
   if (mode === 'kafka' || mode === 'websocket')
     return (
       <EventProtocolWorkspace
+        key={`${projectId}:${mode}`}
         editable={canEdit}
         executable={canExecute}
         projectId={projectId}
@@ -559,7 +560,13 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
                   rows={draft.headers}
                   authorization={draft.authorization}
                   onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
-                  onChange={(headers) => changeRequest(() => patch({ headers }))}
+                  onChange={(update) =>
+                    changeRequest(() =>
+                      patch((current) => ({
+                        headers: typeof update === 'function' ? update(current.headers) : update,
+                      })),
+                    )
+                  }
                 />
                 <Typography.Text type="secondary">
                   请求草稿只保留在当前会话，按协议与固定版本隔离；不会写入浏览器持久存储。
@@ -710,7 +717,13 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                   rows={draft.metadata}
                   authorization={draft.authorization}
                   onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
-                  onChange={(metadata) => changeRequest(() => patch({ metadata }))}
+                  onChange={(update) =>
+                    changeRequest(() =>
+                      patch((current) => ({
+                        metadata: typeof update === 'function' ? update(current.metadata) : update,
+                      })),
+                    )
+                  }
                 />
                 <Typography.Text type="secondary">
                   请求草稿只保留在当前会话，TLS/mTLS与凭据引用保持独立；不会读取凭据明文。

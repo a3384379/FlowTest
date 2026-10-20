@@ -1,4 +1,5 @@
 import { Button, Collapse, Input, Space, Switch, Typography } from 'antd'
+import type { Dispatch, SetStateAction } from 'react'
 import type { ProtocolHeaderEntry } from './protocol-request-draft'
 
 export default function ProtocolHeadersEditor({
@@ -12,11 +13,11 @@ export default function ProtocolHeadersEditor({
   rows: ProtocolHeaderEntry[]
   authorization: string
   onAuthorization: (value: string) => void
-  onChange: (rows: ProtocolHeaderEntry[]) => void
+  onChange: Dispatch<SetStateAction<ProtocolHeaderEntry[]>>
 }) {
   const label = mode === 'graphql' ? 'GraphQL Header' : 'gRPC Metadata'
   function update(id: string, change: Partial<ProtocolHeaderEntry>) {
-    onChange(rows.map((row) => (row.id === id ? { ...row, ...change } : row)))
+    onChange((current) => current.map((row) => (row.id === id ? { ...row, ...change } : row)))
   }
   return (
     <Space orientation="vertical" className="full-width">
@@ -65,7 +66,9 @@ export default function ProtocolHeadersEditor({
                     />
                     <Button
                       aria-label={`删除${label}${index + 1}`}
-                      onClick={() => onChange(rows.filter((item) => item.id !== row.id))}
+                      onClick={() =>
+                        onChange((current) => current.filter((item) => item.id !== row.id))
+                      }
                     >
                       删除
                     </Button>
@@ -73,8 +76,8 @@ export default function ProtocolHeadersEditor({
                 ))}
                 <Button
                   onClick={() =>
-                    onChange([
-                      ...rows,
+                    onChange((current) => [
+                      ...current,
                       { id: crypto.randomUUID(), enabled: true, name: '', value: '' },
                     ])
                   }

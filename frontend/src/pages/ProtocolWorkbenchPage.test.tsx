@@ -174,6 +174,229 @@ describe('ProtocolWorkbenchPage', () => {
     expect(await screen.findByLabelText('gRPC Request')).toHaveValue('{"message":"grpc-only"}')
   })
 
+  it('sends the frozen enabled GraphQL headers and invalidates evidence when a header is edited', async () => {
+    installHandlers()
+    let release: () => void = () => {}
+    let received: () => void = () => {}
+    const started = new Promise<void>((resolve) => {
+      received = resolve
+    })
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const payloads: Array<{
+      headers: Record<string, string>
+      timeout_seconds: number
+      operation_name?: string
+      schema_id: string
+    }> = []
+    server.use(
+      http.post('/api/v1/graphql/execute', async ({ request }) => {
+        payloads.push((await request.json()) as (typeof payloads)[number])
+        received()
+        await pending
+        return HttpResponse.json({
+          output: { body: { data: 'stale-header-response' } },
+          schema_id: graphqlSchema.id,
+          schema_version: 2,
+          schema_hash: graphqlSchema.content_sha256,
+          duration_ms: 1,
+        })
+      }),
+    )
+    const view = renderPage()
+    const browser = userEvent.setup()
+    await screen.findByLabelText('GraphQL Authorization')
+    fireEvent.change(screen.getByLabelText('GraphQL Authorization'), {
+      target: { value: 'Bearer synthetic-graphql' },
+    })
+    fireEvent.change(screen.getByLabelText('GraphQL Operation Name'), { target: { value: 'User' } })
+    fireEvent.change(screen.getByLabelText('GraphQL超时'), { target: { value: '17' } })
+    await browser.click(screen.getByRole('button', { name: /GraphQL Header高级键值/ }))
+    await browser.click(screen.getByRole('button', { name: '添加GraphQL Header' }))
+    fireEvent.change(screen.getByLabelText('GraphQL Header键1'), { target: { value: 'X-Team' } })
+    fireEvent.change(screen.getByLabelText('GraphQL Header值1'), {
+      target: { value: 'before-review' },
+    })
+    await browser.click(screen.getByRole('button', { name: '添加GraphQL Header' }))
+    fireEvent.change(await screen.findByLabelText('GraphQL Header键2'), {
+      target: { value: 'X-Ignored' },
+    })
+    fireEvent.change(screen.getByLabelText('GraphQL Header值2'), {
+      target: { value: 'disabled-value' },
+    })
+    await browser.click(screen.getByRole('switch', { name: '启用GraphQL Header2' }))
+    await browser.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
+    await waitFor(() => expect(payloads).toHaveLength(1))
+    await started
+    expect(payloads).toEqual([
+      expect.objectContaining({
+        headers: { 'X-Team': 'before-review', Authorization: 'Bearer synthetic-graphql' },
+        operation_name: 'User',
+        timeout_seconds: 17,
+        schema_id: graphqlSchema.id,
+      }),
+    ])
+    fireEvent.change(screen.getByLabelText('GraphQL Header值1'), {
+      target: { value: 'after-review' },
+    })
+    await act(async () => {
+      release()
+      await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+    })
+    await browser.click(screen.getByText('响应', { exact: true }))
+    expect(screen.getByText('尚未执行')).toBeInTheDocument()
+    expect(screen.queryByText(/stale-header-response/)).not.toBeInTheDocument()
+    const persisted = [localStorage, sessionStorage]
+      .flatMap((storage) => Object.keys(storage).map((key) => storage.getItem(key)))
+      .join(' ')
+    expect(persisted).not.toContain('synthetic-graphql')
+  })
+
+  it('keeps GraphQL authentication out of gRPC and sends only enabled normalized metadata', async () => {
+    installHandlers()
+    const payloads: Array<{
+      metadata: Record<string, string>
+      timeout_seconds: number
+      descriptor_id: string
+      tls_mode: string
+    }> = []
+    server.use(
+      http.post('/api/v1/grpc/execute', async ({ request }) => {
+        payloads.push((await request.json()) as (typeof payloads)[number])
+        return HttpResponse.json({
+          output: { messages: [] },
+          schema_id: grpcDescriptor.id,
+          schema_version: 1,
+          schema_hash: grpcDescriptor.content_sha256,
+          duration_ms: 1,
+        })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByLabelText('GraphQL Authorization')
+    fireEvent.change(screen.getByLabelText('GraphQL Authorization'), {
+      target: { value: 'Bearer synthetic-graphql-only' },
+    })
+    await browser.click(screen.getByText('gRPC', { selector: '.ant-segmented-item-label' }))
+    expect(await screen.findByLabelText('gRPC Authorization')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('gRPC Authorization'), {
+      target: { value: 'Bearer synthetic-grpc-only' },
+    })
+    fireEvent.change(screen.getByLabelText('gRPC超时'), { target: { value: '23' } })
+    await browser.click(screen.getByRole('button', { name: /gRPC Metadata高级键值/ }))
+    await browser.click(screen.getByRole('button', { name: '添加gRPC Metadata' }))
+    fireEvent.change(screen.getByLabelText('gRPC Metadata键1'), { target: { value: 'X-TEAM' } })
+    fireEvent.change(screen.getByLabelText('gRPC Metadata值1'), { target: { value: 'grpc-team' } })
+    await browser.click(screen.getByRole('button', { name: '添加gRPC Metadata' }))
+    fireEvent.change(await screen.findByLabelText('gRPC Metadata键2'), {
+      target: { value: 'X-TEAM' },
+    })
+    fireEvent.change(screen.getByLabelText('gRPC Metadata值2'), {
+      target: { value: 'disabled-duplicate' },
+    })
+    await browser.click(screen.getByRole('switch', { name: '启用gRPC Metadata2' }))
+    await browser.click(screen.getByRole('button', { name: /执行 gRPC/ }))
+    await waitFor(() => expect(payloads).toHaveLength(1))
+    expect(payloads[0]).toMatchObject({
+      metadata: { 'x-team': 'grpc-team', authorization: 'Bearer synthetic-grpc-only' },
+      timeout_seconds: 23,
+      descriptor_id: grpcDescriptor.id,
+      tls_mode: 'tls',
+    })
+  })
+
+  it.each(['success', 'error'] as const)(
+    'does not apply an old Kafka source %s after selecting a different source',
+    async (outcome) => {
+      installHandlers()
+      const other = {
+        ...kafkaSource,
+        id: '00000000-0000-4000-8000-000000000814',
+        name: '第二Kafka源',
+        version: 2,
+        config_sha256: 'e'.repeat(64),
+      }
+      let release: () => void = () => {}
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let received = false
+      server.use(
+        http.get('/api/v1/event-sources', () =>
+          HttpResponse.json({ items: [kafkaSource, other], total: 2, page: 1, page_size: 20 }),
+        ),
+        http.post(`/api/v1/event-sources/${kafkaSource.id}/kafka/produce`, async () => {
+          received = true
+          await pending
+          if (outcome === 'error')
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'OLD_SOURCE_FAILED',
+                  message: 'previous-source-failure',
+                  details: null,
+                  trace_id: 'old-source-trace',
+                },
+              },
+              { status: 503 },
+            )
+          return HttpResponse.json({ output: { result: 'old-source-evidence' }, duration_ms: 1 })
+        }),
+      )
+      const view = renderPage('?mode=kafka')
+      const browser = userEvent.setup()
+      await browser.click(await screen.findByRole('button', { name: /Produce/ }))
+      await waitFor(() => expect(received).toBe(true))
+      await browser.click(screen.getByText('第二Kafka源', { exact: true }))
+      await screen.findByText('第二Kafka源 · v2')
+      await act(async () => {
+        release()
+        await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+      })
+      await browser.click(screen.getByText('Exchange', { exact: true }))
+      expect(screen.getByText('尚未执行')).toBeInTheDocument()
+      expect(
+        screen.queryByText(
+          /old-source-evidence|previous-source-failure|Request failed with status code 503/,
+        ),
+      ).not.toBeInTheDocument()
+    },
+  )
+
+  it('keeps the newer Kafka consume result when an older produce request finishes last', async () => {
+    installHandlers()
+    let release: () => void = () => {}
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let received = false
+    server.use(
+      http.post(`/api/v1/event-sources/${kafkaSource.id}/kafka/produce`, async () => {
+        received = true
+        await pending
+        return HttpResponse.json({ output: { result: 'older-produce' }, duration_ms: 1 })
+      }),
+      http.post(`/api/v1/event-sources/${kafkaSource.id}/kafka/consume`, () =>
+        HttpResponse.json({ output: { result: 'newest-consume' }, duration_ms: 1 }),
+      ),
+    )
+    const view = renderPage('?mode=kafka')
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: /Produce/ }))
+    await waitFor(() => expect(received).toBe(true))
+    await browser.click(screen.getByRole('button', { name: /Consume/ }))
+    await browser.click(screen.getByText('Exchange', { exact: true }))
+    await screen.findByText(/newest-consume/)
+    await act(async () => {
+      release()
+      await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+    })
+    expect(screen.getByText(/newest-consume/)).toBeInTheDocument()
+    expect(screen.queryByText(/older-produce/)).not.toBeInTheDocument()
+  })
+
   it('does not mount a global notification when an import finishes after workspace unmount', async () => {
     installHandlers()
     let release!: () => void
