@@ -24,9 +24,12 @@ import {
   type ReportExecutionDetail,
   type ReportNode,
   type WorkflowNodeObservation,
+  type WorkflowDefinition,
 } from '../../lib/api'
 import AssertionEvidence from '../evidence/AssertionEvidence'
-import { reportAssertionEvidence } from '../evidence/assertion-model'
+import { reportNodeAssertionEvidence } from '../evidence/assertion-model'
+import type { AssertionSourceContext } from '../evidence/assertion-source'
+import { snapshotDefinition } from '../workflows/workflow-runtime'
 import { workflowExecutionPath } from '../workflows/execution-navigation'
 import { getWorkflowExecution } from '../workflows/workflow-service'
 import type { ExecutionEvidenceLocation } from '../workflows/execution-navigation'
@@ -99,6 +102,9 @@ export default function ReportExecutionWorkspace(props: WorkspaceProps) {
           workflowPath={workflowPath}
           snapshotError={snapshot.isError}
           onRetrySnapshot={() => void snapshot.refetch()}
+          frozenDefinition={
+            snapshot.data ? snapshotDefinition(snapshot.data.execution.snapshot) : null
+          }
         />
       )}
     </section>
@@ -154,6 +160,7 @@ function ReportExecutionBody({
   workflowPath,
   snapshotError,
   onRetrySnapshot,
+  frozenDefinition,
 }: {
   props: WorkspaceProps
   detail: ReportExecutionDetail
@@ -161,6 +168,7 @@ function ReportExecutionBody({
   workflowPath: string
   snapshotError: boolean
   onRetrySnapshot: () => void
+  frozenDefinition: WorkflowDefinition | null
 }) {
   const { executionId } = props
   return (
@@ -182,6 +190,14 @@ function ReportExecutionBody({
             executionId={executionId}
             evidence={props.evidence}
             onSelectEvidence={props.onSelectEvidence}
+            assertionLocation={{
+              projectId: props.projectId,
+              executionId,
+              assertionNodeId: node.node_id,
+              nodes: detail.nodes,
+              frozenDefinition,
+              instanceId: props.evidence?.instanceId,
+            }}
           />
         ) : (
           <Card>
@@ -371,6 +387,7 @@ function ReportNodeEvidence({
   executionId,
   evidence,
   onSelectEvidence,
+  assertionLocation,
 }: {
   node: ReportNode
   workflowPath: string
@@ -380,6 +397,7 @@ function ReportNodeEvidence({
   executionId: string
   evidence?: ExecutionEvidenceLocation
   onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
+  assertionLocation: AssertionSourceContext
 }) {
   const checkpointNode = checkpointNodeId(node, evidence)
   const observations = node.observations ?? []
@@ -389,7 +407,7 @@ function ReportNodeEvidence({
     initialAttempt ?? observations.at(-1)?.attempt,
   )
   const observation = observations.find((item) => item.attempt === attempt) ?? observations.at(-1)
-  const assertions = reportAssertionEvidence(node.assertion, node.name)
+  const assertions = reportNodeAssertionEvidence(node)
   return (
     <Card
       title={
@@ -414,9 +432,17 @@ function ReportNodeEvidence({
         />
       )}
       {assertions.length > 0 && (
-        <AssertionEvidence items={assertions} source={`${node.name} (${node.node_id})`} />
+        <AssertionEvidence
+          items={assertions}
+          source={`${node.name} (${node.node_id})`}
+          location={assertionLocation}
+        />
       )}
-      <MissingReportAttempt attempt={initialAttempt} observations={observations} />
+      <MissingReportAttempt
+        attempt={initialAttempt}
+        observations={observations}
+        nodeType={node.node_type}
+      />
       <Space wrap className="report-node-context">
         <Tag>{node.node_type}</Tag>
         <Tag>尝试次数 {node.attempts}</Tag>
@@ -476,10 +502,13 @@ function ReportNodeEvidence({
 function MissingReportAttempt({
   attempt,
   observations,
+  nodeType,
 }: {
   attempt: number | undefined
   observations: WorkflowNodeObservation[]
+  nodeType: string
 }) {
+  if (observations.length === 0 && nodeType !== 'api') return null
   if (attempt === undefined || observations.some((item) => item.attempt === attempt)) return null
   return (
     <Alert

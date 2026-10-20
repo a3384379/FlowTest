@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
 import AssertionEvidence from '../features/evidence/AssertionEvidence'
 import { workflowAssertionEvidence } from '../features/evidence/assertion-model'
+import { resolveEffectiveNodeType } from './editor/graph-analysis'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowNodeRelations from './WorkflowNodeRelations'
 import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
@@ -123,10 +124,28 @@ function RuntimeNodeDetail({
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
       {assertions.length > 0 && execution ? (
-        <AssertionEvidence items={assertions} source={`${execution.name} (${execution.node_id})`} />
+        <AssertionEvidence
+          items={assertions}
+          source={`${execution.name} (${execution.node_id})`}
+          location={
+            projectId && executionId
+              ? {
+                  projectId,
+                  executionId,
+                  assertionNodeId: node.id,
+                  nodes,
+                  frozenDefinition: definition,
+                }
+              : undefined
+          }
+        />
       ) : null}
       <ExecutionError execution={execution} />
-      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <MissingAttempt
+        initialAttempt={initialAttempt}
+        observations={observations}
+        nodeType={resolveEffectiveNodeType(node)}
+      />
       <WorkflowNodeRelations node={node} definition={definition} onLocateNode={onLocateNode} />
       <ControlIterations
         output={execution?.output}
@@ -175,10 +194,13 @@ function useRuntimeAttempt(
 function MissingAttempt({
   initialAttempt,
   observations,
+  nodeType,
 }: {
   initialAttempt?: number
   observations: WorkflowNodeObservation[]
+  nodeType: string
 }) {
+  if (observations.length === 0 && nodeType !== 'api') return null
   if (!initialAttempt || observations.some((item) => item.attempt === initialAttempt)) return null
   return (
     <Alert
@@ -794,9 +816,20 @@ export function WorkflowCheckpointEvidence({
         <AssertionEvidence
           items={assertions}
           source={`${checkpoint.node_name} (${checkpoint.node_id})`}
+          location={{
+            projectId,
+            executionId: checkpoint.execution_id,
+            assertionNodeId: checkpoint.node_id,
+            nodes: [],
+            instanceId: checkpoint.node_id,
+          }}
         />
       )}
-      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <MissingAttempt
+        initialAttempt={initialAttempt}
+        observations={observations}
+        nodeType={checkpoint.node_type}
+      />
       <ObservationPicker
         observations={observations}
         selected={observation}

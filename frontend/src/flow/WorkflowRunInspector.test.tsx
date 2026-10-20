@@ -34,6 +34,7 @@ describe('WorkflowRunInspector', () => {
         execution={execution}
         nodes={[execution]}
         context={{}}
+        initialAttempt={1}
       />,
     )
     const evidence = within(screen.getByLabelText('断言证据'))
@@ -42,6 +43,22 @@ describe('WorkflowRunInspector', () => {
     expect(evidence.getByText('差值（实际 − 期望）：-1 · 单位：未提供')).toBeVisible()
     expect(evidence.getByText('证据来源：状态码断言 (assert-status)')).toBeVisible()
     expect(screen.queryByText('未提供断言证据')).not.toBeInTheDocument()
+    expect(screen.queryByText('指定请求尝试未保存证据')).not.toBeInTheDocument()
+  })
+  it('still warns about an unavailable attempt on an HTTP node', () => {
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        node={workflowDefinition.nodes[1]}
+        definition={workflowDefinition}
+        execution={execution}
+        nodes={[execution]}
+        context={{}}
+        initialAttempt={99}
+      />,
+    )
+    expect(screen.getByText('指定请求尝试未保存证据')).toBeVisible()
   })
   it('opens the linked attempt and reports a later attempt selection', async () => {
     const browser = userEvent.setup()

@@ -334,6 +334,7 @@ describe('ReportsPage', () => {
     )
     expect(screen.getByText('期望值')).toBeVisible()
     expect(screen.getByText('"pending"')).toBeVisible()
+    expect(screen.queryByText('指定请求尝试不在本次证据中')).not.toBeInTheDocument()
   })
 
   it('loads the next report page from the server', async () => {
