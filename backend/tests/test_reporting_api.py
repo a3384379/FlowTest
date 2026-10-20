@@ -314,6 +314,8 @@ async def test_signed_webhook_secret_is_write_only_and_delivery_is_auditable(
     ("status", "error_code", "expected"),
     [
         ("passed", None, FailureCategory.NONE),
+        ("queued", None, FailureCategory.NONE),
+        ("running", "HTTP_5XX", FailureCategory.NONE),
         ("cancelled", None, FailureCategory.CANCELLED),
         ("failed", "WORKFLOW_ASSERTION_FAILED", FailureCategory.ASSERTION),
         ("failed", "NETWORK_TIMEOUT", FailureCategory.TIMEOUT),
@@ -840,6 +842,18 @@ async def test_report_pending_is_neither_failure_nor_completed_pass_rate_denomin
         33.33,
     )
     assert sum(item["count"] for item in response.json()["failures"]) == 2
+    listed = await context.client.get(
+        f"/api/v1/projects/{context.project_id}/reports/executions",
+        headers=headers,
+        params={
+            "started_from": start.isoformat(),
+            "started_until": (start + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert listed.status_code == 200, listed.text
+    pending = [item for item in listed.json()["items"] if item["status"] in {"queued", "running"}]
+    assert len(pending) == 2
+    assert all(item["failure_category"] == "none" for item in pending)
 
 
 @pytest.mark.asyncio

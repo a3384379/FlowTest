@@ -100,7 +100,7 @@ class NotificationEvent(StrEnum):
 
 
 def classify_failure(*, status: str, error_code: str | None) -> FailureCategory:
-    if status == "passed":
+    if status in {"passed", "queued", "running"}:
         return FailureCategory.NONE
     if status == "cancelled":
         return FailureCategory.CANCELLED
