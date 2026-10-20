@@ -1,5 +1,13 @@
-import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import { Alert, Modal } from 'antd'
+import { useAuthStore } from '../auth/auth-store'
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom'
 import {
   REQUEST_TARGET_DRAFT_PREFIX,
@@ -10,6 +18,10 @@ import {
 
 export function DraftSessionProvider({ children }: { children: ReactNode }) {
   const [session] = useState(() => new DraftSession())
+  const phase = useAuthStore((state) => state.phase)
+  useLayoutEffect(() => {
+    if (phase === 'anonymous' || phase === 'logging-out') session.clearProtocolRequests()
+  }, [phase, session])
   return (
     <DraftContext.Provider value={session}>
       <DraftProtection session={session} />

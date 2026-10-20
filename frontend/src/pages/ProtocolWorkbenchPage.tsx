@@ -38,7 +38,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import ProtocolFailurePanel from '../features/protocols/ProtocolFailurePanel'
 import ProtocolContractBrowser from '../features/protocols/ProtocolContractBrowser'
 import { Link } from 'react-router-dom'
@@ -469,7 +469,7 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
   const { message } = App.useApp()
   const active = useRef(true)
   const generation = useRef(0)
-  useEffect(() => {
+  useLayoutEffect(() => {
     active.current = true
     return () => {
       active.current = false
@@ -679,7 +679,7 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
   const { message } = App.useApp()
   const active = useRef(true)
   const generation = useRef(0)
-  useEffect(() => {
+  useLayoutEffect(() => {
     active.current = true
     return () => {
       active.current = false

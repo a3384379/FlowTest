@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, ConfigProvider } from 'antd'
 import { createMemoryRouter, Link, Outlet, RouterProvider, useSearchParams } from 'react-router-dom'
 import { expect, it } from 'vitest'
+import { useAuthStore } from '../auth/auth-store'
 import { DraftSessionProvider } from './DraftSessionProvider'
 import { useProtocolRequestDraft } from '../protocols/use-protocol-request-draft'
 import type { GraphQLRequestDraft } from '../protocols/protocol-request-draft'
@@ -78,4 +79,49 @@ it('retains protocol query navigation drafts while still guarding module and pro
   await userEvent.click(screen.getByRole('link', { name: '切换项目' }))
   expect(await screen.findByRole('dialog')).toBeInTheDocument()
   expect(router.state.location.pathname).toBe(`${root}/protocols`)
+})
+
+function SessionBoundDraft() {
+  const phase = useAuthStore((state) => state.phase)
+  return phase === 'authenticated' ? <ProtocolDraft /> : <div>当前已退出登录</div>
+}
+it('clears in-memory protocol inputs across logout and same-account reauthentication', async () => {
+  const previous = useAuthStore.getState()
+  useAuthStore.setState({ phase: 'authenticated' })
+  const router = createMemoryRouter(
+    [
+      {
+        path: '*',
+        element: (
+          <DraftSessionProvider>
+            <SessionBoundDraft />
+          </DraftSessionProvider>
+        ),
+      },
+    ],
+    { initialEntries: [`${root}/protocols`] },
+  )
+  const view = render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <App>
+        <RouterProvider router={router} />
+      </App>
+    </ConfigProvider>,
+  )
+  try {
+    fireEvent.change(screen.getByLabelText('协议会话草稿'), {
+      target: { value: 'synthetic-session-private-input' },
+    })
+    await act(async () => {
+      useAuthStore.setState({ phase: 'anonymous' })
+    })
+    expect(screen.getByText('当前已退出登录')).toBeInTheDocument()
+    await act(async () => {
+      useAuthStore.setState({ phase: 'authenticated' })
+    })
+    expect(screen.getByLabelText('协议会话草稿')).toHaveValue('')
+  } finally {
+    view.unmount()
+    useAuthStore.setState(previous)
+  }
 })
