@@ -1,6 +1,6 @@
 # 第十批整改：项目治理
 
-依据[完整审计 M06](../../audits/2026-10-19/complete-audit.md#m06)和[实施方案 M06](../../audits/2026-10-19/remediation-plan.md#m06)，落实 F-PRJ-01、F-PRJ-02。当前已实现并完成专项及浏览器验证，最终完整检查仍在运行；完成后更新本批回执与总进度。本文件不替代冻结审计和实施方案。
+依据[完整审计 M06](../../audits/2026-10-19/complete-audit.md#m06)和[实施方案 M06](../../audits/2026-10-19/remediation-plan.md#m06)，落实 F-PRJ-01、F-PRJ-02。两项均已实现并完成最终完整检查、专项及浏览器验证。本文件不替代冻结审计和实施方案。
 
 ## F-PRJ-01：可追踪的审计历史
 
@@ -43,6 +43,6 @@
 6. 首次脚本因重复文本命中隐藏选项/已存在授权行、把表头算入数据行而中断，均修正测试定位后继续。手机详情打开时曾观测整页441px；进一步测量确认抽屉本身390px，溢出来自后方选中长名称的目录控件。限制其宽度后实测390px，无掩盖横向溢出的全局样式。
 7. 冻结审计文档的源代码行号按其原始 `420d2e0` 验证，避免拿重构后的当前文件长度判断历史GitHub链接。2份文档、26模块、73问题、80验收项、463源码链接、内部锚点与依赖检查通过。
 
-最终源码为 `af4659f58f295fad4e15eb0dad489f3196391c68`，后端树 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端树 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16`。已同步前置协议PR中的S24定位及certifi锁定修复，最终完整检查重新针对这两个精确源码树运行，日志为 `remediation-project-final-backend-full.log`、`remediation-project-final-frontend-full.log`；完成前不计入已完整验证总数。
+最终源码为 `af4659f58f295fad4e15eb0dad489f3196391c68`，后端树 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端树 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16`。已同步前置协议PR中的S24定位及certifi锁定修复，最终完整检查针对这两个精确源码树通过：后端1843通过、14跳过、2项既有警告、91.01%；前端157文件1034项通过，无未处理异常，覆盖率85.89% / 82.15% / 85.44% / 88.34%。格式、Ruff、mypy440文件、lint、类型和生产构建全部通过。日志为 `remediation-project-final-backend-full.log`、`remediation-project-final-frontend-full.log` 和 `remediation-project-final-frontend-build.log`。
 
 GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最新HEAD为 `c163ba5`，安全检查通过，正式Required Gate仍等待其他工作完成。前置main回归39494968109已结束，因旧certifi安全检查失败；其余工作通过，不能记为全绿。本批尚未提交独立PR，未宣称已经合并或完成正式环境验收。
