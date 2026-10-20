@@ -39,4 +39,8 @@
 
 服务目录三项的完整 `make check` 已通过：后端1777 passed、13 skipped，覆盖率90.83%；前端145文件、942项，覆盖率85.65% / 81.74% / 85.04% / 88.12%，无未处理异常。完整格式、类型、构建均通过；真实 PostgreSQL 两个服务的影响及 Pact 角色隔离、桌面和390px手机验收通过。具体合同、源码树、专项和限制见[服务目录整改](batch-07.md)。
 
-报告 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 已按最新提交正式门禁合并 `dfd6f07937766b62611499387546860d07f5b98a`。针对该 SHA 的 [Full Regression 39454568135](https://github.com/a3384379/FlowTest/actions/runs/39454568135) 已成功。用例 [PR #137](https://github.com/a3384379/FlowTest/pull/137) 以 HEAD `e1c7abc3ba3361577899944634bdc4d829f8905d` 的正式 Required Gate 成功、无未解决审查线程后，使用匹配 SHA 的命令合并为 `0831c37f77d24f4fc016bd1cec2d38fcb37a50f5`。该后续主分支回归尚未完成。当前27项本地验证完成，其中24项已合并，其余按最新提交门禁继续交付；不等同于73项整改完成或正式发布验收通过。
+报告 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 已按最新提交正式门禁合并 `dfd6f07937766b62611499387546860d07f5b98a`。针对该 SHA 的 [Full Regression 39454568135](https://github.com/a3384379/FlowTest/actions/runs/39454568135) 已成功。用例 [PR #137](https://github.com/a3384379/FlowTest/pull/137) 以 HEAD `e1c7abc3ba3361577899944634bdc4d829f8905d` 的正式 Required Gate 成功、无未解决审查线程后，使用匹配 SHA 的命令合并为 `0831c37f77d24f4fc016bd1cec2d38fcb37a50f5`。服务目录 [PR #138](https://github.com/a3384379/FlowTest/pull/138) 以 HEAD `86aad999177768b5619ebdb41e10af12bc6451df` 正式Required Gate成功、全部审查线程解决后，按匹配SHA合并为 `1f94db33203a8ac32134517d88a1688b1d6082f1`。该主分支 [Full Regression 39466805365](https://github.com/a3384379/FlowTest/actions/runs/39466805365) 正在执行。当前28项本地验证完成，其中27项已合并，其余按最新提交门禁继续交付；不等同于73项整改完成或正式发布验收通过。
+
+## 请求目标阶段验证
+
+源码 `2a62fb504ff5f42a6e8fc09e90cb5457ad514891` 完整make check通过：后端1788项、13跳过、90.87%；前端147文件949项、覆盖率85.69% / 81.77% / 85.13% / 88.19%，无未处理异常。后续新增了新版节点、相同绑定版本、内联发布固定版本及手机版式补修，分别通过具名专项、类型或构建与真实浏览器；不把旧提交的完整通过冒充后续HEAD完整通过。F-TGT-02/03的候选影响范围仍在开发，合同、证据与限制见[第八批](batch-08.md)。
