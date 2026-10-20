@@ -4,7 +4,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 
-from app.domain.contract_hub import ReleaseVersion, ServiceDisplayName, ServiceKey
+from app.domain.contract_hub import (
+    PactDocument,
+    ProviderInteractionResult,
+    ReleaseVersion,
+    ServiceDisplayName,
+    ServiceKey,
+)
 
 Description = Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)]
 
@@ -78,6 +84,11 @@ class ProviderVerificationRequest(BaseModel):
     )
 
 
+class PactContractDetailResponse(BaseModel):
+    contract: PactContractResponse
+    contract_document: PactDocument
+
+
 class ProviderVerificationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,9 +101,15 @@ class ProviderVerificationResponse(BaseModel):
     interaction_count: int
     passed_count: int
     failed_count: int
-    results: list[dict[str, JsonValue]]
+    results: list[ProviderInteractionResult]
     verified_by_id: UUID
     created_at: datetime
+
+
+class ProviderVerificationDetailResponse(BaseModel):
+    verification: ProviderVerificationResponse
+    pact: PactContractDetailResponse
+    actual_response_available: Literal[False] = False
 
 
 class ContractHubSummaryResponse(BaseModel):

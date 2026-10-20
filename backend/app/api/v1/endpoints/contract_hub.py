@@ -18,7 +18,9 @@ from app.schemas.contract_hub import (
     DeploymentCheckRequest,
     DeploymentCheckResponse,
     PactBrokerImportRequest,
+    PactContractDetailResponse,
     PactContractResponse,
+    ProviderVerificationDetailResponse,
     ProviderVerificationRequest,
     ProviderVerificationResponse,
     ServiceCatalogCreate,
@@ -166,15 +168,58 @@ async def list_pact_contracts(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[PactContractResponse]:
-    views = await _service(session).list_pacts(actor=current_user, project_id=project_id)
-    start = (page - 1) * page_size
+    views, total = await _service(session).page_pacts(
+        actor=current_user,
+        project_id=project_id,
+        search=search,
+        offset=(page - 1) * page_size,
+        limit=page_size,
+    )
     return Page(
-        items=[pact_response(item) for item in views[start : start + page_size]],
-        total=len(views),
+        items=[pact_response(item) for item in views],
+        total=total,
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/pacts/{pact_id}", response_model=PactContractDetailResponse)
+async def get_pact_contract(
+    project_id: UUID,
+    pact_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> PactContractDetailResponse:
+    return await _service(session).get_pact(
+        actor=current_user, project_id=project_id, pact_id=pact_id
+    )
+
+
+@router.get("/verifications/{verification_id}", response_model=ProviderVerificationDetailResponse)
+async def get_provider_verification(
+    project_id: UUID,
+    verification_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ProviderVerificationDetailResponse:
+    return await _service(session).get_verification(
+        actor=current_user, project_id=project_id, verification_id=verification_id
+    )
+
+
+@router.get("/deployment-checks/{check_id}", response_model=DeploymentCheckResponse)
+async def get_deployment_check(
+    project_id: UUID,
+    check_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> DeploymentCheckResponse:
+    model = await _service(session).get_deployment_check(
+        actor=current_user, project_id=project_id, check_id=check_id
+    )
+    return DeploymentCheckResponse.model_validate(model)
 
 
 @router.post(
