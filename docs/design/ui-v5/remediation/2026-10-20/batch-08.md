@@ -109,3 +109,9 @@ PR #139审查指出，预览后另一编辑者发布接口版本时，原绑定�
 真实浏览器并发链路：合成接口预览基线v2后，另一个请求发布v3（新路径`/health/parallel-review`，仍绑定结算服务）；旧候选确认返回409并显示trace，确认按钮禁用，PG读取保持v3且未生成额外版本。显式读取最新版本后显示v3、新路径和同一服务选择；确认保存为v4后，真实API预览与新候选相同。v1、v2、v3的路径与绑定保持，原已发布流程仍固定APIv2。证据`remediation-target-version-live-publication.log`、`remediation-target-version-live-conflict-postcondition.log`、`remediation-target-version-live-save-postcondition.log`。只操作独立审计合成数据，没有发起目标执行。
 
 最后的版本提示纵向布局仅改变说明/按钮排版，四个具名前端文件24项、lint/TypeScript及构建通过。390×926截图已复核：版本说明保持正常行宽、刷新位于说明下方，保存/取消保持可见，文档宽390；截图`remediation-target-version-notice-final-mobile.png`，几何记录`remediation-target-version-notice-mobile-geometry.log`。此验收候选只打开后取消，没有在v4后增加API版本。该小版式调整后的本机全量覆盖率未重复运行；f45全量结果与最新HEAD远端全量门禁分开记录。
+
+### 远端完整前端回归的超时修正
+
+`9798cdea45b492988fcd63e96494ba633f8e21e4` 的 PR Validation [39481664884](https://github.com/a3384379/FlowTest/actions/runs/39481664884) 未通过：服务目录综合测试超过既有60秒上限，其他953项前端测试通过；其余后端、Compose、Windows与升级作业通过。这不是合并成功。
+
+将该测试拆为目录证据/旧链接定位和服务端搜索两个独立场景，限定目录与详情的DOM查询范围。搜索和清空均等待服务端返回的匹配总数实际进入页面，再校验选中ID仍固定；恢复对清空后结果的正向断言。保持原有超时、覆盖率和CI标准。修正后的8项服务目录测试本地通过，日志`remediation-service-ci-timeout-targeted-r1.log`。最新HEAD的远端门禁仍需独立确认，不能把本地通过替代远端结果。
