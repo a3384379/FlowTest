@@ -7,6 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.api_assets import JsonValue
+from app.domain.asset_catalog import (
+    AssetCatalogEnvironment,
+    AssetCatalogRun,
+    AssetCatalogScope,
+    InvalidAssetCatalogScope,
+)
 from app.domain.test_assets import VersionChange, definition_fingerprint, version_changes
 from app.models.access import Folder, User
 from app.models.api_assets import Environment
@@ -18,6 +24,7 @@ from app.models.test_assets import (
     TestSuiteVersionItem,
 )
 from app.models.workflows import Workflow
+from app.repositories.asset_catalog import AssetCatalogRepository
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.test_assets import (
@@ -38,6 +45,15 @@ class AssetVersionDiff:
     from_version: int
     to_version: int
     changes: tuple[VersionChange, ...]
+
+
+def _validated_catalog_scope(scope: AssetCatalogScope | None) -> AssetCatalogScope:
+    try:
+        return (scope or AssetCatalogScope()).validated()
+    except InvalidAssetCatalogScope as error:
+        raise AppError(
+            code="INVALID_ASSET_CATALOG_SCOPE", message=str(error), status_code=422
+        ) from error
 
 
 def _validated_case_definition(raw: dict[str, JsonValue]) -> TestCaseDefinitionInput:
@@ -108,7 +124,8 @@ class TestCaseService:
         page_size: int,
         folder_id: UUID | None = None,
         unfiled: bool = False,
-    ) -> tuple[list[TestCase], int]:
+        scope: AssetCatalogScope | None = None,
+    ) -> tuple[list[TestCase], int, dict[UUID, AssetCatalogRun]]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         if folder_id is not None and unfiled:
             raise AppError(
@@ -126,14 +143,43 @@ class TestCaseService:
             limit=page_size,
             folder_id=folder_id,
             unfiled=unfiled,
+            scope=_validated_catalog_scope(scope),
         )
 
     async def directory_counts(
-        self, *, actor: User, project_id: UUID, search: str | None, tag: str | None
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        search: str | None,
+        tag: str | None,
+        scope: AssetCatalogScope | None = None,
     ) -> AssetDirectoryCountsResponse:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._assets.directory_counts(
-            project_id=project_id, search=search.strip() if search else None, tag=tag
+            project_id=project_id,
+            search=search.strip() if search else None,
+            tag=tag,
+            scope=_validated_catalog_scope(scope),
+        )
+
+    async def catalog_environments(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        search: str,
+        selected_id: UUID | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[AssetCatalogEnvironment], int]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await AssetCatalogRepository(self._session).environment_options(
+            project_id=project_id,
+            search=search.strip(),
+            selected_id=selected_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
         )
 
     async def get(self, *, actor: User, project_id: UUID, case_id: UUID) -> TestCase:
@@ -474,6 +520,7 @@ class TestSuiteService:
         page_size: int,
         folder_id: UUID | None = None,
         unfiled: bool = False,
+        scope: AssetCatalogScope | None = None,
     ) -> tuple[list[TestSuite], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         if folder_id is not None and unfiled:
@@ -491,6 +538,7 @@ class TestSuiteService:
             limit=page_size,
             folder_id=folder_id,
             unfiled=unfiled,
+            scope=_validated_catalog_scope(scope),
         )
 
     async def get(self, *, actor: User, project_id: UUID, suite_id: UUID) -> TestSuite:

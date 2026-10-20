@@ -4,8 +4,10 @@ from uuid import UUID
 from fastapi import APIRouter, Header, Query, Request, Response, status
 
 from app.api.dependencies import CurrentUser, SessionDependency, WorkflowCoordinator
+from app.domain.asset_catalog import AssetCatalogRun
 from app.domain.test_assets import VersionChange
 from app.http.test_asset_packages import package_request_contract, read_package_payload
+from app.models.test_assets import TestCase as TestCaseModel
 from app.schemas.common import Page
 from app.schemas.tasking import TestPlanRunDetailResponse
 from app.schemas.test_asset_packages import (
@@ -19,12 +21,19 @@ from app.schemas.test_assets import (
     AssetBulkDeleteRequest,
     AssetBulkMove,
     AssetBulkMoveResponse,
+    AssetCatalogListQuery,
+    AssetCatalogRunResponse,
     AssetClone,
     AssetDeleteTarget,
     AssetDeletionPreviewRequest,
     AssetDeletionPreviewResponse,
     AssetDeletionResponse,
     AssetDirectoryCountsResponse,
+    AssetDirectoryQuery,
+    AssetEnvironmentQuery,
+    AssetEnvironmentResponse,
+    CaseCatalogListQuery,
+    TestCaseCatalogResponse,
     TestCaseCreate,
     TestCaseResponse,
     TestCaseRunHistoryResponse,
@@ -104,16 +113,42 @@ async def apply_test_asset_package(
     )
 
 
+@router.get("/test-assets/environment-options", response_model=Page[AssetEnvironmentResponse])
+async def test_asset_environment_options(
+    project_id: UUID,
+    query: Annotated[AssetEnvironmentQuery, Query()],
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Page[AssetEnvironmentResponse]:
+    items, total = await TestCaseService(session).catalog_environments(
+        actor=current_user,
+        project_id=project_id,
+        search=query.search,
+        selected_id=query.selected_id,
+        page=query.page,
+        page_size=query.page_size,
+    )
+    return Page(
+        items=[AssetEnvironmentResponse.model_validate(item) for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
 @router.get("/test-assets/directory-counts", response_model=AssetDirectoryCountsResponse)
 async def test_asset_directory_counts(
     project_id: UUID,
+    query: Annotated[AssetDirectoryQuery, Query()],
     session: SessionDependency,
     current_user: CurrentUser,
-    search: str | None = Query(default=None, max_length=200),
-    tag: str | None = Query(default=None, max_length=50),
 ) -> AssetDirectoryCountsResponse:
     return await TestCaseService(session).directory_counts(
-        actor=current_user, project_id=project_id, search=search, tag=tag
+        actor=current_user,
+        project_id=project_id,
+        search=query.search,
+        tag=query.tag,
+        scope=query.to_scope(),
     )
 
 
@@ -312,35 +347,40 @@ async def run_test_case(
     )
 
 
-@router.get("/test-cases", response_model=Page[TestCaseResponse])
+@router.get("/test-cases", response_model=Page[TestCaseCatalogResponse])
 async def list_test_cases(
     project_id: UUID,
+    query: Annotated[CaseCatalogListQuery, Query()],
     session: SessionDependency,
     current_user: CurrentUser,
-    search: str | None = Query(default=None, max_length=200),
-    tag: str | None = Query(default=None, max_length=50),
-    is_template: bool | None = None,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    folder_id: UUID | None = None,
-    unfiled: bool = False,
-) -> Page[TestCaseResponse]:
-    items, total = await TestCaseService(session).list_cases(
+) -> Page[TestCaseCatalogResponse]:
+    service = TestCaseService(session)
+    items, total, latest = await service.list_cases(
         actor=current_user,
         project_id=project_id,
-        search=search,
-        tag=tag,
-        is_template=is_template,
-        page=page,
-        page_size=page_size,
-        folder_id=folder_id,
-        unfiled=unfiled,
+        search=query.search,
+        tag=query.tag,
+        is_template=query.is_template,
+        page=query.page,
+        page_size=query.page_size,
+        folder_id=query.folder_id,
+        unfiled=query.unfiled,
+        scope=query.to_scope(),
     )
     return Page(
-        items=[TestCaseResponse.model_validate(item) for item in items],
+        items=[_catalog_case_response(item, latest.get(item.id)) for item in items],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=query.page,
+        page_size=query.page_size,
+    )
+
+
+def _catalog_case_response(
+    model: TestCaseModel, latest: AssetCatalogRun | None
+) -> TestCaseCatalogResponse:
+    return TestCaseCatalogResponse(
+        **TestCaseResponse.model_validate(model).model_dump(),
+        latest_run=AssetCatalogRunResponse.model_validate(latest) if latest is not None else None,
     )
 
 
@@ -492,30 +532,26 @@ async def diff_test_case_versions(
 @router.get("/test-suites", response_model=Page[TestSuiteResponse])
 async def list_test_suites(
     project_id: UUID,
+    query: Annotated[AssetCatalogListQuery, Query()],
     session: SessionDependency,
     current_user: CurrentUser,
-    search: str | None = Query(default=None, max_length=200),
-    tag: str | None = Query(default=None, max_length=50),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    folder_id: UUID | None = None,
-    unfiled: bool = False,
 ) -> Page[TestSuiteResponse]:
     items, total = await TestSuiteService(session).list_suites(
         actor=current_user,
         project_id=project_id,
-        search=search,
-        tag=tag,
-        page=page,
-        page_size=page_size,
-        folder_id=folder_id,
-        unfiled=unfiled,
+        search=query.search,
+        tag=query.tag,
+        page=query.page,
+        page_size=query.page_size,
+        folder_id=query.folder_id,
+        unfiled=query.unfiled,
+        scope=query.to_scope(),
     )
     return Page(
         items=[TestSuiteResponse.model_validate(item) for item in items],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=query.page,
+        page_size=query.page_size,
     )
 
 

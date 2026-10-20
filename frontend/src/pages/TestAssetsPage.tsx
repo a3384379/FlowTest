@@ -1,3 +1,6 @@
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import AssetCatalogFilters from '../features/test-assets/AssetCatalogFilters'
+import CaseCatalogResult from '../features/test-assets/CaseCatalogResult'
 import {
   CopyOutlined,
   DiffOutlined,
@@ -108,25 +111,34 @@ function TestAssetsWorkspace() {
   const [runVersion, setRunVersion] = useState<number>()
   const [planVersion, setPlanVersion] = useState<number>()
   const [recentRun, setRecentRun] = useState<TestCaseRun | null>(null)
-  const [selectedCases, setSelectedCases] = useState<string[]>([])
-  const [selectedSuites, setSelectedSuites] = useState<string[]>([])
   const [deletion, setDeletion] = useState<{ kind: AssetKind; ids: string[] } | null>(null)
   const [folderId, setFolderId] = useState<string | null>(null)
   const [folderManagementOpen, setFolderManagementOpen] = useState(false)
-  const [casePage, setCasePage] = useState(1)
-  const [suitePage, setSuitePage] = useState(1)
   const [plan, setPlan] = useState<{ targets: PublishedAssetTarget[]; execute: boolean } | null>(
     null,
   )
   const browseFolder = searchParams.get('folder') ?? 'all'
   const state = useTestAssets({
     folder: browseFolder,
-    casePage,
-    suitePage,
     loadCaseOptions: suiteEditor !== undefined,
   })
   const cases = pageItems(state.cases.data)
   const suites = pageItems(state.suites.data)
+  const { casePage, suitePage } = state.catalogScope
+  const selectionTab = searchParams.get('type') === 'suite' ? 'suite' : 'case'
+  const selectionScope = `${state.catalogScope.selectionKey}:${browseFolder}:${selectionTab}`
+  const [caseSelection, setSelectedCases] = useRouteScopedState<string[]>(
+    state.projectId,
+    `${selectionScope}:case:${casePage}`,
+    [],
+  )
+  const [suiteSelection, setSelectedSuites] = useRouteScopedState<string[]>(
+    state.projectId,
+    `${selectionScope}:suite:${suitePage}`,
+    [],
+  )
+  const selectedCases = caseSelection.filter((id) => cases.some((item) => item.id === id))
+  const selectedSuites = suiteSelection.filter((id) => suites.some((item) => item.id === id))
   const publishedCases = pageItems(state.caseOptions.data).filter((item) => item.current_version)
   const history = useAssetHistory(
     state.projectId,
@@ -135,8 +147,6 @@ function TestAssetsWorkspace() {
   function resetSelection() {
     setSelectedCases([])
     setSelectedSuites([])
-    setCasePage(1)
-    setSuitePage(1)
   }
   function browse(folder: string): void {
     resetSelection()
@@ -144,6 +154,8 @@ function TestAssetsWorkspace() {
     next.set('folder', folder)
     next.delete('focus')
     next.delete('version')
+    next.delete('casePage')
+    next.delete('suitePage')
     setSearchParams(next)
   }
   const focusedId = searchParams.get('focus') ?? undefined
@@ -184,6 +196,8 @@ function TestAssetsWorkspace() {
     next.set('type', key === 'suites' ? 'suite' : 'case')
     next.delete('focus')
     next.delete('version')
+    next.delete('casePage')
+    next.delete('suitePage')
     setSearchParams(next)
   }
   function openTarget(target: PublishedAssetTarget, execute: boolean) {
@@ -204,7 +218,7 @@ function TestAssetsWorkspace() {
     page: casePage,
     total: state.cases.data?.total,
     onPage: (page) => {
-      setCasePage(page)
+      state.catalogScope.setPage('case', page)
       setSelectedCases([])
     },
     onFocus: focus,
@@ -219,6 +233,11 @@ function TestAssetsWorkspace() {
   return (
     <div className="test-assets-page">
       <AssetHeading state={state} onFilter={() => resetSelection()} />
+      <AssetCatalogFilters
+        projectId={state.projectId}
+        state={state.catalogScope}
+        onRefresh={() => void state.refreshCatalog()}
+      />
       <div className="test-asset-workspace">
         <AssetDirectory
           folders={folderItems(state)}
@@ -264,7 +283,7 @@ function TestAssetsWorkspace() {
               page: suitePage,
               total: state.suites.data?.total,
               onPage: (page) => {
-                setSuitePage(page)
+                state.catalogScope.setPage('suite', page)
                 setSelectedSuites([])
               },
             }}
@@ -320,6 +339,7 @@ function TestAssetsWorkspace() {
         onClose={() => setDeletion(null)}
         onDeleted={() => {
           resetSelection()
+          state.catalogScope.resetPages()
           setDeletion(null)
         }}
       />
@@ -644,6 +664,7 @@ function AssetHeading({ state, onFilter }: { state: AssetState; onFilter: () => 
       <Space wrap>
         <Input.Search
           key={state.search}
+          defaultValue={state.search}
           aria-label="搜索测试用例"
           allowClear
           placeholder="搜索名称或描述"
@@ -1051,6 +1072,7 @@ function WorkspaceCaseTable(props: Parameters<typeof CaseTable>[0]) {
   const workspace = props.workspace!
   const ids = props.items.map((item) => item.id)
   const latest = useQuery({
+    enabled: props.items.some((item) => item.latest_run === undefined),
     queryKey: ['test-case-runs', workspace.projectId, ids.join('|')],
     queryFn: () => listLatestTestCaseRuns(workspace.projectId, ids),
     refetchInterval: (query) =>
@@ -1153,7 +1175,7 @@ export function CaseTable({
             ]
           : []),
         {
-          title: '运行环境',
+          title: '草稿绑定环境',
           render: (_, item) =>
             environments.find(
               (environment) => environment.id === item.draft_definition.environment_id,
@@ -1163,6 +1185,14 @@ export function CaseTable({
         {
           title: '最近运行',
           render: (_, item) => {
+            if (workspace && item.latest_run !== undefined)
+              return (
+                <CaseCatalogResult
+                  projectId={workspace.projectId}
+                  caseId={item.id}
+                  run={item.latest_run}
+                />
+              )
             if (latestError) return '状态加载失败'
             if (latestLoading || !latestRuns) return '状态加载中'
             const run = latestRuns.find((entry) => entry.case_id === item.id)

@@ -22,6 +22,7 @@ from app.models.workflows import (
     WorkflowExecution,
     WorkflowNodeExecution,
 )
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 def _plan_match(
@@ -185,21 +186,26 @@ class ReportingRepository:
         scope: ReportScope | None = None,
     ) -> tuple[list[WorkflowExecution], int]:
         criteria = _execution_criteria(project_id, scope or ReportScope(status=status))
-        items = list(
-            (
-                await self._session.scalars(
-                    select(WorkflowExecution)
-                    .where(*criteria)
-                    .order_by(WorkflowExecution.started_at.desc(), WorkflowExecution.id.desc())
-                    .offset(offset)
-                    .limit(limit)
-                )
-            ).all()
+        ranked = (
+            select(
+                WorkflowExecution.id.label("item_id"),
+                func.row_number()
+                .over(order_by=(WorkflowExecution.started_at.desc(), WorkflowExecution.id.desc()))
+                .label("position"),
+            )
+            .where(*criteria)
+            .cte()
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(WorkflowExecution).where(*criteria)
-        )
-        return items, int(total or 0)
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(WorkflowExecution, page.c.total)
+                .select_from(page)
+                .outerjoin(WorkflowExecution, WorkflowExecution.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
 
     async def list_executions_since(
         self, *, project_id: UUID, since: datetime, scope: ReportScope | None = None

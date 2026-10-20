@@ -1,3 +1,4 @@
+import type { AssetCatalogScope } from './asset-catalog-scope'
 import {
   apiClient,
   type CreatedTestPlan,
@@ -70,12 +71,13 @@ export async function listAssetDirectoryCounts(
   projectId: string,
   search: string,
   tag: string,
+  scope?: AssetCatalogScope,
 ): Promise<AssetDirectoryCounts> {
   return (
     await apiClient.get<AssetDirectoryCounts>(
       `/projects/${projectId}/test-assets/directory-counts`,
       {
-        params: { search: search || undefined, tag: tag || undefined },
+        params: { search: search || undefined, tag: tag || undefined, ...scope },
       },
     )
   ).data
@@ -203,5 +205,19 @@ export async function createAssetPlan(
         target_version: target.version,
       })),
     })
+  ).data
+}
+
+export async function listAssetEnvironmentOptions(
+  projectId: string,
+  page: number,
+  search: string,
+  selectedId?: string,
+): Promise<Page<{ id: string; name: string }>> {
+  return (
+    await apiClient.get<Page<{ id: string; name: string }>>(
+      `/projects/${projectId}/test-assets/environment-options`,
+      { params: { page, page_size: 20, search, selected_id: selectedId } },
+    )
   ).data
 }

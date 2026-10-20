@@ -42,6 +42,15 @@ export default function AssetPlanDialog({
         await client.invalidateQueries({ queryKey: ['test-suite-latest-runs', projectId] })
         await client.invalidateQueries({ queryKey: ['asset-run-history', projectId] })
         await client.invalidateQueries({ queryKey: ['test-plan-runs', projectId] })
+        for (const resource of [
+          'test-cases',
+          'test-suites',
+          'asset-directory-counts',
+          'asset-environment-options',
+          'asset-environment-selected',
+        ]) {
+          await client.invalidateQueries({ queryKey: [resource, projectId] })
+        }
       }
     } catch (failure) {
       setError(apiErrorMessage(failure))
