@@ -45,4 +45,4 @@
 
 最终源码为 `af4659f58f295fad4e15eb0dad489f3196391c68`，后端树 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端树 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16`。已同步前置协议PR中的S24定位及certifi锁定修复，最终完整检查针对这两个精确源码树通过：后端1843通过、14跳过、2项既有警告、91.01%；前端157文件1034项通过，无未处理异常，覆盖率85.89% / 82.15% / 85.44% / 88.34%。格式、Ruff、mypy440文件、lint、类型和生产构建全部通过。日志为 `remediation-project-final-backend-full.log`、`remediation-project-final-frontend-full.log` 和 `remediation-project-final-frontend-build.log`。
 
-GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最新HEAD为 `c163ba5`，安全检查通过，正式Required Gate仍等待其他工作完成。前置main回归39494968109已结束，因旧certifi安全检查失败；其余工作通过，不能记为全绿。本批尚未提交独立PR，未宣称已经合并或完成正式环境验收。
+GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最新HEAD为 `c163ba5`，安全检查通过，正式Required Gate仍等待其他工作完成。前置main回归39494968109已结束，因旧certifi安全检查失败；其余工作通过，不能记为全绿。项目治理独立分支已推送，正式PR门禁、合并与正式环境验收另行核对。
