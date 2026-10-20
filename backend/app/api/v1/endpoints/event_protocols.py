@@ -46,6 +46,23 @@ async def list_event_sources(
     )
 
 
+@router.get("/event-sources/{source_id}", response_model=EventSourceResponse)
+async def get_event_source(
+    source_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    kind: EventSourceKind | None = None,
+) -> EventSourceResponse:
+    source = await EventSourceService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        source_id=source_id,
+        kind=kind,
+    )
+    return EventSourceResponse.model_validate(source)
+
+
 @router.post(
     "/event-sources",
     response_model=EventSourceResponse,

@@ -45,6 +45,22 @@ async def list_graphql_schemas(
     )
 
 
+@router.get("/graphql/schemas/{artifact_id}", response_model=SchemaArtifactResponse)
+async def get_graphql_schema(
+    artifact_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SchemaArtifactResponse:
+    artifact = await ProtocolAssetService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind.GRAPHQL,
+    )
+    return SchemaArtifactResponse.model_validate(artifact)
+
+
 @router.post(
     "/graphql/schemas",
     response_model=SchemaArtifactResponse,
@@ -83,6 +99,22 @@ async def list_grpc_descriptors(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/grpc/descriptors/{artifact_id}", response_model=SchemaArtifactResponse)
+async def get_grpc_descriptor(
+    artifact_id: UUID,
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> SchemaArtifactResponse:
+    artifact = await ProtocolAssetService(session).get(
+        actor=current_user,
+        project_id=project_id,
+        artifact_id=artifact_id,
+        protocol=ProtocolKind.GRPC,
+    )
+    return SchemaArtifactResponse.model_validate(artifact)
 
 
 @router.post(
