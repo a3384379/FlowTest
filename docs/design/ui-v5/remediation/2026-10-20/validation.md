@@ -70,3 +70,9 @@ F-PRJ-01、F-PRJ-02在源码 `af4659f58f295fad4e15eb0dad489f3196391c68` 完成�
 管理员及独立普通Owner浏览器验证包括61条日志第2页、URL/刷新、受权资源详情、106个合成用户/团队的远端搜索和添加、读失败禁写及选择重试、键盘Enter打开详情与390px布局；日志 `remediation-project-governance-browser-r2.log` 和 `remediation-project-owner-browser-current-r2.log`。先前中断和第一次完整运行后的补修单独保留，详见[第十批](batch-10.md)。冻结审计的历史源码链接按基线Git对象校验，463链接及其余文档结构通过。
 
 当前35/73项本地完成、38项待完成，其中30项已合并；未将本地成功当作最新HEAD门禁或正式环境验收。前置PR #140最新 `c163ba5` 的安全检查通过，其余门禁等待完成；旧main回归39494968109已结束为失败，原因是已由该PR修复的certifi依赖公告。
+
+## 多协议合并后的项目治理基线
+
+[PR #140](https://github.com/a3384379/FlowTest/pull/140)最终HEAD `c163ba5975cc3ec7eaec5fba8dc6e6cc96a21ac0` 的正式Required Gate通过，审查线程无未解决项，按匹配SHA合并main为 `4a27c3b14743be4d0df756f83238766a294adee8`。合并后[Full Regression 39505978249](https://github.com/a3384379/FlowTest/actions/runs/39505978249)运行中，已确认head一致。当前35本地完成、38待完成、33已合并。
+
+项目治理同步main时仅解决两份进度/验证文档的重复上下文冲突，保留已经包含前置修复和本模块回执的最新版本；合并暂存树的后端 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16` 与最终完整验证一致。本地完整检查仍适用于同一源码树，[PR #141](https://github.com/a3384379/FlowTest/pull/141)最新提交门禁另行确认。
