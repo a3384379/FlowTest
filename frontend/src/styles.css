@@ -2447,3 +2447,59 @@ body {
     display: none;
   }
 }
+
+/* Request targets: choose a service, then read one environment address at a time. */
+.request-target-row-selected > td {
+  background: var(--color-primary-bg, #e6f4ff) !important;
+}
+.request-target-environment .ant-space-item {
+  min-width: 0;
+}
+.request-target-environment label {
+  display: block;
+  width: 100%;
+}
+.request-target-url,
+.request-target-impact-item {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.request-target-impact-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-color, #e6edf5);
+}
+.request-target-table .ant-btn-link {
+  white-space: normal;
+  height: auto;
+  text-align: left;
+  padding-inline: 0;
+}
+@media (max-width: 600px) {
+  .request-target-environment .ant-card-body {
+    padding: 12px;
+  }
+  .request-target-endpoint .ant-card-head {
+    padding-inline: 12px;
+  }
+  .request-target-table th,
+  .request-target-table td {
+    overflow-wrap: anywhere;
+  }
+}
+
+.request-target-change-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  margin-block: 4px 12px;
+}
+
+.request-target-api-bindings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+}
+.request-target-api-bindings > .ant-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

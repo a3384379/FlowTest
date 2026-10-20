@@ -5,6 +5,7 @@ import type { WorkflowDraftEdit } from '../workflows/use-workflows'
 import type { SuiteFormValues } from '../test-assets/test-asset-view-model'
 
 export const DRAFT_NAVIGATION_CANCELLED = 'flowtest:draft-navigation-cancelled'
+export const DRAFT_DISCARD_PREFIX = 'discard-on-navigation:'
 
 type ApiDraft = {
   fields: WorkbenchFields

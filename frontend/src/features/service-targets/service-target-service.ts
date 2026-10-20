@@ -74,6 +74,57 @@ export type ServiceTargetImpactPreview = {
 
 type ImpactItem = { id: string; name: string; reason: string }
 
+export type TargetPreviewChange =
+  | { kind: 'service'; service_id: string; enabled?: boolean }
+  | {
+      kind: 'endpoint'
+      endpoint_id: string
+      variant?: string
+      base_url?: string
+      enabled?: boolean
+      variables?: Record<string, string>
+    }
+  | { kind: 'environment_default'; environment_id: string; service_id: string | null }
+  | { kind: 'api_binding'; api_id: string; service_id: string | null }
+
+export type TargetPreviewInput = {
+  change: TargetPreviewChange
+  environment_id?: string
+  api_id?: string
+  api_version?: number
+  service_override?: string
+  endpoint_variant?: string
+}
+
+export type TargetPreviewResolution = {
+  status: 'resolved' | 'unavailable'
+  url: string | null
+  service_key: string | null
+  endpoint_variant: string | null
+  endpoint_revision: number | null
+  api_version: number | null
+  error: { code: string; message: string; details: null; trace_id: string } | null
+}
+
+export type TargetPreviewResult = {
+  before: TargetPreviewResolution
+  after: TargetPreviewResolution
+  persisted: false
+  network_checked: false
+}
+
+export async function previewRequestTarget(
+  projectId: string,
+  input: TargetPreviewInput,
+): Promise<TargetPreviewResult> {
+  return (
+    await apiClient.post<TargetPreviewResult>(
+      `/projects/${projectId}/request-targets/preview`,
+      input,
+    )
+  ).data
+}
+
 export async function listRequestServices(projectId: string): Promise<RequestService[]> {
   return (await apiClient.get<RequestService[]>(`/projects/${projectId}/services`)).data
 }

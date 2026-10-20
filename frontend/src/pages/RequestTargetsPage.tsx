@@ -1,3 +1,17 @@
+import TargetChangeComparison from '../features/service-targets/TargetChangeComparison'
+import BindingReviewModal, {
+  type BindingCandidate,
+} from '../features/service-targets/BindingReviewModal'
+import TargetResolutionPreview from '../features/service-targets/TargetResolutionPreview'
+import TargetDraftGuard from '../features/service-targets/TargetDraftGuard'
+import TargetImpactPanel from '../features/service-targets/TargetImpactPanel'
+import EnvironmentEndpointCard from '../features/service-targets/EnvironmentEndpointCard'
+import EnvironmentMapEditor from '../features/api-console/EnvironmentMapEditor'
+import {
+  mapValue,
+  parseEnvironmentMap,
+  type EnvironmentMapValue,
+} from '../features/api-console/environment-map'
 import CatalogPagination from '../components/CatalogPagination'
 import { invalidateRequestTargets } from '../features/service-targets/request-target-cache'
 import { useCatalogQuery } from '../lib/catalog-query'
@@ -7,6 +21,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Descriptions,
   Form,
   Input,
@@ -14,14 +29,14 @@ import {
   Modal,
   Row,
   Select,
-  Space,
   Switch,
   Table,
+  Space,
   Tag,
   Typography,
   message,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
@@ -40,6 +55,7 @@ import {
   type ServiceTargetImpactPreview,
   type UpdateEndpointInput,
   type UpdateRequestServiceInput,
+  type TargetPreviewChange,
 } from '../features/service-targets/service-target-service'
 import { listSecrets } from '../features/projects/asset-service'
 import { useEnvironmentSelection } from '../features/projects/environment-selection'
@@ -63,8 +79,8 @@ type ServiceForm = CreateRequestServiceInput
 type EndpointForm = CreateEndpointInput
 type ServiceEditForm = UpdateRequestServiceInput
 type EndpointEditForm = Omit<UpdateEndpointInput, 'headers' | 'variables'> & {
-  headers_json: string
-  variables_json: string
+  headers_map: EnvironmentMapValue
+  variables_map: EnvironmentMapValue
 }
 
 type ImpactEditTarget =
@@ -72,17 +88,33 @@ type ImpactEditTarget =
 
 export default function RequestTargetsPage() {
   const { projectId } = useProjectContext()
-  return <RequestTargetsWorkspace key={projectId ?? 'none'} />
+  return projectId ? (
+    <RequestTargetsWorkspace key={projectId} projectId={projectId} />
+  ) : (
+    <Alert type="info" title="请先选择项目" />
+  )
 }
 
-function RequestTargetsWorkspace() {
-  const { projectId } = useProjectContext()
+function RequestTargetsWorkspace({ projectId }: { projectId: string }) {
   const { canEdit, permissions } = useProjectCapabilities()
   const [serviceForm] = Form.useForm<ServiceForm>()
   const [endpointForm] = Form.useForm<EndpointForm>()
   const [serviceEditForm] = Form.useForm<ServiceEditForm>()
   const [endpointEditForm] = Form.useForm<EndpointEditForm>()
-  const [editingTarget, setEditingTarget] = useState<ImpactEditTarget>()
+  const [selectedServiceId, setSelectedServiceId] = useState<string>()
+  const [editingTarget, setEditingTarget] = useState<ImpactEditTarget & { session: number }>()
+  const [editDirty, setEditDirty] = useState(false)
+  const [bindingCandidate, setBindingCandidate] = useState<BindingCandidate>()
+  const session = useRef({ active: true, edit: 0, binding: 0 })
+  useEffect(() => {
+    const current = session.current
+    current.active = true
+    return () => {
+      current.active = false
+      current.edit += 1
+      current.binding += 1
+    }
+  }, [])
   const [impactPreview, setImpactPreview] = useState<ServiceTargetImpactPreview>()
   const [connectivity, setConnectivity] = useState<Record<string, EndpointConnectivity>>({})
   const queryClient = useQueryClient()
@@ -100,6 +132,10 @@ function RequestTargetsWorkspace() {
     environmentPlaceholder,
     environmentStatus,
   } = useEnvironmentSelection(projectId, environments.data)
+  const environmentContext = useRef(environmentId)
+  useLayoutEffect(() => {
+    environmentContext.current = environmentId
+  }, [environmentId])
   const services = useQuery({
     queryKey: ['request-target-services', projectId],
     queryFn: () => listRequestServices(required(projectId)),
@@ -127,68 +163,153 @@ function RequestTargetsWorkspace() {
     mutationFn: (input: ServiceForm) => createRequestService(editable(projectId, canEdit), input),
     onSuccess: async () => {
       await invalidateRequestTargets(queryClient, projectId)
+      if (!session.current.active) return
       serviceForm.resetFields()
-      messageApi.success('请求 Service 已创建')
+      messageApi.success('逻辑服务已创建')
+    },
+    onError: (reason) => {
+      if (session.current.active) messageApi.error(apiErrorMessage(reason))
     },
   })
   const createEndpoint = useMutation({
     mutationFn: (input: EndpointForm) =>
       createServiceEndpoint(editable(projectId, canEdit), required(environmentId), input),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       await invalidateRequestTargets(queryClient, projectId)
+      if (!session.current.active || environmentContext.current !== result.environment_id) return
       endpointForm.resetFields()
-      messageApi.success('Endpoint Variant 已创建')
+      messageApi.success('部署地址变体已创建')
+    },
+    onError: (reason) => {
+      if (session.current.active) messageApi.error(apiErrorMessage(reason))
     },
   })
   const updateDefault = useMutation({
-    mutationFn: (serviceId: string | null) =>
-      setEnvironmentDefaultService(
+    mutationFn: (candidate: Extract<BindingCandidate, { kind: 'environment' }>) => {
+      if (candidate.environment.id !== environmentId)
+        throw new Error('管理环境已切换，请重新编辑候选')
+      return setEnvironmentDefaultService(
         editable(projectId, canEdit),
-        selectedEnvironment(required(environmentId), environments.data),
-        serviceId,
-      ),
-    onSuccess: async () => {
+        candidate.environment,
+        candidate.serviceId,
+      )
+    },
+    onSuccess: async (_result, candidate) => {
       await invalidateRequestTargets(queryClient, projectId)
-      messageApi.success('环境默认 Service 已更新')
+      if (!session.current.active || session.current.binding !== candidate.session) return
+      setBindingCandidate(undefined)
+      messageApi.success('环境默认服务已更新')
     },
   })
   const updateApiService = useMutation({
-    mutationFn: ({ apiId, serviceId }: { apiId: string; serviceId: string | null }) =>
-      updateApiDefinition(editable(projectId, canEdit), apiId, { service_id: serviceId }),
-    onSuccess: async () => {
+    mutationFn: (candidate: Extract<BindingCandidate, { kind: 'api' }>) =>
+      updateApiDefinition(editable(projectId, canEdit), candidate.api.id, {
+        service_id: candidate.serviceId,
+      }),
+    onSuccess: async (_result, candidate) => {
       await invalidateRequestTargets(queryClient, projectId)
-      messageApi.success('API 默认 Service 已更新')
+      if (!session.current.active || session.current.binding !== candidate.session) return
+      setBindingCandidate(undefined)
+      messageApi.success('接口默认服务已更新')
     },
   })
   const prepareEdit = useMutation({
-    mutationFn: (target: ImpactEditTarget) =>
-      loadImpactPreview(required(projectId), target).then((preview) => ({ preview, target })),
-    onSuccess: ({ preview, target }) => {
+    mutationFn: ({
+      target,
+      request,
+      environment,
+    }: {
+      target: ImpactEditTarget
+      request: number
+      environment: string | null
+    }) =>
+      loadImpactPreview(required(projectId), target).then((preview) => ({
+        preview,
+        target,
+        request,
+        environment,
+      })),
+    onSuccess: ({ preview, target, request, environment }) => {
+      if (
+        !session.current.active ||
+        request !== session.current.edit ||
+        environment !== environmentContext.current
+      )
+        return
+      setEditDirty(false)
       setImpactPreview(preview)
-      setEditingTarget(target)
+      setEditingTarget({ ...target, session: request })
       setEditFormValues(target, serviceEditForm, endpointEditForm)
     },
-    onError: (reason) => messageApi.error(apiErrorMessage(reason)),
-  })
-  const updateService = useMutation({
-    mutationFn: ({ serviceId, input }: { serviceId: string; input: ServiceEditForm }) =>
-      updateRequestService(editable(projectId, canEdit), serviceId, input),
-    onSuccess: async () => {
-      await invalidateRequestTargets(queryClient, projectId)
-      closeEdit(setEditingTarget, setImpactPreview)
-      messageApi.success('Service 已更新')
+    onError: (reason, input) => {
+      if (
+        session.current.active &&
+        input.request === session.current.edit &&
+        input.environment === environmentContext.current
+      )
+        messageApi.error(apiErrorMessage(reason))
     },
-    onError: (reason) => messageApi.error(apiErrorMessage(reason)),
+  })
+  function openEdit(target: ImpactEditTarget) {
+    prepareEdit.mutate({
+      target,
+      request: ++session.current.edit,
+      environment: environmentContext.current,
+    })
+  }
+  function cancelEdit() {
+    session.current.edit += 1
+    setEditDirty(false)
+    setEditingTarget(undefined)
+    setImpactPreview(undefined)
+  }
+  const updateService = useMutation({
+    mutationFn: ({
+      serviceId,
+      input,
+    }: {
+      serviceId: string
+      input: ServiceEditForm
+      session: number
+    }) => updateRequestService(editable(projectId, canEdit), serviceId, input),
+    onSuccess: async (_result, input) => {
+      await invalidateRequestTargets(queryClient, projectId)
+      if (!session.current.active || input.session !== session.current.edit) return
+      cancelEdit()
+      messageApi.success('逻辑服务已更新')
+    },
+    onError: (reason) => {
+      if (session.current.active) messageApi.error(apiErrorMessage(reason))
+    },
   })
   const updateEndpoint = useMutation({
-    mutationFn: ({ endpointId, input }: { endpointId: string; input: EndpointEditForm }) =>
-      updateServiceEndpoint(editable(projectId, canEdit), endpointId, endpointEditPayload(input)),
-    onSuccess: async () => {
-      await invalidateRequestTargets(queryClient, projectId)
-      closeEdit(setEditingTarget, setImpactPreview)
-      messageApi.success('Endpoint 已更新')
+    mutationFn: ({
+      endpointId,
+      input,
+      environment,
+    }: {
+      endpointId: string
+      input: EndpointEditForm
+      session: number
+      environment: string
+    }) => {
+      if (environmentContext.current !== environment)
+        throw new Error('管理环境已切换，请重新编辑地址候选')
+      return updateServiceEndpoint(
+        editable(projectId, canEdit),
+        endpointId,
+        endpointEditPayload(input),
+      )
     },
-    onError: (reason) => messageApi.error(apiErrorMessage(reason)),
+    onSuccess: async (_result, input) => {
+      await invalidateRequestTargets(queryClient, projectId)
+      if (!session.current.active || input.session !== session.current.edit) return
+      cancelEdit()
+      messageApi.success('部署地址已更新')
+    },
+    onError: (reason) => {
+      if (session.current.active) messageApi.error(apiErrorMessage(reason))
+    },
   })
   const checkConnectivity = useMutation({
     mutationFn: (endpointId: string) =>
@@ -209,16 +330,21 @@ function RequestTargetsWorkspace() {
     secrets.error,
   ].find(Boolean)
   const selected = environmentItems.find((item) => item.id === environmentId)
-  const serviceOptions = useMemo(() => toServiceOptions(serviceItems), [serviceItems])
+  const selectedService = chooseService(serviceItems, selectedServiceId, selected)
+  const serviceOptions = toServiceOptions(serviceItems)
 
   return (
     <>
       {contextHolder}
+      <TargetDraftGuard
+        projectId={projectId}
+        dirty={hasTargetDraft(canEdit, bindingCandidate, editDirty)}
+      />
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>请求目标</Typography.Title>
           <Typography.Text type="secondary">
-            管理项目级 Service、环境 Endpoint Variant，并统一绑定 API 的默认请求目标。
+            逻辑服务代表一个业务模块，地址变体是该服务在所选环境中的部署地址。请求按节点服务覆盖、接口默认服务、环境默认服务的顺序解析。
           </Typography.Text>
         </div>
         <Button
@@ -246,14 +372,16 @@ function RequestTargetsWorkspace() {
             form={serviceForm}
             submitting={createService.isPending}
             onFinish={(values) => createService.mutate(values)}
-            onEdit={(service) => prepareEdit.mutate({ kind: 'service', service })}
+            onEdit={(service) => openEdit({ kind: 'service', service })}
             editLoading={prepareEdit.isPending}
+            selectedId={selectedService?.id}
+            onSelect={setSelectedServiceId}
           />
         </Col>
         <Col xs={24} xl={15}>
           <EnvironmentEndpointCard
             readOnly={!canEdit}
-            environments={environments.data ?? []}
+            environments={environmentItems}
             selected={selected}
             environmentId={environmentId}
             onEnvironmentChange={setEnvironmentId}
@@ -263,16 +391,24 @@ function RequestTargetsWorkspace() {
             serviceOptions={serviceOptions}
             endpointForm={endpointForm}
             endpoints={endpointItems}
-            services={serviceItems}
+            service={selectedService}
             secrets={listItems(secrets.data)}
             connectivity={connectivity}
             loading={environments.isLoading}
             endpointsLoading={endpoints.isLoading}
             endpointSubmitting={createEndpoint.isPending}
             defaultSubmitting={updateDefault.isPending}
-            onDefaultChange={(value) => updateDefault.mutate(value)}
+            onDefaultChange={(value) => {
+              updateDefault.reset()
+              setBindingCandidate({
+                kind: 'environment',
+                environment: selectedEnvironment(required(environmentId), environments.data),
+                serviceId: value,
+                session: ++session.current.binding,
+              })
+            }}
             onEndpointFinish={(values) => createEndpoint.mutate(values)}
-            onEditEndpoint={(endpoint) => prepareEdit.mutate({ kind: 'endpoint', endpoint })}
+            onEditEndpoint={(endpoint) => openEdit({ kind: 'endpoint', endpoint })}
             onCheckConnectivity={(endpointId) => checkConnectivity.mutate(endpointId)}
             actionLoading={prepareEdit.isPending || checkConnectivity.isPending}
           />
@@ -284,29 +420,69 @@ function RequestTargetsWorkspace() {
         apis={apiItems}
         loading={apis.isLoading}
         serviceOptions={serviceOptions}
-        onChange={(apiId, serviceId) => updateApiService.mutate({ apiId, serviceId })}
-      />
-      <RequestTargetEditModal
-        readOnly={!canEdit}
-        target={editingTarget}
-        impact={impactPreview}
-        services={serviceItems}
-        secrets={listItems(secrets.data)}
-        serviceForm={serviceEditForm}
-        endpointForm={endpointEditForm}
-        submitting={updateService.isPending || updateEndpoint.isPending}
-        onCancel={() => closeEdit(setEditingTarget, setImpactPreview)}
-        onServiceFinish={(values) => {
-          if (editingTarget?.kind === 'service') {
-            updateService.mutate({ serviceId: editingTarget.service.id, input: values })
-          }
-        }}
-        onEndpointFinish={(values) => {
-          if (editingTarget?.kind === 'endpoint') {
-            updateEndpoint.mutate({ endpointId: editingTarget.endpoint.id, input: values })
-          }
+        onChange={(apiId, serviceId) => {
+          const api = apiItems.find((item) => item.id === apiId)
+          if (!api) return
+          updateApiService.reset()
+          setBindingCandidate({ kind: 'api', api, serviceId, session: ++session.current.binding })
         }}
       />
+      {bindingCandidate && (
+        <BindingReviewModal
+          key={bindingCandidate.session}
+          projectId={projectId}
+          environmentId={environmentId}
+          candidate={bindingCandidate}
+          services={serviceItems}
+          readOnly={!canEdit}
+          submitting={updateDefault.isPending || updateApiService.isPending}
+          error={bindingError(bindingCandidate, updateDefault.error, updateApiService.error)}
+          onCancel={() => {
+            session.current.binding += 1
+            setBindingCandidate(undefined)
+          }}
+          onSave={() => {
+            if (bindingCandidate.kind === 'environment') updateDefault.mutate(bindingCandidate)
+            else updateApiService.mutate(bindingCandidate)
+          }}
+        />
+      )}
+      {editingTarget && (
+        <RequestTargetEditModal
+          key={editingTarget.session}
+          projectId={projectId}
+          environmentId={environmentId}
+          onDirty={() => setEditDirty(true)}
+          readOnly={targetIsReadOnly(canEdit, editingTarget, environmentId)}
+          target={editingTarget}
+          impact={impactPreview}
+          services={serviceItems}
+          secrets={listItems(secrets.data)}
+          serviceForm={serviceEditForm}
+          endpointForm={endpointEditForm}
+          submitting={updateService.isPending || updateEndpoint.isPending}
+          onCancel={cancelEdit}
+          onServiceFinish={(values) => {
+            if (editingTarget?.kind === 'service') {
+              updateService.mutate({
+                serviceId: editingTarget.service.id,
+                input: values,
+                session: editingTarget.session,
+              })
+            }
+          }}
+          onEndpointFinish={(values) => {
+            if (editingTarget?.kind === 'endpoint') {
+              updateEndpoint.mutate({
+                endpointId: editingTarget.endpoint.id,
+                input: values,
+                session: editingTarget.session,
+                environment: editingTarget.endpoint.environment_id,
+              })
+            }
+          }}
+        />
+      )}
     </>
   )
 }
@@ -320,6 +496,8 @@ function ServiceCard({
   onFinish,
   onEdit,
   editLoading,
+  selectedId,
+  onSelect,
 }: {
   readOnly: boolean
   services: RequestService[]
@@ -329,9 +507,11 @@ function ServiceCard({
   onFinish: (values: ServiceForm) => void
   onEdit: (service: RequestService) => void
   editLoading: boolean
+  selectedId?: string
+  onSelect: (id: string) => void
 }) {
   return (
-    <Card title="Service" loading={loading}>
+    <Card title="逻辑服务" loading={loading}>
       <Form<ServiceForm>
         name="request-service-create"
         form={form}
@@ -339,7 +519,11 @@ function ServiceCard({
         onFinish={onFinish}
         disabled={readOnly}
       >
-        <Form.Item name="service_key" label="Service Key" rules={[{ required: true }]}>
+        <Form.Item
+          name="service_key"
+          label="服务标识（跨环境保持一致）"
+          rules={[{ required: true }]}
+        >
           <Input placeholder="orders" />
         </Form.Item>
         <Form.Item name="name" label="名称" rules={[{ required: true }]}>
@@ -354,14 +538,26 @@ function ServiceCard({
       </Form>
       <Table<RequestService>
         className="request-target-table"
+        rowClassName={(item) => (item.id === selectedId ? 'request-target-row-selected' : '')}
         rowKey="id"
         size="small"
         pagination={false}
         dataSource={services}
         locale={{ emptyText: '暂无请求 Service' }}
         columns={[
-          { title: 'Key', dataIndex: 'service_key' },
-          { title: '名称', dataIndex: 'name' },
+          {
+            title: '服务',
+            render: (_value, item) => (
+              <div>
+                <Button type="link" onClick={() => onSelect(item.id)}>
+                  {item.name}
+                </Button>
+                <Typography.Text type="secondary" style={{ display: 'block' }}>
+                  {item.service_key}
+                </Typography.Text>
+              </div>
+            ),
+          },
           {
             title: '状态',
             dataIndex: 'enabled',
@@ -389,211 +585,6 @@ function ServiceCard({
   )
 }
 
-function EnvironmentEndpointCard({
-  readOnly,
-  environments,
-  selected,
-  environmentId,
-  onEnvironmentChange,
-  environmentSelectionInvalid,
-  environmentPlaceholder,
-  environmentStatus,
-  serviceOptions,
-  endpointForm,
-  endpoints,
-  services,
-  secrets,
-  connectivity,
-  loading,
-  endpointsLoading,
-  endpointSubmitting,
-  defaultSubmitting,
-  onDefaultChange,
-  onEndpointFinish,
-  onEditEndpoint,
-  onCheckConnectivity,
-  actionLoading,
-}: {
-  readOnly: boolean
-  environments: Environment[]
-  selected: Environment | undefined
-  environmentId: string | null
-  onEnvironmentChange: (value: string) => void
-  environmentSelectionInvalid: boolean
-  environmentPlaceholder: string
-  environmentStatus: 'error' | undefined
-  serviceOptions: Array<{ value: string; label: string }>
-  endpointForm: ReturnType<typeof Form.useForm<EndpointForm>>[0]
-  endpoints: ServiceEndpoint[]
-  services: RequestService[]
-  secrets: SecretMetadata[]
-  connectivity: Record<string, EndpointConnectivity>
-  loading: boolean
-  endpointsLoading: boolean
-  endpointSubmitting: boolean
-  defaultSubmitting: boolean
-  onDefaultChange: (value: string | null) => void
-  onEndpointFinish: (values: EndpointForm) => void
-  onEditEndpoint: (endpoint: ServiceEndpoint) => void
-  onCheckConnectivity: (endpointId: string) => void
-  actionLoading: boolean
-}) {
-  return (
-    <Card
-      title="环境 Endpoint Variant"
-      extra={
-        <Select
-          aria-label="目标环境"
-          style={{ minWidth: 180 }}
-          value={environmentId ?? undefined}
-          onChange={onEnvironmentChange}
-          placeholder={environmentPlaceholder}
-          status={environmentStatus}
-          options={environments.map((item) => ({ value: item.id, label: item.name }))}
-        />
-      }
-      loading={loading}
-    >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        {selected ? (
-          <Space wrap>
-            <Typography.Text>环境默认 Service</Typography.Text>
-            <Select
-              aria-label="环境默认 Service"
-              allowClear
-              style={{ minWidth: 260 }}
-              value={selected.default_service_id ?? undefined}
-              options={serviceOptions}
-              onChange={(value?: string) => onDefaultChange(value ?? null)}
-              loading={defaultSubmitting}
-              disabled={readOnly}
-            />
-          </Space>
-        ) : environmentSelectionInvalid ? (
-          <Alert
-            type="warning"
-            showIcon
-            title={environmentPlaceholder}
-            description="请选择当前项目中仍可用的环境后再管理 Endpoint。"
-          />
-        ) : (
-          <Alert type="info" showIcon title="请先选择环境" />
-        )}
-        <Form<EndpointForm>
-          name="request-endpoint-create"
-          form={endpointForm}
-          layout="inline"
-          onFinish={onEndpointFinish}
-          disabled={!environmentId || readOnly}
-        >
-          <Form.Item name="service_id" rules={[{ required: true, message: '请选择 Service' }]}>
-            <Select
-              aria-label="Endpoint Service"
-              placeholder="Service"
-              options={serviceOptions}
-              style={{ minWidth: 220 }}
-            />
-          </Form.Item>
-          <Form.Item name="variant" initialValue="default">
-            <Input aria-label="Endpoint Variant" placeholder="default" />
-          </Form.Item>
-          <Form.Item name="base_url" rules={[{ required: true, message: '请输入 Base URL' }]}>
-            <Input
-              aria-label="Endpoint Base URL"
-              placeholder="https://orders.example.com"
-              style={{ minWidth: 260 }}
-            />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" loading={endpointSubmitting}>
-            添加 Endpoint
-          </Button>
-        </Form>
-        <Table<ServiceEndpoint>
-          rowKey="id"
-          size="small"
-          pagination={false}
-          loading={endpointsLoading}
-          dataSource={endpoints}
-          locale={{ emptyText: '当前环境暂无 Endpoint Variant' }}
-          columns={[
-            {
-              title: 'Service',
-              dataIndex: 'service_id',
-              render: (value: string) =>
-                services.find((item) => item.id === value)?.service_key ?? value,
-            },
-            { title: 'Variant', dataIndex: 'variant' },
-            { title: 'Base URL', dataIndex: 'base_url' },
-            {
-              title: 'Timeout',
-              render: (_value: unknown, item: ServiceEndpoint) =>
-                `${item.connect_timeout_ms}/${item.read_timeout_ms} ms`,
-            },
-            {
-              title: 'TLS',
-              dataIndex: 'tls_verify',
-              render: (enabled: boolean) => (enabled ? '校验' : '不校验'),
-            },
-            { title: 'Proxy Ref', dataIndex: 'proxy_ref', render: nullableText },
-            {
-              title: 'Headers / Variables',
-              render: (_value: unknown, item: ServiceEndpoint) =>
-                `${Object.keys(item.headers).length} / ${Object.keys(item.variables ?? {}).length}`,
-            },
-            {
-              title: 'Secret Refs',
-              render: (_value: unknown, item: ServiceEndpoint) =>
-                secretReferenceSummary(item.secret_refs, secrets),
-            },
-            {
-              title: 'Health / Expected',
-              render: (_value: unknown, item: ServiceEndpoint) =>
-                `${item.health_check_path ?? '-'} / ${item.health_expected_status ?? '-'}`,
-            },
-            { title: 'Revision', dataIndex: 'revision' },
-            {
-              title: '状态',
-              dataIndex: 'enabled',
-              render: (enabled: boolean) => (
-                <Tag color={enabled ? 'success' : 'default'}>{enabled ? '启用' : '停用'}</Tag>
-              ),
-            },
-            {
-              title: 'Connectivity',
-              render: (_value: unknown, item: ServiceEndpoint) => (
-                <Space>
-                  <ConnectivityTag result={connectivity[item.id]} />
-                  <Button
-                    size="small"
-                    loading={actionLoading}
-                    onClick={() => onCheckConnectivity(item.id)}
-                  >
-                    检查
-                  </Button>
-                </Space>
-              ),
-            },
-            {
-              title: '操作',
-              render: (_value: unknown, item: ServiceEndpoint) => (
-                <Button
-                  type="link"
-                  size="small"
-                  icon={<EditOutlined />}
-                  loading={actionLoading}
-                  onClick={() => onEditEndpoint(item)}
-                >
-                  影响预览 / 编辑
-                </Button>
-              ),
-            },
-          ]}
-        />
-      </Space>
-    </Card>
-  )
-}
-
 function ApiServiceCard({
   readOnly,
   apis,
@@ -608,38 +599,38 @@ function ApiServiceCard({
   onChange: (apiId: string, serviceId: string | null) => void
 }) {
   return (
-    <Card title="API 默认 Service" className="performance-card" loading={loading}>
-      <Table<ApiDefinition>
-        rowKey="id"
-        size="small"
-        pagination={false}
-        dataSource={apis}
-        locale={{ emptyText: '暂无 API 资产' }}
-        columns={[
-          { title: 'API', dataIndex: 'name' },
-          { title: '版本', dataIndex: 'current_version', width: 80 },
-          {
-            title: '默认 Service',
-            dataIndex: 'service_id',
-            render: (value: string | null | undefined, item: ApiDefinition) => (
-              <Select
-                aria-label={`${item.name} 默认 Service`}
-                allowClear
-                disabled={readOnly}
-                style={{ minWidth: 260 }}
-                value={value ?? undefined}
-                options={serviceOptions}
-                onChange={(serviceId?: string) => onChange(item.id, serviceId ?? null)}
-              />
-            ),
-          },
-        ]}
-      />
+    <Card title="接口默认服务（项目目录）" className="performance-card" loading={loading}>
+      <Typography.Paragraph type="secondary">
+        下方按项目目录分页显示接口。接口绑定优先于环境默认服务；修改先生成候选，确认后才会保存为新的接口版本，固定历史版本保持原绑定。
+      </Typography.Paragraph>
+      {!apis.length && <Typography.Text type="secondary">暂无 API 资产</Typography.Text>}
+      <div className="request-target-api-bindings">
+        {apis.map((item) => (
+          <Card key={item.id} size="small">
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Typography.Text strong>{item.name}</Typography.Text>
+              <Tag>当前 v{item.current_version}</Tag>
+            </Space>
+            <Select
+              aria-label={`${item.name} 默认 Service`}
+              allowClear
+              disabled={readOnly}
+              style={{ width: '100%', minWidth: 0 }}
+              value={item.service_id ?? undefined}
+              options={serviceOptions}
+              placeholder="继承环境默认服务"
+              onChange={(serviceId?: string) => onChange(item.id, serviceId ?? null)}
+            />
+          </Card>
+        ))}
+      </div>
     </Card>
   )
 }
 
 function RequestTargetEditModal({
+  projectId,
+  environmentId,
   readOnly,
   target,
   impact,
@@ -649,81 +640,100 @@ function RequestTargetEditModal({
   endpointForm,
   submitting,
   onCancel,
+  onDirty,
   onServiceFinish,
   onEndpointFinish,
 }: {
+  projectId: string
+  environmentId: string | null
   readOnly: boolean
-  target: ImpactEditTarget | undefined
+  target: ImpactEditTarget
   impact: ServiceTargetImpactPreview | undefined
   services: RequestService[]
   secrets: SecretMetadata[]
   serviceForm: ReturnType<typeof Form.useForm<ServiceEditForm>>[0]
   endpointForm: ReturnType<typeof Form.useForm<EndpointEditForm>>[0]
   submitting: boolean
+  onDirty: () => void
   onCancel: () => void
   onServiceFinish: (values: ServiceEditForm) => void
   onEndpointFinish: (values: EndpointEditForm) => void
 }) {
-  const isService = target?.kind === 'service'
+  const [review, setReview] = useState<
+    { kind: 'service'; values: ServiceEditForm } | { kind: 'endpoint'; values: EndpointEditForm }
+  >()
+  const [ready, setReady] = useState(false)
+  const isService = target.kind === 'service'
+  const fieldsReadonly = readOnly || Boolean(review)
   const activeForm = isService ? serviceForm : endpointForm
   return (
     <Modal
       open={Boolean(target)}
       width={860}
       title={isService ? 'Service 影响预览 / 编辑' : 'Endpoint 影响预览 / 编辑'}
-      okText="保存变更"
+      okText={review ? '确认保存' : '分析影响与目标'}
+      mask={{ closable: false }}
+      closable={!submitting}
+      cancelButtonProps={{ disabled: submitting }}
       cancelText="取消"
       confirmLoading={submitting}
-      okButtonProps={{ disabled: readOnly }}
+      okButtonProps={{ disabled: readOnly || Boolean(review && !ready) }}
       onCancel={onCancel}
-      onOk={() => activeForm.submit()}
+      onOk={() => {
+        if (!review) {
+          activeForm.submit()
+          return
+        }
+        if (review.kind === 'service') onServiceFinish(review.values)
+        else onEndpointFinish(review.values)
+      }}
       destroyOnHidden
     >
-      <ImpactPreviewPanel impact={impact} />
+      <TargetImpactPanel impact={impact} />
       {isService ? (
-        <ServiceEditFields readOnly={readOnly} form={serviceForm} onFinish={onServiceFinish} />
+        <ServiceEditFields
+          readOnly={fieldsReadonly}
+          form={serviceForm}
+          onDirty={onDirty}
+          onFinish={(values) => setReview({ kind: 'service', values })}
+        />
       ) : (
         <EndpointEditFields
-          readOnly={readOnly}
+          readOnly={fieldsReadonly}
           form={endpointForm}
-          endpoint={target?.kind === 'endpoint' ? target.endpoint : undefined}
+          onDirty={onDirty}
+          endpoint={editedEndpoint(target)}
           services={services}
           secrets={secrets}
-          onFinish={onEndpointFinish}
+          onFinish={(values) => setReview({ kind: 'endpoint', values })}
         />
       )}
+      {review && (
+        <Space orientation="vertical" className="full-width" style={{ marginTop: 16 }}>
+          <Alert
+            type="warning"
+            title="候选已锁定，尚未保存"
+            description="当前表单是待保存候选。返回修改会重新分析同一对象；确认保存才会写入服务器。"
+          />
+          <Button
+            disabled={submitting}
+            onClick={() => {
+              setReview(undefined)
+              setReady(false)
+            }}
+          >
+            返回修改候选
+          </Button>
+          <ReviewedComparison target={target} review={review} />
+          <TargetResolutionPreview
+            projectId={projectId}
+            environmentId={environmentId}
+            change={reviewChange(target, review)}
+            onReady={setReady}
+          />
+        </Space>
+      )}
     </Modal>
-  )
-}
-
-function ImpactPreviewPanel({ impact }: { impact: ServiceTargetImpactPreview | undefined }) {
-  if (!impact) return null
-  return (
-    <Alert
-      className="page-alert"
-      type="warning"
-      showIcon
-      title="保存前请确认下游影响"
-      description={
-        <Descriptions size="small" column={1}>
-          <Descriptions.Item label="Affected APIs">
-            {impactSummary(impact.affected_apis)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Affected Workflows">
-            {impactSummary(impact.affected_workflows)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Affected Test Plans">
-            {impactSummary(impact.affected_test_plans)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Affected Scheduled Runs">
-            {impactSummary(impact.affected_scheduled_runs)}
-          </Descriptions.Item>
-          <Descriptions.Item label="Affected Release Gates">
-            {impactSummary(impact.affected_release_gates)}
-          </Descriptions.Item>
-        </Descriptions>
-      }
-    />
   )
 }
 
@@ -731,9 +741,11 @@ function ServiceEditFields({
   readOnly,
   form,
   onFinish,
+  onDirty,
 }: {
   readOnly: boolean
   form: ReturnType<typeof Form.useForm<ServiceEditForm>>[0]
+  onDirty: () => void
   onFinish: (values: ServiceEditForm) => void
 }) {
   return (
@@ -742,21 +754,22 @@ function ServiceEditFields({
       form={form}
       layout="vertical"
       onFinish={onFinish}
+      onValuesChange={onDirty}
       disabled={readOnly}
     >
       <Row gutter={16}>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
         </Col>
-        <Col span={12}>
-          <Form.Item name="owner_team" label="Owner Team">
+        <Col xs={24} md={12}>
+          <Form.Item name="owner_team" label="负责团队">
             <Input />
           </Form.Item>
         </Col>
       </Row>
-      <Form.Item name="service_type" label="Service Type">
+      <Form.Item name="service_type" label="服务协议">
         <Select
           options={['http', 'https', 'grpc', 'graphql', 'other'].map((value) => ({
             value,
@@ -767,7 +780,7 @@ function ServiceEditFields({
       <Form.Item name="description" label="描述">
         <Input.TextArea rows={2} />
       </Form.Item>
-      <Form.Item name="enabled" label="Enable / Disable Service" valuePropName="checked">
+      <Form.Item name="enabled" label="启用服务" valuePropName="checked">
         <Switch />
       </Form.Item>
     </Form>
@@ -781,12 +794,14 @@ function EndpointEditFields({
   services,
   secrets,
   onFinish,
+  onDirty,
 }: {
   readOnly: boolean
   form: ReturnType<typeof Form.useForm<EndpointEditForm>>[0]
   endpoint: ServiceEndpoint | undefined
   services: RequestService[]
   secrets: SecretMetadata[]
+  onDirty: () => void
   onFinish: (values: EndpointEditForm) => void
 }) {
   const service = services.find((item) => item.id === endpoint?.service_id)
@@ -796,91 +811,109 @@ function EndpointEditFields({
       form={form}
       layout="vertical"
       onFinish={onFinish}
+      onValuesChange={onDirty}
       disabled={readOnly}
     >
       <Descriptions size="small" column={2}>
-        <Descriptions.Item label="Service">
+        <Descriptions.Item label="逻辑服务">
           {service ? `${service.name} · ${service.service_key}` : '-'}
         </Descriptions.Item>
-        <Descriptions.Item label="Revision">r{endpoint?.revision ?? '-'}</Descriptions.Item>
+        <Descriptions.Item label="配置修订">r{endpoint?.revision ?? '-'}</Descriptions.Item>
       </Descriptions>
       <Row gutter={16}>
-        <Col span={8}>
-          <Form.Item name="variant" label="Endpoint Variant" rules={[{ required: true }]}>
+        <Col xs={24} md={8}>
+          <Form.Item name="variant" label="地址变体（Variant）" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
         </Col>
-        <Col span={16}>
-          <Form.Item name="base_url" label="Base URL" rules={[{ required: true }]}>
+        <Col xs={24} md={16}>
+          <Form.Item name="base_url" label="部署地址" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
         </Col>
       </Row>
-      <Row gutter={16}>
-        <Col span={8}>
-          <Form.Item name="connect_timeout_ms" label="Connect Timeout (ms)">
-            <InputNumber min={100} max={300_000} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="read_timeout_ms" label="Read Timeout (ms)">
-            <InputNumber min={100} max={300_000} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        <Col span={4}>
-          <Form.Item name="tls_verify" label="TLS Verify" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </Col>
-        <Col span={4}>
-          <Form.Item name="enabled" label="Enabled" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Form.Item name="proxy_ref" label="Proxy Ref">
-        <Input />
+      <Form.Item name="enabled" label="启用地址" valuePropName="checked">
+        <Switch />
       </Form.Item>
-      <Form.Item name="headers_json" label="Headers (JSON)" rules={[jsonRecordRule()]}>
-        <Input.TextArea rows={3} />
-      </Form.Item>
-      <Form.Item name="variables_json" label="Variables (JSON)" rules={[jsonRecordRule()]}>
-        <Input.TextArea rows={3} />
-      </Form.Item>
-      <Form.Item name="secret_refs" label="Secret Refs（仅选择引用，不展示明文）">
-        <Select
-          mode="multiple"
-          options={secrets.map((secret) => ({ value: secret.name, label: secret.name }))}
-        />
-      </Form.Item>
-      <Row gutter={16}>
-        <Col span={16}>
-          <Form.Item name="health_check_path" label="Health Check Path">
-            <Input placeholder="/health" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="health_expected_status" label="Expected Status">
-            <InputNumber min={100} max={599} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-      </Row>
+      <Collapse
+        items={[
+          {
+            key: 'connection',
+            label: '连接、TLS 与代理',
+            forceRender: true,
+            children: (
+              <>
+                <Row gutter={16}>
+                  <Col xs={24} md={12}>
+                    <Form.Item name="connect_timeout_ms" label="连接超时（毫秒）">
+                      <InputNumber min={100} max={300_000} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <Form.Item name="read_timeout_ms" label="读取超时（毫秒）">
+                      <InputNumber min={100} max={300_000} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Form.Item name="tls_verify" label="校验 TLS 证书" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+                <Form.Item name="proxy_ref" label="代理引用">
+                  <Input />
+                </Form.Item>
+              </>
+            ),
+          },
+          {
+            key: 'maps',
+            label: '请求头与变量',
+            forceRender: true,
+            children: (
+              <>
+                <Form.Item name="headers_map" label="地址请求头" rules={[mapRule('headers')]}>
+                  <EnvironmentMapEditor kind="headers" readOnly={readOnly} />
+                </Form.Item>
+                <Form.Item name="variables_map" label="地址变量" rules={[mapRule('variables')]}>
+                  <EnvironmentMapEditor kind="variables" readOnly={readOnly} />
+                </Form.Item>
+              </>
+            ),
+          },
+          {
+            key: 'secrets',
+            label: '凭据引用',
+            forceRender: true,
+            children: (
+              <Form.Item name="secret_refs" label="仅选择引用，不展示明文">
+                <Select
+                  mode="multiple"
+                  options={secretOptions(secrets, endpoint?.secret_refs ?? [])}
+                />
+              </Form.Item>
+            ),
+          },
+          {
+            key: 'health',
+            label: '健康检查设置',
+            forceRender: true,
+            children: (
+              <>
+                <Form.Item name="health_check_path" label="检查相对路径">
+                  <Input placeholder="/health" />
+                </Form.Item>
+                <Form.Item name="health_expected_status" label="预期状态码">
+                  <InputNumber min={100} max={599} style={{ width: '100%' }} />
+                </Form.Item>
+                <Typography.Paragraph type="secondary">
+                  保存和影响预览均不探测目标。需要验证时，在地址详情中显式检查连通性。
+                </Typography.Paragraph>
+              </>
+            ),
+          },
+        ]}
+      />
     </Form>
   )
-}
-
-function ConnectivityTag({ result }: { result: EndpointConnectivity | undefined }) {
-  if (!result) return <Tag>未检查</Tag>
-  const healthy = result.status === 'reachable'
-  return (
-    <Tag color={healthy ? 'success' : 'warning'}>
-      {result.status} {result.http_status ?? result.error_code ?? ''}
-    </Tag>
-  )
-}
-
-function impactSummary(items: Array<{ name: string }>): string {
-  return items.length ? `${items.length}: ${items.map((item) => item.name).join(', ')}` : '0'
 }
 
 function loadImpactPreview(
@@ -902,60 +935,18 @@ function setEditFormValues(
   }
   endpointForm.setFieldsValue({
     ...target.endpoint,
-    headers_json: JSON.stringify(target.endpoint.headers, null, 2),
-    variables_json: JSON.stringify(target.endpoint.variables ?? {}, null, 2),
+    headers_map: mapValue(target.endpoint.headers),
+    variables_map: mapValue(target.endpoint.variables ?? {}),
   })
 }
 
 function endpointEditPayload(values: EndpointEditForm): UpdateEndpointInput {
-  const { headers_json, variables_json, ...input } = values
+  const { headers_map, variables_map, ...input } = values
   return {
     ...input,
-    headers: parseJsonRecord(headers_json),
-    variables: parseJsonRecord(variables_json),
+    headers: parseEnvironmentMap(headers_map, 'headers'),
+    variables: parseEnvironmentMap(variables_map, 'variables'),
   }
-}
-
-function parseJsonRecord(value: string): Record<string, string> {
-  const parsed: unknown = JSON.parse(value || '{}')
-  if (!isStringRecord(parsed)) throw new Error('JSON 必须是字符串键值对')
-  return parsed
-}
-
-function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.values(value).every((item) => typeof item === 'string')
-  )
-}
-
-function jsonRecordRule() {
-  return {
-    validator: async (_rule: unknown, value: string) => {
-      parseJsonRecord(value)
-    },
-    message: '请输入字符串键值对 JSON',
-  }
-}
-
-function nullableText(value: string | null | undefined): string {
-  return value || '-'
-}
-
-function secretReferenceSummary(refs: string[], secrets: SecretMetadata[]): string {
-  const known = new Set(secrets.map((secret) => secret.name))
-  const available = refs.filter((ref) => known.has(ref)).length
-  return `${refs.length} refs / ${available} available`
-}
-
-function closeEdit(
-  setTarget: (value: ImpactEditTarget | undefined) => void,
-  setImpact: (value: ServiceTargetImpactPreview | undefined) => void,
-) {
-  setTarget(undefined)
-  setImpact(undefined)
 }
 
 function required(value: string | null | undefined): string {
@@ -990,4 +981,97 @@ function toServiceOptions(services: RequestService[]): Array<{ value: string; la
     value: service.id,
     label: `${service.name} · ${service.service_key}`,
   }))
+}
+
+function mapRule(kind: 'headers' | 'variables') {
+  return {
+    validator: async (_rule: unknown, value: EnvironmentMapValue) => {
+      parseEnvironmentMap(value, kind)
+    },
+  }
+}
+function secretOptions(secrets: SecretMetadata[], refs: string[]) {
+  const names = new Set(secrets.map((item) => item.name))
+  return [
+    ...secrets.map((item) => ({ value: item.name, label: item.name })),
+    ...refs
+      .filter((name) => !names.has(name))
+      .map((name) => ({ value: name, label: `${name}（引用已不可用）` })),
+  ]
+}
+
+function reviewChange(
+  target: ImpactEditTarget,
+  review:
+    { kind: 'service'; values: ServiceEditForm } | { kind: 'endpoint'; values: EndpointEditForm },
+): TargetPreviewChange {
+  if (target.kind === 'service' && review.kind === 'service')
+    return { kind: 'service', service_id: target.service.id, enabled: review.values.enabled }
+  if (target.kind === 'endpoint' && review.kind === 'endpoint')
+    return {
+      kind: 'endpoint',
+      endpoint_id: target.endpoint.id,
+      variant: review.values.variant,
+      base_url: review.values.base_url,
+      enabled: review.values.enabled,
+      variables: parseEnvironmentMap(review.values.variables_map, 'variables'),
+    }
+  throw new Error('候选类型与编辑对象不一致')
+}
+
+function chooseService(
+  services: RequestService[],
+  id: string | undefined,
+  environment: Environment | undefined,
+) {
+  return (
+    services.find((item) => item.id === id) ??
+    services.find((item) => item.id === environment?.default_service_id) ??
+    services[0]
+  )
+}
+function bindingError(candidate: BindingCandidate, environmentError: unknown, apiError: unknown) {
+  return candidate.kind === 'environment' ? environmentError : apiError
+}
+function editedEndpoint(target: ImpactEditTarget) {
+  return target.kind === 'endpoint' ? target.endpoint : undefined
+}
+
+function hasTargetDraft(
+  canEdit: boolean,
+  binding: BindingCandidate | undefined,
+  editDirty: boolean,
+) {
+  return canEdit && Boolean(binding || editDirty)
+}
+
+function targetIsReadOnly(
+  canEdit: boolean,
+  target: ImpactEditTarget,
+  environmentId: string | null,
+) {
+  return (
+    !canEdit || (target.kind === 'endpoint' && target.endpoint.environment_id !== environmentId)
+  )
+}
+
+function ReviewedComparison({
+  target,
+  review,
+}: {
+  target: ImpactEditTarget
+  review:
+    { kind: 'service'; values: ServiceEditForm } | { kind: 'endpoint'; values: EndpointEditForm }
+}) {
+  if (target.kind === 'service' && review.kind === 'service')
+    return <TargetChangeComparison kind="service" before={target.service} after={review.values} />
+  if (target.kind === 'endpoint' && review.kind === 'endpoint')
+    return (
+      <TargetChangeComparison
+        kind="endpoint"
+        before={target.endpoint}
+        after={endpointEditPayload(review.values)}
+      />
+    )
+  return null
 }
