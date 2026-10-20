@@ -42,3 +42,11 @@
 - 补修专项：后端报告/任务/控制报告 58 项通过；前端协议工作台/报告/对象筛选 35 项通过。补修后的完整 `make check` 已通过：后端 1759 通过、13 跳过、2 项既有警告，覆盖率 90.79%；前端 140 文件、909 项通过，无未处理异常，语句/分支/函数/行覆盖率为 85.71% / 81.65% / 85.06% / 88.16%，完整格式、lint/tsc、mypy 与构建通过。
 - 最终补修源码提交 `97062226e2a244a5fa3c50931198486ae7373ebf`，后端树 `b3210e69ed03c7dd2593d5b4de0a0139c1e125ac`、前端树 `b76edc1f13a41d8ae823edaa58d255626188876f`。完整日志 `remediation-report-review-make-check.log`；之前复现问题的失败日志与专项通过日志保留。
 - 本批统一通过 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 交付，最新提交门禁与实际合并仍须单独核对。
+
+## 远端门禁超时复审
+
+远端提交 `21b295e` 的前端完整检查有 2 项超时，其余 907 项通过；后端完整/集成、Compose、历史升级及 Windows 检查通过。门禁因此未通过，尚未合并。本地 CPU profile 确认，这两项测试主要耗时在 JSDOM 的样式继承及无范围角色查询；整改将定位限定为具体审核窗口、内容和按钮，同时保留角色、可见性、禁用权限、审核请求与内容快照断言。同样开启 CI 模式与 CPU profile，2 项测试合计从 24.78 秒降为 0.861 秒；未增加超时、重试、跳过或修改覆盖率标准。完整远端门禁仍以新提交结果为准。
+
+日志：`report-136-frontend-ci-failure.log`、`remediation-report-ci-timeout-profile.log`、`remediation-report-ci-timeout-after-profile.log`。CPU profile 仅用于测试诊断，不增加产品日志或采集。
+
+超时整改后，CI 模式下协议、报告、历史筛选及变更回归 4 文件共 46 项通过；前端 lint 和完整 TypeScript/生产构建通过。日志：`remediation-report-ci-timeout-after.log`、`remediation-report-ci-timeout-build.log`。此轮仅修改测试定位及说明文档，产品源码沿用上节完整 `make check` 通过的版本。
