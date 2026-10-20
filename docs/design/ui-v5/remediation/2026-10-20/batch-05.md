@@ -45,8 +45,14 @@
 
 ## 远端门禁超时复审
 
-远端提交 `21b295e` 的前端完整检查有 2 项超时，其余 907 项通过；后端完整/集成、Compose、历史升级及 Windows 检查通过。门禁因此未通过，尚未合并。本地 CPU profile 确认，这两项测试主要耗时在 JSDOM 的样式继承及无范围角色查询；整改将定位限定为具体审核窗口、内容和按钮，同时保留角色、可见性、禁用权限、审核请求与内容快照断言。同样开启 CI 模式与 CPU profile，2 项测试合计从 24.78 秒降为 0.861 秒；未增加超时、重试、跳过或修改覆盖率标准。完整远端门禁仍以新提交结果为准。
+远端提交 `21b295e` 的前端完整检查有 2 项超时，其余 907 项通过；后端完整/集成、Compose、历史升级及 Windows 检查通过。该次门禁未通过，当时尚未合并。本地 CPU profile 确认，这两项测试主要耗时在 JSDOM 的样式继承及无范围角色查询；整改将定位限定为具体审核窗口、内容和按钮，同时保留角色、可见性、禁用权限、审核请求与内容快照断言。同样开启 CI 模式与 CPU profile，2 项测试合计从 24.78 秒降为 0.861 秒；未增加超时、重试、跳过或修改覆盖率标准。完整远端门禁仍以新提交结果为准。
 
 日志：`report-136-frontend-ci-failure.log`、`remediation-report-ci-timeout-profile.log`、`remediation-report-ci-timeout-after-profile.log`。CPU profile 仅用于测试诊断，不增加产品日志或采集。
 
 超时整改后，CI 模式下协议、报告、历史筛选及变更回归 4 文件共 46 项通过；前端 lint 和完整 TypeScript/生产构建通过。日志：`remediation-report-ci-timeout-after.log`、`remediation-report-ci-timeout-build.log`。此轮仅修改测试定位及说明文档，产品源码沿用上节完整 `make check` 通过的版本。
+
+## GitHub 最终交付
+
+[PR #136](https://github.com/a3384379/FlowTest/pull/136) 于北京时间2026-10-21 00:06:52合并，主分支提交 `dfd6f07937766b62611499387546860d07f5b98a`。合并前再次核对最新 HEAD `68e95c06323ab89c8a085dd5a002bc624b48aabf`：正式 Required Gate 为 success、可合并且全部审查线程已解决；合并命令绑定该 SHA。该提交包含上节超时定位整改，远端前端完整检查已通过。
+
+合并后按该主分支提交启动 [Full Regression 39454568135](https://github.com/a3384379/FlowTest/actions/runs/39454568135)。记录时仍在执行，尚无失败，不能将 PR 门禁成功替代合并后完整回归或正式部署验收。
