@@ -11,6 +11,7 @@ import {
   type ReportExecutionDetail,
   type ReportTrend,
 } from '../../lib/api'
+import type { ReportScope } from './report-scope'
 
 export type CreateNotificationWebhookInput = {
   name: string
@@ -18,7 +19,7 @@ export type CreateNotificationWebhookInput = {
   events: NotificationEvent[]
 }
 
-export type ReportStatusFilter = 'all' | 'running' | 'passed' | 'failed' | 'cancelled'
+export type ReportStatusFilter = 'all' | 'queued' | 'running' | 'passed' | 'failed' | 'cancelled'
 
 export async function listReportProjects(): Promise<Page<Project>> {
   const response = await apiClient.get<Page<Project>>('/projects', {
@@ -31,10 +32,11 @@ export async function listReportExecutions(
   projectId: string,
   page = 1,
   status: ReportStatusFilter = 'all',
+  scope?: ReportScope,
 ): Promise<Page<ReportExecution>> {
   const response = await apiClient.get<Page<ReportExecution>>(
     `/projects/${projectId}/reports/executions`,
-    { params: { page, page_size: 50, status: status === 'all' ? undefined : status } },
+    { params: { page, page_size: 50, status: status === 'all' ? undefined : status, ...scope } },
   )
   return response.data
 }
@@ -49,10 +51,27 @@ export async function getReportExecution(
   return response.data
 }
 
-export async function getReportTrend(projectId: string): Promise<ReportTrend> {
+export async function getReportTrend(projectId: string, scope?: ReportScope): Promise<ReportTrend> {
   const response = await apiClient.get<ReportTrend>(`/projects/${projectId}/reports/trends`, {
-    params: { days: 7 },
+    params: { days: 7, ...scope },
   })
+  return response.data
+}
+
+export type ReportFilterKind = 'workflow' | 'environment' | 'case' | 'plan'
+export type ReportFilterOption = { id: string; name: string }
+
+export async function listReportFilterOptions(
+  projectId: string,
+  kind: ReportFilterKind,
+  page: number,
+  search: string,
+  selectedId?: string,
+): Promise<Page<ReportFilterOption>> {
+  const response = await apiClient.get<Page<ReportFilterOption>>(
+    `/projects/${projectId}/reports/filter-options`,
+    { params: { kind, page, page_size: 20, search, selected_id: selectedId } },
+  )
   return response.data
 }
 

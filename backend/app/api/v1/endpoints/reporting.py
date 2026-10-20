@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
@@ -15,7 +15,12 @@ from app.schemas.reporting import (
     NotificationWebhookUpdate,
     ReportExecutionDetailResponse,
     ReportExecutionResponse,
+    ReportFilterOptionResponse,
+    ReportFilterQuery,
+    ReportListQuery,
     ReportNodeResponse,
+    ReportScopeSummaryResponse,
+    ReportTrendQuery,
     ReportTrendResponse,
     TrendPointResponse,
 )
@@ -23,32 +28,55 @@ from app.services.notifications import NotificationWebhookService
 from app.services.reporting import ExecutionReportDetail, ReportService
 
 router = APIRouter(prefix="/projects/{project_id}")
-ReportStatus = Literal["running", "passed", "failed", "cancelled"]
+
+
+@router.get("/reports/filter-options", response_model=Page[ReportFilterOptionResponse])
+async def list_report_filter_options(
+    project_id: UUID,
+    query: Annotated[ReportFilterQuery, Query()],
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Page[ReportFilterOptionResponse]:
+    items, total = await ReportService(session).list_filter_options(
+        actor=current_user,
+        project_id=project_id,
+        kind=query.kind,
+        page=query.page,
+        page_size=query.page_size,
+        search=query.search,
+        selected_id=query.selected_id,
+    )
+    return Page(
+        items=[
+            ReportFilterOptionResponse.model_validate(item, from_attributes=True) for item in items
+        ],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+    )
 
 
 @router.get("/reports/executions", response_model=Page[ReportExecutionResponse])
 async def list_report_executions(
     project_id: UUID,
+    query: Annotated[ReportListQuery, Query()],
     session: SessionDependency,
     current_user: CurrentUser,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    execution_status: Annotated[ReportStatus | None, Query(alias="status")] = None,
 ) -> Page[ReportExecutionResponse]:
     items, total = await ReportService(session).list_executions(
         actor=current_user,
         project_id=project_id,
-        page=page,
-        page_size=page_size,
-        status=execution_status,
+        page=query.page,
+        page_size=query.page_size,
+        scope=query.to_scope(),
     )
     return Page(
         items=[
             ReportExecutionResponse.model_validate(item, from_attributes=True) for item in items
         ],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=query.page,
+        page_size=query.page_size,
     )
 
 
@@ -70,14 +98,15 @@ async def get_report_execution(
 @router.get("/reports/trends", response_model=ReportTrendResponse)
 async def get_report_trends(
     project_id: UUID,
+    query: Annotated[ReportTrendQuery, Query()],
     session: SessionDependency,
     current_user: CurrentUser,
-    days: int = Query(default=7, ge=1, le=90),
 ) -> ReportTrendResponse:
     trend = await ReportService(session).trend(
         actor=current_user,
         project_id=project_id,
-        days=days,
+        days=query.days,
+        scope=query.to_scope(),
     )
     return ReportTrendResponse(
         points=[
@@ -87,6 +116,7 @@ async def get_report_trends(
             FailureDistributionResponse(category=category, count=count)
             for category, count in trend.failures
         ],
+        summary=ReportScopeSummaryResponse.model_validate(trend.summary, from_attributes=True),
     )
 
 

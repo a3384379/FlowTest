@@ -45,6 +45,17 @@ describe('trend charts', () => {
 
   it('renders report trends and safely handles an absent series', () => {
     const trend: ReportTrend = {
+      summary: {
+        started_from: '2026-08-12T00:00:00Z',
+        started_until: '2026-08-13T00:00:00Z',
+        total: 3,
+        passed: 1,
+        failed: 1,
+        cancelled: 1,
+        pending: 0,
+        completed: 3,
+        pass_rate: 33.33,
+      },
       points: [
         {
           date: '2026-08-12',

@@ -1,7 +1,7 @@
 import html
 import json
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
 from uuid import UUID
@@ -10,7 +10,16 @@ from pydantic import BaseModel, JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
-from app.domain.reporting import FailureCategory, classify_failure
+from app.domain.reporting import (
+    FailureCategory,
+    InvalidReportScope,
+    ReportFilterKind,
+    ReportFilterOption,
+    ReportScope,
+    ReportStatus,
+    ReportTrendRecord,
+    classify_failure,
+)
 from app.engine.results import NodeObservation, NodeResult
 from app.models.access import User
 from app.models.artifacts import Artifact
@@ -102,6 +111,20 @@ class TrendPoint:
 class ReportTrend:
     points: list[TrendPoint]
     failures: list[tuple[FailureCategory, int]]
+    summary: "ReportScopeSummary"
+
+
+@dataclass(frozen=True, slots=True)
+class ReportScopeSummary:
+    started_from: datetime
+    started_until: datetime
+    total: int
+    passed: int
+    failed: int
+    cancelled: int
+    pending: int
+    completed: int
+    pass_rate: float | None
 
 
 class ReportService:
@@ -120,7 +143,8 @@ class ReportService:
         project_id: UUID,
         page: int,
         page_size: int,
-        status: str | None,
+        status: ReportStatus | None = None,
+        scope: ReportScope | None = None,
     ) -> tuple[list[ExecutionReportSummary], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         executions, total = await self._reports.list_executions(
@@ -128,6 +152,7 @@ class ReportService:
             offset=(page - 1) * page_size,
             limit=page_size,
             status=status,
+            scope=_validated_scope(scope or ReportScope(status=status)),
         )
         return [await self._summary(item) for item in executions], total
 
@@ -145,24 +170,55 @@ class ReportService:
             dataset_children=[await self._summary(child) for child in children],
         )
 
-    async def trend(self, *, actor: User, project_id: UUID, days: int) -> ReportTrend:
+    async def list_filter_options(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        kind: ReportFilterKind,
+        page: int,
+        page_size: int,
+        search: str,
+        selected_id: UUID | None,
+    ) -> tuple[list[ReportFilterOption], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
-        since = datetime.now(UTC) - timedelta(days=days - 1)
+        if kind not in {"workflow", "environment", "case", "plan"}:
+            raise AppError(
+                code="INVALID_REPORT_SCOPE", message="报告筛选维度不存在", status_code=422
+            )
+        return await self._reports.list_filter_options(
+            project_id=project_id,
+            kind=kind,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+            search=search.strip(),
+            selected_id=selected_id,
+        )
+
+    async def trend(
+        self, *, actor: User, project_id: UUID, days: int, scope: ReportScope | None = None
+    ) -> ReportTrend:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        selected = _validated_scope(scope, days)
+        since = cast(datetime, selected.started_from)
+        until = cast(datetime, selected.started_until)
         executions = await self._reports.list_executions_since(
             project_id=project_id,
-            since=since.replace(hour=0, minute=0, second=0, microsecond=0),
+            since=since,
+            scope=selected,
         )
-        by_date: dict[date, list[WorkflowExecution]] = defaultdict(list)
+        by_date: dict[date, list[ReportTrendRecord]] = defaultdict(list)
         failures: Counter[FailureCategory] = Counter()
         for execution in executions:
             by_date[_as_utc(execution.started_at).date()].append(execution)
             category = classify_failure(status=execution.status, error_code=execution.error_code)
-            if category is not FailureCategory.NONE:
+            if execution.status in {"failed", "cancelled"}:
                 failures[category] += 1
-        points = [self._trend_point(day, by_date.get(day, [])) for day in _date_range(days)]
+        points = [self._trend_point(day, by_date.get(day, [])) for day in _date_range(since, until)]
         return ReportTrend(
             points=points,
             failures=sorted(failures.items(), key=lambda item: (-item[1], item[0].value)),
+            summary=_scope_summary(since, until, executions),
         )
 
     async def export_html(self, *, actor: User, project_id: UUID, execution_id: UUID) -> Artifact:
@@ -314,7 +370,7 @@ class ReportService:
         )
 
     @staticmethod
-    def _trend_point(day: date, executions: list[WorkflowExecution]) -> TrendPoint:
+    def _trend_point(day: date, executions: list[ReportTrendRecord]) -> TrendPoint:
         total = len(executions)
         durations = [
             duration
@@ -392,9 +448,39 @@ def _as_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _date_range(days: int) -> list[date]:
-    today = datetime.now(UTC).date()
-    return [today - timedelta(days=offset) for offset in reversed(range(days))]
+def _date_range(since: datetime, until: datetime) -> list[date]:
+    first = since.date()
+    last = (until - timedelta(microseconds=1)).date()
+    return [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+
+
+def _scope_summary(
+    since: datetime, until: datetime, executions: list[ReportTrendRecord]
+) -> ReportScopeSummary:
+    counts = Counter(item.status for item in executions)
+    completed = counts["passed"] + counts["failed"] + counts["cancelled"]
+    return ReportScopeSummary(
+        started_from=since,
+        started_until=until,
+        total=len(executions),
+        passed=counts["passed"],
+        failed=counts["failed"],
+        cancelled=counts["cancelled"],
+        pending=counts["queued"] + counts["running"],
+        completed=completed,
+        pass_rate=round(counts["passed"] * 100 / completed, 2) if completed else None,
+    )
+
+
+def _validated_scope(scope: ReportScope | None, days: int | None = None) -> ReportScope:
+    try:
+        selected = (scope or ReportScope()).normalized()
+        if days is not None:
+            since, until = selected.trend_window(days, datetime.now(UTC))
+            selected = replace(selected, started_from=since, started_until=until)
+        return selected
+    except InvalidReportScope as error:
+        raise AppError(code="INVALID_REPORT_SCOPE", message=str(error), status_code=422) from error
 
 
 def _render_html(detail: ExecutionReportDetail) -> str:

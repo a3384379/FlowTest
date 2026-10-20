@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useLocation } from 'react-router-dom'
 
 import type {
   Artifact,
@@ -62,6 +63,17 @@ const detail: ReportExecutionDetail = {
 }
 
 const trend: ReportTrend = {
+  summary: {
+    started_from: '2026-08-09T00:00:00Z',
+    started_until: '2026-08-10T00:00:00Z',
+    total: 120,
+    passed: 72,
+    failed: 36,
+    cancelled: 2,
+    pending: 10,
+    completed: 110,
+    pass_rate: 65.45,
+  },
   points: [
     {
       date: '2026-08-09',
@@ -166,6 +178,15 @@ describe('ReportsPage', () => {
       http.get('/api/v1/projects', () =>
         HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
       ),
+      http.get(`/api/v1/projects/${project.id}/reports/filter-options`, ({ request }) => {
+        const id = new URL(request.url).searchParams.get('selected_id')
+        return HttpResponse.json({
+          items: id ? [{ id, name: '历史筛选对象' }] : [],
+          total: id ? 1 : 0,
+          page: 1,
+          page_size: 20,
+        })
+      }),
       http.get(`/api/v1/projects/${project.id}/reports/executions`, () =>
         HttpResponse.json({ items: [execution], total: 1, page: 1, page_size: 50 }),
       ),
@@ -226,8 +247,8 @@ describe('ReportsPage', () => {
     )
     renderPage()
     const browser = userEvent.setup()
-    expect(await screen.findByText('1/2 条本页记录')).toBeVisible()
-    expect(screen.getByText('本页通过率')).toBeVisible()
+    expect(await screen.findByText('72/110 条已完成记录（含取消，排除排队与运行中）')).toBeVisible()
+    expect(screen.getByText('范围内通过率')).toBeVisible()
     expect(screen.getByText('当前页 2 条 · 当前筛选共 120 条')).toBeVisible()
     await browser.click(screen.getByTitle('2'))
     await waitFor(() => expect(requests.at(-1)?.page).toBe('2'))
@@ -237,6 +258,77 @@ describe('ReportsPage', () => {
     expect(requests.at(-1)).toEqual({ status: 'failed', page: '1' })
     expect(screen.queryByText('通过流程 · v3')).not.toBeInTheDocument()
     expect(screen.getByText('更早失败流程 · v3')).toBeVisible()
+  })
+
+  it('shares one URL scope across list, totals and trend and keeps it after detail navigation', async () => {
+    const requests: { route: string; params: Record<string, string> }[] = []
+    const id = '00000000-0000-4000-8000-000000000099'
+    for (const route of ['executions', 'trends'])
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/reports/${route}`, ({ request }) => {
+          const params = Object.fromEntries(new URL(request.url).searchParams)
+          requests.push({ route, params })
+          return HttpResponse.json(
+            route === 'trends' ? trend : { items: [execution], total: 121, page: 3, page_size: 50 },
+          )
+        }),
+      )
+    const query = `reportFrom=2026-08-01&reportTo=2026-08-09&reportPage=3&reportEnvironment=${id}&reportCase=${id}&reportPlan=${id}&reportWorkflow=${execution.workflow_id}&reportSource=plan&reportStatus=failed`
+    renderPage(`/projects/${project.id}/reports?${query}`)
+    expect(await screen.findByText('当前页 1 条 · 当前筛选共 121 条')).toBeVisible()
+    const expected = {
+      started_from: '2026-08-01T00:00:00.000Z',
+      started_until: '2026-08-10T00:00:00.000Z',
+      workflow_id: execution.workflow_id,
+      environment_id: id,
+      source_case_id: id,
+      source_plan_id: id,
+      source: 'plan',
+      status: 'failed',
+    }
+    await waitFor(() => expect(requests).toHaveLength(2))
+    requests.forEach(({ params }) => expect(params).toEqual(expect.objectContaining(expected)))
+    expect(requests.find((item) => item.route === 'executions')?.params.page).toBe('3')
+    fireEvent.click(screen.getByRole('button', { name: /详情/ }))
+    expect(await screen.findByRole('button', { name: '返回执行列表' })).toBeVisible()
+    expect(screen.getByTestId('report-location').textContent).toContain('reportPage=3')
+    fireEvent.click(screen.getByRole('button', { name: '返回执行列表' }))
+    expect(await screen.findByText('当前页 1 条 · 当前筛选共 121 条')).toBeVisible()
+    expect(screen.getByTestId('report-location').textContent).not.toContain('execution=')
+    expect(screen.getByTestId('report-location').textContent).toContain('reportSource=plan')
+  })
+
+  it('shows empty scope without a fabricated pass rate and does not query an invalid period', async () => {
+    let calls = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions`, () => {
+        calls += 1
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 50 })
+      }),
+      http.get(`/api/v1/projects/${project.id}/reports/trends`, () =>
+        HttpResponse.json({
+          ...trend,
+          failures: [],
+          summary: {
+            ...trend.summary,
+            total: 0,
+            passed: 0,
+            failed: 0,
+            cancelled: 0,
+            pending: 0,
+            completed: 0,
+            pass_rate: null,
+          },
+        }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?reportFrom=2026-08-10&reportTo=2026-08-01`)
+    expect(await screen.findByText('日期范围须为 1 至 90 天（含首尾日期）')).toBeVisible()
+    expect(calls).toBe(0)
+    fireEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+    expect(await screen.findByText('0/0 条已完成记录（含取消，排除排队与运行中）')).toBeVisible()
+    expect(screen.queryByText('0%')).not.toBeInTheDocument()
+    expect(calls).toBe(1)
   })
 
   it('drills into reports, exports HTML and manages signed notifications', async () => {
@@ -629,9 +721,18 @@ function renderPage(initialEntry?: string) {
         <QueryClientProvider client={queryClient}>
           <ProjectTestProvider section="reports" initialEntry={initialEntry}>
             <ReportsPage />
+            <ReportLocation />
           </ProjectTestProvider>
         </QueryClientProvider>
       </AntdApp>
     </ConfigProvider>,
+  )
+}
+
+function ReportLocation() {
+  return (
+    <span data-testid="report-location" hidden>
+      {useLocation().search}
+    </span>
   )
 }
