@@ -86,8 +86,14 @@ def test_graphql_actual_roots_fields_requiredness_and_legal_sample() -> None:
 def test_graphql_custom_scalar_recursive_and_deep_inputs_do_not_claim_complete_examples() -> None:
     custom = inspect_graphql(SDL, "field:ReadRoot.date", 0, 25)
     assert custom.example is None and "自定义标量" in (custom.notice or "")
+    with pytest.raises(ProtocolSchemaError):
+        inspect_graphql(
+            b"input Loop { next: Loop! } type Query { read(loop: Loop!): ID }",
+            "field:Query.read",
+            0,
+            25,
+        )
     for content in [
-        b"input Loop { next: Loop! } type Query { read(loop: Loop!): ID }",
         b"input A { child: B! } input B { child: C! } input C { child: D! } "
         b"input D { child: E! } input E { child: F! } input F { child: G! } "
         b"input G { id: ID! } type Query { read(input: A!): ID }",
@@ -225,3 +231,28 @@ def test_error_root_location_bounds_tokens_and_fragment_traversal_without_execut
     ]:
         with pytest.raises(ProtocolSchemaError):
             locate_graphql_error_root(SDL, operation, None, ["alias"])
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "query Pick { alias: a } query Pick { alias: b }",
+        "query Pick { ...F } fragment F on Query { alias: a } fragment F on Query { alias: b }",
+    ],
+)
+def test_error_root_does_not_guess_between_duplicate_operation_or_fragment_names(
+    operation: str,
+) -> None:
+    from app.domain.graphql_structure import locate_graphql_error_root
+
+    with pytest.raises(ProtocolSchemaError):
+        locate_graphql_error_root(
+            b"type Query { a: String b: String }", operation, "Pick", ["alias"]
+        )
+
+
+def test_invalid_stored_schema_does_not_generate_a_claimed_legal_sample() -> None:
+    with pytest.raises(ProtocolSchemaError):
+        inspect_graphql(
+            b"enum Empty type Query { read(value: Empty!): String }", "field:Query.read", 0, 25
+        )

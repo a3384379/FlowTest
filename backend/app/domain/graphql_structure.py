@@ -16,12 +16,15 @@ from graphql import (
     build_schema,
     get_named_type,
     is_composite_type,
+    validate_schema,
 )
 from graphql.language import (
+    DocumentNode,
     FieldNode,
     FragmentDefinitionNode,
     FragmentSpreadNode,
     InlineFragmentNode,
+    OperationDefinitionNode,
     SelectionSetNode,
 )
 from pydantic import JsonValue
@@ -53,6 +56,8 @@ def _inspect_schema(schema: GraphQLSchema, node: str, offset: int, limit: int) -
         or sum(len(getattr(item, "fields", {})) for item in public) > MAX_GRAPHQL_FIELDS
     ):
         raise ProtocolSchemaError("GraphQL契约结构超过平台上限")
+    if validate_schema(schema):
+        raise ProtocolSchemaError("存储的GraphQL契约结构无效,请核对源文档并重新导入。")
     if node == "root":
         return structure_page(node, "GraphQL契约", _roots(schema), offset, limit)
     if node == "types":
@@ -267,14 +272,16 @@ def _locate_graphql_error_root(
     content: bytes, operation: str, operation_name: str | None, path: list[str | int]
 ) -> str:
     """Resolve a response alias to its actual root field without executing the operation."""
-    from graphql import get_operation_ast, parse
+    from graphql import parse
 
     check_structure_size(operation.encode())
     document = parse(operation, max_tokens=25000)
-    selected = get_operation_ast(document, operation_name)
-    if selected is None or not path or not isinstance(path[0], str):
+    selected = _selected_operation(document, operation_name)
+    if not path or not isinstance(path[0], str):
         raise ProtocolSchemaError("无法唯一定位操作或错误路径,请核对Operation Name与响应。")
     schema = build_schema(content.decode())
+    if validate_schema(schema):
+        raise ProtocolSchemaError("存储的GraphQL契约结构无效,无法定位字段。")
     roots = {"query": schema.query_type, "mutation": schema.mutation_type}
     root = roots.get(selected.operation.value)
     if root is None:
@@ -284,10 +291,26 @@ def _locate_graphql_error_root(
         for item in document.definitions
         if isinstance(item, FragmentDefinitionNode)
     }
+    if len(fragments) != sum(
+        isinstance(item, FragmentDefinitionNode) for item in document.definitions
+    ):
+        raise ProtocolSchemaError("Fragment名称重复,无法唯一定位字段。")
     names = _root_field_names(selected.selection_set, fragments, path[0])
     if len(names) != 1 or next(iter(names)) not in root.fields:
         raise ProtocolSchemaError("错误根字段无法唯一定位,请对照操作与契约。")
     return f"field:{root.name}.{next(iter(names))}"
+
+
+def _selected_operation(document: DocumentNode, name: str | None) -> OperationDefinitionNode:
+    operations = [
+        item for item in document.definitions if isinstance(item, OperationDefinitionNode)
+    ]
+    matches = [
+        item for item in operations if name is None or (item.name and item.name.value == name)
+    ]
+    if len(matches) != 1:
+        raise ProtocolSchemaError("操作名称缺失或重复,无法唯一定位字段。")
+    return matches[0]
 
 
 def _root_field_names(
