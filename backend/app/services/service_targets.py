@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.domain.network import OutboundNetworkPolicy
+from app.engine.contracts import CAPABILITY_LEGACY_NODE_TYPES, NodeType
 from app.models.access import Project, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.release_gate import ReleasePolicy
@@ -670,8 +671,8 @@ def _node_uses_service(
 ) -> bool:
     if not isinstance(node, dict):
         return False
-    config = node.get("config")
-    if not isinstance(config, dict):
+    config = _http_node_configuration(node)
+    if config is None:
         return False
     service_override = config.get("service_override")
     if service_override is not None:
@@ -684,6 +685,28 @@ def _node_uses_service(
         else current_versions.get(definition_id)
     )
     return version is not None and (definition_id, version) in version_refs
+
+
+def _http_node_configuration(node: dict[str, object]) -> dict[str, object] | None:
+    key = "config"
+    if node.get("type") == "capability":
+        if not _is_http_capability(node):
+            return None
+        key = "configuration"
+    elif node.get("type") != "api":
+        return None
+    config = node.get(key)
+    return config if isinstance(config, dict) else None
+
+
+def _is_http_capability(node: dict[str, object]) -> bool:
+    capability_id = node.get("capability_id")
+    version = node.get("capability_version")
+    return (
+        isinstance(capability_id, str)
+        and isinstance(version, str)
+        and CAPABILITY_LEGACY_NODE_TYPES.get((capability_id, version)) is NodeType.API
+    )
 
 
 class _ImpactNamed(Protocol):

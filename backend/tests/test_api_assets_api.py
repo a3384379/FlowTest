@@ -764,6 +764,49 @@ async def test_service_endpoint_resolution_and_snapshot(
     assert region_workflow.json()["id"] in {
         item["id"] for item in region_impact.json()["affected_workflows"]
     }
+    native_workflow_ids: set[str] = set()
+    for node_config in [
+        {"api_definition_id": definition_id, "api_version": 2},
+        {"api_definition_id": definition_id, "api_version": 3, "service_override": "auth"},
+    ]:
+        native_definition = {
+            **region_definition,
+            "regions": [
+                {
+                    **region_definition["regions"][0],
+                    "nodes": [
+                        {
+                            "id": "request",
+                            "type": "capability",
+                            "name": "新版 HTTP 请求",
+                            "position": {"x": 180, "y": 0},
+                            "capability_id": "http.request",
+                            "capability_version": "2.0.0",
+                            "configuration": node_config,
+                            "bindings": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        native_workflow = await asset_client.post(
+            f"/api/v1/projects/{project_id}/workflows",
+            headers=headers,
+            json={
+                "name": f"新版 HTTP 区域节点 {len(native_workflow_ids)}",
+                "definition": native_definition,
+            },
+        )
+        assert native_workflow.status_code == 201, native_workflow.text
+        native_workflow_ids.add(native_workflow.json()["id"])
+    native_impact = await asset_client.get(
+        f"/api/v1/projects/{project_id}/services/{auth_id}/impact-preview",
+        headers=headers,
+    )
+    assert native_impact.status_code == 200, native_impact.text
+    assert native_workflow_ids <= {
+        item["id"] for item in native_impact.json()["affected_workflows"]
+    }
     restored = await asset_client.patch(
         f"/api/v1/projects/{project_id}/apis/{definition_id}",
         headers=headers,

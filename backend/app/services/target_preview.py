@@ -316,7 +316,7 @@ def _candidate_version(
         return version
     return APIVersion(
         api_definition_id=version.api_definition_id,
-        version=version.version + (change.service_id != version.service_id),
+        version=version.version + 1,
         service_id=change.service_id,
         path=version.path,
         query_parameters=version.query_parameters,

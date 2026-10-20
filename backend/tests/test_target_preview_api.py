@@ -374,3 +374,44 @@ async def test_preview_authorizes_viewer_without_granting_writes(
     )
     assert denied.status_code == 403, denied.text
     assert denied.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("binding", ["changed", "unchanged"])
+async def test_binding_preview_matches_new_version_and_preserves_historical_resolution(
+    preview_assets: PreviewAssets,
+    binding: str,
+) -> None:
+    fixture = preview_assets
+    service_id = fixture.service_id if binding == "changed" else None
+    preview = await fixture.client.post(
+        f"{fixture.root}/request-targets/preview",
+        headers=fixture.headers,
+        json={
+            "environment_id": fixture.environment_id,
+            "api_id": fixture.unbound_api_id,
+            "change": {
+                "kind": "api_binding",
+                "api_id": fixture.unbound_api_id,
+                "service_id": service_id,
+            },
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["before"]["api_version"] == 1
+    assert preview.json()["after"]["api_version"] == 2
+    saved = await fixture.client.patch(
+        f"{fixture.root}/apis/{fixture.unbound_api_id}",
+        headers=fixture.headers,
+        json={"service_id": service_id},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["current_version"] == 2
+    for version, key in [(1, "before"), (2, "after")]:
+        actual = await fixture.client.post(
+            f"{fixture.root}/apis/{fixture.unbound_api_id}/preview",
+            headers=fixture.headers,
+            json={"environment_id": fixture.environment_id, "version": version},
+        )
+        assert actual.status_code == 200, actual.text
+        assert actual.json()["url"] == preview.json()[key]["url"]
