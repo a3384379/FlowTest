@@ -446,6 +446,8 @@ function CreatePlanDialog({
     <Modal
       title="新建测试计划"
       open={open}
+      style={{ top: 24 }}
+      styles={{ body: { maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' } }}
       confirmLoading={submitting}
       onCancel={onClose}
       onOk={() => form.submit()}

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
@@ -195,8 +195,13 @@ describe('ChangeRegressionPage', () => {
     )
     renderPage()
     await screen.findByText('订单变更回归')
-    expect(screen.queryByRole('button', { name: '接受' })).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '查看并审核' }))
+    const missing = within(screen.getByRole('region', { name: '缺失测试草案' }))
+    expect(missing.queryByRole('button', { name: '接受' })).not.toBeInTheDocument()
+    // Check the semantic button and its visibility once instead of repeating ancestor-style queries.
+    const openReview = missing.getByText('查看并审核').closest('button')
+    expect(openReview).toHaveRole('button')
+    expect(openReview).toBeVisible()
+    fireEvent.click(openReview!)
     const review = screen.getByRole('dialog', { name: '缺失测试草案审核' })
     expect(within(review).getByText(/openapi:\/\/orders\/create/)).toBeVisible()
     expect(within(review).getByText(/"expected": 201/)).toBeVisible()
@@ -248,17 +253,18 @@ describe('ChangeRegressionPage', () => {
     expect(screen.getByText(/00000000-0000-4000-8000-000000003010 · v2/)).toBeVisible()
     expect(screen.getByText('100 → 999')).toBeVisible()
     expect(screen.getByText('contract:openapi://orders/GET')).toBeVisible()
-    await waitFor(() => expect(screen.getByRole('button', { name: '人工批准' })).toBeVisible())
+    const actions = within(await screen.findByRole('group', { name: '变更回归动作' }))
+    await waitFor(() => expect(actions.getByRole('button', { name: '人工批准' })).toBeVisible())
 
-    await browser.click(screen.getByRole('button', { name: '人工批准' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '执行回归' })).toBeVisible())
+    await browser.click(actions.getByRole('button', { name: '人工批准' }))
+    await waitFor(() => expect(actions.getByRole('button', { name: '执行回归' })).toBeVisible())
 
-    await browser.click(screen.getByRole('button', { name: '执行回归' }))
+    await browser.click(actions.getByRole('button', { name: '执行回归' }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '评估 Release Gate' })).toBeVisible(),
+      expect(actions.getByRole('button', { name: '评估 Release Gate' })).toBeVisible(),
     )
 
-    await browser.click(screen.getByRole('button', { name: '评估 Release Gate' }))
+    await browser.click(actions.getByRole('button', { name: '评估 Release Gate' }))
     await waitFor(() => expect(screen.getAllByText('passed').length).toBeGreaterThan(0))
     expect(currentRun.status).toBe('passed')
   })
@@ -885,12 +891,14 @@ function renderPage() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="change-regression">
-          <ChangeRegressionPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="change-regression">
+            <ChangeRegressionPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }

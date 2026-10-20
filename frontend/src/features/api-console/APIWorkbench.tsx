@@ -178,6 +178,7 @@ function LoadedAPIWorkbench(props: APIWorkbenchProps & { detail: ApiDetail }) {
         </div>
         <Tabs
           key={props.detail?.definition.id}
+          tabBarGutter={12}
           items={[
             {
               key: 'params',

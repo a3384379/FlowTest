@@ -285,7 +285,7 @@ function MissingTestReview({
   }
   if (!run.missing_tests.length) return null
   return (
-    <>
+    <section aria-label="缺失测试草案">
       <Divider titlePlacement="left">缺失测试草案 / 人工审核</Divider>
       <Table
         rowKey="item_id"
@@ -380,7 +380,7 @@ function MissingTestReview({
           </>
         )}
       </Drawer>
-    </>
+    </section>
   )
 }
 
@@ -394,7 +394,7 @@ function RunActions({
   const pending = run.missing_tests.filter((item) => item.review_status === 'pending')
   const planGateOpen = Boolean(run.selection_summary.unresolved_current_plan_gap_count)
   return (
-    <Space wrap>
+    <Space wrap role="group" aria-label="变更回归动作">
       {run.status === 'review_required' && pending.length === 0 && (
         <Button
           type="primary"

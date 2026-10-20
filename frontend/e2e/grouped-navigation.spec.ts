@@ -73,7 +73,8 @@ for (const viewport of [
     page,
   }) => {
     await page.setViewportSize(viewport)
-    await seedEditor(page)
+    const fixture = await seedEditor(page)
+    await page.goto(`${fixture.root}/workflows?focus=${fixture.workflow.id}`)
     await expect(page.getByTestId('workflow-workbench')).toBeVisible()
     const navigation = await openDirectory(page)
     await navigation.getByRole('menuitem', { name: '项目与接口', exact: true }).click()
@@ -111,16 +112,18 @@ for (const viewport of [
       expect(sample.height).toBeCloseTo(viewport.height, 0)
       expect(sample.footerBottom).toBeCloseTo(footerBottom, 0)
     }
-    await page.getByRole('tab', { name: '流程编排', exact: true }).click()
+    await page.getByRole('tab', { name: /流程编辑器验收/ }).click()
     await expect(page.getByTestId('workflow-workbench')).toBeVisible()
   })
 }
 
-test('N06/N08：module directory supports keyboard selection, Escape, tabs and browser history', async ({
+test('N06/N08：module directory supports keyboard selection, Escape, object tabs and browser history', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await seedEditor(page)
+  const fixture = await seedEditor(page)
+  await page.goto(`${fixture.root}/workflows?focus=${fixture.workflow.id}`)
+  await expect(page.getByTestId('workflow-workbench')).toBeVisible()
   await navigateMenu(page, '服务目录')
   await expect(page.getByRole('heading', { name: '服务目录', exact: true })).toBeVisible()
   await page.goBack()
@@ -147,7 +150,9 @@ test('N06/N08：module directory supports keyboard selection, Escape, tabs and b
   await overview.focus()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/dashboard$/)
-  await page.getByRole('tab', { name: /服务目录/ }).click()
+  await expect(page.getByRole('tab', { name: /服务目录/ })).toHaveCount(0)
+  await openDirectory(page)
+  await service.click()
   await expect(page).toHaveURL(/services$/)
   await openDirectory(page)
   await search.clear()
@@ -155,7 +160,7 @@ test('N06/N08：module directory supports keyboard selection, Escape, tabs and b
     navigation.getByRole('menuitem', { name: '项目与接口', exact: true }),
   ).toHaveAttribute('aria-expanded', 'true')
   await page.keyboard.press('Escape')
-  await page.getByRole('tab', { name: /流程编排/ }).click()
+  await page.getByRole('tab', { name: /流程编辑器验收/ }).click()
   await openDirectory(page)
   await expect(parent).toHaveAttribute('aria-expanded', 'true')
 })
