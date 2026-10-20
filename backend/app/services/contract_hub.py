@@ -17,6 +17,7 @@ from app.domain.contract_hub import (
     normalize_contract_origin,
     service_key_for_name,
 )
+from app.domain.service_catalog import ServiceContractVersion
 from app.models.access import User
 from app.models.contracts import (
     ContractRun,
@@ -101,6 +102,39 @@ class ContractHubService:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._repository.list_services(project_id=project_id)
+
+    async def page_services(
+        self, *, actor: User, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[ServiceCatalogEntry], int]:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        search = search.strip()
+        if len(search) > 200:
+            raise AppError(
+                code="SERVICE_CATALOG_SEARCH_INVALID",
+                message="服务搜索词超过200字符",
+                status_code=422,
+            )
+        return await self._repository.page_services(
+            project_id=project_id, search=search, offset=offset, limit=limit
+        )
+
+    async def get_service(
+        self, *, actor: User, project_id: UUID, service_id: UUID
+    ) -> ServiceCatalogEntry:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._project_service(project_id, service_id)
+
+    async def service_versions(
+        self, *, actor: User, project_id: UUID, service_id: UUID, offset: int, limit: int
+    ) -> tuple[list[ServiceContractVersion], int]:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        await self._project_service(project_id, service_id)
+        return await self._repository.page_service_versions(
+            project_id=project_id, service_id=service_id, offset=offset, limit=limit
+        )
 
     async def import_pact(
         self,

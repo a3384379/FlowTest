@@ -509,3 +509,38 @@ async def test_catalog_empty_page_preserves_full_scope_total(
     assert first.json()["total"] > 0
     assert outside.json()["total"] == first.json()["total"]
     assert outside.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_catalog_and_history_preserve_failed_workflow_execution(
+    asset_history_fixture: AssetHistoryFixture,
+) -> None:
+    fixture = asset_history_fixture
+    async with fixture.context.session_maker() as session:
+        execution = await session.get(WorkflowExecution, fixture.direct_execution_id)
+        assert execution is not None
+        execution.status = "failed"
+        execution.error_code = "WORKER_RUNTIME_ERROR"
+        execution.error_message = "审计合成运行异常"
+        await session.commit()
+    root = f"/api/v1/projects/{fixture.project_id}"
+    for scope in [{}, {"latest_result": "failed"}]:
+        response = await fixture.context.client.get(
+            f"{root}/test-cases", headers=fixture.headers, params=scope
+        )
+        assert response.status_code == 200, response.text
+        case = next(row for row in response.json()["items"] if row["id"] == fixture.case_id)
+        assert case["latest_run"]["status"] == "failed"
+        assert case["latest_run"]["execution_id"] == str(fixture.direct_execution_id)
+    counts = await fixture.context.client.get(
+        f"{root}/test-assets/directory-counts",
+        headers=fixture.headers,
+        params={"latest_result": "failed"},
+    )
+    assert counts.status_code == 200, counts.text
+    assert counts.json()["case_total"] == 1
+    history = await fixture.context.client.get(
+        f"{root}/test-cases/{fixture.case_id}/runs", headers=fixture.headers
+    )
+    assert history.status_code == 200, history.text
+    assert history.json()["items"][0]["status"] == "failed"

@@ -37,6 +37,7 @@ export type ImpactCatalog = {
 }
 
 export type ImpactChange = {
+  service_key?: string | null
   key: string
   source_kind: ImpactSourceKind
   source_key: string
@@ -170,16 +171,32 @@ export async function listImpactRuns(
   projectId: string,
   page = 1,
   pageSize = 100,
+  contractServiceId?: string,
 ): Promise<Page<ImpactRunSummary>> {
   return (
     await apiClient.get<Page<ImpactRunSummary>>(`/projects/${projectId}/impact/runs`, {
-      params: { page, page_size: pageSize },
+      params: {
+        page,
+        page_size: pageSize,
+        ...(contractServiceId ? { contract_service_id: contractServiceId } : {}),
+      },
     })
   ).data
 }
 
-export async function getImpactRun(projectId: string, runId: string): Promise<ImpactRunDetail> {
-  return (await apiClient.get<ImpactRunDetail>(`/projects/${projectId}/impact/runs/${runId}`)).data
+export async function getImpactRun(
+  projectId: string,
+  runId: string,
+  contractServiceId?: string,
+): Promise<ImpactRunDetail> {
+  const path = `/projects/${projectId}/impact/runs/${runId}`
+  return (
+    contractServiceId
+      ? await apiClient.get<ImpactRunDetail>(path, {
+          params: { contract_service_id: contractServiceId },
+        })
+      : await apiClient.get<ImpactRunDetail>(path)
+  ).data
 }
 
 export async function createImpactRun(

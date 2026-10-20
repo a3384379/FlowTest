@@ -1,9 +1,12 @@
 from collections.abc import Sequence
+from datetime import UTC
+from typing import Literal, cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.service_catalog import ServiceContractVersion
 from app.models.contracts import (
     ContractRun,
     DeploymentCompatibilityCheck,
@@ -11,6 +14,7 @@ from app.models.contracts import (
     PactProviderVerification,
     ServiceCatalogEntry,
 )
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 class ContractHubRepository:
@@ -57,6 +61,98 @@ class ContractHubRepository:
                 )
             ).all()
         )
+
+    async def page_services(
+        self, *, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[ServiceCatalogEntry], int]:
+        query = select(ServiceCatalogEntry.id.label("item_id")).where(
+            ServiceCatalogEntry.project_id == project_id
+        )
+        if search:
+            query = query.where(
+                or_(
+                    ServiceCatalogEntry.display_name.icontains(search, autoescape=True),
+                    ServiceCatalogEntry.service_key.icontains(search, autoescape=True),
+                    ServiceCatalogEntry.description.icontains(search, autoescape=True),
+                )
+            )
+        ranked = query.add_columns(
+            func.row_number()
+            .over(order_by=(ServiceCatalogEntry.display_name, ServiceCatalogEntry.id))
+            .label("position")
+        ).cte()
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(ServiceCatalogEntry, page.c.total)
+                .select_from(page)
+                .outerjoin(ServiceCatalogEntry, ServiceCatalogEntry.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
+
+    async def page_service_versions(
+        self, *, project_id: UUID, service_id: UUID, offset: int, limit: int
+    ) -> tuple[list[ServiceContractVersion], int]:
+        openapi = select(
+            ContractRun.id.label("item_id"),
+            literal("openapi").label("kind"),
+            ContractRun.provider_version.label("version"),
+            ContractRun.source_name,
+            literal("provider").label("service_role"),
+            ContractRun.status,
+            ContractRun.created_at,
+        ).where(ContractRun.project_id == project_id, ContractRun.provider_service_id == service_id)
+        pact = select(
+            PactContractVersion.id.label("item_id"),
+            literal("pact").label("kind"),
+            PactContractVersion.consumer_version.label("version"),
+            PactContractVersion.source_name,
+            case(
+                (
+                    and_(
+                        PactContractVersion.consumer_service_id == service_id,
+                        PactContractVersion.provider_service_id == service_id,
+                    ),
+                    "both",
+                ),
+                (PactContractVersion.consumer_service_id == service_id, "consumer"),
+                else_="provider",
+            ).label("service_role"),
+            literal("completed").label("status"),
+            PactContractVersion.created_at,
+        ).where(
+            PactContractVersion.project_id == project_id,
+            or_(
+                PactContractVersion.consumer_service_id == service_id,
+                PactContractVersion.provider_service_id == service_id,
+            ),
+        )
+        history = union_all(openapi, pact).subquery()
+        ranked = select(
+            history,
+            func.row_number()
+            .over(order_by=(history.c.created_at.desc(), history.c.item_id.desc(), history.c.kind))
+            .label("position"),
+        ).cte()
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (await self._session.execute(select(page).order_by(page.c.position))).all()
+        return [
+            ServiceContractVersion(
+                id=row.item_id,
+                kind=cast(Literal["openapi", "pact"], row.kind),
+                version=row.version,
+                source_name=row.source_name,
+                service_role=cast(Literal["provider", "consumer", "both"], row.service_role),
+                status=cast(Literal["completed", "failed"], row.status),
+                created_at=row.created_at
+                if row.created_at.utcoffset() is not None
+                else row.created_at.replace(tzinfo=UTC),
+            )
+            for row in rows
+            if row.item_id is not None
+        ], int(rows[0].total)
 
     def add_pact(self, model: PactContractVersion) -> None:
         self._session.add(model)

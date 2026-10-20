@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -56,9 +56,15 @@ describe('ServiceCatalogPage', () => {
     let createPayload: Record<string, unknown> | null = null
     installFeatureHandler(true)
     server.use(
-      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
-        HttpResponse.json({ items: services, total: services.length, page: 1, page_size: 100 }),
-      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
+        const search = new URL(request.url).searchParams.get('search')?.toLowerCase() ?? ''
+        const items = services.filter((item) =>
+          [item.display_name, item.service_key, item.description].some((value) =>
+            value.toLowerCase().includes(search),
+          ),
+        )
+        return HttpResponse.json({ items, total: items.length, page: 1, page_size: 20 })
+      }),
       http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
         HttpResponse.json(summary(services.length)),
       ),
@@ -81,19 +87,22 @@ describe('ServiceCatalogPage', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByRole('heading', { name: '服务目录' })).toBeVisible()
-    expect(await screen.findByText('Web 前端')).toBeVisible()
-    expect(screen.getByText('订单服务')).toBeVisible()
+    const list = within(screen.getByLabelText('服务目录列表'))
+    expect(await list.findByText('Web 前端')).toBeVisible()
+    expect(list.getByText('订单服务')).toBeVisible()
     expect(screen.getByText('消费方')).toBeVisible()
-    expect(screen.getByText('提供方')).toBeVisible()
-    expect(screen.getByText('OpenAPI')).toBeVisible()
+    expect(list.getByText('提供方')).toBeVisible()
+    expect(list.getByText('OpenAPI')).toBeVisible()
     expect(screen.getAllByText('Pact').length).toBeGreaterThan(0)
     expect(screen.getByText('服务数量').closest('.ant-card')).toHaveTextContent('2')
-    expect(screen.getByRole('row', { name: /订单服务/ })).toHaveClass('service-catalog-row-focused')
+    expect(list.getByRole('row', { name: /订单服务/ })).toHaveClass('service-catalog-row-focused')
 
-    await browser.type(screen.getByLabelText('搜索服务'), 'web')
-    expect(screen.getByText('Web 前端')).toBeVisible()
-    expect(screen.queryByText('订单服务')).not.toBeInTheDocument()
+    await browser.type(screen.getByLabelText('搜索服务'), 'web{Enter}')
+    await waitFor(() => expect(list.queryByText('订单服务')).not.toBeInTheDocument())
+    expect(list.getByText('Web 前端')).toBeVisible()
+    expect(within(screen.getByLabelText('选中服务详情')).getByText('订单服务')).toBeInTheDocument()
     await browser.clear(screen.getByLabelText('搜索服务'))
+    await browser.keyboard('{Enter}')
 
     await browser.click(screen.getByRole('button', { name: /新建服务/ }))
     const dialog = screen.getByRole('dialog', { name: '新建服务' })
@@ -120,6 +129,95 @@ describe('ServiceCatalogPage', () => {
     expect(screen.getByText('服务数量').closest('.ant-card')).toHaveTextContent('3')
   })
 
+  it('reads a selected service outside the visible page and keeps it through server searches', async () => {
+    const services = Array.from({ length: 105 }, (_, index) =>
+      service(
+        `00000000-0000-4000-8000-${String(4000 + index).padStart(12, '0')}`,
+        `service-${index}`,
+        `完整目录${index}`,
+        '真实服务端范围',
+      ),
+    )
+    const requests: URLSearchParams[] = []
+    installFeatureHandler(true)
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        requests.push(params)
+        const matching = services.filter((item) =>
+          item.display_name.includes(params.get('search') ?? ''),
+        )
+        const page = Number(params.get('page') ?? 1)
+        return HttpResponse.json({
+          items: matching.slice((page - 1) * 20, page * 20),
+          total: matching.length,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId`, ({ params }) =>
+        HttpResponse.json(services.find((item) => item.id === params.serviceId)),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json(summary(105)),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+        HttpResponse.json({ nodes: [], edges: [] }),
+      ),
+    )
+    renderPage(`?contractServiceId=${services[104].id}&servicePage=6`)
+    const details = await screen.findByLabelText('选中服务详情')
+    expect(await within(details).findByText('service-104')).toBeInTheDocument()
+    expect(requests.at(-1)?.get('page')).toBe('6')
+    const browser = userEvent.setup()
+    await browser.type(screen.getByLabelText('搜索服务'), '完整目录0{Enter}')
+    await waitFor(() => expect(requests.at(-1)?.get('search')).toBe('完整目录0'))
+    expect(requests.at(-1)?.get('page')).toBe('1')
+    expect(within(details).getByText('service-104')).toBeInTheDocument()
+    expect(await screen.findByText('完整目录0')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看服务契约' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/contracts?contractServiceId=${services[104].id}`,
+    )
+    expect(screen.getByRole('link', { name: '查看服务影响' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/impact?contractServiceId=${services[104].id}`,
+    )
+  })
+
+  it('shows a failed exact lookup instead of selecting a visible different service', async () => {
+    installFeatureHandler(true)
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
+        HttpResponse.json({ items: [initialServices[0]], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json(summary(1)),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+        HttpResponse.json({ nodes: [], edges: [] }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services/${providerId}`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'SERVICE_CATALOG_ENTRY_NOT_FOUND',
+              message: '服务目录项不存在',
+              trace_id: 'service-missing',
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    )
+    renderPage(`?contractServiceId=${providerId}`)
+    expect(await screen.findByText('服务目录项不存在')).toBeInTheDocument()
+    const detail = within(screen.getByLabelText('选中服务详情'))
+    expect(detail.queryByText('Web 前端')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看服务契约' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
+  })
+
   it('keeps the route visible without calling disabled Contract Hub APIs', async () => {
     let catalogReads = 0
     installFeatureHandler(false)
@@ -137,9 +235,57 @@ describe('ServiceCatalogPage', () => {
     expect(catalogReads).toBe(0)
   })
 
+  it('uses fresh capabilities and preserves the draft while revoked editing disables submit', async () => {
+    installFeatureHandler(true)
+    let editable = true
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({
+          effective_role: editable ? 'owner' : 'viewer',
+          capabilities: editable ? ['read', 'edit'] : ['read'],
+          matrix: {},
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+        HttpResponse.json(summary(0)),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+        HttpResponse.json({ nodes: [], edges: [] }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/contract-hub/services`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    const { queryClient } = renderPage()
+    const open = screen.getByRole('button', { name: /新建服务/ })
+    await waitFor(() => expect(open).toBeEnabled())
+    await userEvent.click(open)
+    const dialog = within(screen.getByRole('dialog', { name: '新建服务' }))
+    fireEvent.change(dialog.getByLabelText('服务标识'), { target: { value: 'audit-revoked' } })
+    fireEvent.change(dialog.getByLabelText('显示名称'), { target: { value: '权限撤销时保留草稿' } })
+    editable = false
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['project-permissions', project.id] })
+    })
+    const submit = dialog.getByRole('button', { name: '登记服务' })
+    await waitFor(() => expect(submit).toBeDisabled())
+    expect(dialog.getByLabelText('显示名称')).toBeDisabled()
+    expect(dialog.getByLabelText('显示名称')).toHaveValue('权限撤销时保留草稿')
+    fireEvent.click(submit)
+    expect(writes).toBe(0)
+  })
+
   it('keeps the catalog read-only for project viewers', async () => {
     installFeatureHandler(true)
     server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json({ effective_role: 'viewer', capabilities: ['read'], matrix: {} }),
+      ),
       http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
@@ -154,7 +300,7 @@ describe('ServiceCatalogPage', () => {
 
     const createButton = await screen.findByRole('button', { name: /新建服务/ })
     expect(createButton).toBeDisabled()
-    expect(createButton).toHaveAttribute('title', '查看者无权登记服务')
+    await waitFor(() => expect(createButton).toHaveAttribute('title', '当前权限不能登记服务'))
     expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
 })
@@ -168,7 +314,7 @@ function renderPage(search = '', visibleProject = project) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <ProjectTestProvider
@@ -180,10 +326,17 @@ function renderPage(search = '', visibleProject = project) {
       </QueryClientProvider>
     </AntdApp>,
   )
+  return { ...view, queryClient }
 }
 
 function installFeatureHandler(enabled: boolean): void {
   server.use(
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId/versions`, () =>
+      HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services/:serviceId`, ({ params }) =>
+      HttpResponse.json(initialServices.find((item) => item.id === params.serviceId)),
+    ),
     http.get('/api/v1/v3/features', () =>
       HttpResponse.json({
         capability_sdk: true,

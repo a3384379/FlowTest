@@ -1,5 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { useImpactAnalysis } from '../features/impact/use-impact-analysis'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -178,6 +181,99 @@ const run: ImpactRunDetail = {
 }
 
 describe('ImpactAnalysisPage', () => {
+  it('keeps an empty service scope distinct from another service history and can return to the project', async () => {
+    installHandlers({ mappings: [], runs: [run] })
+    const serviceId = '00000000-0000-4000-8000-000000002801'
+    const requested: Array<string | null> = []
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services/${serviceId}`, () =>
+        HttpResponse.json({ id: serviceId, service_key: 'orders', display_name: '订单上下文' }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/impact/runs`, ({ request }) => {
+        const scope = new URL(request.url).searchParams.get('contract_service_id')
+        requested.push(scope)
+        return HttpResponse.json({
+          items: scope ? [] : [run],
+          total: scope ? 0 : 1,
+          page: 1,
+          page_size: 20,
+        })
+      }),
+    )
+    renderPage(`/projects/${project.id}/impact?service_id=${serviceId}`)
+    expect(await screen.findByText('服务上下文：订单上下文')).toBeInTheDocument()
+    await waitFor(() => expect(requested).toContain(serviceId))
+    expect(screen.queryByText(run.title)).not.toBeInTheDocument()
+    expect(screen.getByText('当前服务未记录可确认的影响分析')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '查看项目全部范围' }))
+    expect(await screen.findByText(run.title)).toBeInTheDocument()
+    expect(requested.at(-1)).toBeNull()
+  })
+
+  it('preserves the newly selected service when an earlier creation finishes late', async () => {
+    installHandlers({ mappings: [], runs: [] })
+    const serviceId = '00000000-0000-4000-8000-000000002802'
+    let release!: () => void
+    let posted = false
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contract-hub/services/${serviceId}`, () =>
+        HttpResponse.json({
+          id: serviceId,
+          service_key: 'later-service',
+          display_name: '后来选择的服务',
+        }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/impact/runs`, async () => {
+        posted = true
+        await barrier
+        return HttpResponse.json(run, { status: 201 })
+      }),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    const view = renderHook(
+      () => ({ state: useImpactAnalysis(), navigate: useNavigate(), search: useLocation().search }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <AntdApp>
+            <QueryClientProvider client={client}>
+              <ProjectTestProvider section="impact">{children}</ProjectTestProvider>
+            </QueryClientProvider>
+          </AntdApp>
+        ),
+      },
+    )
+    try {
+      await waitFor(() => expect(view.result.current.state.canEdit).toBe(true))
+      let pending!: Promise<boolean>
+      act(() => {
+        pending = view.result.current.state.analyze({
+          title: '人工创建',
+          source_ref: 'audit://scope',
+          git_diff:
+            'diff --git a/orders.ts b/orders.ts\n--- a/orders.ts\n+++ b/orders.ts\n@@ -1 +1 @@\n-old\n+new',
+          openapi_diffs: [],
+          schema_diffs: [],
+        })
+      })
+      await waitFor(() => expect(posted).toBe(true))
+      act(() => view.result.current.navigate(`?contractServiceId=${serviceId}`))
+      await act(async () => {
+        release()
+        await pending
+      })
+      expect(view.result.current.search).toBe(`?contractServiceId=${serviceId}`)
+    } finally {
+      release()
+      view.unmount()
+      client.clear()
+    }
+  })
+
   it('does not offer writes or fetch optional evidence when impact analysis is closed', async () => {
     installHandlers({ mappings: [], runs: [] })
     let reads = 0

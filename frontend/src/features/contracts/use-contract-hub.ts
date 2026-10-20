@@ -112,6 +112,7 @@ export function useContractHub(providerServiceId: string | null) {
     await queryClient.invalidateQueries({ queryKey: ['contract-services', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['pact-contracts', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['contract-runs', projectId] })
+    await queryClient.invalidateQueries({ queryKey: ['service-contract-versions', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['contract-hub-summary', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['contract-service-graph', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['contract-compatibility', projectId] })

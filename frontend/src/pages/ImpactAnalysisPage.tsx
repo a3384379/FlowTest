@@ -35,6 +35,7 @@ import type {
 } from '../features/impact/impact-service'
 import { useImpactAnalysis } from '../features/impact/use-impact-analysis'
 import QueryFailureNotice from '../components/QueryFailureNotice'
+import ContractServiceContextNotice from '../features/services/ContractServiceContextNotice'
 import { useProjectContext } from '../features/projects/use-project-context'
 
 type MappingForm = {
@@ -77,10 +78,15 @@ function ImpactAnalysisWorkspace() {
   const state = useImpactAnalysis()
   const [mappingOpen, setMappingOpen] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
-  const detail = state.detail.data
+  const detail = state.serviceContext.ready ? state.detail.data : undefined
   const mappings = state.mappings.data?.items ?? []
   return (
     <>
+      <ContractServiceContextNotice
+        projectId={state.projectId}
+        context={state.serviceContext}
+        description="影响记录按冻结的目录服务标识精确关联；未记录关联的旧分析保留在项目范围。"
+      />
       <div className="page-heading">
         <div>
           <Space align="center">
@@ -127,17 +133,7 @@ function ImpactAnalysisWorkspace() {
         <CatalogPagination query={state.runs} label="分析历史" />
       </div>
       <ImpactOverview detail={detail} mappingCount={mappings.length} />
-      {state.detail.isError ? (
-        <Alert
-          showIcon
-          type="error"
-          title="所选影响分析读取失败"
-          description={apiErrorMessage(state.detail.error)}
-          action={<Button onClick={() => void state.detail.refetch()}>重试</Button>}
-        />
-      ) : (
-        <AnalysisWorkspace detail={detail} loading={state.detail.isLoading} />
-      )}
+      <AnalysisEvidenceState state={state} />
       <CoverageMatrix detail={detail} />
       <Row gutter={16}>
         <Col span={14}>
@@ -186,6 +182,31 @@ function ImpactAnalysisWorkspace() {
   )
 }
 
+function AnalysisEvidenceState({ state }: { state: ReturnType<typeof useImpactAnalysis> }) {
+  const detail = state.serviceContext.ready ? state.detail.data : undefined
+  return state.detail.isError ? (
+    <Alert
+      showIcon
+      type="error"
+      title="所选影响分析读取失败"
+      description={apiErrorMessage(state.detail.error)}
+      action={<Button onClick={() => void state.detail.refetch()}>重试</Button>}
+    />
+  ) : (
+    <AnalysisWorkspace
+      detail={detail}
+      loading={state.detail.isLoading}
+      scoped={Boolean(state.serviceContext.selection.id)}
+      unavailable={
+        Boolean(state.serviceContext.selection.error) ||
+        state.serviceContext.selected.isError ||
+        state.runs.isError ||
+        state.detail.isError
+      }
+    />
+  )
+}
+
 function ImpactOverview({
   detail,
   mappingCount,
@@ -216,7 +237,7 @@ function ImpactOverview({
       </Col>
       <Col span={6}>
         <Card>
-          <Statistic title="显式映射" value={mappingCount} prefix={<LinkOutlined />} />
+          <Statistic title="项目显式映射" value={mappingCount} prefix={<LinkOutlined />} />
         </Card>
       </Col>
     </Row>
@@ -226,18 +247,41 @@ function ImpactOverview({
 function AnalysisWorkspace({
   detail,
   loading,
+  scoped,
+  unavailable,
 }: {
   detail: ReturnType<typeof useImpactAnalysis>['detail']['data']
   loading: boolean
+  scoped: boolean
+  unavailable: boolean
 }) {
-  if (!detail) return <EmptyAnalysisWorkspace loading={loading} />
+  if (!detail)
+    return <EmptyAnalysisWorkspace loading={loading} scoped={scoped} unavailable={unavailable} />
   return <AnalysisContent detail={detail} />
 }
 
-function EmptyAnalysisWorkspace({ loading }: { loading: boolean }) {
+function EmptyAnalysisWorkspace({
+  loading,
+  scoped,
+  unavailable,
+}: {
+  loading: boolean
+  scoped: boolean
+  unavailable: boolean
+}) {
   return (
     <Card className="performance-card" loading={loading}>
-      {!loading ? <Empty description="登记映射并创建首个影响分析" /> : null}
+      {!loading ? (
+        <Empty
+          description={
+            unavailable
+              ? '请先恢复影响记录读取或修正服务定位'
+              : scoped
+                ? '当前服务未记录可确认的影响分析'
+                : '登记映射并创建首个影响分析'
+          }
+        />
+      ) : null}
     </Card>
   )
 }

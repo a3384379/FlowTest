@@ -126,7 +126,12 @@ class ImpactService:
         return ImpactMappingView(model, target)
 
     async def list_mappings(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
     ) -> tuple[list[ImpactMappingView], int]:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
@@ -271,23 +276,55 @@ class ImpactService:
         return bundle
 
     async def list_runs(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        contract_service_id: UUID | None = None,
     ) -> tuple[list[ImpactRun], int]:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        service_key = await self._service_scope_key(project_id, contract_service_id)
         return await self._repository.list_runs(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            service_key=service_key,
         )
 
-    async def get_run(self, *, actor: User, project_id: UUID, run_id: UUID) -> ImpactRunBundle:
+    async def get_run(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        run_id: UUID,
+        contract_service_id: UUID | None = None,
+    ) -> ImpactRunBundle:
         self._require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         bundle = await self._repository.get_run_bundle(run_id)
         if bundle is None or bundle.run.project_id != project_id:
             raise AppError(code="IMPACT_RUN_NOT_FOUND", message="影响分析不存在", status_code=404)
+        service_key = await self._service_scope_key(project_id, contract_service_id)
+        if service_key is not None and not any(
+            change.get("service_key") == service_key for change in bundle.run.changes
+        ):
+            raise AppError(
+                code="IMPACT_RUN_NOT_FOUND", message="该服务没有关联此影响分析", status_code=404
+            )
         return bundle
+
+    async def _service_scope_key(self, project_id: UUID, service_id: UUID | None) -> str | None:
+        if service_id is None:
+            return None
+        service = await self._session.get(ServiceCatalogEntry, service_id)
+        if service is None or service.project_id != project_id:
+            raise AppError(
+                code="SERVICE_CATALOG_ENTRY_NOT_FOUND", message="服务目录项不存在", status_code=404
+            )
+        return service.service_key
 
     async def _collect_changes(
         self, project_id: UUID, payload: ImpactRunCreate

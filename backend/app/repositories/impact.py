@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import cast, exists, func, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.contracts import ContractRun, PactContractVersion
 from app.models.impact import CoverageSnapshot, ImpactAssetMapping, ImpactRun, TestSelection
@@ -10,6 +12,7 @@ from app.models.performance import PerformanceScenario
 from app.models.protocols import SchemaArtifact
 from app.models.test_assets import TestCase
 from app.models.workflows import Workflow
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,24 +78,37 @@ class ImpactRepository:
         self._session.add_all((selection, coverage))
 
     async def list_runs(
-        self, *, project_id: UUID, offset: int, limit: int
+        self, *, project_id: UUID, offset: int, limit: int, service_key: str | None = None
     ) -> tuple[list[ImpactRun], int]:
-        filters = (ImpactRun.project_id == project_id,)
-        items = list(
-            (
-                await self._session.scalars(
-                    select(ImpactRun)
-                    .where(*filters)
-                    .order_by(ImpactRun.created_at.desc())
-                    .offset(offset)
-                    .limit(limit)
-                )
-            ).all()
-        )
-        total = await self._session.scalar(
-            select(func.count()).select_from(ImpactRun).where(*filters)
-        )
-        return items, int(total or 0)
+        query = select(ImpactRun.id.label("item_id")).where(ImpactRun.project_id == project_id)
+        if service_key is not None:
+            query = query.where(self._service_change_match(service_key))
+        ranked = query.add_columns(
+            func.row_number()
+            .over(order_by=(ImpactRun.created_at.desc(), ImpactRun.id.desc()))
+            .label("position")
+        ).cte()
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(ImpactRun, page.c.total)
+                .select_from(page)
+                .outerjoin(ImpactRun, ImpactRun.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
+
+    def _service_change_match(self, service_key: str) -> ColumnElement[bool]:
+        if self._session.get_bind().dialect.name == "postgresql":
+            entries = func.jsonb_array_elements(cast(ImpactRun.changes, JSONB)).table_valued(
+                "value"
+            )
+            key = cast(entries.c.value, JSONB)["service_key"].astext
+        else:
+            entries = func.json_each(ImpactRun.changes).table_valued("key", "value")
+            key = func.json_extract(entries.c.value, "$.service_key")
+        return exists(select(1).select_from(entries).where(key == service_key).correlate(ImpactRun))
 
     async def get_run_bundle(self, run_id: UUID) -> ImpactRunBundle | None:
         row = (

@@ -2417,3 +2417,33 @@ body {
     margin-inline-start: 0;
   }
 }
+
+.service-catalog-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.service-catalog-list,
+.service-catalog-detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .service-catalog-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .service-catalog-workspace.has-selection .service-catalog-list,
+  .service-catalog-workspace:not(.has-selection) .service-catalog-detail {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .service-catalog-page.has-selection .service-catalog-overview {
+    display: none;
+  }
+}

@@ -102,11 +102,48 @@ export type PactImportInput =
   | { kind: 'upload'; document: File; consumerVersion: string }
   | { kind: 'broker'; consumer: string; provider: string; consumerVersion: string }
 
-export async function listContractServices(projectId: string, page = 1, pageSize = 100) {
+export async function listContractServices(
+  projectId: string,
+  page = 1,
+  pageSize = 100,
+  search = '',
+) {
   return (
     await apiClient.get<Page<ServiceCatalogEntry>>(`/projects/${projectId}/contract-hub/services`, {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, search },
     })
+  ).data
+}
+
+export async function getContractService(projectId: string, serviceId: string) {
+  return (
+    await apiClient.get<ServiceCatalogEntry>(
+      `/projects/${projectId}/contract-hub/services/${serviceId}`,
+    )
+  ).data
+}
+
+export type ServiceContractVersion = {
+  id: string
+  kind: 'openapi' | 'pact'
+  version: string | null
+  source_name: string
+  service_role: 'provider' | 'consumer' | 'both'
+  status: 'completed' | 'failed'
+  created_at: string
+}
+
+export async function listServiceContractVersions(
+  projectId: string,
+  serviceId: string,
+  page = 1,
+  pageSize = 20,
+) {
+  return (
+    await apiClient.get<Page<ServiceContractVersion>>(
+      `/projects/${projectId}/contract-hub/services/${serviceId}/versions`,
+      { params: { page, page_size: pageSize } },
+    )
   ).data
 }
 
