@@ -1,6 +1,6 @@
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import cast
 from uuid import UUID
@@ -11,6 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.mock_preview import (
+    MockPreviewDecision,
+    MockPreviewOutcome,
+    MockPreviewRequest,
+    MockPreviewRule,
+    match_mock_preview,
+    render_mock_preview,
+)
+from app.domain.mock_preview_limits import MockPreviewError, MockPreviewLimits
 from app.domain.mock_services import (
     MockRequestContext,
     MockTemplateError,
@@ -22,7 +31,7 @@ from app.domain.mock_services import (
 from app.models.access import User
 from app.models.data_sources import MockRequestLog, MockRoute, MockService
 from app.repositories.data_sources import DataSourceRepository
-from app.schemas.data_sources import MockRouteWrite
+from app.schemas.data_sources import MockRoutePreviewInput, MockRouteWrite
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -190,6 +199,97 @@ class MockServiceManager:
         await self._session.refresh(route)
         return route
 
+    async def preview_route(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        service_id: UUID,
+        payload: MockRoutePreviewInput,
+    ) -> MockPreviewOutcome:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        service = await self._get_project_service(project_id, service_id)
+        _route_fields(payload.draft, route_id=payload.route_id)
+        limits = MockPreviewLimits(output_bytes=settings.inline_body_limit_bytes)
+        request = MockDispatchRequest(
+            service.slug,
+            payload.request.method,
+            payload.request.path,
+            dict(payload.request.query),
+            dict(payload.request.headers),
+            payload.request.body,
+        )
+        preview_request = MockPreviewRequest(
+            request.method,
+            request.path,
+            request.query,
+            request.headers,
+            request.body,
+            _selected_scenario(request),
+        )
+        try:
+            await self._check_preview_catalog(service_id, limits)
+            rows = await self._repository.list_mock_routes(
+                service_id,
+                enabled_only=False,
+                limit=limits.candidate_count + 1,
+                include_response_body=False,
+            )
+            draft, candidates = _preview_candidates(rows, payload, limits)
+            decision = match_mock_preview(
+                draft=draft,
+                candidates=candidates,
+                request=preview_request,
+                service_enabled=service.is_enabled,
+                limits=limits,
+            )
+            decision = await self._load_preview_body(decision, limits)
+            return render_mock_preview(decision, limits)
+        except MockPreviewError as error:
+            raise AppError(
+                code=error.code,
+                message=str(error),
+                status_code=422,
+                details={
+                    "field": error.field,
+                    "pointer": error.pointer,
+                    "route_id": str(error.route_id) if error.route_id else None,
+                },
+            ) from error
+
+    async def _check_preview_catalog(self, service_id: UUID, limits: MockPreviewLimits) -> None:
+        size = await self._repository.mock_preview_catalog_size(service_id)
+        if size.count > limits.candidate_count or size.metadata_characters > limits.metadata_bytes:
+            raise MockPreviewError(
+                "规则目录超过预览数量或元数据大小上限, 未进行局部匹配",
+                field="request",
+                code="MOCK_PREVIEW_LIMIT_EXCEEDED",
+            )
+
+    async def _load_preview_body(
+        self, decision: MockPreviewDecision, limits: MockPreviewLimits
+    ) -> MockPreviewDecision:
+        selected = decision.selected
+        if selected is None or selected.is_draft:
+            return decision
+        if selected.route_id is None:
+            raise AppError(code="MOCK_ROUTE_NOT_FOUND", message="Mock 路由不存在", status_code=404)
+        stored = await self._repository.get_mock_preview_body(
+            selected.route_id, maximum_characters=limits.source_bytes
+        )
+        if stored is None or _preview_stored_rule(stored.route) != selected:
+            raise AppError(
+                code="MOCK_PREVIEW_CHANGED", message="规则目录已变化, 请重新预览", status_code=409
+            )
+        if stored.character_count > limits.source_bytes:
+            raise MockPreviewError(
+                "已保存模板超过64KiB预览上限",
+                field="response_body",
+                route_id=selected.route_id,
+                code="MOCK_PREVIEW_LIMIT_EXCEEDED",
+            )
+        return replace(decision, selected=replace(selected, response_body=stored.body))
+
     async def delete_route(
         self,
         *,
@@ -321,16 +421,90 @@ class MockServiceManager:
         )
 
 
-def _validated_path(pattern: str) -> str:
+def _preview_candidates(
+    rows: list[MockRoute], payload: MockRoutePreviewInput, limits: MockPreviewLimits
+) -> tuple[MockPreviewRule, list[MockPreviewRule]]:
+    if len(rows) > limits.candidate_count:
+        raise MockPreviewError(
+            "规则目录超过500条预览上限, 未进行局部匹配",
+            field="request",
+            code="MOCK_PREVIEW_LIMIT_EXCEEDED",
+        )
+    draft = _preview_draft_rule(payload)
+    candidates = []
+    replaced = False
+    for row in rows:
+        if row.id == payload.route_id:
+            draft = replace(draft, created_at=row.created_at)
+            candidates.append(draft)
+            replaced = True
+        else:
+            candidates.append(_preview_stored_rule(row))
+    if payload.route_id is not None and not replaced:
+        raise AppError(code="MOCK_ROUTE_NOT_FOUND", message="Mock 路由不存在", status_code=404)
+    if not replaced:
+        candidates.append(draft)
+    return draft, candidates
+
+
+def _preview_draft_rule(payload: MockRoutePreviewInput) -> MockPreviewRule:
+    draft = payload.draft
+    return MockPreviewRule(
+        route_id=payload.route_id,
+        name=draft.name.strip(),
+        method=draft.method,
+        path_pattern=_validated_path(draft.path_pattern, route_id=payload.route_id),
+        query_conditions=draft.query_conditions,
+        header_conditions=draft.header_conditions,
+        response_status=draft.response_status,
+        response_headers=draft.response_headers,
+        response_body=draft.response_body,
+        scenario=draft.scenario.strip() if draft.scenario else None,
+        priority=draft.priority,
+        delay_ms=draft.delay_ms,
+        is_enabled=draft.is_enabled,
+        is_draft=True,
+    )
+
+
+def _preview_stored_rule(route: MockRoute) -> MockPreviewRule:
+    return MockPreviewRule(
+        route_id=route.id,
+        name=route.name,
+        method=route.method,
+        path_pattern=route.path_pattern,
+        query_conditions=route.query_conditions,
+        header_conditions=route.header_conditions,
+        response_status=route.response_status,
+        response_headers=route.response_headers,
+        response_body=None,
+        scenario=route.scenario,
+        priority=route.priority,
+        delay_ms=route.delay_ms,
+        is_enabled=route.is_enabled,
+        created_at=route.created_at,
+    )
+
+
+def _validated_path(pattern: str, *, route_id: UUID | None = None) -> str:
     try:
         normalized = normalize_mock_path(pattern)
         compile_mock_path(normalized)
         return normalized
     except MockTemplateError as error:
-        raise AppError(code="INVALID_MOCK_PATH", message=str(error), status_code=422) from error
+        raise AppError(
+            code="INVALID_MOCK_PATH",
+            message=str(error),
+            status_code=422,
+            details={
+                "field": "path_pattern",
+                "pointer": "",
+                "route_id": str(route_id) if route_id else None,
+            },
+        ) from error
 
 
-def _route_fields(payload: MockRouteWrite) -> dict[str, object]:
+def _route_fields(payload: MockRouteWrite, *, route_id: UUID | None = None) -> dict[str, object]:
     headers = {
         name: value
         for name, value in payload.response_headers.items()
@@ -341,6 +515,11 @@ def _route_fields(payload: MockRouteWrite) -> dict[str, object]:
             code="INVALID_MOCK_RESPONSE_HEADER",
             message="Mock 响应包含禁止设置的传输级 Header",
             status_code=422,
+            details={
+                "field": "response_headers",
+                "pointer": "",
+                "route_id": str(route_id) if route_id else None,
+            },
         )
     return {
         "name": payload.name.strip(),

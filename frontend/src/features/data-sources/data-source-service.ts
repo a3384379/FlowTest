@@ -24,6 +24,43 @@ export type MockRouteInput = Omit<
   'id' | 'mock_service_id' | 'created_by_id' | 'created_at' | 'updated_at'
 >
 
+export type MockPreviewRequest = {
+  method: MockRouteInput['method']
+  path: string
+  query: Record<string, string>
+  headers: Record<string, string>
+  body: unknown
+}
+
+export type MockPreviewResult = {
+  service_enabled: boolean
+  draft_matches: boolean
+  selected: {
+    route_id: string | null
+    name: string
+    is_draft: boolean
+    priority: number
+    scenario: string | null
+    delay_ms: number
+  } | null
+  checks: Array<{ field: string; matched: boolean; message: string }>
+  warnings: Array<{ field: string; pointer: string; message: string; route_id: string | null }>
+  response: { status_code: number; headers: Record<string, string>; body: unknown } | null
+}
+
+export async function previewMockRoute(
+  projectId: string,
+  serviceId: string,
+  input: { draft: MockRouteInput; route_id: string | null; request: MockPreviewRequest },
+): Promise<MockPreviewResult> {
+  return (
+    await apiClient.post<MockPreviewResult>(
+      `/projects/${projectId}/mock-services/${serviceId}/routes/preview`,
+      input,
+    )
+  ).data
+}
+
 export async function listCredentials(projectId: string): Promise<Credential[]> {
   const response = await apiClient.get<Credential[]>('/credentials', {
     params: { project_id: projectId },
@@ -62,7 +99,7 @@ export async function createMockService(
 export async function updateMockService(
   projectId: string,
   serviceId: string,
-  input: { is_enabled: boolean },
+  input: { name?: string; description?: string; is_enabled?: boolean },
 ): Promise<MockService> {
   const response = await apiClient.patch<MockService>(
     `/projects/${projectId}/mock-services/${serviceId}`,
@@ -96,6 +133,20 @@ export async function deleteMockRoute(
   routeId: string,
 ): Promise<void> {
   await apiClient.delete(`/projects/${projectId}/mock-services/${serviceId}/routes/${routeId}`)
+}
+
+export async function updateMockRoute(
+  projectId: string,
+  serviceId: string,
+  routeId: string,
+  input: MockRouteInput,
+): Promise<MockRoute> {
+  return (
+    await apiClient.put<MockRoute>(
+      `/projects/${projectId}/mock-services/${serviceId}/routes/${routeId}`,
+      input,
+    )
+  ).data
 }
 
 export async function listMockLogs(

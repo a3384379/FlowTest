@@ -1,4 +1,5 @@
 import MockRouteWorkspace from '../features/data-sources/MockRouteWorkspace'
+import MockServiceEditor from '../features/data-sources/MockServiceEditor'
 import {
   DeleteOutlined,
   LinkOutlined,
@@ -24,7 +25,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 
@@ -58,12 +59,12 @@ export default function DataMockPage() {
           {
             key: 'credentials',
             label: 'Credential',
-            children: <CredentialPanel projectId={projectId} canEdit={canEdit} />,
+            children: <CredentialPanel key={projectId} projectId={projectId} canEdit={canEdit} />,
           },
           {
             key: 'mock',
             label: 'Mock 服务',
-            children: <MockPanel projectId={projectId} canEdit={canEdit} />,
+            children: <MockPanel key={projectId} projectId={projectId} canEdit={canEdit} />,
           },
         ]}
       />
@@ -244,9 +245,41 @@ function CredentialForm({
 }
 
 export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  const active = useRef(true)
+  const [editingService, setEditingService] = useState(false)
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty
+  }, [dirty])
+  useLayoutEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+  function selectService(id: string) {
+    setDirty(false)
+    setSelectedId(id)
+    setEditingService(false)
+  }
+  function requestService(id: string) {
+    if (id === selectedId) return
+    if (!dirtyRef.current) {
+      selectService(id)
+      return
+    }
+    modal.confirm({
+      title: '切换服务前放弃未保存规则？',
+      content: '当前规则尚未保存，切换后会加载另一个服务的规则。',
+      okText: '放弃并切换',
+      cancelText: '继续编辑',
+      onOk: () => selectService(id),
+    })
+  }
   const services = useQuery({
     queryKey: ['mock-services', projectId],
     queryFn: () => listMockServices(projectId),
@@ -256,18 +289,23 @@ export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: 
     mutationFn: (input: { name: string; slug: string; description: string }) =>
       createMockService(projectId, input),
     onSuccess: async (created) => {
-      setSelectedId(created.id)
       await queryClient.invalidateQueries({ queryKey: ['mock-services', projectId] })
+      if (!active.current) return
+      requestService(created.id)
       void message.success('Mock 服务已创建')
     },
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: (error) => {
+      if (active.current) void message.error(apiErrorMessage(error))
+    },
   })
   const toggleMutation = useMutation({
     mutationFn: (service: MockService) =>
       updateMockService(projectId, service.id, { is_enabled: !service.is_enabled }),
     onSuccess: async () =>
       queryClient.invalidateQueries({ queryKey: ['mock-services', projectId] }),
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: (error) => {
+      if (active.current) void message.error(apiErrorMessage(error))
+    },
   })
   return (
     <Space orientation="vertical" className="full-width">
@@ -281,14 +319,70 @@ export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: 
         <Select
           aria-label="Mock 服务"
           className="management-select"
+          style={{ width: 240, maxWidth: '100%' }}
           value={selected?.id}
           options={services.data?.map((item) => ({ value: item.id, label: item.name }))}
-          onChange={setSelectedId}
+          onChange={requestService}
         />
-        <MockServiceSummary service={selected} canEdit={canEdit} onToggle={toggleMutation.mutate} />
+        <MockServiceSummary
+          service={selected}
+          canEdit={canEdit && services.isSuccess && !toggleMutation.isPending}
+          onToggle={toggleMutation.mutate}
+        />
+        <MockServiceEditing
+          projectId={projectId}
+          service={selected}
+          canEdit={canEdit}
+          readable={services.isSuccess}
+          open={editingService}
+          onOpen={() => setEditingService(true)}
+          onClose={() => setEditingService(false)}
+        />
       </Space>
-      <SelectedMockWorkspace projectId={projectId} service={selected} canEdit={canEdit} />
+      <SelectedMockWorkspace
+        projectId={projectId}
+        service={selected}
+        canEdit={canEdit}
+        readable={services.isSuccess}
+        onDirtyChange={setDirty}
+      />
     </Space>
+  )
+}
+
+function MockServiceEditing({
+  projectId,
+  service,
+  canEdit,
+  readable,
+  open,
+  onOpen,
+  onClose,
+}: {
+  projectId: string
+  service?: MockService
+  canEdit: boolean
+  readable: boolean
+  open: boolean
+  onOpen: () => void
+  onClose: () => void
+}) {
+  if (!service || !canEdit) return null
+  return (
+    <>
+      <Button disabled={!readable} onClick={onOpen}>
+        编辑服务
+      </Button>
+      {open && (
+        <MockServiceEditor
+          key={service.id}
+          projectId={projectId}
+          service={service}
+          canEdit={readable}
+          onClose={onClose}
+        />
+      )}
+    </>
   )
 }
 
@@ -334,20 +428,33 @@ function SelectedMockWorkspace({
   projectId,
   service,
   canEdit,
+  readable,
+  onDirtyChange,
 }: {
   projectId: string
   service: MockService | undefined
   canEdit: boolean
+  readable: boolean
+  onDirtyChange: (dirty: boolean) => void
 }) {
-  if (!service) return <Card>暂无 Mock 服务</Card>
-  return <MockRouteWorkspace projectId={projectId} service={service} canEdit={canEdit} />
+  if (!service)
+    return <Card>{readable ? '暂无 Mock 服务' : '尚未取得 Mock 服务目录，请先重试读取'}</Card>
+  return (
+    <MockRouteWorkspace
+      projectId={projectId}
+      service={service}
+      canEdit={canEdit}
+      readable={readable}
+      onDirtyChange={onDirtyChange}
+    />
+  )
 }
 
 function selectedMockService(
   services: MockService[] | undefined,
   selectedId: string | null,
 ): MockService | undefined {
-  return services?.find((item) => item.id === selectedId) ?? services?.at(0)
+  return selectedId ? services?.find((item) => item.id === selectedId) : services?.at(0)
 }
 
 function MockServiceForm({
