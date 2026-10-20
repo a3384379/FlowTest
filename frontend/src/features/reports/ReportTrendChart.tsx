@@ -58,7 +58,7 @@ export function ReportTrendChart({ trend }: { trend: ReportTrend | undefined }) 
   }, [trend, reduced])
 
   return (
-    <div ref={container} className="report-trend-chart" aria-label="最近七日执行趋势">
+    <div ref={container} className="report-trend-chart" aria-label="当前范围执行趋势（UTC）">
       {!trend?.points.length && (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未提供趋势数据" />
       )}

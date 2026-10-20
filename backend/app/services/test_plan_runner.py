@@ -106,12 +106,13 @@ class TestPlanRunCoordinator:
                     version=item.workflow_version,
                     runtime_variables=item.runtime_variables,
                     runtime_headers=item.runtime_headers,
+                    commit=False,
                 )
                 if item.target_type == "case":
                     execution.source_case_id = item.target_id
                     execution.source_case_version = item.target_version
                     execution.source_trigger = "plan"
-                    execution.source_plan_run_item_id = item.id
+                execution.source_plan_run_item_id = item.id
             except AppError as error:
                 if error.code == "PROJECT_CONCURRENCY_EXCEEDED":
                     await session.rollback()

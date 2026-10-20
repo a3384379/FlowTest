@@ -195,17 +195,25 @@ describe('ChangeRegressionPage', () => {
     )
     renderPage()
     await screen.findByText('订单变更回归')
-    const missing = within(screen.getByRole('region', { name: '缺失测试草案' }))
-    expect(missing.queryByRole('button', { name: '接受' })).not.toBeInTheDocument()
+    const missing = within(screen.getByLabelText('缺失测试草案'))
+    expect(missing.queryByText('接受', { exact: true })).not.toBeInTheDocument()
     // Check the semantic button and its visibility once instead of repeating ancestor-style queries.
     const openReview = missing.getByText('查看并审核').closest('button')
     expect(openReview).toHaveRole('button')
     expect(openReview).toBeVisible()
     fireEvent.click(openReview!)
-    const review = screen.getByRole('dialog', { name: '缺失测试草案审核' })
-    expect(within(review).getByText(/openapi:\/\/orders\/create/)).toBeVisible()
-    expect(within(review).getByText(/"expected": 201/)).toBeVisible()
-    await userEvent.click(within(review).getByRole('button', { name: '接受草案' }))
+    const review = screen.getByText('缺失测试草案审核').closest('[role=dialog]')!
+    expect(review).toHaveRole('dialog')
+    const content = within(review as HTMLElement).getByLabelText('缺失测试草案内容')
+    expect(content).toHaveTextContent('openapi://orders/create')
+    expect(content).toHaveTextContent('"expected": 201')
+    expect(content).toBeVisible()
+    const accept = within(review as HTMLElement)
+      .getByText('接受草案')
+      .closest('button')!
+    expect(accept).toHaveRole('button')
+    expect(accept).toBeEnabled()
+    await userEvent.click(accept)
     await waitFor(() => expect(current.missing_tests[0].review_status).toBe('accepted'))
     expect(reviewedPayloads).toEqual([{ note: '前端人工审核', expected_content: expectedContent }])
   })
@@ -228,11 +236,14 @@ describe('ChangeRegressionPage', () => {
     )
     renderPage()
     expect(await screen.findByText('订单变更回归')).toBeInTheDocument()
-    const approve = await screen.findByRole('button', { name: '人工批准' })
+    const approve = buttonByText('人工批准')!
+    expect(approve).toHaveRole('button')
     expect(approve).toBeDisabled()
     fireEvent.click(approve)
     expect(current.status).toBe('review_required')
-    expect(screen.getByRole('button', { name: '分析并创建链路' })).toBeDisabled()
+    const create = buttonByText('分析并创建链路')!
+    expect(create).toHaveRole('button')
+    expect(create).toBeDisabled()
   })
 
   it('keeps the viewed snapshot through background refresh and replaces it only on explicit refresh', async () => {

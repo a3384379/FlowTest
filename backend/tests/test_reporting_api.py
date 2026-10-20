@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import respx
@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.database import get_session
 from app.core.security import password_service
 from app.core.storage import StoredObject
-from app.domain.reporting import FailureCategory, classify_failure
+from app.domain.reporting import FailureCategory, ReportScope, classify_failure
 from app.engine.contracts import NodeStatus
 from app.engine.results import (
     HttpRequestSnapshot,
@@ -33,6 +33,16 @@ from app.models import Base
 from app.models.access import Project, User
 from app.models.api_assets import Environment
 from app.models.durable_execution import ExecutionCheckpoint
+from app.models.tasking import (
+    TestPlan as PlanModel,
+)
+from app.models.tasking import (
+    TestPlanRun as PlanRunModel,
+)
+from app.models.tasking import (
+    TestPlanRunItem as PlanRunItemModel,
+)
+from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import (
     Workflow,
     WorkflowControlRecord,
@@ -41,6 +51,7 @@ from app.models.workflows import (
     WorkflowVersion,
 )
 from app.services.notifications import NotificationDeliveryService
+from app.services.reporting import ReportService
 
 ADMIN_EMAIL = "report-admin@example.com"
 ADMIN_PASSWORD = "report-password-123!"
@@ -303,6 +314,8 @@ async def test_signed_webhook_secret_is_write_only_and_delivery_is_auditable(
     ("status", "error_code", "expected"),
     [
         ("passed", None, FailureCategory.NONE),
+        ("queued", None, FailureCategory.NONE),
+        ("running", "HTTP_5XX", FailureCategory.NONE),
         ("cancelled", None, FailureCategory.CANCELLED),
         ("failed", "WORKFLOW_ASSERTION_FAILED", FailureCategory.ASSERTION),
         ("failed", "NETWORK_TIMEOUT", FailureCategory.TIMEOUT),
@@ -681,3 +694,391 @@ async def test_report_name_uses_frozen_metadata_and_marks_legacy_current_names(
         await session.commit()
     legacy = await reporting_context.client.get(path, headers=headers)
     assert legacy.json()["summary"]["workflow_name"] == "后续改名(当前名称; 历史名称未提供)"
+
+
+async def _scope_execution(
+    session: AsyncSession,
+    base: WorkflowExecution,
+    *,
+    started: datetime,
+    status: str = "passed",
+    environment_id: UUID | None = None,
+    case_id: UUID | None = None,
+) -> WorkflowExecution:
+    item = WorkflowExecution(
+        project_id=base.project_id,
+        workflow_id=base.workflow_id,
+        workflow_version_id=base.workflow_version_id,
+        environment_id=environment_id or base.environment_id,
+        triggered_by_id=base.triggered_by_id,
+        status=status,
+        snapshot=base.snapshot,
+        source_case_id=case_id,
+        source_case_version=1 if case_id else None,
+        source_trigger="direct" if case_id else None,
+        started_at=started,
+        completed_at=started + timedelta(seconds=1)
+        if status in {"passed", "failed", "cancelled"}
+        else None,
+    )
+    session.add(item)
+    await session.flush()
+    return item
+
+
+@pytest.mark.asyncio
+async def test_report_scope_filters_every_page_and_trend_with_utc_boundaries(
+    reporting_context: ReportingContext,
+) -> None:
+    context = reporting_context
+    start = datetime(2026, 2, 1, tzinfo=UTC)
+    async with context.session_maker() as session:
+        base = await session.get(WorkflowExecution, context.execution_id)
+        assert base is not None
+        other_environment = Environment(
+            project_id=context.project_id,
+            name="另一个环境",
+            base_url="https://other.example.test",
+            created_by_id=base.triggered_by_id,
+        )
+        case = CaseModel(
+            project_id=context.project_id,
+            name="历史用例",
+            draft_definition={},
+            archived_at=start,
+            created_by_id=base.triggered_by_id,
+        )
+        session.add_all([other_environment, case])
+        await session.flush()
+        for index in range(121):
+            await _scope_execution(
+                session,
+                base,
+                started=start + timedelta(seconds=index),
+                status="passed" if index < 100 else "failed",
+                case_id=case.id,
+            )
+        await _scope_execution(
+            session, base, started=start - timedelta(microseconds=1), case_id=case.id
+        )
+        await _scope_execution(session, base, started=start + timedelta(days=1), case_id=case.id)
+        await _scope_execution(
+            session, base, started=start, environment_id=other_environment.id, case_id=case.id
+        )
+        child = await _scope_execution(session, base, started=start, case_id=case.id)
+        child.parent_execution_id, child.dataset_row_index = base.id, 0
+        await session.commit()
+        scope = {
+            "workflow_id": str(base.workflow_id),
+            "environment_id": str(base.environment_id),
+            "source_case_id": str(case.id),
+            "source": "case",
+            "started_from": "2026-02-01T08:00:00+08:00",
+            "started_until": "2026-02-02T08:00:00+08:00",
+        }
+        archived_case_id = case.id
+    headers = await _login_headers(context.client)
+    path = f"/api/v1/projects/{context.project_id}/reports"
+    first = await context.client.get(
+        f"{path}/executions", headers=headers, params={**scope, "page_size": 100}
+    )
+    second = await context.client.get(
+        f"{path}/executions", headers=headers, params={**scope, "page_size": 100, "page": 2}
+    )
+    trend_response = await context.client.get(f"{path}/trends", headers=headers, params=scope)
+    assert first.status_code == second.status_code == trend_response.status_code == 200
+    assert first.json()["total"] == second.json()["total"] == 121
+    assert len(first.json()["items"]) == 100 and len(second.json()["items"]) == 21
+    assert not (
+        {item["id"] for item in first.json()["items"]}
+        & {item["id"] for item in second.json()["items"]}
+    )
+    result = trend_response.json()
+    assert result["summary"]["total"] == sum(point["total"] for point in result["points"]) == 121
+    assert result["summary"]["completed"] == 121
+    assert result["summary"]["passed"] == 100
+    assert result["summary"]["pass_rate"] == 82.64
+    assert result["summary"]["started_from"] == "2026-02-01T00:00:00Z"
+    assert result["summary"]["started_until"] == "2026-02-02T00:00:00Z"
+    options = await context.client.get(
+        f"{path}/filter-options", headers=headers, params={"kind": "case", "search": "历史"}
+    )
+    assert options.status_code == 200, options.text
+    assert options.json()["items"] == [{"id": str(archived_case_id), "name": "历史用例"}]
+    empty = await context.client.get(
+        f"{path}/trends", headers=headers, params={**scope, "source_case_id": str(uuid4())}
+    )
+    assert empty.json()["summary"]["total"] == 0
+    assert empty.json()["summary"]["pass_rate"] is None
+
+
+@pytest.mark.asyncio
+async def test_report_pending_is_neither_failure_nor_completed_pass_rate_denominator(
+    reporting_context: ReportingContext,
+) -> None:
+    context = reporting_context
+    start = datetime(2026, 3, 1, tzinfo=UTC)
+    async with context.session_maker() as session:
+        base = await session.get(WorkflowExecution, context.execution_id)
+        assert base is not None
+        for status in ["queued", "running", "passed", "failed", "cancelled"]:
+            await _scope_execution(session, base, started=start, status=status)
+        await session.commit()
+    headers = await _login_headers(context.client)
+    response = await context.client.get(
+        f"/api/v1/projects/{context.project_id}/reports/trends",
+        headers=headers,
+        params={
+            "started_from": start.isoformat(),
+            "started_until": (start + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    summary = response.json()["summary"]
+    assert (summary["total"], summary["pending"], summary["completed"], summary["pass_rate"]) == (
+        5,
+        2,
+        3,
+        33.33,
+    )
+    assert sum(item["count"] for item in response.json()["failures"]) == 2
+    listed = await context.client.get(
+        f"/api/v1/projects/{context.project_id}/reports/executions",
+        headers=headers,
+        params={
+            "started_from": start.isoformat(),
+            "started_until": (start + timedelta(days=1)).isoformat(),
+        },
+    )
+    assert listed.status_code == 200, listed.text
+    pending = [item for item in listed.json()["items"] if item["status"] in {"queued", "running"}]
+    assert len(pending) == 2
+    assert all(item["failure_category"] == "none" for item in pending)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"started_from": "2026-02-01T00:00:00Z"},
+        {"started_from": "2026-02-01T00:00:00", "started_until": "2026-02-02T00:00:00"},
+        {"started_from": "2026-02-02T00:00:00Z", "started_until": "2026-02-01T00:00:00Z"},
+        {"started_from": "2026-01-01T00:00:00Z", "started_until": "2026-04-02T00:00:00Z"},
+        {"source": "unknown"},
+        {"status": "unknown"},
+    ],
+)
+async def test_report_invalid_scope_is_rejected_by_both_queries(
+    reporting_context: ReportingContext,
+    params: dict[str, str],
+) -> None:
+    headers = await _login_headers(reporting_context.client)
+    for suffix in ["executions", "trends"]:
+        response = await reporting_context.client.get(
+            f"/api/v1/projects/{reporting_context.project_id}/reports/{suffix}",
+            headers=headers,
+            params=params,
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_report_scope_policy_applies_to_non_http_callers(
+    reporting_context: ReportingContext,
+) -> None:
+    async with reporting_context.session_maker() as session:
+        base = await session.get(WorkflowExecution, reporting_context.execution_id)
+        assert base is not None
+        user = await session.get(User, base.triggered_by_id)
+        assert user is not None
+        from app.core.errors import AppError
+
+        with pytest.raises(AppError, match="同时提供"):
+            await ReportService(session).list_executions(
+                actor=user,
+                project_id=reporting_context.project_id,
+                page=1,
+                page_size=20,
+                scope=ReportScope(started_from=datetime.now(UTC)),
+            )
+
+
+@pytest.mark.asyncio
+async def test_report_plan_scope_prefers_canonical_source_and_keeps_legacy_runs(
+    reporting_context: ReportingContext,
+) -> None:
+    context = reporting_context
+    start = datetime(2026, 4, 1, tzinfo=UTC)
+    async with context.session_maker() as session:
+        base = await session.get(WorkflowExecution, context.execution_id)
+        assert base is not None
+        cases = [
+            CaseModel(
+                project_id=context.project_id,
+                name=f"来源用例{index}",
+                draft_definition={},
+                created_by_id=base.triggered_by_id,
+            )
+            for index in range(2)
+        ]
+        session.add_all(cases)
+        await session.flush()
+        plans = [
+            PlanModel(
+                project_id=context.project_id,
+                name=f"计划{index}",
+                created_by_id=base.triggered_by_id,
+                webhook_secret_ciphertext=b"ciphertext",
+                webhook_secret_nonce=b"nonce",
+            )
+            for index in range(2)
+        ]
+        session.add_all(plans)
+        await session.flush()
+        runs = [
+            PlanRunModel(
+                project_id=context.project_id,
+                test_plan_id=plan.id,
+                requested_by_id=base.triggered_by_id,
+                status="passed",
+                trigger_type="manual",
+            )
+            for plan in plans
+        ]
+        session.add_all(runs)
+        await session.flush()
+        canonical = await _scope_execution(session, base, started=start, case_id=cases[0].id)
+        legacy = await _scope_execution(session, base, started=start)
+        for index, (run, execution) in enumerate(
+            [(runs[0], canonical), (runs[0], legacy), (runs[1], canonical)]
+        ):
+            item = PlanRunItemModel(
+                test_plan_run_id=run.id,
+                target_type="case",
+                target_id=cases[0 if index == 0 else 1].id,
+                target_version=1,
+                workflow_id=base.workflow_id,
+                environment_id=base.environment_id,
+                workflow_version=1,
+                position=index,
+                max_retries=0,
+                status="passed",
+                workflow_execution_id=execution.id,
+            )
+            session.add(item)
+            await session.flush()
+            if index == 0:
+                canonical.source_plan_run_item_id = item.id
+        await session.commit()
+        plan_ids = [str(plan.id) for plan in plans]
+        case_ids = [str(item.id) for item in cases]
+    headers = await _login_headers(context.client)
+    path = f"/api/v1/projects/{context.project_id}/reports"
+    scope = {
+        "started_from": start.isoformat(),
+        "started_until": (start + timedelta(days=1)).isoformat(),
+        "source": "plan",
+    }
+    listed = await context.client.get(
+        f"{path}/executions", headers=headers, params={**scope, "source_plan_id": plan_ids[0]}
+    )
+    trend = await context.client.get(
+        f"{path}/trends", headers=headers, params={**scope, "source_plan_id": plan_ids[0]}
+    )
+    assert listed.status_code == trend.status_code == 200
+    assert listed.json()["total"] == trend.json()["summary"]["total"] == 2
+    wrong = await context.client.get(
+        f"{path}/executions", headers=headers, params={**scope, "source_plan_id": plan_ids[1]}
+    )
+    assert wrong.json()["total"] == 0
+    options = await context.client.get(
+        f"{path}/filter-options", headers=headers, params={"kind": "plan"}
+    )
+    assert options.status_code == 200, options.text
+    assert options.json()["items"] == [{"id": plan_ids[0], "name": "计划0"}]
+    workflow = await context.client.get(
+        f"{path}/executions", headers=headers, params={**scope, "source": "workflow"}
+    )
+    assert workflow.json()["total"] == 0
+    for case_id in case_ids:
+        case_scope = await context.client.get(
+            f"{path}/executions", headers=headers, params={**scope, "source_case_id": case_id}
+        )
+        assert case_scope.json()["total"] == 1
+    case_options = await context.client.get(
+        f"{path}/filter-options", headers=headers, params={"kind": "case"}
+    )
+    assert {item["id"] for item in case_options.json()["items"]} == set(case_ids)
+
+
+@pytest.mark.asyncio
+async def test_report_filter_options_are_paginated_searchable_and_project_scoped(
+    reporting_context: ReportingContext,
+) -> None:
+    context = reporting_context
+    async with context.session_maker() as session:
+        base = await session.get(WorkflowExecution, context.execution_id)
+        assert base is not None
+        for index in range(105):
+            environment = Environment(
+                project_id=context.project_id,
+                name=f"历史环境{index:03}",
+                base_url="https://example.test",
+                archived_at=datetime.now(UTC),
+                created_by_id=base.triggered_by_id,
+            )
+            session.add(environment)
+            await session.flush()
+            await _scope_execution(
+                session,
+                base,
+                started=datetime(2026, 1, 1, tzinfo=UTC),
+                environment_id=environment.id,
+            )
+        other_project = Project(name="另一项目", description="", created_by_id=base.triggered_by_id)
+        session.add(other_project)
+        await session.flush()
+        foreign_environment = Environment(
+            project_id=other_project.id,
+            name="历史环境越界",
+            base_url="https://example.test",
+            created_by_id=base.triggered_by_id,
+        )
+        session.add(foreign_environment)
+        await session.commit()
+        foreign_id = str(foreign_environment.id)
+    headers = await _login_headers(context.client)
+    path = f"/api/v1/projects/{context.project_id}/reports"
+    first = await context.client.get(
+        f"{path}/filter-options",
+        headers=headers,
+        params={"kind": "environment", "page_size": 100, "search": "历史环境"},
+    )
+    last = await context.client.get(
+        f"{path}/filter-options",
+        headers=headers,
+        params={"kind": "environment", "page_size": 100, "page": 2, "search": "历史环境"},
+    )
+    assert first.status_code == last.status_code == 200
+    assert first.json()["total"] == last.json()["total"] == 105
+    assert len(first.json()["items"]) == 100 and len(last.json()["items"]) == 5
+    assert last.json()["items"][-1]["name"] == "历史环境104"
+    selected = await context.client.get(
+        f"{path}/filter-options",
+        headers=headers,
+        params={"kind": "environment", "selected_id": last.json()["items"][-1]["id"]},
+    )
+    assert selected.json()["items"] == last.json()["items"][-1:]
+    for suffix in ["executions", "trends"]:
+        scoped = await context.client.get(
+            f"{path}/{suffix}", headers=headers, params={"environment_id": foreign_id}
+        )
+        result = scoped.json()
+        assert result.get("total", result.get("summary", {}).get("total")) == 0
+    foreign = await context.client.get(
+        f"{path}/filter-options",
+        headers=headers,
+        params={"kind": "environment", "selected_id": foreign_id},
+    )
+    assert foreign.json()["total"] == 0

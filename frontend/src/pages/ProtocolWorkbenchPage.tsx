@@ -11,6 +11,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
+  App,
   Button,
   Card,
   Col,
@@ -27,7 +28,6 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -354,6 +354,7 @@ function ProtocolEditor({
 }
 
 function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
+  const { message } = App.useApp()
   const active = useRef(true)
   const generation = useRef(0)
   useEffect(() => {
@@ -437,6 +438,7 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
 }
 
 function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorProps) {
+  const { message } = App.useApp()
   const active = useRef(true)
   const generation = useRef(0)
   useEffect(() => {
@@ -628,6 +630,7 @@ function SchemaImportDialog({
   onClose: () => void
   credentials: Credential[]
 }) {
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{
     name: string

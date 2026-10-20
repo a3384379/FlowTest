@@ -1638,6 +1638,17 @@ export type ReportExecutionDetail = {
 }
 
 export type ReportTrend = {
+  summary: {
+    started_from: string
+    started_until: string
+    total: number
+    passed: number
+    failed: number
+    cancelled: number
+    pending: number
+    completed: number
+    pass_rate: number | null
+  }
   points: Array<{
     date: string
     total: number

@@ -23,6 +23,7 @@ import {
   Typography,
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
+import ReportFilters from '../features/reports/ReportFilters'
 import ReportExecutionWorkspace from '../features/reports/ReportExecutionWorkspace'
 import {
   clearExecutionEvidence,
@@ -40,6 +41,7 @@ import type {
   NotificationDelivery,
   NotificationWebhook,
   ReportExecution,
+  ReportTrend,
 } from '../lib/api'
 
 export default function ReportsPage() {
@@ -100,6 +102,11 @@ export default function ReportsPage() {
       <QueryFailureNotice
         queries={[state.reports, state.trend, state.webhooks, state.permissions]}
       />
+      <ReportFilters
+        projectId={state.projectId}
+        state={state.reportScope}
+        onRefresh={() => void state.refreshReports()}
+      />
       <ReportOverview state={state} />
       <ExecutionCard state={state} />
       <div className="catalog-controls">
@@ -147,9 +154,9 @@ function ReportHeading({ state }: { state: ReportState }) {
 function ReportOverview({ state }: { state: ReportState }) {
   return (
     <>
-      <ReportCounts data={state.reports.data} />
+      <ReportCounts data={state.trend.data} />
       <div className="report-overview-grid">
-        <Card title="最近 7 日趋势" loading={state.trend.isLoading}>
+        <Card title="当前范围趋势（UTC）" loading={state.trend.isLoading}>
           <ReportTrendChart trend={state.trend.data} />
         </Card>
         <Card title="失败分类">
@@ -160,49 +167,56 @@ function ReportOverview({ state }: { state: ReportState }) {
   )
 }
 
-function ReportCounts({ data }: { data: ReportState['reports']['data'] }) {
-  const items = data?.items ?? []
-  const passed = items.filter((item) => item.status === 'passed').length
-  const failed = items.filter((item) => item.status === 'failed').length
-  const passRate = items.length ? Math.round((passed * 1000) / items.length) / 10 : null
+function ReportCounts({ data }: { data: ReportState['trend']['data'] }) {
+  const summary = data?.summary
   return (
     <div className="stat-grid">
       <Card>
-        <Statistic title="执行总数" value={data?.total ?? '—'} />
+        <Statistic title="范围内执行总数" value={summary?.total ?? '—'} />
+        <Typography.Text type="secondary">
+          <ReportPendingCaption summary={summary} />
+        </Typography.Text>
       </Card>
       <Card>
         <Statistic
-          title="本页通过"
-          value={data ? passed : '—'}
+          title="范围内通过"
+          value={summary?.passed ?? '—'}
           styles={{ content: { color: iceColors.success } }}
         />
       </Card>
       <Card>
         <Statistic
-          title="本页失败"
-          value={data ? failed : '—'}
+          title="范围内失败"
+          value={summary?.failed ?? '—'}
           styles={{ content: { color: iceColors.danger } }}
         />
       </Card>
-      <ReportPassRate rate={passRate} passed={passed} count={data ? items.length : null} />
+      <ReportPassRate summary={summary} />
     </div>
   )
 }
 
-function ReportPassRate({
-  rate,
-  passed,
-  count,
-}: {
-  rate: number | null
-  passed: number
-  count: number | null
-}) {
+function ReportPendingCaption({ summary }: { summary: ReportTrend['summary'] | undefined }) {
+  return (
+    <>
+      待完成 {summary?.pending ?? '—'} 条 · 已取消 {summary?.cancelled ?? '—'} 条
+    </>
+  )
+}
+
+function ReportPassRate({ summary }: { summary: ReportTrend['summary'] | undefined }) {
+  const rate = summary?.pass_rate ?? null
   return (
     <Card>
-      <Statistic title="本页通过率" value={rate ?? '—'} suffix={rate === null ? undefined : '%'} />
+      <Statistic
+        title="范围内通过率"
+        value={rate ?? '—'}
+        suffix={rate === null ? undefined : '%'}
+      />
       <Typography.Text type="secondary">
-        {count === null ? '未提供本页记录' : `${passed}/${count} 条本页记录`}
+        {summary
+          ? `${summary.passed}/${summary.completed} 条已完成记录（含取消，排除排队与运行中）`
+          : '未提供统计数据'}
       </Typography.Text>
       {rate !== null && (
         <Progress percent={rate} showInfo={false} strokeColor={iceColors.success} />
@@ -221,7 +235,7 @@ function FailureCategories({ trend }: { trend: ReportState['trend']['data'] }) {
       ))}
       {!trend?.failures.length && (
         <Typography.Text type="secondary">
-          {trend ? '最近 7 日暂无失败' : '未提供分类数据'}
+          {trend ? '当前范围暂无失败' : '未提供分类数据'}
         </Typography.Text>
       )}
     </Space>
@@ -231,26 +245,7 @@ function FailureCategories({ trend }: { trend: ReportState['trend']['data'] }) {
 function ExecutionCard({ state }: { state: ReportState }) {
   const items = state.reports.data?.items ?? []
   return (
-    <Card
-      title="执行记录"
-      className="workflow-result-card"
-      loading={state.reports.isLoading}
-      extra={
-        <Select
-          aria-label="执行状态"
-          value={state.statusFilter}
-          onChange={state.setStatusFilter}
-          style={{ width: 150 }}
-          options={[
-            { value: 'all', label: '全部状态' },
-            { value: 'failed', label: '仅失败' },
-            { value: 'passed', label: '仅通过' },
-            { value: 'running', label: '运行中' },
-            { value: 'cancelled', label: '已取消' },
-          ]}
-        />
-      }
-    >
+    <Card title="执行记录" className="workflow-result-card" loading={state.reports.isLoading}>
       <Typography.Paragraph type="secondary">
         当前页 {items.length} 条 · 当前筛选共 {state.reports.data?.total ?? '—'} 条
       </Typography.Paragraph>
@@ -307,7 +302,7 @@ function executionColumns(state: ReportState) {
         value === null ? (item.status === 'running' ? '运行中' : '未提供') : `${value} ms`,
     },
     {
-      title: '开始时间',
+      title: '开始时间（北京时间）',
       dataIndex: 'started_at',
       render: (value: string) => localTime(value),
     },

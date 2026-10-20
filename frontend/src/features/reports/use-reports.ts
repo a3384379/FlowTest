@@ -4,7 +4,8 @@ import { App } from 'antd'
 import { useState } from 'react'
 
 import { apiErrorMessage } from '../../lib/api'
-import { useRouteScopedSelection, useRouteScopedState } from '../../lib/use-route-scoped-state'
+import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
+import { useReportScope } from './report-scope'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
 import {
@@ -18,7 +19,6 @@ import {
   listReportExecutions,
   setNotificationWebhookEnabled,
   type CreateNotificationWebhookInput,
-  type ReportStatusFilter,
 } from './report-service'
 
 export function useReports(initialExecutionId?: string) {
@@ -33,23 +33,22 @@ export function useReports(initialExecutionId?: string) {
   )
   const [webhookOpen, setWebhookOpen] = useState(false)
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null)
-  const [page, setPage] = useRouteScopedState(projectId, 'report-list', 1)
-  const [statusFilter, setStatusFilter] = useRouteScopedState<ReportStatusFilter>(
-    projectId,
-    'report-status-filter',
-    'all',
-  )
+  const reportScope = useReportScope(projectId, !selectedExecutionId)
+  const { page, scope } = reportScope
   const reports = useQuery({
-    queryKey: ['reports', projectId, page, statusFilter],
-    queryFn: () => listReportExecutions(required(projectId), page, statusFilter),
-    enabled: Boolean(projectId),
+    queryKey: ['reports', projectId, page, scope],
+    queryFn: () => listReportExecutions(required(projectId), page, 'all', scope!),
+    enabled: Boolean(projectId && scope && !selectedExecutionId),
     refetchInterval: (query) =>
-      query.state.data?.items.some((item) => item.status === 'running') ? 1000 : false,
+      query.state.data?.items.some((item) => ['queued', 'running'].includes(item.status))
+        ? 1000
+        : false,
   })
   const trend = useQuery({
-    queryKey: ['report-trend', projectId],
-    queryFn: () => getReportTrend(required(projectId)),
-    enabled: Boolean(projectId),
+    queryKey: ['report-trend', projectId, scope],
+    queryFn: () => getReportTrend(required(projectId), scope!),
+    enabled: Boolean(projectId && scope && !selectedExecutionId),
+    refetchInterval: (query) => (query.state.data?.summary?.pending ? 1000 : false),
   })
   const detail = useQuery({
     queryKey: ['report-detail', projectId, selectedExecutionId],
@@ -127,12 +126,9 @@ export function useReports(initialExecutionId?: string) {
     setProjectSelection: selectProject,
     reports,
     page,
-    setPage,
-    statusFilter,
-    setStatusFilter: (status: ReportStatusFilter) => {
-      setStatusFilter(status)
-      setPage(1)
-    },
+    setPage: reportScope.setPage,
+    reportScope,
+    refreshReports: () => Promise.all([reports.refetch(), trend.refetch()]),
     trend,
     detail,
     selectedExecutionId,

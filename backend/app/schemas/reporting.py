@@ -2,12 +2,71 @@ from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, JsonValue
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    JsonValue,
+)
 
-from app.domain.reporting import FailureCategory, NotificationEvent
+from app.domain.reporting import (
+    FailureCategory,
+    NotificationEvent,
+    ReportFilterKind,
+    ReportScope,
+    ReportSource,
+    ReportStatus,
+)
 from app.engine.results import NodeObservation, NodeResult
 
 WebhookName = Annotated[str, Field(min_length=1, max_length=160)]
+
+
+class ReportQuery(BaseModel):
+    status: ReportStatus | None = None
+    started_from: AwareDatetime | None = None
+    started_until: AwareDatetime | None = None
+    workflow_id: UUID | None = None
+    environment_id: UUID | None = None
+    source_case_id: UUID | None = None
+    source_plan_id: UUID | None = None
+    source: ReportSource | None = None
+
+    def to_scope(self) -> ReportScope:
+        return ReportScope(
+            status=self.status,
+            started_from=self.started_from,
+            started_until=self.started_until,
+            workflow_id=self.workflow_id,
+            environment_id=self.environment_id,
+            source_case_id=self.source_case_id,
+            source_plan_id=self.source_plan_id,
+            source=self.source,
+        )
+
+
+class ReportListQuery(ReportQuery):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
+class ReportTrendQuery(ReportQuery):
+    days: int = 7
+
+
+class ReportFilterQuery(BaseModel):
+    kind: ReportFilterKind
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    search: str = Field(default="", max_length=200)
+    selected_id: UUID | None = None
+
+
+class ReportFilterOptionResponse(BaseModel):
+    id: UUID
+    name: str
 
 
 class ReportExecutionResponse(BaseModel):
@@ -68,9 +127,22 @@ class FailureDistributionResponse(BaseModel):
     count: int
 
 
+class ReportScopeSummaryResponse(BaseModel):
+    started_from: datetime
+    started_until: datetime
+    total: int
+    passed: int
+    failed: int
+    cancelled: int
+    pending: int
+    completed: int
+    pass_rate: float | None
+
+
 class ReportTrendResponse(BaseModel):
     points: list[TrendPointResponse]
     failures: list[FailureDistributionResponse]
+    summary: ReportScopeSummaryResponse
 
 
 class NotificationWebhookCreate(BaseModel):
