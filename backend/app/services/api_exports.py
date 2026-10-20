@@ -15,11 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.api_exports import APIExportSelection, InvalidAPIExportSelection
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion
 from app.repositories.access import ProjectRepository
 from app.repositories.api_assets import APIAssetRepository
-from app.schemas.api_exports import APIExportSelection
 from app.services.projects import ProjectService
 
 
@@ -58,7 +58,14 @@ class APIExportService:
         selection: APIExportSelection | None = None,
     ) -> APIExportDocument:
         access = await self._projects.get(actor=actor, project_id=project_id)
-        definitions = await self._select_definitions(project_id, selection or APIExportSelection())
+        selected = selection or APIExportSelection()
+        try:
+            selected.validate()
+        except InvalidAPIExportSelection as error:
+            raise AppError(
+                code="INVALID_API_EXPORT_SELECTION", message=str(error), status_code=422
+            ) from error
+        definitions = await self._select_definitions(project_id, selected)
         items = await self._load_versions(definitions)
         safe_name = (
             "".join(
@@ -96,7 +103,7 @@ class APIExportService:
     ) -> list[APIDefinition]:
         if selection.scope == "selected":
             definitions = await self._assets.get_definitions(
-                project_id=project_id, definition_ids=selection.definition_ids
+                project_id=project_id, definition_ids=list(selection.definition_ids)
             )
             if len(definitions) != len(selection.definition_ids):
                 raise AppError(

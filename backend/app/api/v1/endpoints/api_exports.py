@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 
 from app.api.dependencies import CurrentUser, SessionDependency
-from app.schemas.api_exports import APIExportRequest, APIExportSelection
+from app.domain.api_exports import APIExportSelection
+from app.schemas.api_exports import APIExportRequest
 from app.services.api_exports import APIExportFormat, APIExportService
 
 router = APIRouter(prefix="/projects/{project_id}/exports")
@@ -26,7 +27,7 @@ async def export_api_selection(
             scope=payload.scope,
             folder_id=payload.folder_id,
             unfiled=payload.unfiled,
-            definition_ids=payload.definition_ids,
+            definition_ids=tuple(payload.definition_ids),
         ),
     )
     return Response(
