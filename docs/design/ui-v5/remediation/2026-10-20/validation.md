@@ -39,4 +39,4 @@
 
 服务目录三项的完整 `make check` 已通过：后端1777 passed、13 skipped，覆盖率90.83%；前端145文件、942项，覆盖率85.65% / 81.74% / 85.04% / 88.12%，无未处理异常。完整格式、类型、构建均通过；真实 PostgreSQL 两个服务的影响及 Pact 角色隔离、桌面和390px手机验收通过。具体合同、源码树、专项和限制见[服务目录整改](batch-07.md)。
 
-报告 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 已按最新提交正式门禁合并 `dfd6f07937766b62611499387546860d07f5b98a`。针对该 SHA 的 [Full Regression 39454568135](https://github.com/a3384379/FlowTest/actions/runs/39454568135) 仍在执行。当前27项本地验证完成，其中23项已合并，其余按最新提交门禁继续交付；不等同于73项整改完成或正式发布验收通过。
+报告 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 已按最新提交正式门禁合并 `dfd6f07937766b62611499387546860d07f5b98a`。针对该 SHA 的 [Full Regression 39454568135](https://github.com/a3384379/FlowTest/actions/runs/39454568135) 已成功。用例 [PR #137](https://github.com/a3384379/FlowTest/pull/137) 以 HEAD `e1c7abc3ba3361577899944634bdc4d829f8905d` 的正式 Required Gate 成功、无未解决审查线程后，使用匹配 SHA 的命令合并为 `0831c37f77d24f4fc016bd1cec2d38fcb37a50f5`。该后续主分支回归尚未完成。当前27项本地验证完成，其中24项已合并，其余按最新提交门禁继续交付；不等同于73项整改完成或正式发布验收通过。

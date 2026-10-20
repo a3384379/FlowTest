@@ -57,7 +57,9 @@ test('S31 服务目录登记真实资产并通过全局搜索深链返回', asyn
       response.request().method() === 'POST',
   )
   await dialog.getByRole('button', { name: '登记服务' }).click()
-  expect((await created).status()).toBe(201)
+  const createdResponse = await created
+  expect(createdResponse.status()).toBe(201)
+  const service = (await createdResponse.json()) as Identified
   await expect(page.getByRole('row', { name: new RegExp(serviceName) })).toBeVisible()
 
   const search = page.getByLabel('全局搜索')
@@ -86,10 +88,21 @@ test('S31 服务目录登记真实资产并通过全局搜索深链返回', asyn
   await expect(page.getByRole('row', { name: new RegExp(serviceName) })).toHaveClass(
     /service-catalog-row-focused/,
   )
-  await expect(page.getByRole('link', { name: '契约' }).last()).toHaveAttribute(
+  const contracts = page.getByRole('link', { name: '查看服务契约' })
+  await expect(contracts).toHaveAttribute(
     'href',
-    new RegExp(`/projects/${project.id}/contracts\\?focus=contract_service:`),
+    `/projects/${project.id}/contracts?contractServiceId=${service.id}`,
   )
+  await contracts.click()
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${project.id}/contracts\\?contractServiceId=${service.id}`),
+  )
+  await expect(page.getByText(`服务上下文：${serviceName}`, { exact: true })).toBeVisible()
+  await page.getByRole('link', { name: '返回该服务详情' }).click()
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${project.id}/services\\?contractServiceId=${service.id}`),
+  )
+  await expect(page.getByRole('heading', { name: serviceName })).toBeVisible()
 })
 
 test('S31 质量指挥中心展示真实历史判断并保持证据深链', async ({ page }) => {

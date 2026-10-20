@@ -57,3 +57,11 @@
 真实 PostgreSQL 另验证同一个 Pact 在A/B两个服务中分别显示提供方/消费方，均保留同一消费者版本，版本总数各3。浏览器验证服务A到契约页仍选择A、影响页仅显示A的分析、固定版本目录和返回路径。手机390px时文档宽381px，没有横向溢出，选中服务后仅显示详情，返回恢复目录；详情首屏隐藏项目统计。桌面及手机版本阅读截图已逐张检查，保留于 `output/playwright/audit-20261019/`。
 
 第一次完整检查在前端 lint 阶段发现详情组件复杂度超标，已经拆分职责后重新专项通过，并启动完整检查；未放宽复杂度、覆盖率、超时或跳过条件。既有项目图接口未进行容量验收，本批不宣称大规模图读取性能已经验证。
+
+## 2026-10-21 复审与远程失败处理
+
+PR #138 首次 Compose 验收发现 S31 测试仍断言旧 focus=contract_service 契约跳转，实际产品已使用精确 contractServiceId。更新断言为创建响应中的服务 ID，并实际进入契约页验证服务上下文、返回同一服务详情。独立 Chromium 测试配置下，专用 Compose 栈该场景及登录 setup 共2项通过（7.6秒），没有增加超时或重试。日志：remediation-service-e2e-r1.log。
+
+复审提出用例目录应接收 error 状态。经源码和数据库约束核实，ExecutionService._fail_execution 修改 APICallExecution（单次接口调试），目录读取 WorkflowExecution；后者运行异常由 WorkflowService.stage_runtime_failed 标记 failed，数据库 CHECK 只允许 queued/running/passed/failed/cancelled。没有扩大状态枚举或修改执行合同。新增公开 API 回归验证带运行异常的 failed 流程正常读取目录、筛选、数量和固定版本历史，保留实际 execution_id。后端目录文件16项通过（7.62秒），Ruff格式及检查通过。
+
+用例 PR #137 已合并；本分支同步主分支的文档冲突采用已包含用例及服务证据的本分支版本，产品源码树未变化。服务目录仍等待最新 HEAD 正式门禁。

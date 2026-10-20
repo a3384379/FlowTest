@@ -240,7 +240,7 @@ Runner证据走项目只读分页/详情接口，保留项目授权与跨项目�
 
 报告列表、趋势、分类和全范围汇总共享时间、状态、流程、环境、用例、计划及来源筛选；URL 保存范围和页码，历史来源兼容且不改写快照。未完成记录不计失败，空分母显示未提供。详见[报告统一查询范围整改](batch-05.md)。
 
-首批22项经 [PR #133](https://github.com/a3384379/FlowTest/pull/133)、报告范围经 [PR #136](https://github.com/a3384379/FlowTest/pull/136) 合并主分支，目前23项已合并。用例 [PR #137](https://github.com/a3384379/FlowTest/pull/137) 与服务目录按各自最新提交门禁继续交付。完成数量表示代码及本地验证，不等同于27项均已合并。
+首批22项、报告范围及用例范围经 [PR #133](https://github.com/a3384379/FlowTest/pull/133)、[PR #136](https://github.com/a3384379/FlowTest/pull/136)、[PR #137](https://github.com/a3384379/FlowTest/pull/137) 合并主分支，目前24项已合并。服务目录 [PR #138](https://github.com/a3384379/FlowTest/pull/138) 按最新提交门禁继续交付。完成数量表示代码及本地验证，不等同于27项均已合并。
 
 ### F-CASE-04
 
