@@ -51,63 +51,53 @@ const graph: ServiceGraph = {
 }
 
 describe('ServiceCatalogPage', () => {
-  it('shows catalog evidence, focuses deep-links, and searches without losing selection', async () => {
-    const services = [...initialServices]
-    installFeatureHandler(true)
-    server.use(
-      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
-        const search = new URL(request.url).searchParams.get('search')?.toLowerCase() ?? ''
-        const items = services.filter((item) =>
-          [item.display_name, item.service_key, item.description].some((value) =>
-            value.toLowerCase().includes(search),
-          ),
-        )
-        return HttpResponse.json({ items, total: items.length, page: 1, page_size: 20 })
-      }),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
-        HttpResponse.json(summary(services.length)),
-      ),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
-        HttpResponse.json(graph),
-      ),
-    )
+  it('shows catalog evidence and focuses a legacy service deep-link', async () => {
+    installCatalogReads(() => initialServices)
     renderPage(`?focus=contract_service:${providerId}`)
-
-    expect(await screen.findByRole('heading', { name: '服务目录' })).toBeVisible()
     const list = within(screen.getByLabelText('服务目录列表'))
     expect(await list.findByText('Web 前端')).toBeVisible()
+    expect(await list.findByText('消费方')).toBeVisible()
     expect(list.getByText('订单服务')).toBeVisible()
-    expect(screen.getByText('消费方')).toBeVisible()
     expect(list.getByText('提供方')).toBeVisible()
     expect(list.getByText('OpenAPI')).toBeVisible()
-    expect(screen.getAllByText('Pact').length).toBeGreaterThan(0)
+    expect(list.getAllByText('Pact').length).toBeGreaterThan(0)
     expect(screen.getByText('服务数量').closest('.ant-card')).toHaveTextContent('2')
-    expect(list.getByRole('row', { name: /订单服务/ })).toHaveClass('service-catalog-row-focused')
+    expect(list.getByText('订单服务').closest('tr')).toHaveClass('service-catalog-row-focused')
+    const details = within(screen.getByLabelText('选中服务详情'))
+    expect(await details.findByText('orders-api')).toBeInTheDocument()
+  })
 
-    fireEvent.change(screen.getByLabelText('搜索服务'), { target: { value: 'web' } })
-    fireEvent.keyDown(screen.getByLabelText('搜索服务'), { key: 'Enter', code: 'Enter' })
-    expect(screen.getByLabelText('搜索服务')).toHaveValue('web')
-    expect(await list.findByText('Web 前端')).toBeVisible()
+  it('commits server search results and preserves the fixed service through search and clear', async () => {
+    const searches: string[] = []
+    installCatalogReads(() => initialServices, searches)
+    renderPage(`?contractServiceId=${providerId}`)
+    const list = within(screen.getByLabelText('服务目录列表'))
+    expect(await list.findByText('匹配 2 个服务')).toBeInTheDocument()
+    const details = within(screen.getByLabelText('选中服务详情'))
+    expect(await details.findByText('orders-api')).toBeInTheDocument()
+    const search = screen.getByLabelText('搜索服务')
+    fireEvent.change(search, { target: { value: 'web' } })
+    fireEvent.keyDown(search, { key: 'Enter', code: 'Enter' })
+    expect(await list.findByText('匹配 1 个服务')).toBeInTheDocument()
+    expect(searches.at(-1)).toBe('web')
+    expect(list.getByText('Web 前端')).toBeVisible()
     expect(list.queryByText('订单服务')).not.toBeInTheDocument()
-    expect(within(screen.getByLabelText('选中服务详情')).getByText('订单服务')).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('搜索服务'), { target: { value: '' } })
-    fireEvent.keyDown(screen.getByLabelText('搜索服务'), { key: 'Enter', code: 'Enter' })
+    expect(details.getByText('订单服务')).toBeInTheDocument()
+    const filteredSearch = screen.getByLabelText('搜索服务')
+    expect(filteredSearch).toHaveValue('web')
+    fireEvent.change(filteredSearch, { target: { value: '' } })
+    fireEvent.keyDown(filteredSearch, { key: 'Enter', code: 'Enter' })
+    expect(await list.findByText('匹配 2 个服务')).toBeInTheDocument()
+    expect(searches.at(-1)).toBe('')
+    expect(list.getByText('订单服务').closest('tr')).toHaveClass('service-catalog-row-focused')
+    expect(details.getByText('orders-api')).toBeInTheDocument()
   })
 
   it('validates registration and refreshes the catalog and summary after saving', async () => {
     let services = [...initialServices]
     let createPayload: Record<string, unknown> | null = null
-    installFeatureHandler(true)
+    installCatalogReads(() => services)
     server.use(
-      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, () =>
-        HttpResponse.json({ items: services, total: services.length, page: 1, page_size: 20 }),
-      ),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
-        HttpResponse.json(summary(services.length)),
-      ),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
-        HttpResponse.json(graph),
-      ),
       http.post(`/api/v1/projects/${project.id}/contract-hub/services`, async ({ request }) => {
         createPayload = (await request.json()) as Record<string, unknown>
         const created = service(
@@ -326,6 +316,28 @@ describe('ServiceCatalogPage', () => {
     expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
 })
+
+function installCatalogReads(read: () => ServiceCatalogEntry[], searches?: string[]) {
+  installFeatureHandler(true)
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
+      const search = new URL(request.url).searchParams.get('search') ?? ''
+      searches?.push(search)
+      const items = read().filter((item) =>
+        [item.display_name, item.service_key, item.description].some((value) =>
+          value.toLowerCase().includes(search.toLowerCase()),
+        ),
+      )
+      return HttpResponse.json({ items, total: items.length, page: 1, page_size: 20 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+      HttpResponse.json(summary(read().length)),
+    ),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+      HttpResponse.json(graph),
+    ),
+  )
+}
 
 function renderPage(search = '', visibleProject = project) {
   server.use(
