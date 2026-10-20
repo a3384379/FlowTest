@@ -85,7 +85,7 @@ export type TargetPreviewChange =
       variables?: Record<string, string>
     }
   | { kind: 'environment_default'; environment_id: string; service_id: string | null }
-  | { kind: 'api_binding'; api_id: string; service_id: string | null }
+  | { kind: 'api_binding'; api_id: string; service_id: string | null; base_version?: number }
 
 export type TargetPreviewInput = {
   change: TargetPreviewChange

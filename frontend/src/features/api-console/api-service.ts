@@ -213,7 +213,12 @@ export async function getApiDetail(
 export async function updateApiDefinition(
   projectId: string,
   apiId: string,
-  input: { name?: string; service_id?: string | null; folder_id?: string | null },
+  input: {
+    name?: string
+    service_id?: string | null
+    folder_id?: string | null
+    base_version?: number
+  },
 ): Promise<ApiDefinition> {
   const response = await apiClient.patch<ApiDefinition>(
     `/projects/${projectId}/apis/${apiId}`,

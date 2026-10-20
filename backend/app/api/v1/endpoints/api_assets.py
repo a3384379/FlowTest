@@ -318,6 +318,7 @@ async def update_api_definition(
         change_folder="folder_id" in payload.model_fields_set,
         service_id=payload.service_id,
         change_service="service_id" in payload.model_fields_set,
+        base_version=payload.base_version,
     )
     return APIDefinitionResponse.model_validate(definition)
 

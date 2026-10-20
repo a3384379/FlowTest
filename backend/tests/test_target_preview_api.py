@@ -422,3 +422,126 @@ async def test_binding_preview_matches_new_version_and_preserves_historical_reso
         )
         assert actual.status_code == 200, actual.text
         assert actual.json()["url"] == preview.json()[key]["url"]
+
+
+@pytest.mark.asyncio
+async def test_binding_confirmation_rejects_a_version_published_after_the_review(
+    preview_assets: PreviewAssets,
+) -> None:
+    fixture = preview_assets
+    change = {
+        "kind": "api_binding",
+        "api_id": fixture.unbound_api_id,
+        "service_id": fixture.service_id,
+        "base_version": 1,
+    }
+    path = f"{fixture.root}/apis/{fixture.unbound_api_id}"
+    preview = await fixture.client.post(
+        f"{fixture.root}/request-targets/preview",
+        headers=fixture.headers,
+        json={
+            "environment_id": fixture.environment_id,
+            "api_id": fixture.unbound_api_id,
+            "change": {key: value for key, value in change.items() if key != "base_version"},
+        },
+    )
+    assert preview.status_code == 200 and preview.json()["after"]["api_version"] == 2
+    published = await fixture.client.post(
+        f"{path}/versions",
+        headers=fixture.headers,
+        json={
+            "base_version": 1,
+            "method": "GET",
+            "path": "/health/new-publication",
+            "body_kind": "none",
+        },
+    )
+    assert published.status_code == 201, published.text
+    rejected = await fixture.client.patch(
+        path,
+        headers=fixture.headers,
+        json={"service_id": fixture.service_id, "base_version": 1, "name": "不应写入的名称"},
+    )
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()["error"]["code"] == "API_VERSION_CONFLICT"
+    assert rejected.json()["error"]["trace_id"]
+    actual = await fixture.client.get(path, headers=fixture.headers)
+    assert actual.json()["definition"]["current_version"] == 2
+    assert actual.json()["definition"]["name"] == "继承环境"
+    assert actual.json()["version"]["service_id"] is None
+    assert actual.json()["version"]["path"] == "/health/new-publication"
+    versions = await fixture.client.get(f"{path}/versions", headers=fixture.headers)
+    assert [item["version"] for item in versions.json()] == [2, 1]
+    for endpoint in ("preview", "impact-preview"):
+        stale = await fixture.client.post(
+            f"{fixture.root}/request-targets/{endpoint}",
+            headers=fixture.headers,
+            json={"change": change},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["error"]["trace_id"]
+    refreshed = {**change, "base_version": 2}
+    reviewed = await fixture.client.post(
+        f"{fixture.root}/request-targets/preview",
+        headers=fixture.headers,
+        json={
+            "environment_id": fixture.environment_id,
+            "api_id": fixture.unbound_api_id,
+            "change": refreshed,
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["after"]["api_version"] == 3
+    accepted = await fixture.client.patch(
+        path, headers=fixture.headers, json={"service_id": fixture.service_id, "base_version": 2}
+    )
+    assert accepted.status_code == 200 and accepted.json()["current_version"] == 3
+    resolved = await fixture.client.post(
+        f"{path}/preview", headers=fixture.headers, json={"environment_id": fixture.environment_id}
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["url"] == reviewed.json()["after"]["url"]
+
+
+@pytest.mark.asyncio
+async def test_binding_base_version_belongs_to_the_candidate_api_not_the_url_preview_api(
+    preview_assets: PreviewAssets,
+) -> None:
+    fixture = preview_assets
+    other = await fixture.client.post(
+        f"{fixture.root}/apis/{fixture.api_id}/versions",
+        headers=fixture.headers,
+        json={"base_version": 1, "method": "GET", "path": "/other-api/new", "body_kind": "none"},
+    )
+    assert other.status_code == 201, other.text
+    change = {
+        "kind": "api_binding",
+        "api_id": fixture.unbound_api_id,
+        "service_id": fixture.service_id,
+        "base_version": 1,
+    }
+    context = {
+        "api_id": fixture.api_id,
+        "api_version": 1,
+        "environment_id": fixture.environment_id,
+        "change": change,
+    }
+    preview = await fixture.client.post(
+        f"{fixture.root}/request-targets/preview", headers=fixture.headers, json=context
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["before"] == preview.json()["after"]
+    saved = await fixture.client.patch(
+        f"{fixture.root}/apis/{fixture.unbound_api_id}",
+        headers=fixture.headers,
+        json={"service_id": fixture.service_id, "base_version": 1},
+    )
+    assert saved.status_code == 200 and saved.json()["current_version"] == 2
+    stale = await fixture.client.post(
+        f"{fixture.root}/request-targets/preview", headers=fixture.headers, json=context
+    )
+    assert stale.status_code == 409
+    assert (
+        stale.json()["error"]["code"] == "API_VERSION_CONFLICT"
+        and stale.json()["error"]["trace_id"]
+    )

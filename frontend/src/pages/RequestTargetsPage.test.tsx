@@ -91,6 +91,161 @@ describe('RequestTargetsPage', () => {
     useAuthStore.setState({ user: null })
   })
 
+  it('keeps a conflicted API binding candidate until explicitly reloading and reviewing the latest revision', async () => {
+    let currentVersion = 1
+    const writes: Array<{ base_version?: number; service_id?: string }> = []
+    const previews: Array<{ base_version?: number }> = []
+    installTargetCatalog(() => [targetEnvironment])
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/request-targets/preview`, async ({ request }) => {
+        const input = (await request.json()) as { change: { base_version?: number } }
+        previews.push(input.change)
+        return HttpResponse.json({
+          before: unavailableResolution,
+          after: unavailableResolution,
+          persisted: false,
+          network_checked: false,
+        })
+      }),
+      http.patch(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, async ({ request }) => {
+        const body = (await request.json()) as { base_version?: number; service_id?: string }
+        writes.push(body)
+        if (body.base_version !== currentVersion)
+          return HttpResponse.json(
+            {
+              error: {
+                code: 'API_VERSION_CONFLICT',
+                message: '接口已有新版本,请读取最新版本并重新分析候选',
+                details: { current_version: currentVersion },
+                trace_id: 'binding-revision-trace',
+              },
+            },
+            { status: 409 },
+          )
+        currentVersion += 1
+        return HttpResponse.json({
+          ...apiDefinition,
+          current_version: currentVersion,
+          service_id: body.service_id,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+        HttpResponse.json({
+          definition: { ...apiDefinition, current_version: currentVersion },
+          version: {
+            id: '00000000-0000-4000-8000-000000001231',
+            api_definition_id: apiDefinition.id,
+            version: currentVersion,
+            method: 'GET',
+            path: '/users/new',
+            headers: {},
+            variables: {},
+            query_parameters: [],
+            body_kind: 'none',
+            body: null,
+            auth_kind: 'none',
+            auth_config: {},
+            extraction_rules: [],
+            assertions: [],
+            created_at: '2026-10-21T00:00:00Z',
+          },
+        }),
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(
+      await screen.findByRole('combobox', { name: `${apiDefinition.name} 默认服务` }),
+    )
+    await chooseOption(browser, '订单服务 · orders')
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: '确认保存' })).toBeEnabled(),
+    )
+    expect(previews.at(-1)?.base_version).toBe(1)
+    currentVersion = 2
+    await browser.click(within(dialog).getByRole('button', { name: '确认保存' }))
+    await screen.findByText('接口已有新版本,请读取最新版本并重新分析候选')
+    expect(writes).toEqual([{ service_id: service.id, base_version: 1 }])
+    expect(currentVersion).toBe(2)
+    expect(within(dialog).getByRole('button', { name: '确认保存' })).toBeDisabled()
+    expect(screen.getByText(/binding-revision-trace/)).toBeInTheDocument()
+    await browser.click(within(dialog).getByRole('button', { name: '读取最新版本并重新分析' }))
+    await waitFor(() => expect(previews.at(-1)?.base_version).toBe(2))
+    const refreshed = screen.getByRole('dialog')
+    await waitFor(() =>
+      expect(within(refreshed).getByRole('button', { name: '确认保存' })).toBeEnabled(),
+    )
+    expect(writes).toHaveLength(1)
+    await browser.click(within(refreshed).getByRole('button', { name: '确认保存' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1]).toEqual({ service_id: service.id, base_version: 2 })
+    expect(currentVersion).toBe(3)
+    await waitFor(() => expect(refreshed).not.toBeInTheDocument())
+  })
+
+  it('ignores a late revision reload after its candidate was cancelled and a new review opened', async () => {
+    let release: () => void = () => {}
+    let started = false
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    installTargetCatalog(() => [targetEnvironment])
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, async () => {
+        started = true
+        await pending
+        return HttpResponse.json({
+          definition: { ...apiDefinition, current_version: 9 },
+          version: {
+            id: '00000000-0000-4000-8000-000000001239',
+            api_definition_id: apiDefinition.id,
+            version: 9,
+            method: 'GET',
+            path: '/users/new',
+            headers: {},
+            variables: {},
+            query_parameters: [],
+            body_kind: 'none',
+            body: null,
+            auth_kind: 'none',
+            auth_config: {},
+            extraction_rules: [],
+            assertions: [],
+            created_at: '2026-10-21T00:00:00Z',
+          },
+        })
+      }),
+    )
+    const view = renderPage()
+    const browser = userEvent.setup()
+    await browser.click(
+      await screen.findByRole('combobox', { name: `${apiDefinition.name} 默认服务` }),
+    )
+    await chooseOption(browser, '订单服务 · orders')
+    const old = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(old).getByRole('button', { name: '确认保存' })).toBeEnabled())
+    await browser.click(within(old).getByRole('button', { name: '读取最新版本并重新分析' }))
+    await waitFor(() => expect(started).toBe(true))
+    await browser.click(within(old).getByRole('button', { name: '取消候选' }))
+    await waitFor(() => expect(old).not.toBeInTheDocument())
+    expect(
+      screen
+        .getByRole('combobox', { name: `${apiDefinition.name} 默认服务` })
+        .closest('.ant-select'),
+    ).not.toHaveTextContent('订单服务')
+    await browser.click(screen.getByRole('combobox', { name: `${apiDefinition.name} 默认服务` }))
+    await chooseOption(browser, '订单服务 · orders')
+    const current = await screen.findByRole('dialog')
+    await waitFor(() =>
+      expect(within(current).getByRole('button', { name: '确认保存' })).toBeEnabled(),
+    )
+    release()
+    await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+    expect(within(current).getByText('已锁定接口当前版本 v1')).toBeInTheDocument()
+    expect(screen.queryByText('已锁定接口当前版本 v9')).not.toBeInTheDocument()
+  })
+
   it('allows viewers to review target impact while keeping forms and bindings read-only', async () => {
     let writes = 0
     server.use(
@@ -295,7 +450,10 @@ describe('RequestTargetsPage', () => {
     )
     await browser.click(within(apiReview).getByRole('button', { name: '确认保存' }))
     await waitFor(() =>
-      expect(apiPayload).toEqual({ service_id: '00000000-0000-4000-8000-000000004003' }),
+      expect(apiPayload).toEqual({
+        service_id: '00000000-0000-4000-8000-000000004003',
+        base_version: apiDefinition.current_version,
+      }),
     )
 
     await browser.click(screen.getAllByRole('button', { name: /影响预览 \/ 编辑/ })[0])

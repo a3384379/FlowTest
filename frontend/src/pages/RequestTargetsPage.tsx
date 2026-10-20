@@ -63,6 +63,7 @@ import { useProjectContext } from '../features/projects/use-project-context'
 import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
 import {
   listApis,
+  getApiDetail,
   listEnvironments,
   updateApiDefinition,
 } from '../features/api-console/api-service'
@@ -205,12 +206,30 @@ function RequestTargetsWorkspace({ projectId }: { projectId: string }) {
     mutationFn: (candidate: Extract<BindingCandidate, { kind: 'api' }>) =>
       updateApiDefinition(editable(projectId, canEdit), candidate.api.id, {
         service_id: candidate.serviceId,
+        base_version: candidate.api.current_version,
       }),
     onSuccess: async (_result, candidate) => {
       await invalidateRequestTargets(queryClient, projectId)
       if (!session.current.active || session.current.binding !== candidate.session) return
       setBindingCandidate(undefined)
       messageApi.success('接口默认服务已更新')
+    },
+  })
+  const refreshApiCandidate = useMutation({
+    mutationFn: (candidate: Extract<BindingCandidate, { kind: 'api' }>) =>
+      getApiDetail(editable(projectId, canEdit), candidate.api.id),
+    onSuccess: (detail, candidate) => {
+      if (!session.current.active || session.current.binding !== candidate.session) return
+      updateApiService.reset()
+      setBindingCandidate({
+        ...candidate,
+        api: detail.definition,
+        session: ++session.current.binding,
+      })
+    },
+    onError: (reason, candidate) => {
+      if (session.current.active && session.current.binding === candidate.session)
+        messageApi.error(apiErrorMessage(reason))
     },
   })
   const prepareEdit = useMutation({
@@ -436,6 +455,14 @@ function RequestTargetsWorkspace({ projectId }: { projectId: string }) {
           services={serviceItems}
           readOnly={!canEdit}
           submitting={updateDefault.isPending || updateApiService.isPending}
+          refreshing={isRefreshingCandidate(
+            refreshApiCandidate.isPending,
+            refreshApiCandidate.variables,
+            bindingCandidate,
+          )}
+          onRefresh={() => {
+            if (bindingCandidate.kind === 'api') refreshApiCandidate.mutate(bindingCandidate)
+          }}
           error={bindingError(bindingCandidate, updateDefault.error, updateApiService.error)}
           onCancel={() => {
             session.current.binding += 1
@@ -653,7 +680,7 @@ function ApiServiceCard({
               allowClear
               disabled={readOnly}
               style={{ width: '100%', minWidth: 0 }}
-              value={item.service_id ?? undefined}
+              value={item.service_id ?? null}
               options={serviceOptions}
               placeholder="继承环境默认服务"
               onChange={(serviceId?: string) => onChange(item.id, serviceId ?? null)}
@@ -1113,4 +1140,12 @@ function ReviewedComparison({
       />
     )
   return null
+}
+
+function isRefreshingCandidate(
+  pending: boolean,
+  variables: BindingCandidate | undefined,
+  candidate: BindingCandidate,
+) {
+  return pending && variables?.session === candidate.session
 }

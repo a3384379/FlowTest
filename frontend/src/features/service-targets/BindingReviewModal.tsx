@@ -1,6 +1,7 @@
-import { Alert, Modal, Space, Typography } from 'antd'
+import { Alert, Button, Modal, Space, Typography } from 'antd'
 import { useState } from 'react'
-import { apiErrorMessage } from '../../lib/api'
+import { isAxiosError } from 'axios'
+import { apiErrorMessage, apiErrorTraceId } from '../../lib/api'
 import type { ApiDefinition, Environment, RequestService } from '../../lib/api'
 import TargetResolutionPreview from './TargetResolutionPreview'
 import { type TargetPreviewChange } from './service-target-service'
@@ -17,6 +18,8 @@ export default function BindingReviewModal({
   services,
   readOnly,
   submitting,
+  refreshing,
+  onRefresh,
   error,
   onCancel,
   onSave,
@@ -27,6 +30,8 @@ export default function BindingReviewModal({
   services: RequestService[]
   readOnly: boolean
   submitting: boolean
+  refreshing: boolean
+  onRefresh: () => void
   error: unknown
   onCancel: () => void
   onSave: () => void
@@ -55,7 +60,7 @@ export default function BindingReviewModal({
       onCancel={onCancel}
       onOk={onSave}
       okButtonProps={{
-        disabled: readOnly || stale || !ready,
+        disabled: readOnly || stale || !ready || refreshing || isVersionConflict(error),
       }}
     >
       <Space orientation="vertical" className="full-width">
@@ -71,6 +76,12 @@ export default function BindingReviewModal({
         <Typography.Paragraph>
           当前生效：{serviceName(originalId)} → 待保存候选：{serviceName(candidate.serviceId)}
         </Typography.Paragraph>
+        <APIRevisionNotice
+          candidate={candidate}
+          refreshing={refreshing}
+          disabled={readOnly || submitting}
+          onRefresh={onRefresh}
+        />
         <TargetResolutionPreview
           projectId={projectId}
           environmentId={environmentId}
@@ -78,13 +89,7 @@ export default function BindingReviewModal({
           change={change}
           onReady={setReady}
         />
-        {Boolean(error) && (
-          <Alert
-            type="error"
-            title={apiErrorMessage(error)}
-            description="保存失败，候选仍保留，可重试确认保存。"
-          />
-        )}
+        <BindingFailure error={error} />
       </Space>
     </Modal>
   )
@@ -110,6 +115,60 @@ function candidateDetails(candidate: BindingCandidate) {
       kind: 'api_binding',
       api_id: candidate.api.id,
       service_id: candidate.serviceId,
+      base_version: candidate.api.current_version,
     } satisfies TargetPreviewChange,
   }
+}
+
+function APIRevisionNotice({
+  candidate,
+  refreshing,
+  disabled,
+  onRefresh,
+}: {
+  candidate: BindingCandidate
+  refreshing: boolean
+  disabled: boolean
+  onRefresh: () => void
+}) {
+  if (candidate.kind !== 'api') return null
+  return (
+    <Alert
+      type="info"
+      title={`已锁定接口当前版本 v${candidate.api.current_version}`}
+      description={
+        <Space orientation="vertical" className="full-width">
+          <Typography.Paragraph style={{ marginBottom: 0 }}>
+            预览和保存使用同一基线版本。其他人发布或重新绑定后，保存会拒绝过期候选；读取最新版本会保留服务选择，并重新开始解析。
+          </Typography.Paragraph>
+          <Button disabled={disabled} loading={refreshing} onClick={onRefresh}>
+            读取最新版本并重新分析
+          </Button>
+        </Space>
+      }
+    />
+  )
+}
+function BindingFailure({ error }: { error: unknown }) {
+  if (!error) return null
+  const trace = apiErrorTraceId(error)
+  return (
+    <Alert
+      type="error"
+      title={apiErrorMessage(error)}
+      description={
+        <>
+          <div>保存失败，候选仍保留。接口版本冲突时先读取最新版本重新分析。</div>
+          {trace && <Typography.Text type="secondary">Trace ID: {trace}</Typography.Text>}
+        </>
+      }
+    />
+  )
+}
+
+function isVersionConflict(error: unknown): boolean {
+  return (
+    isAxiosError<{ error: { code: string } }>(error) &&
+    error.response?.data?.error?.code === 'API_VERSION_CONFLICT'
+  )
 }
