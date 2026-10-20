@@ -57,7 +57,8 @@ describe('ProjectAuditPanel', () => {
     expect(await screen.findByText('订单组 Owner')).toBeVisible()
     expect(read).toHaveBeenCalledWith({ page: '2', page_size: '50', action: 'api.updated' })
     expect(screen.getByText('共 61 条')).toBeVisible()
-    await userEvent.click(screen.getByText('查看详情'))
+    screen.getByRole('button', { name: '查看详情' }).focus()
+    await userEvent.keyboard('{Enter}')
     const drawer = await screen.findByRole('dialog')
     expect(within(drawer).getByText('actor-1')).toBeVisible()
     expect(within(drawer).getByText('audit-trace-51')).toBeVisible()
@@ -162,5 +163,42 @@ describe('ProjectAuditPanel', () => {
     renderPanel('?auditPage=NaN')
     expect(screen.getByText('审计链接中的页码或动作筛选无效，请重新筛选。')).toBeVisible()
     expect(read).not.toHaveBeenCalled()
+  })
+
+  it('closes the read-only drawer when navigating to a verified project resource', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/audit-logs`, () =>
+        HttpResponse.json({
+          items: [{ ...record, resource_type: 'project', resource_id: project.id }],
+          total: 1,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+    )
+    renderPanel('?auditAction=api.updated')
+    await userEvent.click(await screen.findByRole('button', { name: '查看详情' }))
+    const drawer = await screen.findByRole('dialog')
+    await userEvent.click(await within(drawer).findByRole('link', { name: '定位资源' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('当前链接')).toBeEmptyDOMElement()
+  })
+
+  it('does not read or link the resource without the project read capability', async () => {
+    const resourceRead = vi.fn()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/audit-logs`, () =>
+        HttpResponse.json({ items: [record], total: 1, page: 1, page_size: 50 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () => {
+        resourceRead()
+        return HttpResponse.json({ api: apiDefinition })
+      }),
+    )
+    renderPanel('', false)
+    await userEvent.click(await screen.findByRole('button', { name: '查看详情' }))
+    expect(await screen.findByRole('dialog')).toBeVisible()
+    expect(screen.queryByRole('link', { name: '定位资源' })).not.toBeInTheDocument()
+    expect(resourceRead).not.toHaveBeenCalled()
   })
 })

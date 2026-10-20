@@ -212,8 +212,9 @@ async def test_owner_directory_is_scoped_searchable_and_paged_without_global_use
         "/api/v1/users/search", headers=admin_headers, json={"query": "outside-private"}
     )
     assert admin_users.status_code == 200 and admin_users.json()["total"] == 1
-    invalid = await client.post(endpoint, headers=owner_headers, json={"page_size": 101})
-    assert invalid.status_code == 422 and invalid.json()["error"]["trace_id"]
+    for payload in [{"page_size": 101}, {"page": 2_147_483_648}, {"unrecognized": True}]:
+        invalid = await client.post(endpoint, headers=owner_headers, json=payload)
+        assert invalid.status_code == 422 and invalid.json()["error"]["trace_id"]
     team = (
         await client.post("/api/v1/teams", headers=admin_headers, json={"name": "身份摘要验证团队"})
     ).json()

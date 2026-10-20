@@ -29,7 +29,7 @@ export default function DirectoryPicker({
   const [selected, setSelected] = useState<Option | null>(null)
   const options = includeSelection(state.options, value, selected, selectedLabel)
   return (
-    <Space orientation="vertical" size={4}>
+    <Space orientation="vertical" size={4} style={{ width: 240, maxWidth: '100%' }}>
       {advanced ? (
         <Input
           aria-label={`${label} ID`}
@@ -42,6 +42,7 @@ export default function DirectoryPicker({
         <Select
           aria-label={label}
           className="management-select"
+          style={{ width: '100%', minWidth: 0 }}
           placeholder={`搜索${label}`}
           value={value}
           disabled={disabled}

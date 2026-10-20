@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Card, Descriptions, Drawer, Input, Space, Table, Typography } from 'antd'
+import { Alert, Button, Card, Descriptions, Drawer, Input, Space, Table, Typography } from 'antd'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -65,7 +65,9 @@ export default function ProjectAuditPanel({
             {
               title: '详情',
               render: (_, item) => (
-                <Typography.Link onClick={() => setSelected(item)}>查看详情</Typography.Link>
+                <Button type="link" onClick={() => setSelected(item)}>
+                  查看详情
+                </Button>
               ),
             },
           ]}
@@ -155,7 +157,7 @@ function AuditDetails({
           { key: 'trace', label: 'Trace ID', children: <CopyValue value={traceId(item)} /> },
         ]}
       />
-      <AuditResourceLink item={item} projectId={projectId} canRead={canRead} />
+      <AuditResourceLink item={item} projectId={projectId} canRead={canRead} onNavigate={onClose} />
       <Typography.Title level={5}>变更内容（只读）</Typography.Title>
       <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
         {JSON.stringify(item.details, null, 2)}
@@ -168,10 +170,12 @@ function AuditResourceLink({
   item,
   projectId,
   canRead,
+  onNavigate,
 }: {
   item: AuditLog
   projectId: string
   canRead: boolean
+  onNavigate: () => void
 }) {
   const target = auditResource(item, projectId)
   const query = useQuery({
@@ -182,8 +186,10 @@ function AuditResourceLink({
   })
   if (!canRead || !target) return null
   if (query.isError) return <QueryFailureNotice queries={[query]} />
-  return query.isSuccess ? (
-    <Link to={target.path}>定位资源</Link>
+  return query.isSuccess && !query.isFetching ? (
+    <Link to={target.path} onClick={onNavigate}>
+      定位资源
+    </Link>
   ) : (
     <span>正在确认资源访问权限…</span>
   )

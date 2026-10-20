@@ -169,6 +169,7 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
           </Form.Item>
           <Form.Item name="role">
             <Select
+              aria-label="项目成员角色"
               className="role-select"
               options={['owner', 'editor', 'viewer'].map((role) => ({ value: role, label: role }))}
             />
@@ -240,6 +241,7 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
           </Form.Item>
           <Form.Item name="role">
             <Select
+              aria-label="团队授权角色"
               className="role-select"
               options={['editor', 'viewer'].map((role) => ({ value: role, label: role }))}
             />
