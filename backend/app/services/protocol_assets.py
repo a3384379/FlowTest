@@ -1,4 +1,5 @@
 import base64
+import codecs
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -280,7 +281,8 @@ def _source_view(artifact: SchemaArtifact) -> StructureView:
     raw = artifact.source_content[:maximum]
     encoding = "text"
     try:
-        document = raw.decode("utf-8")
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        document = decoder.decode(raw, final=len(artifact.source_content) <= maximum)
     except UnicodeDecodeError:
         document = base64.b64encode(raw).decode("ascii")
         encoding = "base64"

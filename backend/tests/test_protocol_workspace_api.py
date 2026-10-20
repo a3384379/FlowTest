@@ -154,7 +154,7 @@ async def test_stored_structure_and_source_are_bounded_scoped_and_read_only(
     headers = await _login_headers(client)
     project = await client.post("/api/v1/projects", headers=headers, json={"name": "结构浏览项目"})
     project_id = project.json()["id"]
-    source = "#" + "source-prefix" * 6000 + "\n" + GRAPHQL_SDL
+    source = "# " + "审计协议源文档" * 6000 + "\n" + GRAPHQL_SDL
     created = await client.post(
         "/api/v1/graphql/schemas",
         headers=headers,
@@ -187,7 +187,10 @@ async def test_stored_structure_and_source_are_bounded_scoped_and_read_only(
     assert field.status_code == 200 and field.json()["view"]["total"] == 2
     assert field.json()["view"]["example"]["variables"] == {"id": "example-id"}
     document = await client.get(path, params={**params, "node": "source"}, headers=headers)
-    assert document.json()["view"]["notice"] and len(document.json()["view"]["document"]) == 65536
+    assert (
+        document.json()["view"]["notice"]
+        and len(document.json()["view"]["document"].encode()) <= 65536
+    )
     assert document.json()["view"]["document_format"] == "text"
     for override, status in [
         ({"node": "type:absent"}, 404),
