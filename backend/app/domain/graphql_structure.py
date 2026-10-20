@@ -17,6 +17,13 @@ from graphql import (
     get_named_type,
     is_composite_type,
 )
+from graphql.language import (
+    FieldNode,
+    FragmentDefinitionNode,
+    FragmentSpreadNode,
+    InlineFragmentNode,
+    SelectionSetNode,
+)
 from pydantic import JsonValue
 
 from app.domain.protocol_structure import (
@@ -261,17 +268,9 @@ def _locate_graphql_error_root(
 ) -> str:
     """Resolve a response alias to its actual root field without executing the operation."""
     from graphql import get_operation_ast, parse
-    from graphql.language import (
-        FieldNode,
-        FragmentDefinitionNode,
-        FragmentSpreadNode,
-        InlineFragmentNode,
-    )
 
-    from app.domain.protocols import validate_graphql_operation
-
-    validate_graphql_operation(content, operation)
-    document = parse(operation)
+    check_structure_size(operation.encode())
+    document = parse(operation, max_tokens=25000)
     selected = get_operation_ast(document, operation_name)
     if selected is None or not path or not isinstance(path[0], str):
         raise ProtocolSchemaError("无法唯一定位操作或错误路径,请核对Operation Name与响应。")
@@ -285,21 +284,45 @@ def _locate_graphql_error_root(
         for item in document.definitions
         if isinstance(item, FragmentDefinitionNode)
     }
-    stack = list(selected.selection_set.selections)
-    names: set[str] = set()
-    visited: set[str] = set()
-    while stack:
-        item = stack.pop()
-        if isinstance(item, FieldNode) and (item.alias or item.name).value == path[0]:
-            names.add(item.name.value)
-        elif isinstance(item, InlineFragmentNode):
-            stack.extend(item.selection_set.selections)
-        elif isinstance(item, FragmentSpreadNode) and item.name.value not in visited:
-            visited.add(item.name.value)
-            stack.extend(fragments[item.name.value].selection_set.selections)
+    names = _root_field_names(selected.selection_set, fragments, path[0])
     if len(names) != 1 or next(iter(names)) not in root.fields:
         raise ProtocolSchemaError("错误根字段无法唯一定位,请对照操作与契约。")
     return f"field:{root.name}.{next(iter(names))}"
+
+
+def _root_field_names(
+    selection: SelectionSetNode, fragments: dict[str, FragmentDefinitionNode], response_key: str
+) -> set[str]:
+    stack = [(item, frozenset[str]()) for item in selection.selections]
+    names: set[str] = set()
+    visited: set[str] = set()
+    count = 0
+    while stack:
+        item, ancestors = stack.pop()
+        count += 1
+        if count > 1000:
+            raise ProtocolSchemaError("操作根结构超过1000项定位上限")
+        if isinstance(item, FieldNode) and (item.alias or item.name).value == response_key:
+            names.add(item.name.value)
+        elif isinstance(item, InlineFragmentNode):
+            stack.extend((child, ancestors) for child in item.selection_set.selections)
+        elif isinstance(item, FragmentSpreadNode):
+            fragment = _root_fragment(item.name.value, fragments, ancestors)
+            if item.name.value not in visited:
+                visited.add(item.name.value)
+                stack.extend(
+                    (child, ancestors | {item.name.value})
+                    for child in fragment.selection_set.selections
+                )
+    return names
+
+
+def _root_fragment(
+    name: str, fragments: dict[str, FragmentDefinitionNode], ancestors: frozenset[str]
+) -> FragmentDefinitionNode:
+    if name in ancestors or name not in fragments:
+        raise ProtocolSchemaError("Fragment递归或缺失,无法定位根字段。")
+    return fragments[name]
 
 
 def locate_graphql_error_root(

@@ -198,3 +198,30 @@ def test_graphql_error_path_resolves_alias_and_fragment_to_actual_custom_root() 
             locate_graphql_error_root(SDL, operation, "Pick", path)
     with pytest.raises(ProtocolSchemaError):
         locate_graphql_error_root(SDL, operation, "Unknown", ["alias"])
+
+
+def test_error_root_location_bounds_tokens_and_fragment_traversal_without_execution_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.domain import protocols
+    from app.domain.graphql_structure import locate_graphql_error_root
+
+    def forbidden(*args: object, **kwargs: object) -> str:
+        raise AssertionError("Root location must not expand/validate a complete execution")
+
+    monkeypatch.setattr(protocols, "validate_graphql_operation", forbidden)
+    fragments = [
+        'fragment F0 on ReadRoot { alias: item(filter: {id: "42"}, choice: FIRST) { id } }'
+    ]
+    fragments.extend(
+        f"fragment F{i} on ReadRoot {{ ...F{i - 1} ...F{i - 1} }}" for i in range(1, 24)
+    )
+    operation = "query { ...F23 } " + " ".join(fragments)
+    assert locate_graphql_error_root(SDL, operation, None, ["alias", "id"]) == "field:ReadRoot.item"
+    for operation in [
+        "query { ...F } fragment F on ReadRoot { ...F }",
+        "query { ...Missing }",
+        "{ " + " date " * 26000 + " }",
+    ]:
+        with pytest.raises(ProtocolSchemaError):
+            locate_graphql_error_root(SDL, operation, None, ["alias"])
