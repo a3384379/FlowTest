@@ -81,3 +81,9 @@
 最终源码提交 `eb0b596fb4d13174726d8b60b4d7c5e3fb4cb060`，backend树 `d0096a516e80d991a72c9a0b3305ccef2b525121`，后端应用树 `b974f2737e87db1b68427ef7c9f32693e0bb1b6b`，frontend树 `f5245a50446913511c1f55c0a4a21301f308ce3c`。对应完整检查日志 `remediation-mock-eb0b596-backend-full.log`、`remediation-mock-eb0b596-frontend-full.log`。该精确树最终检查通过：后端1874项、14项跳过、2项既有警告，覆盖率91.05%，Ruff格式/检查和mypy442文件通过；前端159文件1056用例、无未处理错误，覆盖率85.94/82.01/85.52/88.41%，格式、lint/类型和构建通过。检查运行期间保持本工作树的应用和测试源码冻结，后续文档收尾未改变源码树。
 
 最终Grid浏览器补验显式设置并核对桌面viewport=1440、document=1440、页面高度2315；随后切换手机viewport=390、document=390。相同路由ID保存、优先级42、键值条件、模板数组类型及真实Mock201对照再次通过，页面异常0。记录：`remediation-mock-layout-verified-browser.log`；截图：`remediation-mock-layout-verified-desktop.png`、`remediation-mock-layout-verified-mobile.png`。之前某轮沿用了上一轮手机视口，文件名虽带desktop但实际390px，未将该截图计为桌面证据；本次通过明确尺寸断言补验。
+
+## 项目治理合并与Mock后续交付
+
+[PR #141](https://github.com/a3384379/FlowTest/pull/141)最终HEAD `b4f0ea592c082b6153022da47ae408e279525e2a` 的[正式Required Gate 39513064716](https://github.com/a3384379/FlowTest/actions/runs/39513064716)成功，审查线程为空且无下一页，按匹配SHA命令合并main为 `9e9d95ce6deb3a5dfd669ae6b4a7eae731055d33`。合并后[Full Regression 39517147484](https://github.com/a3384379/FlowTest/actions/runs/39517147484)已启动，核对精确head一致，结果待结束；PR门禁成功不代替合并后回归成功。
+
+数据与Mock [PR #142](https://github.com/a3384379/FlowTest/pull/142)同步该main时仅保留三份包含最新验证回执的整改文档，后端树 `d0096a516e80d991a72c9a0b3305ccef2b525121`、前端树 `f5245a50446913511c1f55c0a4a21301f308ce3c` 均与最终完整本地验证一致。当前37/73项本地完成、36项待完成、35项已合并；Mock的2项尚未合并。
