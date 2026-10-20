@@ -46,7 +46,12 @@ function DraftProtection({ session }: { session: DraftSession }) {
   )
 }
 function DraftNavigationGuard({ unsafe, discarding }: { unsafe: boolean; discarding: boolean }) {
-  const blocker = useBlocker(unsafe)
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    const protocolQuery =
+      currentLocation.pathname === nextLocation.pathname &&
+      /\/projects\/[^/]+\/protocols$/.test(currentLocation.pathname)
+    return unsafe && (discarding || !protocolQuery)
+  })
   return (
     <Modal
       open={blocker.state === 'blocked'}
