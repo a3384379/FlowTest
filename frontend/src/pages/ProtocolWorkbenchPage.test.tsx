@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, message as staticMessage } from 'antd'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -75,6 +75,44 @@ const websocketSource: EventSource = {
 }
 
 describe('ProtocolWorkbenchPage', () => {
+  it('does not mount a global notification when an import finishes after workspace unmount', async () => {
+    installHandlers()
+    let release!: () => void
+    let received!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const started = new Promise<void>((resolve) => {
+      received = resolve
+    })
+    server.use(
+      http.post('/api/v1/graphql/schemas', async () => {
+        received()
+        await pending
+        return HttpResponse.json(graphqlSchema)
+      }),
+    )
+    const view = renderPage()
+    await screen.findByText('用户 GraphQL')
+    await userEvent.click(screen.getByRole('button', { name: /导入协议 Schema/ }))
+    await userEvent.type(screen.getByLabelText('名称'), '卸载中的导入')
+    await userEvent.click(screen.getByRole('button', { name: '校验并保存' }))
+    await started
+    view.unmount()
+    try {
+      await act(async () => {
+        release()
+        await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+      })
+      expect(document.querySelector('.ant-message')).toBeNull()
+    } finally {
+      await act(async () => {
+        staticMessage.destroy()
+      })
+      view.queryClient.clear()
+    }
+  })
+
   it('invalidates completed and pending evidence when the same schema request is edited', async () => {
     installHandlers()
     renderPage()
@@ -719,7 +757,7 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <ProjectTestProvider section="protocols">
@@ -728,4 +766,5 @@ function renderPage() {
       </QueryClientProvider>
     </AntdApp>,
   )
+  return { ...view, queryClient }
 }

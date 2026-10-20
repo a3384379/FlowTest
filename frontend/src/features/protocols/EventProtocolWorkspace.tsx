@@ -10,6 +10,7 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
+  App,
   Button,
   Descriptions,
   Empty,
@@ -24,7 +25,6 @@ import {
   Tabs,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import { useMemo, useState } from 'react'
 
@@ -287,6 +287,7 @@ function KafkaConsole({
   schemas: SchemaArtifact[]
   enabled: boolean
 }) {
+  const { message } = App.useApp()
   const [topic, setTopic] = useState('flowtest.orders')
   const [payload, setPayload] = useState('{"id":"order-42"}')
   const [schemaId, setSchemaId] = useState<string>()
@@ -387,6 +388,7 @@ function WebSocketConsole({
   source: EventSource
   enabled: boolean
 }) {
+  const { message } = App.useApp()
   const [payloadKind, setPayloadKind] = useState<'json' | 'text'>('json')
   const [payload, setPayload] = useState('{"id":"order-42","action":"subscribe"}')
   const [correlation, setCorrelation] = useState('id')
@@ -511,6 +513,7 @@ function EventSourceDialog({
   mode: EventProtocolMode
   onClose: () => void
 }) {
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{ name: string; endpoint: string; registry?: string }>()
   const mutation = useMutation({
@@ -581,6 +584,7 @@ function EventSchemaDialog({
   source: EventSource | null
   onClose: () => void
 }) {
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{
     mode: 'registry' | 'json_schema' | 'avro'
