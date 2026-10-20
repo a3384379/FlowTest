@@ -76,3 +76,7 @@ F-PRJ-01、F-PRJ-02在源码 `af4659f58f295fad4e15eb0dad489f3196391c68` 完成�
 [PR #140](https://github.com/a3384379/FlowTest/pull/140)最终HEAD `c163ba5975cc3ec7eaec5fba8dc6e6cc96a21ac0` 的正式Required Gate通过，审查线程无未解决项，按匹配SHA合并main为 `4a27c3b14743be4d0df756f83238766a294adee8`。合并后[Full Regression 39505978249](https://github.com/a3384379/FlowTest/actions/runs/39505978249)运行中，已确认head一致。当前35本地完成、38待完成、33已合并。
 
 项目治理同步main时仅解决两份进度/验证文档的重复上下文冲突，保留已经包含前置修复和本模块回执的最新版本；合并暂存树的后端 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16` 与最终完整验证一致。本地完整检查仍适用于同一源码树，[PR #141](https://github.com/a3384379/FlowTest/pull/141)最新提交门禁另行确认。
+
+### M06 门禁补修源码65fb43d
+
+S14旧目录定位与新Vite高危公告阻断远程检查，修补详情见batch-10“最新远程检查补修”。后端树b15a36616bb120dd0b196550d4401acc3fb90e38未变；前端树824af86f6f2add63812813817d908711fb59120b重新完成格式、lint/类型、157文件1034用例、覆盖率85.89/82.15/85.44/88.34%与生产构建。高危依赖审计退出0。真实隔离浏览器团队搜索、加成员、团队授权整条路径通过。最新HEAD正式门禁与合并后检查仍需另行确认。
