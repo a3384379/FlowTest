@@ -5,9 +5,35 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response
 
 from app.api.dependencies import CurrentUser, SessionDependency
+from app.schemas.api_exports import APIExportRequest, APIExportSelection
 from app.services.api_exports import APIExportFormat, APIExportService
 
 router = APIRouter(prefix="/projects/{project_id}/exports")
+
+
+@router.post("/apis")
+async def export_api_selection(
+    project_id: UUID,
+    payload: APIExportRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Response:
+    document = await APIExportService(session).export(
+        actor=current_user,
+        project_id=project_id,
+        export_format=APIExportFormat(payload.format),
+        selection=APIExportSelection(
+            scope=payload.scope,
+            folder_id=payload.folder_id,
+            unfiled=payload.unfiled,
+            definition_ids=payload.definition_ids,
+        ),
+    )
+    return Response(
+        content=document.content,
+        media_type=document.media_type,
+        headers={"Content-Disposition": attachment_disposition(document.filename)},
+    )
 
 
 @router.get("/apis")

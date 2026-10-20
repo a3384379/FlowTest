@@ -83,7 +83,7 @@ describe('ApiConsolePage', () => {
     await waitFor(() =>
       expect(
         screen.getByText(
-          '当前分组、搜索筛选和批量选择不会影响本次全项目导出。当前版本暂不支持仅导出分组或已选接口。',
+          '使用各接口已保存的当前版本；搜索和方法筛选不影响范围。数量为当前查询结果，下载时由服务器重新校验。',
         ),
       ).toBeVisible(),
     )
@@ -176,6 +176,15 @@ describe('ApiConsolePage', () => {
     await browser.click(await screen.findByRole('checkbox', { name: '勾选接口 第二页接口' }))
     expect(screen.getByText(apiDefinition.name, { exact: true })).toBeVisible()
     expect(screen.getByText('已选 2 个，本页 1 个，其他页 1 个')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '导出接口' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '导出范围' }))
+    await browser.click(
+      await screen.findByText('已选接口（包含其他页保留的选择）', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(screen.getByText('已选接口（包含其他页保留的选择） · 当前共 2 个接口')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '取消' }))
     await browser.click(screen.getByRole('button', { name: '批量移动' }))
     expect(screen.getByRole('button', { name: '确认移动' })).toBeDisabled()
     await browser.click(screen.getByRole('combobox', { name: '接口目标分组' }))
@@ -453,6 +462,8 @@ describe('ApiConsolePage', () => {
     expect(screen.getByText('"测试用户"')).toBeVisible()
     expect(await screen.findByRole('button', { name: /保存新版本/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送请求' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: `勾选接口 ${apiDefinition.name}` })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '导出接口' })).toBeEnabled()
     expect(screen.getByLabelText('请求路径')).toBeDisabled()
   })
 

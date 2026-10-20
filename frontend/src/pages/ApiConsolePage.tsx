@@ -34,6 +34,7 @@ import QueryFailureNotice from '../components/QueryFailureNotice'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import APIWorkbench from '../features/api-console/APIWorkbench'
 import ApiWorkspace from '../features/api-console/ApiWorkspace'
+import ApiExportDialog from '../features/api-console/ApiExportDialog'
 import { apiWorkspaceKey } from '../features/api-console/api-layout-preferences'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import EnvironmentManager from '../features/api-console/EnvironmentManager'
@@ -48,7 +49,7 @@ import type {
 import { useApiConsole } from '../features/api-console/use-api-console'
 import { effectiveApiAssertions } from '../features/api-console/api-service'
 import { useAuthStore } from '../features/auth/auth-store'
-import { apiErrorMessage, type ApiDefinition } from '../lib/api'
+import { type ApiDefinition } from '../lib/api'
 
 type DialogState = 'project' | 'environment' | 'api' | null
 
@@ -64,6 +65,7 @@ export default function ApiConsolePage() {
   const [artifactsOpen, setArtifactsOpen] = useState(searchParams.get('panel') === 'files')
   const consoleState = useConsoleFromRoute(searchParams)
   const userId = useAuthStore((state) => state.user?.id)
+  const [selectedIds, setSelectedIds] = useProjectApiSelection(consoleState.projectId)
   const currentDefinition = selectedApiDefinition(consoleState)
   const artifacts = artifactItems(consoleState)
   const apis = apiItems(consoleState)
@@ -179,6 +181,8 @@ export default function ApiConsolePage() {
                 loading={consoleState.apis.isLoading}
                 items={apis}
                 selectedId={consoleState.apiId}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
                 onSelect={selectApi}
                 onRename={setRenameTarget}
                 page={consoleState.apis.data?.page ?? consoleState.apiPage}
@@ -226,9 +230,10 @@ export default function ApiConsolePage() {
           </Card>
         }
       />
-      <ExportScopeDialog
+      <ExportDialogContainer
         open={exportOpen}
         state={consoleState}
+        selectedIds={selectedIds}
         onClose={() => setExportOpen(false)}
       />
       <Drawer
@@ -349,41 +354,73 @@ function EnvironmentManagerContainer({
   )
 }
 
-function ApiDirectorySelection(
-  props: Omit<ApiTableProps, 'selectedIds' | 'onSelectionChange'> & { projectId: string | null },
-) {
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+function useProjectApiSelection(projectId: string | null) {
+  const [selection, setSelection] = useState<{ projectId: string | null; ids: string[] }>({
+    projectId: null,
+    ids: [],
+  })
+  const ids = selection.projectId === projectId ? selection.ids : []
+  return [ids, (next: string[]) => setSelection({ projectId, ids: next })] as const
+}
+
+function ExportDialogContainer({
+  open,
+  state,
+  selectedIds,
+  onClose,
+}: {
+  open: boolean
+  state: ConsoleState
+  selectedIds: string[]
+  onClose: () => void
+}) {
+  if (!open || !state.projectId) return null
+  return (
+    <ApiExportDialog
+      key={state.projectId}
+      projectId={state.projectId}
+      folder={state.apiFolder}
+      selectedIds={selectedIds}
+      exporting={state.exporting}
+      onExport={state.exportApis}
+      onClose={onClose}
+    />
+  )
+}
+
+function ApiDirectorySelection(props: ApiTableProps & { projectId: string | null }) {
+  const { selectedIds, onSelectionChange: setSelectedIds } = props
   const [moving, setMoving] = useState(false)
   const inPage = selectedIds.filter((id) => props.items.some((item) => item.id === id)).length
   return (
     <>
-      {props.editable && (
-        <Checkbox
-          aria-label="全选本页"
-          disabled={props.loading || !props.items.length}
-          checked={props.items.length > 0 && inPage === props.items.length}
-          indeterminate={inPage > 0 && inPage < props.items.length}
-          onChange={(event) =>
-            setSelectedIds(
-              event.target.checked
-                ? [...new Set([...selectedIds, ...props.items.map((item) => item.id)])]
-                : selectedIds.filter((id) => !props.items.some((item) => item.id === id)),
-            )
-          }
-        >
-          全选本页
-        </Checkbox>
-      )}
+      <Checkbox
+        aria-label="全选本页"
+        disabled={props.loading || !props.items.length}
+        checked={props.items.length > 0 && inPage === props.items.length}
+        indeterminate={inPage > 0 && inPage < props.items.length}
+        onChange={(event) =>
+          setSelectedIds(
+            event.target.checked
+              ? [...new Set([...selectedIds, ...props.items.map((item) => item.id)])]
+              : selectedIds.filter((id) => !props.items.some((item) => item.id === id)),
+          )
+        }
+      >
+        全选本页
+      </Checkbox>
 
-      {props.editable && selectedIds.length > 0 && (
+      {selectedIds.length > 0 && (
         <div className="api-bulk-toolbar">
           <Typography.Text>
             已选 {selectedIds.length} 个，本页 {inPage} 个，其他页 {selectedIds.length - inPage} 个
           </Typography.Text>
           <Space wrap>
-            <Button size="small" onClick={() => setMoving(true)}>
-              批量移动
-            </Button>
+            {props.editable && (
+              <Button size="small" onClick={() => setMoving(true)}>
+                批量移动
+              </Button>
+            )}
             <Button size="small" onClick={() => setSelectedIds([])}>
               清空选择
             </Button>
@@ -586,69 +623,6 @@ function ApiConsoleHeading({
   )
 }
 
-function ExportScopeDialog({
-  open,
-  state,
-  onClose,
-}: {
-  open: boolean
-  state: ConsoleState
-  onClose: () => void
-}) {
-  const [format, setFormat] = useState<Parameters<ConsoleState['exportApis']>[0]>('har')
-  const [error, setError] = useState<string | null>(null)
-  async function download() {
-    setError(null)
-    try {
-      await state.exportApis(format)
-      onClose()
-    } catch (failure) {
-      setError(apiErrorMessage(failure))
-    }
-  }
-  return (
-    <Modal
-      title="导出接口资产"
-      open={open}
-      okText="导出整个项目"
-      cancelText="取消"
-      confirmLoading={state.exporting}
-      closable={!state.exporting}
-      cancelButtonProps={{ disabled: state.exporting }}
-      onCancel={() => {
-        if (!state.exporting) onClose()
-      }}
-      onOk={() => void download()}
-    >
-      <Typography.Paragraph>
-        导出范围：当前项目全部可导出的接口，使用各接口的已保存当前版本。
-      </Typography.Paragraph>
-      <Typography.Paragraph type="secondary">
-        当前分组、搜索筛选和批量选择不会影响本次全项目导出。当前版本暂不支持仅导出分组或已选接口。
-      </Typography.Paragraph>
-      <Form layout="vertical">
-        <Form.Item label="文件格式">
-          <Select
-            value={format}
-            onChange={setFormat}
-            options={[
-              { value: 'har', label: 'HAR' },
-              { value: 'curl', label: 'cURL' },
-              { value: 'bruno', label: 'Bruno' },
-              { value: 'excel', label: 'Excel' },
-            ]}
-          />
-        </Form.Item>
-      </Form>
-      {error && (
-        <Typography.Paragraph role="alert" type="danger">
-          {error}
-        </Typography.Paragraph>
-      )}
-    </Modal>
-  )
-}
-
 function RunnerActions({ state, enabled }: { state: ConsoleState; enabled: boolean }) {
   return (
     <div className="api-send-action">
@@ -727,24 +701,17 @@ function ApiTable({
 }: ApiTableProps) {
   return (
     <Table
-      rowSelection={
-        editable
-          ? {
-              selectedRowKeys: selectedIds,
-              preserveSelectedRowKeys: true,
-              onChange: (keys) => onSelectionChange(keys.map(String)),
-              getCheckboxProps: (record) => ({ 'aria-label': `勾选接口 ${record.name}` }),
-              renderCell: (_, record, __, node) => (
-                <span
-                  onClick={(event) => event.stopPropagation()}
-                  aria-label={`选择 ${record.name}`}
-                >
-                  {node}
-                </span>
-              ),
-            }
-          : undefined
-      }
+      rowSelection={{
+        selectedRowKeys: selectedIds,
+        preserveSelectedRowKeys: true,
+        onChange: (keys) => onSelectionChange(keys.map(String)),
+        getCheckboxProps: (record) => ({ 'aria-label': `勾选接口 ${record.name}` }),
+        renderCell: (_, record, __, node) => (
+          <span onClick={(event) => event.stopPropagation()} aria-label={`选择 ${record.name}`}>
+            {node}
+          </span>
+        ),
+      }}
       rowKey="id"
       size="small"
       className="api-directory-table"
