@@ -7,6 +7,8 @@ import { server } from '../test/server'
 import {
   apiClient,
   apiErrorMessage,
+  apiErrorTraceId,
+  apiErrorWithTrace,
   createPlatformApiClient,
   shouldSkipAutomaticQueryRetry,
   type PlatformAuthPort,
@@ -79,4 +81,38 @@ describe('apiErrorMessage', () => {
     expect(apiErrorMessage(new Error('network unavailable'))).toBe('network unavailable')
     expect(apiErrorMessage(null)).toBe('请求失败，请稍后重试')
   })
+
+  it('preserves a structured trace without including other response fields', () => {
+    const error = {
+      isAxiosError: true,
+      message: 'Request failed',
+      response: {
+        data: {
+          error: {
+            message: '草案已变化',
+            trace_id: 'review-trace',
+            details: { ignored: 'not part of the display' },
+          },
+        },
+      },
+    }
+    expect(apiErrorTraceId(error)).toBe('review-trace')
+    expect(apiErrorWithTrace(error)).toBe('草案已变化（Trace ID: review-trace）')
+    expect(apiErrorMessage(error)).toBe('草案已变化')
+  })
+
+  it.each([null, 42, ''])(
+    'does not invent a trace for a missing or malformed value: %s',
+    (trace) => {
+      const error = {
+        isAxiosError: true,
+        message: 'network error',
+        response: { data: { error: { trace_id: trace } } },
+      }
+      expect(apiErrorTraceId(error)).toBeUndefined()
+      expect(apiErrorWithTrace(error)).toBe('network error')
+      expect(apiErrorTraceId(new Error('ordinary'))).toBeUndefined()
+      expect(apiErrorWithTrace(null)).toBe('请求失败，请稍后重试')
+    },
+  )
 })

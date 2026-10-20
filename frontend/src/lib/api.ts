@@ -1703,3 +1703,15 @@ export function apiErrorMessage(error: unknown): string {
   }
   return error instanceof Error ? error.message : '请求失败，请稍后重试'
 }
+
+export function apiErrorTraceId(error: unknown): string | undefined {
+  if (!axios.isAxiosError(error)) return undefined
+  const trace: unknown = error.response?.data?.error?.trace_id
+  return typeof trace === 'string' && trace.length > 0 ? trace : undefined
+}
+
+export function apiErrorWithTrace(error: unknown): string {
+  const message = apiErrorMessage(error)
+  const trace = apiErrorTraceId(error)
+  return trace ? `${message}（Trace ID: ${trace}）` : message
+}

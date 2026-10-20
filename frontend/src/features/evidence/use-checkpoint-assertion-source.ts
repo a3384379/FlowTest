@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import axios from 'axios'
 import {
   apiErrorMessage,
+  apiErrorTraceId,
   type ExecutionCheckpoint,
   type WorkflowExecutionDetail,
   type WorkflowNodeObservation,
@@ -34,14 +34,11 @@ export function useCheckpointAssertionSource(
         if (active) setLoad({ key, detail })
       })
       .catch((error: unknown) => {
-        const traceId = axios.isAxiosError(error)
-          ? error.response?.data?.error?.trace_id
-          : undefined
         if (active)
           setLoad({
             key,
             error: apiErrorMessage(error),
-            traceId: typeof traceId === 'string' ? traceId : undefined,
+            traceId: apiErrorTraceId(error),
           })
       })
     return () => {

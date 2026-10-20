@@ -1,8 +1,7 @@
 import { SearchOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Select, Space, Spin, Typography } from 'antd'
-import axios from 'axios'
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, apiErrorTraceId } from '../../lib/api'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -62,12 +61,9 @@ export default function GlobalSearch() {
               onMouseDown={(event) => event.preventDefault()}
             >
               <Typography.Text type="danger">{apiErrorMessage(results.error)}</Typography.Text>
-              {axios.isAxiosError(results.error) &&
-                typeof results.error.response?.data?.error?.trace_id === 'string' && (
-                  <Typography.Text copyable>
-                    {results.error.response.data.error.trace_id}
-                  </Typography.Text>
-                )}
+              {apiErrorTraceId(results.error) && (
+                <Typography.Text copyable>{apiErrorTraceId(results.error)}</Typography.Text>
+              )}
               {results.data && (
                 <Typography.Text type="secondary">以下为上次成功搜索结果</Typography.Text>
               )}

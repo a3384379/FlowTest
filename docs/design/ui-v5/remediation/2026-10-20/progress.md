@@ -191,7 +191,7 @@ Bearer、Basic、API Key 按具名字段填写，校验必需值和位置，保�
 
 ### F-REG-01
 
-先在抽屉查看完整缺失测试草案与来源后审核；前端提交所看内容，服务端加锁后检查，过期审核409；保留人工边界。
+先在抽屉查看完整缺失测试草案与来源后审核；窗口固定打开或主动刷新时的内容及来源，迟到刷新不会覆盖新审核。前端提交所看内容，服务端加锁后检查，过期审核409；保留人工边界。详情见[审核快照复审](batch-04.md)。
 
 - 实现：[backend/app/services/change_regression.py](../../../../../backend/app/services/change_regression.py)。
 - 回归：[backend/tests/test_change_regression.py](../../../../../backend/tests/test_change_regression.py)。

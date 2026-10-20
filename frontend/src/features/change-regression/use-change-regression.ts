@@ -2,7 +2,7 @@ import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
@@ -158,7 +158,7 @@ export function useChangeRegression(initialRunId?: string) {
       void message.success(input.decision === 'accept' ? '缺失测试已接受' : '缺失测试已拒绝')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      void message.error(apiErrorWithTrace(error))
       return false
     }
   }
