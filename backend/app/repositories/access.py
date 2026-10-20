@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import datetime
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from app.models.access import (
     TeamMember,
     User,
 )
+from app.models.organizations import OrganizationMember
 
 
 class UserRepository:
@@ -25,6 +27,14 @@ class UserRepository:
 
     async def get(self, user_id: UUID) -> User | None:
         return await self._session.get(User, user_id)
+
+    async def display_names(self, user_ids: Sequence[UUID]) -> dict[UUID, str]:
+        if not user_ids:
+            return {}
+        rows = await self._session.execute(
+            select(User.id, User.display_name).where(User.id.in_(user_ids))
+        )
+        return {user_id: name for user_id, name in rows}
 
     async def lock_session_changes(self, user_id: UUID) -> bool:
         # A write also serializes these operations on SQLite, where FOR UPDATE is ignored.
@@ -49,15 +59,65 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list(self, *, offset: int, limit: int) -> tuple[list[User], int]:
+    async def get_many(self, user_ids: Sequence[UUID]) -> dict[UUID, User]:
+        if not user_ids:
+            return {}
+        users = await self._session.scalars(select(User).where(User.id.in_(user_ids)))
+        return {user.id: user for user in users}
+
+    async def member_candidates(
+        self,
+        *,
+        project_id: UUID,
+        organization_id: UUID | None,
+        global_directory: bool,
+        query: str,
+        offset: int,
+        limit: int,
+    ) -> tuple[list[User], int]:
+        statement = select(User).where(User.is_active.is_(True))
+        if not global_directory:
+            project_users = select(ProjectMember.user_id).where(
+                ProjectMember.project_id == project_id
+            )
+            organization_users = select(OrganizationMember.user_id).where(
+                OrganizationMember.organization_id == organization_id
+            )
+            statement = statement.where(
+                or_(User.id.in_(project_users), User.id.in_(organization_users))
+            )
+        if query:
+            statement = statement.where(
+                or_(
+                    User.display_name.icontains(query, autoescape=True),
+                    User.email.icontains(query, autoescape=True),
+                )
+            )
+        total = await self._session.scalar(select(func.count()).select_from(statement.subquery()))
+        users = await self._session.scalars(
+            statement.order_by(User.display_name, User.id).offset(offset).limit(limit)
+        )
+        return list(users.all()), int(total or 0)
+
+    async def list(self, *, offset: int, limit: int, query: str = "") -> tuple[list[User], int]:
+        statement = select(User)
+        if query:
+            statement = statement.where(
+                or_(
+                    User.display_name.icontains(query, autoescape=True),
+                    User.email.icontains(query, autoescape=True),
+                )
+            )
         users = list(
             (
                 await self._session.scalars(
-                    select(User).order_by(User.created_at.desc()).offset(offset).limit(limit)
+                    statement.order_by(User.created_at.desc(), User.id.desc())
+                    .offset(offset)
+                    .limit(limit)
                 )
             ).all()
         )
-        total = await self._session.scalar(select(func.count()).select_from(User))
+        total = await self._session.scalar(select(func.count()).select_from(statement.subquery()))
         return users, int(total or 0)
 
     def add(self, user: User) -> None:
@@ -343,7 +403,9 @@ class ProjectRepository:
         logs = list(
             (
                 await self._session.scalars(
-                    query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+                    query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+                    .offset(offset)
+                    .limit(limit)
                 )
             ).all()
         )
@@ -364,15 +426,26 @@ class TeamRepository:
         result = await self._session.execute(select(Team).where(Team.name == name))
         return result.scalar_one_or_none()
 
-    async def list_teams(self, *, offset: int, limit: int) -> tuple[list[Team], int]:
+    async def get_many(self, team_ids: Sequence[UUID]) -> dict[UUID, Team]:
+        if not team_ids:
+            return {}
+        teams = await self._session.scalars(select(Team).where(Team.id.in_(team_ids)))
+        return {team.id: team for team in teams}
+
+    async def list_teams(
+        self, *, offset: int, limit: int, query: str = ""
+    ) -> tuple[list[Team], int]:
+        statement = select(Team)
+        if query:
+            statement = statement.where(Team.name.icontains(query, autoescape=True))
         teams = list(
             (
                 await self._session.scalars(
-                    select(Team).order_by(Team.name).offset(offset).limit(limit)
+                    statement.order_by(Team.name, Team.id).offset(offset).limit(limit)
                 )
             ).all()
         )
-        total = await self._session.scalar(select(func.count()).select_from(Team))
+        total = await self._session.scalar(select(func.count()).select_from(statement.subquery()))
         return teams, int(total or 0)
 
     async def get_member(self, *, team_id: UUID, user_id: UUID) -> TeamMember | None:

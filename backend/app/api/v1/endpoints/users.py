@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, status
 
 from app.api.dependencies import SessionDependency, SystemAdministrator
-from app.schemas.access import UserCreate, UserResponse, UserUpdate
+from app.schemas.access import DirectorySearchRequest, UserCreate, UserResponse, UserUpdate
 from app.schemas.common import Page
 from app.services.auth import UserService
 
@@ -23,6 +23,23 @@ async def list_users(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("/search", response_model=Page[UserResponse])
+async def search_users(
+    payload: DirectorySearchRequest,
+    session: SessionDependency,
+    _administrator: SystemAdministrator,
+) -> Page[UserResponse]:
+    users, total = await UserService(session).list(
+        query=payload.query, page=payload.page, page_size=payload.page_size
+    )
+    return Page(
+        items=[UserResponse.model_validate(user) for user in users],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
     )
 
 

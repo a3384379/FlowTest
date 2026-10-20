@@ -441,6 +441,7 @@ export type ProjectRetentionPolicy = {
 export type AuditLog = {
   id: string
   actor_user_id: string | null
+  actor_display_name?: string | null
   organization_id: string | null
   project_id: string
   action: string
@@ -499,6 +500,8 @@ export type ProjectMember = {
   id: string
   project_id: string
   user_id: string
+  display_name?: string | null
+  email?: string | null
   role: 'owner' | 'editor' | 'viewer'
   created_at: string
   updated_at: string
@@ -517,6 +520,8 @@ export type TeamMember = {
   id: string
   team_id: string
   user_id: string
+  display_name?: string | null
+  email?: string | null
   created_at: string
   updated_at: string
 }
@@ -525,6 +530,7 @@ export type ProjectTeamGrant = {
   id: string
   project_id: string
   team_id: string
+  team_name?: string | null
   role: 'editor' | 'viewer'
   created_by_id: string
   created_at: string

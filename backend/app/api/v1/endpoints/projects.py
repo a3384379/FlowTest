@@ -8,9 +8,11 @@ from app.core.errors import AppError
 from app.domain.access import ProjectRole
 from app.schemas.access import (
     AuditLogResponse,
+    DirectorySearchRequest,
     FolderCreate,
     FolderResponse,
     FolderUpdate,
+    MemberCandidateResponse,
     MemberResponse,
     MemberUpsert,
     ProjectCapacityPolicy,
@@ -258,8 +260,13 @@ async def list_project_audit_logs(
         page=page,
         page_size=page_size,
     )
+    items = []
+    for entry in logs:
+        item = AuditLogResponse.model_validate(entry.log)
+        item.actor_display_name = entry.actor_display_name
+        items.append(item)
     return Page(
-        items=[AuditLogResponse.model_validate(item) for item in logs],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -286,8 +293,38 @@ async def update_project(
 async def list_members(
     project_id: UUID, session: SessionDependency, current_user: CurrentUser
 ) -> list[MemberResponse]:
-    members = await ProjectService(session).list_members(actor=current_user, project_id=project_id)
-    return [MemberResponse.model_validate(member) for member in members]
+    entries = await ProjectService(session).list_member_entries(
+        actor=current_user, project_id=project_id
+    )
+    items = []
+    for entry in entries:
+        item = MemberResponse.model_validate(entry.member)
+        item.display_name = entry.display_name
+        item.email = entry.email
+        items.append(item)
+    return items
+
+
+@router.post("/{project_id}/member-candidates/search", response_model=Page[MemberCandidateResponse])
+async def search_member_candidates(
+    project_id: UUID,
+    payload: DirectorySearchRequest,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> Page[MemberCandidateResponse]:
+    users, total = await ProjectService(session).search_member_candidates(
+        actor=current_user,
+        project_id=project_id,
+        query=payload.query,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
+    return Page(
+        items=[MemberCandidateResponse.model_validate(user) for user in users],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
+    )
 
 
 @router.put("/{project_id}/members/{user_id}", response_model=MemberResponse)

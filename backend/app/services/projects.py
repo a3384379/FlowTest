@@ -35,6 +35,19 @@ class ProjectAccess:
         return frozenset(ProjectCapability) if self.role is None else self.role.capabilities
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectAuditEntry:
+    log: AuditLog
+    actor_display_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectMemberEntry:
+    member: ProjectMember
+    display_name: str | None
+    email: str | None
+
+
 class ProjectService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -195,6 +208,44 @@ class ProjectService:
     async def list_members(self, *, actor: User, project_id: UUID) -> list[ProjectMember]:
         await self.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._projects.list_members(project_id)
+
+    async def list_member_entries(
+        self, *, actor: User, project_id: UUID
+    ) -> list[ProjectMemberEntry]:
+        members = await self.list_members(actor=actor, project_id=project_id)
+        users = await self._users.get_many(tuple(member.user_id for member in members))
+        entries = []
+        for member in members:
+            user = users.get(member.user_id)
+            entries.append(
+                ProjectMemberEntry(
+                    member=member,
+                    display_name=user.display_name if user else None,
+                    email=user.email if user else None,
+                )
+            )
+        return entries
+
+    async def search_member_candidates(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        query: str,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[User], int]:
+        access = await self.authorize(
+            actor=actor, project_id=project_id, capability=ProjectCapability.MANAGE_MEMBERS
+        )
+        return await self._users.member_candidates(
+            project_id=project_id,
+            organization_id=access.project.organization_id,
+            global_directory=actor.is_system_admin,
+            query=query.strip(),
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
 
     async def get_security_policy(self, *, actor: User, project_id: UUID) -> OutboundNetworkPolicy:
         access = await self.authorize(
@@ -426,18 +477,25 @@ class ProjectService:
         action: str | None,
         page: int,
         page_size: int,
-    ) -> tuple[list[AuditLog], int]:
+    ) -> tuple[list[ProjectAuditEntry], int]:
         await self.authorize(
             actor=actor,
             project_id=project_id,
             capability=ProjectCapability.VIEW_AUDIT,
         )
-        return await self._projects.list_audit_logs(
+        logs, total = await self._projects.list_audit_logs(
             project_id=project_id,
             action=action,
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+
+        actor_ids = tuple({log.actor_user_id for log in logs if log.actor_user_id is not None})
+        names = await self._users.display_names(actor_ids)
+        return [
+            ProjectAuditEntry(log, names.get(log.actor_user_id) if log.actor_user_id else None)
+            for log in logs
+        ], total
 
     async def upsert_member(
         self, *, actor: User, project_id: UUID, user_id: UUID, role: ProjectRole

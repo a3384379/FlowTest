@@ -113,9 +113,13 @@ export async function updateProjectRetentionPolicy(
   return response.data
 }
 
-export async function listProjectAuditLogs(projectId: string): Promise<Page<AuditLog>> {
+export async function listProjectAuditLogs(
+  projectId: string,
+  page = 1,
+  action?: string,
+): Promise<Page<AuditLog>> {
   const response = await apiClient.get<Page<AuditLog>>(`/projects/${projectId}/audit-logs`, {
-    params: { page: 1, page_size: 50 },
+    params: { page, page_size: 50, action: action || undefined },
   })
   return response.data
 }
