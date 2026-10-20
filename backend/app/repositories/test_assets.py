@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.elements import ColumnElement
 
+from app.domain.asset_catalog import AssetCatalogRun, AssetCatalogScope
 from app.models.test_assets import (
     TestCase,
     TestCaseVersion,
@@ -14,6 +15,15 @@ from app.models.test_assets import (
     TestSuiteVersion,
     TestSuiteVersionItem,
 )
+from app.repositories.asset_catalog import (
+    apply_catalog_scope,
+    case_catalog_page,
+    catalog_order,
+    catalog_run,
+    latest_case_catalog,
+    latest_suite_catalog,
+)
+from app.repositories.catalog_paging import ranked_catalog_page
 from app.schemas.test_assets import AssetDirectoryCountsResponse, AssetFolderCount
 
 TestAssetEntity = TestCase | TestCaseVersion | TestSuite | TestSuiteVersion | TestSuiteVersionItem
@@ -71,24 +81,38 @@ class TestAssetRepository:
         limit: int,
         folder_id: UUID | None = None,
         unfiled: bool = False,
-    ) -> tuple[list[TestCase], int]:
+        scope: AssetCatalogScope | None = None,
+    ) -> tuple[list[TestCase], int, dict[UUID, AssetCatalogRun]]:
         filters = self._catalog_filters(TestCase, project_id, search, tag, folder_id, unfiled)
         if is_template is not None:
             filters.append(TestCase.is_template == is_template)
-        query = select(TestCase).where(*filters)
-        items = list(
-            (
-                await self._session.scalars(
-                    query.order_by(TestCase.updated_at.desc(), TestCase.id.desc())
-                    .offset(offset)
-                    .limit(limit)
-                )
-            ).all()
+        selected = scope or AssetCatalogScope()
+        latest = latest_case_catalog(project_id)
+        query = apply_catalog_scope(
+            select(TestCase).where(*filters),
+            model=TestCase,
+            project_id=project_id,
+            scope=selected,
+            latest=latest,
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(TestCase).where(*filters)
-        )
-        return items, int(total or 0)
+        page = case_catalog_page(query, latest, selected, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(TestCase, page)
+                .select_from(page)
+                .outerjoin(TestCase, TestCase.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        items: list[TestCase] = []
+        runs: dict[UUID, AssetCatalogRun] = {}
+        for row in rows:
+            model = row[0]
+            if model is not None:
+                items.append(model)
+                if row._mapping["asset_key"] is not None:
+                    runs[model.id] = catalog_run(row._mapping)
+        return items, int(rows[0]._mapping["total"]), runs
 
     async def case_name_exists(
         self, *, project_id: UUID, name: str, excluding_id: UUID | None = None
@@ -151,22 +175,38 @@ class TestAssetRepository:
         limit: int,
         folder_id: UUID | None = None,
         unfiled: bool = False,
+        scope: AssetCatalogScope | None = None,
     ) -> tuple[list[TestSuite], int]:
         filters = self._catalog_filters(TestSuite, project_id, search, tag, folder_id, unfiled)
-        query = select(TestSuite).where(*filters)
-        items = list(
-            (
-                await self._session.scalars(
-                    query.order_by(TestSuite.updated_at.desc(), TestSuite.id.desc())
-                    .offset(offset)
-                    .limit(limit)
-                )
-            ).all()
+        selected = scope or AssetCatalogScope()
+        latest = latest_suite_catalog(project_id) if selected.order == "latest_run_desc" else None
+        query = apply_catalog_scope(
+            select(TestSuite).where(*filters),
+            model=TestSuite,
+            project_id=project_id,
+            scope=selected,
+            latest=latest,
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(TestSuite).where(*filters)
+        ranked = (
+            query.order_by(None)
+            .with_only_columns(
+                TestSuite.id.label("item_id"),
+                func.row_number()
+                .over(order_by=catalog_order(TestSuite, latest, selected))
+                .label("position"),
+            )
+            .cte()
         )
-        return items, int(total or 0)
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(TestSuite, page.c.total)
+                .select_from(page)
+                .outerjoin(TestSuite, TestSuite.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
 
     def _catalog_filters(
         self,
@@ -198,27 +238,50 @@ class TestAssetRepository:
         return cast(column, JSONB).contains([tag])
 
     async def directory_counts(
-        self, *, project_id: UUID, search: str | None, tag: str | None
+        self,
+        *,
+        project_id: UUID,
+        search: str | None,
+        tag: str | None,
+        scope: AssetCatalogScope | None = None,
     ) -> AssetDirectoryCountsResponse:
+        case_query = (
+            apply_catalog_scope(
+                select(TestCase).where(
+                    *self._catalog_filters(TestCase, project_id, search, tag, None, False)
+                ),
+                model=TestCase,
+                project_id=project_id,
+                scope=scope or AssetCatalogScope(),
+            )
+            .order_by(None)
+            .subquery()
+        )
         case_rows = await self._session.execute(
             select(
-                TestCase.folder_id,
+                case_query.c.folder_id,
                 func.count(),
-                func.sum(case((TestCase.current_version.is_not(None), 1), else_=0)),
-            )
-            .where(*self._catalog_filters(TestCase, project_id, search, tag, None, False))
-            .group_by(TestCase.folder_id)
+                func.sum(case((case_query.c.current_version.is_not(None), 1), else_=0)),
+            ).group_by(case_query.c.folder_id)
         )
         case_groups = case_rows.all()
         cases = {folder_id: int(count) for folder_id, count, _published in case_groups}
         # Aggregates retain one row per folder, rather than materializing assets.
         published = sum(int(value or 0) for _folder, _count, value in case_groups)
-        suite_rows = await self._session.execute(
-            select(TestSuite.folder_id, func.count())
-            .where(
-                *self._catalog_filters(TestSuite, project_id, search, tag, None, False),
+        suite_query = (
+            apply_catalog_scope(
+                select(TestSuite).where(
+                    *self._catalog_filters(TestSuite, project_id, search, tag, None, False)
+                ),
+                model=TestSuite,
+                project_id=project_id,
+                scope=scope or AssetCatalogScope(),
             )
-            .group_by(TestSuite.folder_id)
+            .order_by(None)
+            .subquery()
+        )
+        suite_rows = await self._session.execute(
+            select(suite_query.c.folder_id, func.count()).group_by(suite_query.c.folder_id)
         )
         suites = {folder_id: int(count) for folder_id, count in suite_rows}
         folder_ids = sorted(

@@ -1,3 +1,5 @@
+import userEvent from '@testing-library/user-event'
+import { useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App as AntdApp, ConfigProvider } from 'antd'
@@ -160,11 +162,13 @@ function renderWorkspace(initialEntry?: string) {
         <QueryClientProvider client={queryClient}>
           <ProjectTestProvider section="assets" initialEntry={initialEntry}>
             <TestAssetsPage />
+            <AssetLocation />
           </ProjectTestProvider>
         </QueryClientProvider>
       </AntdApp>
     </ConfigProvider>,
   )
+  return queryClient
 }
 
 it('loads the selected server directory page and uses aggregate counts without preloading every asset', async () => {
@@ -379,4 +383,127 @@ it('adds the selected fixed case version to an existing plan without executing i
     }),
   )
   expect(writes).not.toHaveBeenCalled()
+})
+
+function AssetLocation() {
+  return (
+    <span hidden data-testid="asset-location">
+      {useLocation().search}
+    </span>
+  )
+}
+
+it('shares task scope across server pages and folder counts and retains it in frozen-version links', async () => {
+  mockWorkspace(false, 0)
+  const requests: { resource: string; params: Record<string, string> }[] = []
+  const latest = {
+    status: 'failed',
+    occurred_at: '2026-09-01T00:00:00Z',
+    execution_id: 'old-execution',
+    plan_id: null,
+    plan_run_id: null,
+    asset_version: 1,
+    source: 'direct',
+  }
+  for (const resource of ['test-cases', 'test-suites', 'test-assets/directory-counts'])
+    server.use(
+      http.get(root + '/' + resource, ({ request }) => {
+        const params = Object.fromEntries(new URL(request.url).searchParams)
+        requests.push({ resource, params })
+        if (resource === 'test-assets/directory-counts')
+          return HttpResponse.json({
+            case_total: 61,
+            suite_total: 21,
+            published_case_total: 61,
+            unfiled_cases: 0,
+            unfiled_suites: 0,
+            folders: [{ folder_id: folder.id, cases: 61, suites: 21 }],
+          })
+        return HttpResponse.json({
+          items: resource === 'test-cases' ? [{ ...baseCase, latest_run: latest }] : [],
+          total: resource === 'test-cases' ? 61 : 21,
+          page: Number(params.page),
+          page_size: 20,
+        })
+      }),
+    )
+  server.use(
+    http.get(root + '/test-assets/environment-options', () =>
+      HttpResponse.json({
+        items: [{ id: environment.id, name: environment.name }],
+        total: 1,
+        page: 1,
+        page_size: 20,
+      }),
+    ),
+  )
+  renderWorkspace(
+    `/projects/${project.id}/assets?folder=${folder.id}&assetPublication=published&assetResult=failed&assetEnvironment=${environment.id}&assetOrder=latest_run_desc&casePage=3&suitePage=2`,
+  )
+  expect(await screen.findByText('当前目录匹配 61 个用例、21 个套件。')).toBeVisible()
+  await waitFor(() => expect(requests).toHaveLength(3))
+  requests.forEach(({ params }) =>
+    expect(params).toEqual(
+      expect.objectContaining({
+        publication: 'published',
+        latest_result: 'failed',
+        environment_id: environment.id,
+        order: 'latest_run_desc',
+      }),
+    ),
+  )
+  expect(requests.find((item) => item.resource === 'test-cases')?.params.page).toBe('3')
+  expect(requests.find((item) => item.resource === 'test-suites')?.params.page).toBe('2')
+  const row = screen.getByText('目录用例').closest('tr')!
+  const frozenVersion = within(row).getByRole('link', { name: '用例 v1' })
+  expect(frozenVersion.getAttribute('href')).toContain('assetResult=failed')
+  expect(frozenVersion.getAttribute('href')).toContain('version=1')
+  fireEvent.click(frozenVersion)
+  expect(await screen.findByText('正在查看不可变的发布版本 v1。')).toBeVisible()
+  expect(screen.getByTestId('asset-location').textContent).toContain('casePage=3')
+})
+
+it('clears batch selection when the task filter changes or selected records disappear on refresh', async () => {
+  const { writes } = mockWorkspace(false, 0)
+  let refreshed = false
+  server.use(
+    http.get(root + '/test-cases', ({ request }) => {
+      const params = new URL(request.url).searchParams
+      const filtered = params.get('latest_result') === 'failed'
+      return HttpResponse.json({
+        items: filtered || refreshed ? [laterCase] : [baseCase, laterCase],
+        total: filtered || refreshed ? 1 : 2,
+        page: 1,
+        page_size: 20,
+      })
+    }),
+  )
+  const client = renderWorkspace()
+  const row = (await screen.findByText('目录用例')).closest('tr')!
+  const toolbar = within(screen.getByText('仅选择当前页').closest<HTMLElement>('.asset-toolbar')!)
+  fireEvent.click(within(row).getByRole('checkbox'))
+  expect(toolbar.getByRole('button', { name: /批量移动 \(1\)/ })).toBeEnabled()
+  refreshed = true
+  await client.invalidateQueries({ queryKey: ['test-cases', project.id] })
+  await waitFor(() => expect(screen.queryByText('目录用例')).not.toBeInTheDocument())
+  expect(toolbar.getByRole('button', { name: /批量移动 \(0\)/ })).toBeDisabled()
+  fireEvent.click(within(screen.getByText('跨页用例').closest('tr')!).getByRole('checkbox'))
+  expect(toolbar.getByRole('button', { name: /批量移动 \(1\)/ })).toBeEnabled()
+  await userEvent.click(screen.getByRole('combobox', { name: '资产最近结果' }))
+  await userEvent.click(screen.getByText('失败', { selector: '.ant-select-item-option-content' }))
+  await waitFor(() =>
+    expect(screen.getByTestId('asset-location').textContent).toContain('assetResult=failed'),
+  )
+  expect(toolbar.getByRole('button', { name: /批量移动 \(0\)/ })).toBeDisabled()
+  expect(writes).not.toHaveBeenCalled()
+})
+
+it('rejects invalid task scope without querying a broader catalog and recovers through reset', async () => {
+  const { pages } = mockWorkspace(false, 0)
+  renderWorkspace(`/projects/${project.id}/assets?assetResult=unknown`)
+  expect(await screen.findByText('URL 中的最近结果无效')).toBeVisible()
+  expect(pages).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+  expect(await screen.findByText('目录用例')).toBeVisible()
+  expect(pages).toHaveBeenCalled()
 })

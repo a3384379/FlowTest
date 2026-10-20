@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useAssetCatalogScope } from './asset-catalog-scope'
 
 import { listFolders } from '../projects/asset-service'
 import { listEnvironments } from '../workflows/workflow-service'
@@ -36,38 +37,44 @@ import {
 
 type AssetBrowseOptions = {
   folder?: string
-  casePage?: number
-  suitePage?: number
   loadCaseOptions?: boolean
 }
 
-function resolveBrowseOptions({
-  folder = 'all',
-  casePage = 1,
-  suitePage = 1,
-  loadCaseOptions = true,
-}: AssetBrowseOptions) {
-  return { folder, casePage, suitePage, loadCaseOptions }
+function resolveBrowseOptions({ folder = 'all', loadCaseOptions = true }: AssetBrowseOptions) {
+  return { folder, loadCaseOptions }
 }
 
 export function useTestAssets(options: AssetBrowseOptions = {}) {
-  const { folder, casePage, suitePage, loadCaseOptions } = resolveBrowseOptions(options)
+  const { folder, loadCaseOptions } = resolveBrowseOptions(options)
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const [search, setSearch] = useState('')
-  const [tag, setTag] = useState('')
+  const catalogScope = useAssetCatalogScope()
+  const { casePage, suitePage, scope } = catalogScope
+  const search = catalogScope.filters.search
+  const tag = catalogScope.filters.tag
   const [diff, setDiff] = useState<VersionDiff | null>(null)
   const enabled = Boolean(projectId)
+  const catalogEnabled = enabled && Boolean(scope)
   const cases = useQuery({
-    queryKey: ['test-cases', projectId, search, tag, folder, casePage],
-    queryFn: () => listTestCases(projectId!, search, tag, casePage, 20, folder),
-    enabled,
+    queryKey: ['test-cases', projectId, search, tag, folder, casePage, scope],
+    queryFn: () => listTestCases(projectId!, search, tag, casePage, 20, folder, scope!),
+    enabled: catalogEnabled,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) => activeResult(item.latest_run?.status)) ? 2000 : false,
   })
   const suites = useQuery({
-    queryKey: ['test-suites', projectId, search, tag, folder, suitePage],
-    queryFn: () => listTestSuites(projectId!, search, tag, suitePage, 20, folder),
-    enabled,
+    queryKey: ['test-suites', projectId, search, tag, folder, suitePage, scope],
+    queryFn: () => listTestSuites(projectId!, search, tag, suitePage, 20, folder, scope!),
+    enabled: catalogEnabled,
+    refetchInterval: (query) =>
+      activeResult(scope?.latest_result) && query.state.data?.items.length ? 2000 : false,
   })
+  const active = catalogIsActive(cases.data, suites.data, scope)
+  useCatalogCompletionRefresh(
+    projectId,
+    JSON.stringify([projectId, folder, casePage, suitePage, catalogScope.selectionKey]),
+    active,
+  )
   const workflows = useQuery({
     queryKey: ['workflows', projectId, 'asset-options'],
     queryFn: () => listAssetWorkflows(projectId!),
@@ -89,9 +96,10 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     enabled: enabled && loadCaseOptions,
   })
   const directoryCounts = useQuery({
-    queryKey: ['asset-directory-counts', projectId, search, tag],
-    queryFn: () => listAssetDirectoryCounts(projectId!, search, tag),
-    enabled,
+    queryKey: ['asset-directory-counts', projectId, search, tag, scope],
+    queryFn: () => listAssetDirectoryCounts(projectId!, search, tag, scope!),
+    enabled: catalogEnabled,
+    refetchInterval: active ? 2000 : false,
   })
   const permissions = useQuery({
     queryKey: ['project-permission', projectId],
@@ -108,6 +116,8 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
       queryClient.invalidateQueries({ queryKey: ['test-suite-versions', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['test-case-options', projectId] }),
       queryClient.invalidateQueries({ queryKey: ['asset-directory-counts', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['asset-environment-options', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['asset-environment-selected', projectId] }),
     ])
   }
 
@@ -132,6 +142,7 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['test-case-runs', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['asset-run-history', projectId] }),
+        invalidateAssets(),
       ]),
   })
   const publishSuiteMutation = useMutation({
@@ -177,8 +188,9 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     projectId,
     search,
     tag,
-    setSearch,
-    setTag,
+    setSearch: (value: string) => catalogScope.setFilter('search', value),
+    setTag: (value: string) => catalogScope.setFilter('tag', value),
+    catalogScope,
     cases,
     suites,
     workflows,
@@ -186,6 +198,8 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     folders,
     caseOptions,
     directoryCounts,
+    refreshCatalog: () =>
+      Promise.all([cases.refetch(), suites.refetch(), directoryCounts.refetch()]),
     permissions,
     canEdit: permissions.data?.capabilities.includes('edit') ?? false,
     canExecute: permissions.data?.capabilities.includes('execute') ?? false,
@@ -205,4 +219,32 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     loadSuiteDiff,
     saving: saveCaseMutation.isPending || saveSuiteMutation.isPending,
   }
+}
+
+function activeResult(status?: string): boolean {
+  return status === 'queued' || status === 'running'
+}
+
+function useCatalogCompletionRefresh(projectId: string | null, key: string, active: boolean) {
+  const client = useQueryClient()
+  const previous = useRef({ key, active })
+  useEffect(() => {
+    const completed = previous.current.key === key && previous.current.active && !active
+    previous.current = { key, active }
+    if (!completed) return
+    for (const resource of ['test-cases', 'test-suites', 'asset-directory-counts']) {
+      void client.invalidateQueries({ queryKey: [resource, projectId] })
+    }
+  }, [client, projectId, key, active])
+}
+
+function catalogIsActive(
+  cases: { items: TestCase[] } | undefined,
+  suites: { items: TestSuite[] } | undefined,
+  scope: ReturnType<typeof useAssetCatalogScope>['scope'],
+): boolean {
+  return Boolean(
+    cases?.items.some((item) => activeResult(item.latest_run?.status)) ||
+    (activeResult(scope?.latest_result) && suites?.items.length),
+  )
 }

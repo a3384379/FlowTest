@@ -1395,6 +1395,17 @@ export type TestCase = {
   created_by_id: string
   created_at: string
   updated_at: string
+  latest_run?: AssetCatalogRun | null
+}
+
+export type AssetCatalogRun = {
+  status: 'queued' | 'running' | 'passed' | 'failed' | 'cancelled' | 'quarantined'
+  occurred_at: string
+  execution_id: string | null
+  plan_id: string | null
+  plan_run_id: string | null
+  asset_version: number | null
+  source: 'direct' | 'plan'
 }
 
 export type TestCaseVersion = {

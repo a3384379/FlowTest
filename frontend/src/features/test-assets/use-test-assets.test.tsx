@@ -1,3 +1,4 @@
+import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -100,11 +101,49 @@ describe('useTestAssets', () => {
       result.current.setTag('smoke')
     })
     await waitFor(() =>
-      expect(listTestCases).toHaveBeenCalledWith('project-1', '登录', 'smoke', 1, 20, 'all'),
+      expect(listTestCases).toHaveBeenCalledWith(
+        'project-1',
+        '登录',
+        'smoke',
+        1,
+        20,
+        'all',
+        expect.objectContaining({ order: 'updated_desc' }),
+      ),
     )
     await waitFor(() => expect(result.current.cases.data?.items).toEqual([testCase]))
     await waitFor(() => expect(result.current.suites.data?.items).toEqual([testSuite]))
     expect(result.current.caseOptions.data?.items).toEqual([testCase])
+  })
+
+  it('refreshes directory totals once the last visible active run completes', async () => {
+    const running = {
+      ...testCase,
+      latest_run: {
+        status: 'running',
+        occurred_at: '2026-10-20T01:00:00Z',
+        execution_id: 'execution-1',
+        plan_id: null,
+        plan_run_id: null,
+        asset_version: 1,
+        source: 'direct',
+      },
+    } as TestCase
+    vi.mocked(listTestCases).mockResolvedValue(page([running]))
+    const { result } = renderAssetsHook()
+    await waitFor(() =>
+      expect(result.current.cases.data?.items[0].latest_run?.status).toBe('running'),
+    )
+    const countReads = vi.mocked(listAssetDirectoryCounts).mock.calls.length
+    vi.mocked(listTestCases).mockResolvedValue(
+      page([{ ...running, latest_run: { ...running.latest_run!, status: 'passed' } }]),
+    )
+    await act(() => result.current.cases.refetch().then(() => undefined))
+    await waitFor(() => expect(listAssetDirectoryCounts).toHaveBeenCalledTimes(countReads + 1))
+    expect(result.current.cases.data?.items[0].latest_run?.status).toBe('passed')
+    const reads = vi.mocked(listAssetDirectoryCounts).mock.calls.length
+    await act(() => result.current.cases.refetch().then(() => undefined))
+    expect(listAssetDirectoryCounts).toHaveBeenCalledTimes(reads)
   })
 
   it('creates and updates case and suite drafts through one stable hook', async () => {
@@ -184,7 +223,9 @@ function renderAssetsHook() {
   })
   return renderHook(() => useTestAssets(), {
     wrapper: ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </MemoryRouter>
     ),
   })
 }

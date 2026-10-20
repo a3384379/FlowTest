@@ -6,12 +6,59 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.domain.api_assets import JsonValue
+from app.domain.asset_catalog import (
+    AssetCatalogOrder,
+    AssetCatalogScope,
+    AssetPublication,
+    AssetResult,
+)
 from app.schemas.tasking import TestPlanRunDetailResponse
 
 RuntimeName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$", max_length=160)]
 TagName = Annotated[str, Field(min_length=1, max_length=50)]
 AssetName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 TestAssetKind = Literal["case", "suite"]
+
+
+class AssetDirectoryQuery(BaseModel):
+    search: str | None = Field(default=None, max_length=200)
+    tag: str | None = Field(default=None, max_length=50)
+    publication: AssetPublication | None = None
+    latest_result: AssetResult | None = None
+    environment_id: UUID | None = None
+    order: AssetCatalogOrder = "updated_desc"
+
+    def to_scope(self) -> AssetCatalogScope:
+        return AssetCatalogScope(
+            publication=self.publication,
+            latest_result=self.latest_result,
+            environment_id=self.environment_id,
+            order=self.order,
+        )
+
+
+class AssetCatalogListQuery(AssetDirectoryQuery):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    folder_id: UUID | None = None
+    unfiled: bool = False
+
+
+class CaseCatalogListQuery(AssetCatalogListQuery):
+    is_template: bool | None = None
+
+
+class AssetEnvironmentQuery(BaseModel):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+    search: str = Field(default="", max_length=200)
+    selected_id: UUID | None = None
+
+
+class AssetEnvironmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    name: str
 
 
 def validate_runtime_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -88,6 +135,22 @@ class TestCaseResponse(BaseModel):
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+class AssetCatalogRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: Literal["queued", "running", "passed", "failed", "cancelled", "quarantined"]
+    occurred_at: datetime
+    execution_id: UUID | None
+    plan_id: UUID | None
+    plan_run_id: UUID | None
+    asset_version: int | None
+    source: Literal["direct", "plan"]
+
+
+class TestCaseCatalogResponse(TestCaseResponse):
+    latest_run: AssetCatalogRunResponse | None = None
 
 
 class VersionPublish(BaseModel):

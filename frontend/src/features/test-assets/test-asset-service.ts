@@ -1,3 +1,4 @@
+import type { AssetCatalogScope } from './asset-catalog-scope'
 import {
   apiClient,
   type Page,
@@ -35,6 +36,7 @@ export async function listTestCases(
   page = 1,
   pageSize = 20,
   folder?: string,
+  scope?: AssetCatalogScope,
 ): Promise<Page<TestCase>> {
   const response = await apiClient.get<Page<TestCase>>(`/projects/${projectId}/test-cases`, {
     params: {
@@ -43,6 +45,7 @@ export async function listTestCases(
       search: search || undefined,
       tag: tag || undefined,
       ...assetFolderFilter(folder),
+      ...scope,
     },
   })
   return response.data
@@ -194,6 +197,7 @@ export async function listTestSuites(
   page = 1,
   pageSize = 20,
   folder?: string,
+  scope?: AssetCatalogScope,
 ): Promise<Page<TestSuite>> {
   const response = await apiClient.get<Page<TestSuite>>(`/projects/${projectId}/test-suites`, {
     params: {
@@ -202,6 +206,7 @@ export async function listTestSuites(
       search: search || undefined,
       tag: tag || undefined,
       ...assetFolderFilter(folder),
+      ...scope,
     },
   })
   return response.data
