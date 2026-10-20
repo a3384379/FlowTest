@@ -24,13 +24,13 @@ import QueryFailureNotice from '../components/QueryFailureNotice'
 
 import AccessManagementPanel from '../features/projects/AccessManagementPanel'
 import AssetManagementPanel from '../features/projects/AssetManagementPanel'
+import ProjectAuditPanel from '../features/projects/ProjectAuditPanel'
 import {
   getProjectPermission,
   getProjectOutboundPolicy,
   getProjectRedactionPolicy,
   getProjectRetentionPolicy,
   getProjectSecurityPolicy,
-  listProjectAuditLogs,
   updateProjectSecurityPolicy,
   updateProjectOutboundPolicy,
   updateProjectRedactionPolicy,
@@ -39,7 +39,6 @@ import {
 import { useProjectContext } from '../features/projects/use-project-context'
 import {
   apiErrorMessage,
-  type AuditLog,
   type ProjectCapability,
   type ProjectPermission,
   type ProjectOutboundPolicy,
@@ -110,16 +109,12 @@ function useProjectsPageState() {
     enabled: Boolean(projectId),
   })
   const canManageSecurity =
+    permission.isSuccess &&
     hasCapability(permission.data, 'manage_security') &&
     governanceReadComplete([policy, outbound, retention, redaction])
-  const canManageMembers = hasCapability(permission.data, 'manage_members')
-  const canEdit = hasCapability(permission.data, 'edit')
-  const canViewAudit = hasCapability(permission.data, 'view_audit')
-  const audit = useQuery({
-    queryKey: ['project-audit', projectId],
-    queryFn: () => listProjectAuditLogs(requiredId(projectId)),
-    enabled: Boolean(projectId) && canViewAudit,
-  })
+  const canManageMembers = permission.isSuccess && hasCapability(permission.data, 'manage_members')
+  const canEdit = permission.isSuccess && hasCapability(permission.data, 'edit')
+  const canViewAudit = permission.isSuccess && hasCapability(permission.data, 'view_audit')
 
   useEffect(() => synchronizePolicyForm(form, policy.data), [form, policy.data])
 
@@ -171,7 +166,7 @@ function useProjectsPageState() {
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   return {
-    queries: [projects, permission, policy, outbound, retention, redaction, audit],
+    queries: [projects, permission, policy, outbound, retention, redaction],
     projectId,
     projects: projects.data?.items ?? [],
     projectsLoading: projects.isLoading,
@@ -186,6 +181,7 @@ function useProjectsPageState() {
     form,
     canManageSecurity,
     canManageMembers,
+    canRead: permission.isSuccess && hasCapability(permission.data, 'read'),
     canEdit,
     updatePolicy: (values: PolicyForm) => updatePolicy.mutate(policyPayload(values)),
     updatePolicyPending: updatePolicy.isPending,
@@ -198,8 +194,6 @@ function useProjectsPageState() {
     updateRedaction: (mode: ProjectRedactionPolicy['mode']) => updateRedaction.mutate(mode),
     updateRedactionPending: updateRedaction.isPending,
     canViewAudit,
-    audit: audit.data?.items ?? [],
-    auditLoading: audit.isLoading,
   }
 }
 
@@ -259,17 +253,24 @@ function ProjectsView({ state }: { state: ProjectsPageState }) {
           saving={state.updateRedactionPending}
           onSave={state.updateRedaction}
         />
-        {state.projectId && (
+        {state.projectId && state.canRead && (
           <Col span={24}>
             <AccessManagementPanel projectId={state.projectId} canManage={state.canManageMembers} />
           </Col>
         )}
-        {state.projectId && (
+        {state.projectId && state.canRead && (
           <Col span={24}>
             <AssetManagementPanel projectId={state.projectId} canEdit={state.canEdit} />
           </Col>
         )}
-        <AuditPanel visible={state.canViewAudit} loading={state.auditLoading} items={state.audit} />
+        {state.projectId && state.canViewAudit && (
+          <Col span={24}>
+            <ProjectAuditPanel
+              projectId={state.projectId}
+              canRead={hasCapability(state.permission, 'read')}
+            />
+          </Col>
+        )}
       </Row>
     </>
   )
@@ -524,45 +525,6 @@ function SecurityPolicyPanel({
             保存安全策略
           </Button>
         </Form>
-      </Card>
-    </Col>
-  )
-}
-
-function AuditPanel({
-  visible,
-  loading,
-  items,
-}: {
-  visible: boolean
-  loading: boolean
-  items: AuditLog[]
-}) {
-  if (!visible) return null
-  return (
-    <Col span={24}>
-      <Card title="审计日志">
-        <Table
-          rowKey="id"
-          size="small"
-          loading={loading}
-          pagination={false}
-          dataSource={items}
-          columns={[
-            {
-              title: '时间',
-              dataIndex: 'created_at',
-              width: 180,
-              render: (value: string) => new Date(value).toLocaleString('zh-CN'),
-            },
-            { title: '操作', dataIndex: 'action', width: 240 },
-            { title: '资源', dataIndex: 'resource_type', width: 160 },
-            {
-              title: 'Trace ID',
-              render: (_, item) => String(item.details.trace_id ?? '-'),
-            },
-          ]}
-        />
       </Card>
     </Col>
   )

@@ -2120,8 +2120,12 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
         headers=headers,
     )
 
+    request_started = asyncio.Event()
+    response_blocked = asyncio.Event()
+
     async def slow_response(_request: Any) -> Response:
-        await asyncio.sleep(5)
+        request_started.set()
+        await response_blocked.wait()
         return Response(200, json={"late": True})
 
     respx.get("http://workflow.example.com/users/v1").mock(side_effect=slow_response)
@@ -2132,6 +2136,7 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     )
     assert running.status_code == 202, running.text
     execution_id = running.json()["id"]
+    await asyncio.wait_for(request_started.wait(), timeout=2)
     running_checkpoint: dict[str, Any] | None = None
     for _ in range(50):
         checkpoints = await workflow_client.get(
@@ -2172,11 +2177,14 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     assert cancelled_api["attempt"] == 1
     assert cancelled_api["input_hash"] == reserved_input_hash
 
+    request_started.clear()
     forced = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
         headers=headers,
         json={"environment_id": environment_id},
     )
+    assert forced.status_code == 202, forced.text
+    await asyncio.wait_for(request_started.wait(), timeout=2)
     missing_reason = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflow-executions/{forced.json()['id']}/cancel",
         headers=headers,
@@ -2196,13 +2204,14 @@ async def test_running_workflow_can_be_cancelled(workflow_client: AsyncClient) -
     )
     assert forced_result["execution"]["status"] == "cancelled"
 
+    request_started.clear()
     interrupted = await workflow_client.post(
         f"/api/v1/projects/{project_id}/workflows/{workflow_id}/executions",
         headers=headers,
         json={"environment_id": environment_id},
     )
     assert interrupted.status_code == 202
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(request_started.wait(), timeout=2)
     await app.state.workflow_run_coordinator.shutdown()
     interrupted_result = await workflow_client.get(
         f"/api/v1/projects/{project_id}/workflow-executions/{interrupted.json()['id']}",

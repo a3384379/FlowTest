@@ -8,6 +8,29 @@ import {
   type User,
 } from '../../lib/api'
 
+export type MemberCandidate = Pick<User, 'id' | 'display_name' | 'email' | 'is_active'>
+export type DirectorySearch = { query: string; page: number; page_size: number }
+
+export async function searchMemberCandidates(
+  projectId: string,
+  input: DirectorySearch,
+): Promise<Page<MemberCandidate>> {
+  return (
+    await apiClient.post<Page<MemberCandidate>>(
+      `/projects/${projectId}/member-candidates/search`,
+      input,
+    )
+  ).data
+}
+
+export async function searchUsers(input: DirectorySearch): Promise<Page<User>> {
+  return (await apiClient.post<Page<User>>('/users/search', input)).data
+}
+
+export async function searchTeams(input: DirectorySearch): Promise<Page<Team>> {
+  return (await apiClient.post<Page<Team>>('/teams/search', input)).data
+}
+
 export async function listUsers(): Promise<Page<User>> {
   const response = await apiClient.get<Page<User>>('/users', {
     params: { page: 1, page_size: 100 },

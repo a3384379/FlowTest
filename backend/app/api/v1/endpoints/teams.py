@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, status
 from app.api.dependencies import CurrentUser, SessionDependency
 from app.core.errors import AppError
 from app.schemas.access import (
+    DirectorySearchRequest,
     ProjectTeamGrantResponse,
     ProjectTeamGrantWrite,
     TeamCreate,
@@ -32,6 +33,23 @@ async def list_teams(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.post("/teams/search", response_model=Page[TeamResponse])
+async def search_teams(
+    payload: DirectorySearchRequest,
+    session: SessionDependency,
+    _current_user: CurrentUser,
+) -> Page[TeamResponse]:
+    teams, total = await TeamService(session).list_teams(
+        query=payload.query, page=payload.page, page_size=payload.page_size
+    )
+    return Page(
+        items=[TeamResponse.model_validate(team) for team in teams],
+        total=total,
+        page=payload.page,
+        page_size=payload.page_size,
     )
 
 
@@ -71,8 +89,15 @@ async def list_team_members(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> list[TeamMemberResponse]:
-    members = await TeamService(session).list_members(actor=current_user, team_id=team_id)
-    return [TeamMemberResponse.model_validate(member) for member in members]
+    entries = await TeamService(session).list_member_entries(actor=current_user, team_id=team_id)
+    items = []
+    for entry in entries:
+        item = TeamMemberResponse.model_validate(entry.member)
+        if entry.user is not None:
+            item.display_name = entry.user.display_name
+            item.email = entry.user.email
+        items.append(item)
+    return items
 
 
 @router.put("/teams/{team_id}/members/{user_id}", response_model=TeamMemberResponse)
@@ -116,10 +141,15 @@ async def list_project_team_grants(
     session: SessionDependency,
     current_user: CurrentUser,
 ) -> list[ProjectTeamGrantResponse]:
-    grants = await TeamService(session).list_project_grants(
+    entries = await TeamService(session).list_grant_entries(
         actor=current_user, project_id=project_id
     )
-    return [ProjectTeamGrantResponse.model_validate(grant) for grant in grants]
+    items = []
+    for entry in entries:
+        item = ProjectTeamGrantResponse.model_validate(entry.grant)
+        item.team_name = entry.team.name if entry.team is not None else None
+        items.append(item)
+    return items
 
 
 @router.put(

@@ -62,3 +62,21 @@ F-PROTO-02、03、04完成本地整改，当前合计33/73项本地完成、40�
 `5a2f958` 的S24浏览器验收仍断言旧界面文字，已在 `e9f1137` 更新两处说明定位，保留真实协议执行断言、原超时和重试规则。隔离Chromium在专用项目真实完成Registry导入、Kafka Produce/Consume（不自动提交）与WebSocket Exchange；详见[第九批补修记录](batch-09.md#远端验收补修与依赖修复)。
 
 前置main回归39494968109的安全检查检测到新公布的certifi公告，`efdaf0a`只更新其锁定版本至2026.10.19。pip-audit通过，完整后端1841通过、14跳过、2项既有警告、90.99%，格式/Ruff/mypy通过。此次依赖修复的日志和旧失败证据分开保存。尚未取得最新PR的正式Required Gate，也未将旧main回归标为成功；整改数量仍为33本地完成、30已合并。
+
+## 项目治理最终本地验证
+
+F-PRJ-01、F-PRJ-02在源码 `af4659f58f295fad4e15eb0dad489f3196391c68` 完成本地整改。后端树 `b15a36616bb120dd0b196550d4401acc3fb90e38`：1843通过、14跳过、2项既有警告、91.01%，格式/Ruff/mypy440文件通过。前端树 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16`：157文件1034项通过，无未处理异常，覆盖率85.89% / 82.15% / 85.44% / 88.34%，格式/lint/类型/构建通过。最终日志 `remediation-project-final-backend-full.log`、`remediation-project-final-frontend-full.log`、`remediation-project-final-frontend-build.log`。
+
+管理员及独立普通Owner浏览器验证包括61条日志第2页、URL/刷新、受权资源详情、106个合成用户/团队的远端搜索和添加、读失败禁写及选择重试、键盘Enter打开详情与390px布局；日志 `remediation-project-governance-browser-r2.log` 和 `remediation-project-owner-browser-current-r2.log`。先前中断和第一次完整运行后的补修单独保留，详见[第十批](batch-10.md)。冻结审计的历史源码链接按基线Git对象校验，463链接及其余文档结构通过。
+
+当前35/73项本地完成、38项待完成，其中30项已合并；未将本地成功当作最新HEAD门禁或正式环境验收。前置PR #140最新 `c163ba5` 的安全检查通过，其余门禁等待完成；旧main回归39494968109已结束为失败，原因是已由该PR修复的certifi依赖公告。
+
+## 多协议合并后的项目治理基线
+
+[PR #140](https://github.com/a3384379/FlowTest/pull/140)最终HEAD `c163ba5975cc3ec7eaec5fba8dc6e6cc96a21ac0` 的正式Required Gate通过，审查线程无未解决项，按匹配SHA合并main为 `4a27c3b14743be4d0df756f83238766a294adee8`。合并后[Full Regression 39505978249](https://github.com/a3384379/FlowTest/actions/runs/39505978249)运行中，已确认head一致。当前35本地完成、38待完成、33已合并。
+
+项目治理同步main时仅解决两份进度/验证文档的重复上下文冲突，保留已经包含前置修复和本模块回执的最新版本；合并暂存树的后端 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16` 与最终完整验证一致。本地完整检查仍适用于同一源码树，[PR #141](https://github.com/a3384379/FlowTest/pull/141)最新提交门禁另行确认。
+
+### M06 门禁补修源码65fb43d
+
+S14旧目录定位与新Vite高危公告阻断远程检查，修补详情见batch-10“最新远程检查补修”。后端树b15a36616bb120dd0b196550d4401acc3fb90e38未变；前端树824af86f6f2add63812813817d908711fb59120b重新完成格式、lint/类型、157文件1034用例、覆盖率85.89/82.15/85.44/88.34%与生产构建。高危依赖审计退出0。真实隔离浏览器团队搜索、加成员、团队授权整条路径通过。最新HEAD正式门禁与合并后检查仍需另行确认。

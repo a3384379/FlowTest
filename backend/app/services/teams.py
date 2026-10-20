@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +12,18 @@ from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
 
+@dataclass(frozen=True, slots=True)
+class TeamMemberEntry:
+    member: TeamMember
+    user: User | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectTeamGrantEntry:
+    grant: ProjectTeamGrant
+    team: Team | None
+
+
 class TeamService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -19,8 +32,12 @@ class TeamService:
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
 
-    async def list_teams(self, *, page: int, page_size: int) -> tuple[list[Team], int]:
-        return await self._teams.list_teams(offset=(page - 1) * page_size, limit=page_size)
+    async def list_teams(
+        self, *, page: int, page_size: int, query: str = ""
+    ) -> tuple[list[Team], int]:
+        return await self._teams.list_teams(
+            offset=(page - 1) * page_size, limit=page_size, query=query.strip()
+        )
 
     async def create(self, *, actor: User, name: str, description: str) -> Team:
         self._require_administrator(actor)
@@ -66,6 +83,22 @@ class TeamService:
         self._require_administrator(actor)
         await self._get_team(team_id)
         return await self._teams.list_members(team_id)
+
+    async def list_member_entries(self, *, actor: User, team_id: UUID) -> list[TeamMemberEntry]:
+        members = await self.list_members(actor=actor, team_id=team_id)
+        users = await self._users.get_many(tuple(member.user_id for member in members))
+        return [
+            TeamMemberEntry(member=member, user=users.get(member.user_id)) for member in members
+        ]
+
+    async def list_grant_entries(
+        self, *, actor: User, project_id: UUID
+    ) -> list[ProjectTeamGrantEntry]:
+        grants = await self.list_project_grants(actor=actor, project_id=project_id)
+        teams = await self._teams.get_many(tuple(grant.team_id for grant in grants))
+        return [
+            ProjectTeamGrantEntry(grant=grant, team=teams.get(grant.team_id)) for grant in grants
+        ]
 
     async def add_member(self, *, actor: User, team_id: UUID, user_id: UUID) -> TeamMember:
         self._require_administrator(actor)

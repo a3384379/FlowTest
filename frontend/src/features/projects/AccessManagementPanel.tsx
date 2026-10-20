@@ -1,7 +1,10 @@
 import { DeleteOutlined, TeamOutlined, UserAddOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
+
+import QueryFailureNotice from '../../components/QueryFailureNotice'
+import DirectoryPicker from './DirectoryPicker'
 
 import { useAuthStore } from '../auth/auth-store'
 import {
@@ -11,8 +14,6 @@ import {
   listProjectMembers,
   listProjectTeamGrants,
   listTeamMembers,
-  listTeams,
-  listUsers,
   removeProjectMember,
   removeProjectTeamGrant,
   removeTeamMember,
@@ -34,6 +35,8 @@ export default function AccessManagementPanel({
   return (
     <Card title="成员与团队" className="management-card">
       <Tabs
+        activeKey={state.activeTab}
+        onChange={state.setActiveTab}
         items={[
           {
             key: 'members',
@@ -64,54 +67,76 @@ function useAccessManagement(projectId: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const isAdministrator = useAuthStore((value) => Boolean(value.user?.is_system_admin))
+  const active = useRef(true)
+  useLayoutEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+  const [activeTab, setActiveTab] = useState('members')
   const [teamId, setTeamId] = useState<string | null>(null)
-  const users = useQuery({
-    queryKey: ['users'],
-    queryFn: listUsers,
-    enabled: isAdministrator,
-  })
+  const [teamLabel, setTeamLabel] = useState<string | undefined>()
   const members = useQuery({
     queryKey: ['project-members', projectId],
     queryFn: () => listProjectMembers(projectId),
   })
-  const teams = useQuery({ queryKey: ['teams'], queryFn: listTeams })
   const grants = useQuery({
     queryKey: ['project-team-grants', projectId],
     queryFn: () => listProjectTeamGrants(projectId),
   })
-  const selectedTeamId = selectedTeam(teamId, teams.data?.items)
+  const selectedTeamId = teamId
   const teamMembers = useQuery({
     queryKey: ['team-members', selectedTeamId],
     queryFn: () => listTeamMembers(required(selectedTeamId)),
-    enabled: Boolean(selectedTeamId) && isAdministrator,
+    enabled: Boolean(selectedTeamId) && isAdministrator && activeTab === 'organization',
   })
   const mutation = useMutation({
     mutationFn: async (operation: () => Promise<unknown>) => operation(),
     onSuccess: async () => {
-      await queryClient.invalidateQueries()
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['project-members', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['project-team-grants', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['team-members'] }),
+        queryClient.invalidateQueries({ queryKey: ['access-directory'] }),
+        queryClient.invalidateQueries({ queryKey: ['project-audit', projectId] }),
+      ])
+      if (!active.current) return
       void message.success('成员与团队配置已更新')
     },
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: (error) => {
+      if (active.current) void message.error(apiErrorMessage(error))
+    },
   })
 
   function createAndSelectTeam(values: { name: string; description: string }) {
     mutation.mutate(async () => {
       const created = await createTeamRequest(values)
-      setTeamId(created.id)
+      if (active.current) {
+        setTeamId(created.id)
+        setTeamLabel(created.name)
+      }
       return created
     })
   }
   return {
     projectId,
     isAdministrator,
-    users: pageItems(users.data),
+    activeTab,
+    setActiveTab,
+    membersQuery: members,
+    grantsQuery: grants,
+    teamMembersQuery: teamMembers,
+    teamLabel,
     members: arrayItems(members.data),
     membersLoading: members.isLoading,
-    teams: pageItems(teams.data),
     grants: arrayItems(grants.data),
     grantsLoading: grants.isLoading,
     selectedTeamId,
-    setTeamId,
+    setTeamId: (id: string | undefined) => {
+      setTeamId(id ?? null)
+      setTeamLabel(undefined)
+    },
     teamMembers: arrayItems(teamMembers.data),
     teamMembersLoading: teamMembers.isLoading,
     pending: mutation.isPending,
@@ -135,23 +160,16 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
             state.run(() => upsertProjectMember(state.projectId, values.user_id, values.role))
           }
         >
-          <Form.Item name="user_id" rules={[{ required: true, message: '请选择或输入用户' }]}>
-            {state.users.length ? (
-              <Select
-                showSearch
-                placeholder="用户"
-                className="management-select"
-                options={state.users.map((user) => ({
-                  value: user.id,
-                  label: `${user.display_name} (${user.email})`,
-                }))}
-              />
-            ) : (
-              <Input placeholder="用户 UUID" />
-            )}
+          <Form.Item name="user_id" rules={identityRules('请选择或输入用户')}>
+            <DirectoryPicker
+              source={{ kind: 'project-user', projectId: state.projectId }}
+              label="项目用户"
+              disabled={state.pending}
+            />
           </Form.Item>
           <Form.Item name="role">
             <Select
+              aria-label="项目成员角色"
               className="role-select"
               options={['owner', 'editor', 'viewer'].map((role) => ({ value: role, label: role }))}
             />
@@ -161,19 +179,22 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
             type="primary"
             icon={<UserAddOutlined />}
             loading={state.pending}
+            disabled={!state.membersQuery.isSuccess}
           >
             添加成员
           </Button>
         </Form>
       )}
+      <QueryFailureNotice queries={[state.membersQuery]} />
       <Table
         rowKey="id"
         size="small"
+        locale={{ emptyText: state.membersQuery.isError ? '成员读取失败，请重试' : '无项目成员' }}
         loading={state.membersLoading}
         pagination={false}
         dataSource={state.members}
         columns={[
-          { title: '用户', dataIndex: 'user_id' },
+          { title: '用户', render: (_, member) => <MemberIdentity member={member} /> },
           { title: '角色', dataIndex: 'role', width: 120, render: (role) => <Tag>{role}</Tag> },
           {
             title: '操作',
@@ -186,7 +207,13 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
                     state.run(() => removeProjectMember(state.projectId, member.user_id))
                   }
                 >
-                  <Button type="text" danger icon={<DeleteOutlined />} aria-label="移除项目成员" />
+                  <Button
+                    type="text"
+                    danger
+                    disabled={state.pending || !state.membersQuery.isSuccess}
+                    icon={<DeleteOutlined />}
+                    aria-label="移除项目成员"
+                  />
                 </Popconfirm>
               ) : null,
           },
@@ -209,27 +236,34 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
             state.run(() => upsertProjectTeamGrant(state.projectId, values.team_id, values.role))
           }
         >
-          <Form.Item name="team_id" rules={[{ required: true, message: '请选择团队' }]}>
-            <Select
-              placeholder="团队"
-              className="management-select"
-              options={state.teams.map((team) => ({ value: team.id, label: team.name }))}
-            />
+          <Form.Item name="team_id" rules={identityRules('请选择团队')}>
+            <DirectoryPicker source={{ kind: 'team' }} label="授权团队" disabled={state.pending} />
           </Form.Item>
           <Form.Item name="role">
             <Select
+              aria-label="团队授权角色"
               className="role-select"
               options={['editor', 'viewer'].map((role) => ({ value: role, label: role }))}
             />
           </Form.Item>
-          <Button htmlType="submit" type="primary" icon={<TeamOutlined />} loading={state.pending}>
+          <Button
+            htmlType="submit"
+            type="primary"
+            icon={<TeamOutlined />}
+            loading={state.pending}
+            disabled={!state.grantsQuery.isSuccess}
+          >
             授权团队
           </Button>
         </Form>
       )}
+      <QueryFailureNotice queries={[state.grantsQuery]} />
       <Table
         rowKey="id"
         size="small"
+        locale={{
+          emptyText: state.grantsQuery.isError ? '团队授权读取失败，请重试' : '无团队授权',
+        }}
         loading={state.grantsLoading}
         pagination={false}
         dataSource={state.grants}
@@ -237,7 +271,12 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
           {
             title: '团队',
             dataIndex: 'team_id',
-            render: (teamId) => state.teams.find((team) => team.id === teamId)?.name ?? teamId,
+            render: (_, grant) => (
+              <Space orientation="vertical" size={0}>
+                <span>{grant.team_name || '名称未提供'}</span>
+                <span>{grant.team_id}</span>
+              </Space>
+            ),
           },
           { title: '角色', dataIndex: 'role', width: 120, render: (role) => <Tag>{role}</Tag> },
           {
@@ -251,7 +290,13 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
                     state.run(() => removeProjectTeamGrant(state.projectId, grant.team_id))
                   }
                 >
-                  <Button type="text" danger icon={<DeleteOutlined />} aria-label="移除团队授权" />
+                  <Button
+                    type="text"
+                    danger
+                    disabled={state.pending || !state.grantsQuery.isSuccess}
+                    icon={<DeleteOutlined />}
+                    aria-label="移除团队授权"
+                  />
                 </Popconfirm>
               ) : null,
           },
@@ -317,12 +362,13 @@ function TeamMembership({ state }: { state: AccessState }) {
   return (
     <Space orientation="vertical" className="full-width">
       <Space wrap>
-        <Select
-          aria-label="管理团队"
-          className="management-select"
+        <DirectoryPicker
+          source={{ kind: 'team' }}
+          label="管理团队"
           value={state.selectedTeamId}
+          selectedLabel={state.teamLabel}
           onChange={state.setTeamId}
-          options={state.teams.map((team) => ({ value: team.id, label: team.name }))}
+          disabled={state.pending}
         />
         <Form
           form={form}
@@ -331,21 +377,23 @@ function TeamMembership({ state }: { state: AccessState }) {
             state.run(() => addTeamMember(required(state.selectedTeamId), values.user_id))
           }
         >
-          <Form.Item name="user_id" rules={[{ required: true }]}>
-            <Select
-              placeholder="添加用户"
-              className="management-select"
-              options={state.users.map((user) => ({ value: user.id, label: user.email }))}
-            />
+          <Form.Item name="user_id" rules={identityRules('请选择团队用户')}>
+            <DirectoryPicker source={{ kind: 'user' }} label="团队用户" disabled={state.pending} />
           </Form.Item>
-          <Button htmlType="submit" disabled={!state.selectedTeamId} loading={state.pending}>
+          <Button
+            htmlType="submit"
+            disabled={!state.selectedTeamId || !state.teamMembersQuery.isSuccess}
+            loading={state.pending}
+          >
             添加到团队
           </Button>
         </Form>
       </Space>
+      <QueryFailureNotice queries={[state.teamMembersQuery]} />
       <Table
         rowKey="id"
         size="small"
+        locale={{ emptyText: teamEmptyText(state.selectedTeamId, state.teamMembersQuery.isError) }}
         loading={state.teamMembersLoading}
         pagination={false}
         dataSource={state.teamMembers}
@@ -353,7 +401,7 @@ function TeamMembership({ state }: { state: AccessState }) {
           {
             title: '成员',
             dataIndex: 'user_id',
-            render: (userId) => state.users.find((user) => user.id === userId)?.email ?? userId,
+            render: (_, member) => <MemberIdentity member={member} />,
           },
           {
             title: '操作',
@@ -363,7 +411,13 @@ function TeamMembership({ state }: { state: AccessState }) {
                 title="确认移除团队成员？"
                 onConfirm={() => state.run(() => removeTeamMember(member.team_id, member.user_id))}
               >
-                <Button type="text" danger icon={<DeleteOutlined />} aria-label="移除团队成员" />
+                <Button
+                  type="text"
+                  danger
+                  disabled={state.pending || !state.teamMembersQuery.isSuccess}
+                  icon={<DeleteOutlined />}
+                  aria-label="移除团队成员"
+                />
               </Popconfirm>
             ),
           },
@@ -378,15 +432,35 @@ function required(value: string | null): string {
   return value
 }
 
-function selectedTeam(selection: string | null, teams?: Array<{ id: string }>): string | null {
-  if (selection) return selection
-  return teams?.at(0)?.id ?? null
-}
-
-function pageItems<T>(page?: { items: T[] }): T[] {
-  return page?.items ?? []
-}
-
 function arrayItems<T>(items?: T[]): T[] {
   return items ?? []
+}
+
+function MemberIdentity({
+  member,
+}: {
+  member: { user_id: string; display_name?: string | null; email?: string | null }
+}) {
+  return (
+    <Space orientation="vertical" size={0}>
+      <span>{member.display_name || '名称未提供'}</span>
+      <span>{member.email || '邮箱未提供'}</span>
+      <span>{member.user_id}</span>
+    </Space>
+  )
+}
+
+function identityRules(message: string) {
+  return [
+    { required: true, message },
+    {
+      pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      message: '请输入完整有效的 UUID',
+    },
+  ]
+}
+
+function teamEmptyText(teamId: string | null, failed: boolean): string {
+  if (!teamId) return '请先选择要管理的团队'
+  return failed ? '团队成员读取失败，请重试' : '无团队成员'
 }

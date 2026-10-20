@@ -213,8 +213,10 @@ class UserService:
         self._users = UserRepository(session)
         self._audit = AuditService(session)
 
-    async def list(self, *, page: int, page_size: int) -> tuple[list[User], int]:
-        return await self._users.list(offset=(page - 1) * page_size, limit=page_size)
+    async def list(self, *, page: int, page_size: int, query: str = "") -> tuple[list[User], int]:
+        return await self._users.list(
+            offset=(page - 1) * page_size, limit=page_size, query=query.strip()
+        )
 
     async def create(
         self,

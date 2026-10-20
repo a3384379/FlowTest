@@ -61,6 +61,23 @@ class UserUpdate(BaseModel):
     is_system_admin: bool | None = None
 
 
+class DirectorySearchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(default="", max_length=320)
+    page: int = Field(default=1, ge=1, le=2_147_483_647)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
+class MemberCandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    display_name: str
+    email: str
+    is_active: bool
+
+
 class PasswordChange(BaseModel):
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=8, max_length=256)
@@ -136,6 +153,8 @@ class ProjectOutboundPolicy(BaseModel):
 class AuditLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    actor_display_name: str | None = None
+
     id: UUID
     actor_user_id: UUID | None
     organization_id: UUID | None
@@ -158,6 +177,8 @@ class MemberResponse(BaseModel):
     id: UUID
     project_id: UUID
     user_id: UUID
+    display_name: str | None = None
+    email: str | None = None
     role: ProjectRole
     created_at: datetime
     updated_at: datetime
@@ -194,6 +215,8 @@ class TeamMemberResponse(BaseModel):
     id: UUID
     team_id: UUID
     user_id: UUID
+    display_name: str | None = None
+    email: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -209,6 +232,7 @@ class ProjectTeamGrantResponse(BaseModel):
     id: UUID
     project_id: UUID
     team_id: UUID
+    team_name: str | None = None
     role: TeamGrantRole
     created_by_id: UUID
     created_at: datetime

@@ -47,8 +47,8 @@ describe('project management panels', () => {
           },
         ]),
       ),
-      http.get('/api/v1/teams', () =>
-        HttpResponse.json({ items: [team], total: 1, page: 1, page_size: 100 }),
+      http.post('/api/v1/teams/search', () =>
+        HttpResponse.json({ items: [team], total: 1, page: 1, page_size: 20 }),
       ),
       http.get(`/api/v1/projects/${projectId}/team-grants`, () =>
         HttpResponse.json([
@@ -56,6 +56,7 @@ describe('project management panels', () => {
             id: 'grant-1',
             project_id: projectId,
             team_id: team.id,
+            team_name: team.name,
             role: 'editor',
             created_by_id: 'admin-1',
             created_at: '2026-08-09T00:00:00Z',
@@ -78,6 +79,8 @@ describe('project management panels', () => {
             id: 'team-member-1',
             team_id: team.id,
             user_id: user.id,
+            display_name: user.display_name,
+            email: user.email,
             created_at: '2026-08-09T00:00:00Z',
             updated_at: '2026-08-09T00:00:00Z',
           },
@@ -102,7 +105,10 @@ describe('project management panels', () => {
     fireEvent.click(screen.getByRole('tab', { name: '用户与团队' }))
     expect(await screen.findByRole('button', { name: '创建用户' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加到团队' })).toBeInTheDocument()
-    expect(screen.getByText(user.email)).toBeInTheDocument()
+    expect(screen.getByText('请先选择要管理的团队')).toBeInTheDocument()
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '管理团队' }))
+    fireEvent.click(await screen.findByTitle(team.name))
+    expect(await screen.findByText(user.email)).toBeInTheDocument()
     expect(screen.getByText('user-unknown')).toBeInTheDocument()
   })
 
@@ -391,7 +397,7 @@ describe('project management panels', () => {
       http.get(`/api/v1/projects/${projectId}/team-grants`, () => HttpResponse.json([])),
     )
     renderPanel(<AccessManagementPanel projectId={projectId} canManage={false} />)
-    expect((await screen.findAllByText('No data')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('无项目成员')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '用户与团队' })).not.toBeInTheDocument()
   })
