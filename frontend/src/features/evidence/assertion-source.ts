@@ -1,16 +1,17 @@
-import type { WorkflowDefinition } from '../../lib/api'
+import type { WorkflowDefinition, WorkflowNode } from '../../lib/api'
 import { effectiveConfig, resolveEffectiveNodeType } from '../../flow/editor/graph-analysis'
 import { reportExecutionPath } from '../workflows/execution-navigation'
 
-export type AssertionSourceReference = { nodeId: string; expression: string }
+export type AssertionSourceReference = { nodeId: string; expression: string | null }
 export type AssertionProvenance = {
   actual: AssertionSourceReference
   expected?: AssertionSourceReference
   operator?: string
-  expectedKind: 'literal' | 'node' | 'unresolved'
+  expectedKind: 'literal' | 'node' | 'unresolved' | 'recorded'
 }
 export type AssertionSourceNode = {
   node_id: string
+  node_type?: string
   name: string
   status: string
   attempts: number
@@ -64,17 +65,26 @@ function expectedSourceKind(
 }
 export function definitionAssertionProvenance(
   context: AssertionSourceContext,
+  singleAssertion = true,
 ): AssertionProvenance | undefined {
-  const definition = context.frozenDefinition
-  if (!definition) return undefined
-  const nodes = [
-    ...definition.nodes,
-    ...(definition.regions ?? []).flatMap((region) => region.nodes),
-  ]
+  const nodes = frozenDefinitionNodes(context.frozenDefinition)
   const node = nodes.find((item) => item.id === context.assertionNodeId)
-  return node && resolveEffectiveNodeType(node) === 'assert'
-    ? frozenAssertionProvenance(effectiveConfig(node))
-    : undefined
+  const type = node
+    ? resolveEffectiveNodeType(node)
+    : context.nodes.find((item) => item.node_id === context.assertionNodeId)?.node_type
+  if (type === 'api')
+    return {
+      actual: { nodeId: context.assertionNodeId, expression: null },
+      expectedKind: 'recorded',
+    }
+  if (node && type === 'assert' && singleAssertion)
+    return frozenAssertionProvenance(effectiveConfig(node))
+  return undefined
+}
+
+function frozenDefinitionNodes(definition: WorkflowDefinition | null | undefined): WorkflowNode[] {
+  if (!definition) return []
+  return [...definition.nodes, ...(definition.regions ?? []).flatMap((region) => region.nodes)]
 }
 export function locateAssertionSource(
   reference: AssertionSourceReference,
@@ -84,10 +94,10 @@ export function locateAssertionSource(
     return { ...reference, reason: '区域实例的来源轮次未解析，不跳转到其他实例' }
   const node = context.nodes.find((item) => item.node_id === reference.nodeId)
   if (!node) return { ...reference, reason: '同次运行未提供来源节点证据' }
-  if (node.status !== 'passed')
-    return { ...reference, name: node.name, reason: '来源节点未成功完成，无法确认对应尝试' }
   const observations = node.observations ?? node.result?.observations ?? []
-  const attempt = observations.at(-1)?.attempt ?? (node.attempts > 0 ? node.attempts : undefined)
+  if (node.status !== 'passed' && observations.length === 0)
+    return { ...reference, name: node.name, reason: '来源节点未成功完成，无法确认对应尝试' }
+  const attempt = sourceAttempt(node, observations)
   return {
     ...reference,
     name: node.name,
@@ -98,4 +108,11 @@ export function locateAssertionSource(
       attempt,
     }),
   }
+}
+
+function sourceAttempt(
+  node: AssertionSourceNode,
+  observations: ReadonlyArray<{ attempt: number }>,
+): number | undefined {
+  return observations.at(-1)?.attempt ?? (node.attempts > 0 ? node.attempts : undefined)
 }

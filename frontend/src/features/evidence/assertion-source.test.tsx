@@ -37,6 +37,35 @@ const output = {
 }
 
 describe('frozen assertion provenance', () => {
+  it('locates every standard API assertion in its captured HTTP evidence without inventing targets', () => {
+    const apiContext: AssertionSourceContext = {
+      ...context,
+      assertionNodeId: 'api',
+      frozenDefinition: workflowDefinition,
+      nodes: [{ ...context.nodes[0], node_type: 'api', status: 'failed' }],
+    }
+    render(
+      <MemoryRouter>
+        <AssertionEvidence
+          items={[
+            { name: '状态断言', passed: false, expected: 200, actual: 503 },
+            { name: '响应内容断言', passed: false, expected: 'ready', actual: 'failed' },
+          ]}
+          location={apiContext}
+        />
+      </MemoryRouter>,
+    )
+    const links = screen.getAllByRole('link', { name: /订单响应/ })
+    expect(links).toHaveLength(2)
+    for (const link of links)
+      expect(link).toHaveAttribute(
+        'href',
+        '/projects/project-frozen/reports?execution=run-frozen&node=api&attempt=3',
+      )
+    expect(screen.getAllByText('未提供（原始断言 target 未记录）')).toHaveLength(2)
+    expect(screen.getAllByText('期望值来源：本次断言记录（原始来源未提供）')).toHaveLength(2)
+    expect(screen.queryByText(/来源定位：未解析/)).not.toBeInTheDocument()
+  })
   it('locates actual and dynamic expected sources within the same frozen execution', () => {
     render(
       <MemoryRouter>
@@ -75,7 +104,7 @@ describe('frozen assertion provenance', () => {
     expect(
       locateAssertionSource(
         { nodeId: 'api', expression: 'body.id' },
-        { ...context, nodes: [{ ...context.nodes[0], status: 'failed' }] },
+        { ...context, nodes: [{ ...context.nodes[0], status: 'failed', result: null }] },
       ),
     ).toMatchObject({ reason: '来源节点未成功完成，无法确认对应尝试' })
   })

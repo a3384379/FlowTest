@@ -13,7 +13,10 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
-import AssertionEvidence from '../features/evidence/AssertionEvidence'
+import AssertionEvidence, {
+  type AssertionEvidenceItem,
+} from '../features/evidence/AssertionEvidence'
+import { useCheckpointAssertionSource } from '../features/evidence/use-checkpoint-assertion-source'
 import { workflowAssertionEvidence } from '../features/evidence/assertion-model'
 import { resolveEffectiveNodeType } from './editor/graph-analysis'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
@@ -803,27 +806,18 @@ export function WorkflowCheckpointEvidence({
   )
   const observation = selectedObservation(observations, attempt)
   const assertions = workflowAssertionEvidence({ ...checkpoint, name: checkpoint.node_name })
+  const labels = checkpointLabels(checkpoint.node_id)
   return (
-    <section aria-label="实例执行证据">
+    <section aria-label={labels.section}>
       <Typography.Paragraph>
         {checkpoint.node_name} · {checkpoint.status}
       </Typography.Paragraph>
       <Typography.Paragraph type="secondary">
-        实例：{checkpoint.node_id} · 阶段：{checkpoint.phase ?? '未提供'} · 检查点尝试：
+        {labels.owner}：{checkpoint.node_id} · 阶段：{checkpoint.phase ?? '未提供'} · 检查点尝试：
         {checkpoint.attempt ?? '未提供'}
       </Typography.Paragraph>
       {assertions.length > 0 && (
-        <AssertionEvidence
-          items={assertions}
-          source={`${checkpoint.node_name} (${checkpoint.node_id})`}
-          location={{
-            projectId,
-            executionId: checkpoint.execution_id,
-            assertionNodeId: checkpoint.node_id,
-            nodes: [],
-            instanceId: checkpoint.node_id,
-          }}
-        />
+        <CheckpointAssertions items={assertions} checkpoint={checkpoint} projectId={projectId} />
       )}
       <MissingAttempt
         initialAttempt={initialAttempt}
@@ -845,38 +839,108 @@ export function WorkflowCheckpointEvidence({
             key: 'response',
             label: '响应',
             children: (
-              <Payload title="实例响应" value={observation?.response} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}响应`}
+                value={observation?.response}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'request',
             label: '请求',
             children: (
-              <Payload title="实例请求" value={observation?.request} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}请求`}
+                value={observation?.request}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'mapping',
             label: '变量映射',
             children: (
-              <Payload title="实例变量映射" value={observation?.mappings} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}变量映射`}
+                value={observation?.mappings}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'output',
             label: '输出',
-            children: <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />,
+            children: (
+              <Payload
+                title={`${labels.owner}输出`}
+                value={checkpoint.output}
+                projectId={projectId}
+              />
+            ),
           },
           {
             key: 'raw',
             label: '原始证据',
             children: (
-              <Payload title="实例完整结果" value={checkpoint.result} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}完整结果`}
+                value={checkpoint.result}
+                projectId={projectId}
+              />
             ),
           },
         ]}
       />
     </section>
+  )
+}
+
+function checkpointLabels(nodeId: string) {
+  return nodeId.startsWith('__nested_request__:')
+    ? { section: '实例执行证据', owner: '实例' }
+    : { section: '检查点执行证据', owner: '检查点' }
+}
+function CheckpointAssertions({
+  items,
+  checkpoint,
+  projectId,
+}: {
+  items: AssertionEvidenceItem[]
+  checkpoint: ExecutionCheckpoint
+  projectId: string
+}) {
+  const state = useCheckpointAssertionSource(
+    projectId,
+    checkpoint,
+    checkpointObservations(checkpoint),
+  )
+  return (
+    <>
+      {state.loading && (
+        <Typography.Paragraph type="secondary">
+          正在读取同次执行的来源节点证据…
+        </Typography.Paragraph>
+      )}
+      {state.error && (
+        <Alert
+          type="error"
+          title="来源节点证据读取失败"
+          description={
+            <Space orientation="vertical">
+              <span>{state.error}</span>
+              {state.traceId && <Typography.Text copyable>{state.traceId}</Typography.Text>}
+            </Space>
+          }
+          action={<Button onClick={state.retry}>重试来源证据</Button>}
+        />
+      )}
+      <AssertionEvidence
+        items={items}
+        source={`${checkpoint.node_name} (${checkpoint.node_id})`}
+        location={state.location}
+      />
+    </>
   )
 }
 

@@ -77,8 +77,7 @@ function AssertionProvenanceView({
   context: AssertionSourceContext
   single: boolean
 }) {
-  const provenance =
-    item.provenance ?? (single ? definitionAssertionProvenance(context) : undefined)
+  const provenance = item.provenance ?? definitionAssertionProvenance(context, single)
   if (!provenance)
     return (
       <Typography.Paragraph type="secondary">
@@ -94,13 +93,15 @@ function AssertionProvenanceView({
       <AssertionSourceView label="实际值来源" reference={provenance.actual} context={context} />
       {provenance.expected ? (
         <AssertionSourceView label="期望值来源" reference={provenance.expected} context={context} />
+      ) : provenance.expectedKind === 'recorded' ? (
+        <Typography.Paragraph>期望值来源：本次断言记录（原始来源未提供）</Typography.Paragraph>
       ) : provenance.expectedKind === 'literal' ? (
         <Typography.Paragraph>期望值来源：当次断言记录的固定值</Typography.Paragraph>
       ) : (
         <Typography.Paragraph>期望值来源：未解析（冻结来源字段不完整）</Typography.Paragraph>
       )}
       <Typography.Paragraph>
-        原始表达：<code>{provenance.actual.expression}</code> · 运算符：
+        原始表达：<code>{provenance.actual.expression ?? '未提供'}</code> · 运算符：
         {provenance.operator ?? '未提供'}
       </Typography.Paragraph>
     </div>
@@ -129,7 +130,7 @@ function AssertionSourceView({
         </span>
       )}
       <br />
-      提取路径（原文）：<code>{source.expression}</code>
+      提取路径（原文）：<code>{source.expression ?? '未提供（原始断言 target 未记录）'}</code>
     </Typography.Paragraph>
   )
 }
