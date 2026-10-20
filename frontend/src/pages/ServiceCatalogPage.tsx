@@ -85,7 +85,7 @@ function ServiceCatalogWorkspace() {
         className={`service-catalog-workspace${state.selection.id || state.selection.error ? ' has-selection' : ''}`}
       >
         <section aria-label="服务目录列表" className="service-catalog-list">
-          <Card title="服务资产" loading={state.services.isLoading}>
+          <Card title="服务资产">
             <Input.Search
               key={`${state.projectId}:${state.search}`}
               aria-label="搜索服务"
@@ -184,6 +184,7 @@ function ServiceTable({ state }: { state: ReturnType<typeof useServiceCatalog> }
   const profiles = serviceProfiles(state.graph.data)
   return (
     <Table
+      loading={state.services.isLoading}
       rowKey="id"
       dataSource={state.services.data?.items ?? []}
       locale={{ emptyText: '暂无匹配服务' }}

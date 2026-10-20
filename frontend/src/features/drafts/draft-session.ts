@@ -5,6 +5,7 @@ import type { WorkflowDraftEdit } from '../workflows/use-workflows'
 import type { SuiteFormValues } from '../test-assets/test-asset-view-model'
 
 export const DRAFT_NAVIGATION_CANCELLED = 'flowtest:draft-navigation-cancelled'
+export const REQUEST_TARGET_DRAFT_PREFIX = 'request-target-candidate:'
 
 type ApiDraft = {
   fields: WorkbenchFields

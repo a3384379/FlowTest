@@ -219,3 +219,82 @@ async def test_paged_directory_remains_stable_while_moving_imported_timestamp_ti
             await cleanup.execute(delete(User).where(User.id == fixture.actor_id))
             await cleanup.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reviewed_binding_and_publication_serialize_on_the_same_api_revision() -> None:
+    from app.core.errors import AppError
+
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    fixture = await _create_assets(sessions)
+    barrier = asyncio.Barrier(2)
+
+    async def change_api(binding: bool) -> tuple[bool, str, int]:
+        async with sessions() as session:
+            actor = await session.get(User, fixture.actor_id)
+            assert actor is not None
+            await barrier.wait()
+            try:
+                if binding:
+                    definition = await APIAssetService(session).update_definition(
+                        actor=actor,
+                        project_id=fixture.project_id,
+                        definition_id=fixture.definition_id,
+                        name=None,
+                        description=None,
+                        folder_id=None,
+                        change_folder=False,
+                        service_id=None,
+                        change_service=True,
+                        base_version=1,
+                    )
+                    return binding, "saved", definition.current_version
+                version = await APIAssetService(session).create_version(
+                    actor=actor,
+                    project_id=fixture.project_id,
+                    definition_id=fixture.definition_id,
+                    base_version=1,
+                    request=APIVersionSpec(
+                        method=HttpMethod.GET,
+                        path="/orders/new",
+                        query_parameters=(),
+                        headers={},
+                        body_kind=BodyKind.NONE,
+                        body=None,
+                        auth_kind=AuthKind.NONE,
+                        auth_config={},
+                    ),
+                )
+                return binding, "saved", version.version
+            except AppError as error:
+                await session.rollback()
+                assert error.code == "API_VERSION_CONFLICT" and error.status_code == 409
+                return binding, error.code, 0
+
+    tasks = [asyncio.create_task(change_api(binding)) for binding in (False, True)]
+    try:
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+        assert sorted(item[1] for item in results) == ["API_VERSION_CONFLICT", "saved"]
+        async with sessions() as session:
+            repository = APIAssetRepository(session)
+            current = await repository.get_definition(fixture.definition_id)
+            versions = await repository.list_versions(fixture.definition_id)
+            assert current is not None and current.current_version == 2
+            assert [item.version for item in versions] == [2, 1]
+            assert versions[1].path == "/orders"
+            winner = next(item[0] for item in results if item[1] == "saved")
+            assert versions[0].path == ("/orders" if winner else "/orders/new")
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        async with sessions() as cleanup:
+            project = await cleanup.get(Project, fixture.project_id)
+            assert project is not None and project.name == fixture.marker
+            await cleanup.execute(delete(AuditLog).where(AuditLog.project_id == fixture.project_id))
+            await cleanup.execute(delete(Project).where(Project.id == fixture.project_id))
+            await cleanup.execute(delete(User).where(User.id == fixture.actor_id))
+            await cleanup.commit()
+        await engine.dispose()

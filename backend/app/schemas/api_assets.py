@@ -148,6 +148,7 @@ class APIDefinitionCreate(BaseModel):
 
 
 class APIDefinitionUpdate(BaseModel):
+    base_version: int | None = Field(default=None, ge=1)
     name: APIDefinitionName | None = None
     description: str | None = Field(default=None, max_length=4000)
     folder_id: UUID | None = None

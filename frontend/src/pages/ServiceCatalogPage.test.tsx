@@ -51,26 +51,53 @@ const graph: ServiceGraph = {
 }
 
 describe('ServiceCatalogPage', () => {
-  it('shows real catalog evidence, focuses search deep-links, filters, and creates a service', async () => {
+  it('shows catalog evidence and focuses a legacy service deep-link', async () => {
+    installCatalogReads(() => initialServices)
+    renderPage(`?focus=contract_service:${providerId}`)
+    const list = within(screen.getByLabelText('服务目录列表'))
+    expect(await list.findByText('Web 前端')).toBeVisible()
+    expect(await list.findByText('消费方')).toBeVisible()
+    expect(list.getByText('订单服务')).toBeVisible()
+    expect(list.getByText('提供方')).toBeVisible()
+    expect(list.getByText('OpenAPI')).toBeVisible()
+    expect(list.getAllByText('Pact').length).toBeGreaterThan(0)
+    expect(screen.getByText('服务数量').closest('.ant-card')).toHaveTextContent('2')
+    expect(list.getByText('订单服务').closest('tr')).toHaveClass('service-catalog-row-focused')
+    const details = within(screen.getByLabelText('选中服务详情'))
+    expect(await details.findByText('orders-api')).toBeInTheDocument()
+  })
+
+  it('commits server search results and preserves the fixed service through search and clear', async () => {
+    const searches: string[] = []
+    installCatalogReads(() => initialServices, searches)
+    renderPage(`?contractServiceId=${providerId}`)
+    const list = within(screen.getByLabelText('服务目录列表'))
+    expect(await list.findByText('匹配 2 个服务')).toBeInTheDocument()
+    const details = within(screen.getByLabelText('选中服务详情'))
+    expect(await details.findByText('orders-api')).toBeInTheDocument()
+    const search = screen.getByLabelText('搜索服务')
+    fireEvent.change(search, { target: { value: 'web' } })
+    fireEvent.keyDown(search, { key: 'Enter', code: 'Enter' })
+    expect(await list.findByText('匹配 1 个服务')).toBeInTheDocument()
+    expect(searches.at(-1)).toBe('web')
+    expect(list.getByText('Web 前端')).toBeVisible()
+    expect(list.queryByText('订单服务')).not.toBeInTheDocument()
+    expect(details.getByText('订单服务')).toBeInTheDocument()
+    const filteredSearch = screen.getByLabelText('搜索服务')
+    expect(filteredSearch).toHaveValue('web')
+    fireEvent.change(filteredSearch, { target: { value: '' } })
+    fireEvent.keyDown(filteredSearch, { key: 'Enter', code: 'Enter' })
+    expect(await list.findByText('匹配 2 个服务')).toBeInTheDocument()
+    expect(searches.at(-1)).toBe('')
+    expect(list.getByText('订单服务').closest('tr')).toHaveClass('service-catalog-row-focused')
+    expect(details.getByText('orders-api')).toBeInTheDocument()
+  })
+
+  it('validates registration and refreshes the catalog and summary after saving', async () => {
     let services = [...initialServices]
     let createPayload: Record<string, unknown> | null = null
-    installFeatureHandler(true)
+    installCatalogReads(() => services)
     server.use(
-      http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
-        const search = new URL(request.url).searchParams.get('search')?.toLowerCase() ?? ''
-        const items = services.filter((item) =>
-          [item.display_name, item.service_key, item.description].some((value) =>
-            value.toLowerCase().includes(search),
-          ),
-        )
-        return HttpResponse.json({ items, total: items.length, page: 1, page_size: 20 })
-      }),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
-        HttpResponse.json(summary(services.length)),
-      ),
-      http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
-        HttpResponse.json(graph),
-      ),
       http.post(`/api/v1/projects/${project.id}/contract-hub/services`, async ({ request }) => {
         createPayload = (await request.json()) as Record<string, unknown>
         const created = service(
@@ -83,27 +110,9 @@ describe('ServiceCatalogPage', () => {
         return HttpResponse.json(created, { status: 201 })
       }),
     )
-    renderPage(`?focus=contract_service:${providerId}`)
+    renderPage()
     const browser = userEvent.setup()
-
-    expect(await screen.findByRole('heading', { name: '服务目录' })).toBeVisible()
-    const list = within(screen.getByLabelText('服务目录列表'))
-    expect(await list.findByText('Web 前端')).toBeVisible()
-    expect(list.getByText('订单服务')).toBeVisible()
-    expect(screen.getByText('消费方')).toBeVisible()
-    expect(list.getByText('提供方')).toBeVisible()
-    expect(list.getByText('OpenAPI')).toBeVisible()
-    expect(screen.getAllByText('Pact').length).toBeGreaterThan(0)
-    expect(screen.getByText('服务数量').closest('.ant-card')).toHaveTextContent('2')
-    expect(list.getByRole('row', { name: /订单服务/ })).toHaveClass('service-catalog-row-focused')
-
-    await browser.type(screen.getByLabelText('搜索服务'), 'web{Enter}')
-    await waitFor(() => expect(list.queryByText('订单服务')).not.toBeInTheDocument())
-    expect(list.getByText('Web 前端')).toBeVisible()
-    expect(within(screen.getByLabelText('选中服务详情')).getByText('订单服务')).toBeInTheDocument()
-    await browser.clear(screen.getByLabelText('搜索服务'))
-    await browser.keyboard('{Enter}')
-
+    await waitFor(() => expect(screen.getByRole('button', { name: /新建服务/ })).toBeEnabled())
     await browser.click(screen.getByRole('button', { name: /新建服务/ }))
     const dialog = screen.getByRole('dialog', { name: '新建服务' })
     await browser.type(within(dialog).getByLabelText('服务标识'), 'Billing API')
@@ -168,9 +177,12 @@ describe('ServiceCatalogPage', () => {
     renderPage(`?contractServiceId=${services[104].id}&servicePage=6`)
     const details = await screen.findByLabelText('选中服务详情')
     expect(await within(details).findByText('service-104')).toBeInTheDocument()
+    expect(
+      await within(screen.getByLabelText('服务目录列表')).findByText('完整目录100'),
+    ).toBeVisible()
     expect(requests.at(-1)?.get('page')).toBe('6')
-    const browser = userEvent.setup()
-    await browser.type(screen.getByLabelText('搜索服务'), '完整目录0{Enter}')
+    fireEvent.change(screen.getByLabelText('搜索服务'), { target: { value: '完整目录0' } })
+    fireEvent.keyDown(screen.getByLabelText('搜索服务'), { key: 'Enter', code: 'Enter' })
     await waitFor(() => expect(requests.at(-1)?.get('search')).toBe('完整目录0'))
     expect(requests.at(-1)?.get('page')).toBe('1')
     expect(within(details).getByText('service-104')).toBeInTheDocument()
@@ -304,6 +316,28 @@ describe('ServiceCatalogPage', () => {
     expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
 })
+
+function installCatalogReads(read: () => ServiceCatalogEntry[], searches?: string[]) {
+  installFeatureHandler(true)
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/contract-hub/services`, ({ request }) => {
+      const search = new URL(request.url).searchParams.get('search') ?? ''
+      searches?.push(search)
+      const items = read().filter((item) =>
+        [item.display_name, item.service_key, item.description].some((value) =>
+          value.toLowerCase().includes(search.toLowerCase()),
+        ),
+      )
+      return HttpResponse.json({ items, total: items.length, page: 1, page_size: 20 })
+    }),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/summary`, () =>
+      HttpResponse.json(summary(read().length)),
+    ),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/service-graph`, () =>
+      HttpResponse.json(graph),
+    ),
+  )
+}
 
 function renderPage(search = '', visibleProject = project) {
   server.use(
