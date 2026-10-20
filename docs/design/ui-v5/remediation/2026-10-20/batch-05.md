@@ -1,0 +1,35 @@
+# 报告统一查询范围整改
+
+日期：2026-10-20。对应 `F-REP-04`，基于[完整审计](../../audits/2026-10-19/complete-audit.md#f-rep-04)和[详细方案](../../audits/2026-10-19/remediation-plan.md#f-rep-04)。
+
+## 实现合同
+
+报告列表、趋势、失败分类和统计卡片使用同一服务端查询范围：时间、状态、流程、实际执行环境、用例、计划与运行来源。前端将筛选条件和页码写入 URL；改变筛选回到第一页，浏览器前进/后退及详情返回保留范围。详情按执行 ID 独立读取，不受列表时间窗口限制。
+
+默认显示最近 7 个 UTC 日，日期控件包含首尾日期，服务器使用起点包含、终点排除的区间。单次范围为 1 至 90 天。接口接受带时区时间并统一转为 UTC；单边时间、倒置范围、无时区时间和非法枚举返回带 trace ID 的标准错误。无效 URL 不发送统计或列表查询，不默默扩大范围。趋势按 UTC 日分桶；列表时间明确标为北京时间。
+
+统计在全部匹配根执行上计算，不取当前页样本。数据集子执行不重复计数。通过率分母为已完成的通过、失败及取消执行，排除排队与运行中；没有已完成记录时返回 `null`、显示“—”，同时展示实际分母。待完成不计入失败分类，列表也不显示为运行错误。已补充排队及运行中带旧错误码的回归。列表按开始时间、执行 ID 倒序稳定分页。
+
+来源筛选区分流程直接运行、用例直接运行、计划运行和沙箱预览。计划关联优先采用执行的正式来源字段，仅在缺失时兼容旧计划条目；用例关联同样优先采用正式用例来源，兼容没有该字段的旧计划执行，不因重复旧关联扩大结果。
+
+对象选项由本项目实际根执行历史提供，分页、搜索并支持单独回显 URL 中选中的对象；不会以当前目录前 100 项冒充完整选项。已归档流程、环境及用例仍可检索其报告，选项显示当前名称，页面明确说明此含义。筛选只读，不改写历史快照，不增加执行、发布、日志或诊断采集。
+
+兼容边界：原列表请求不带时间参数时仍查询全部历史；原趋势请求不带时间参数时仍默认最近 7 日。新版报告页始终显式发送相同时间边界。旧版本趋势响应暂不含新增汇总字段时，前端显示未提供统计，不从当前页猜测。
+
+## 改动与验证入口
+
+- 后端领域合同：[reporting.py](../../../../../backend/app/domain/reporting.py)。
+- 只读查询与关联：[reporting.py](../../../../../backend/app/repositories/reporting.py)。
+- 聚合与授权：[reporting.py](../../../../../backend/app/services/reporting.py)。
+- URL 范围与页面：[report-scope.ts](../../../../../frontend/src/features/reports/report-scope.ts)、[ReportFilters.tsx](../../../../../frontend/src/features/reports/ReportFilters.tsx)、[ReportsPage.tsx](../../../../../frontend/src/pages/ReportsPage.tsx)。
+- 后端回归：[test_reporting_api.py](../../../../../backend/tests/test_reporting_api.py)。覆盖 121 条报告跨页、105 个历史环境分页、时区与边界、归档对象、项目隔离、排队/运行/取消分母、正式及旧计划来源、非 HTTP 调用策略。
+- 前端回归：[report-scope.test.ts](../../../../../frontend/src/features/reports/report-scope.test.ts)、[ReportFilters.test.tsx](../../../../../frontend/src/features/reports/ReportFilters.test.tsx)、[ReportsPage.test.tsx](../../../../../frontend/src/pages/ReportsPage.test.tsx)。覆盖非法 URL、90 天窗口、服务端选项分页和搜索、筛选复位页码、列表与趋势同参、详情返回、空样本。
+
+## 验收记录
+
+- 后端专项 31 项通过；前端页面/范围/图表 25 项与对象选择器 1 项通过。
+- 浏览器已验证真实后端：默认窗口、流程选项、收敛为同一条记录和分母、节点详情返回、超长范围、空窗口及重置。
+- 最终前端完整检查通过：140 文件、908 项；语句/分支/函数/行覆盖率为 85.70% / 81.65% / 85.06% / 88.15%，格式、lint/tsc、构建通过。对应源码树 `c49f66469a748c70cb2de22145e14070d7ce0723`。
+- 最终后端格式、Ruff、mypy（427 文件）及完整 pytest 通过：1759 通过、13 跳过、2 项既有警告，覆盖率 90.78%。对应源码树 `67f739a22d0d876a7ae176a7fe0d94529dc33a02`，提交 `d5e2b54b6731dbdbd0518c14a6543f0b19f6cde3`。该次完整检查在新增未完成记录分类保护后重新执行。
+- 最终日志：`remediation-report-scope-final-backend-r3.log`、`remediation-report-scope-final-frontend.log`、`remediation-report-scope-final-build.log`。早期全量中的选择器测试使用了错误的分页语言配置，已修正并重新全量通过；一次并行运行的短超时测试单独诊断通过，最终后端串行全量也已通过。没有放宽超时、覆盖率或跳过条件。
+- 本批 GitHub 最新提交门禁与合并结果单独核对；本地完整检查不代表正式部署或全站设计签收。

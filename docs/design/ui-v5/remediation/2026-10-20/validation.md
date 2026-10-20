@@ -25,6 +25,8 @@
 
 ## GitHub 与正式验收
 
-主分支交付统一追踪 [PR #133](https://github.com/a3384379/FlowTest/pull/133)；补充 PR #134、#135 已汇总到该分支。合并时仍需核对最新 HEAD 的正式 Required Gate、审核线程、目标 `main` 与实际 merge commit；合并后 CI 单独核对其 SHA。
+[PR #133](https://github.com/a3384379/FlowTest/pull/133) 已于 2026-10-20 合并到 `main`，合并提交为 `cd52b154048babc96cb136f9c63946cb1bc5ee31`。合并前核对 HEAD `9c4c5949c06b0695f83f606a73323401ecbdc4c2`：正式 Required Gate 成功、审查线程全部解决；合并命令绑定该 SHA。补充 PR #134、#135 先汇总到首批分支，主分支交付由 #133 完成。
+
+合并后已针对该主分支提交启动 [Full Regression 39434496764](https://github.com/a3384379/FlowTest/actions/runs/39434496764)，当前运行中，不据此声称合并后检查已通过。后续新增报告范围整改独立见[报告整改记录](batch-05.md)，不属于首批 22 项。
 
 本地完整检查及专项不代替远端门禁。正式环境部署、真实 Windows 终端运行和外部系统实际联调尚未执行，不能据此宣称全站设计签收或完整发布验收。
