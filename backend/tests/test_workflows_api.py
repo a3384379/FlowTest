@@ -2885,3 +2885,81 @@ def _dataset_cancel_definition(artifact_id: str, api_id: str) -> dict[str, Any]:
             {"id": "api-end", "source": "api", "target": "end"},
         ],
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native_http", [False, True])
+async def test_workflow_publish_pins_inline_region_api_versions(
+    workflow_client: AsyncClient,
+    native_http: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.workflows.settings.feature_capability_sdk_enabled", True)
+    headers = await _login_headers(workflow_client)
+    project_id, _environment_id, api_id = await _create_assets(workflow_client, headers)
+    definition = _workflow_definition(api_id)
+    definition["schema_version"] = "4.0"
+    definition["run_policy"] = {"request_budget": 5, "max_runtime_seconds": 90}
+    definition["nodes"][1] = {
+        "id": "api",
+        "type": "capability",
+        "name": "步骤组",
+        "position": {"x": 100, "y": 0},
+        "capability_id": "flow.control.group",
+        "capability_version": "1.0.0",
+        "configuration": {"body": {"kind": "inline", "region_id": "body"}},
+        "bindings": [],
+    }
+    request_node: dict[str, Any] = {
+        "id": "request",
+        "name": "区域请求",
+        "position": {"x": 0, "y": 0},
+    }
+    if native_http:
+        request_node.update(
+            {
+                "type": "capability",
+                "capability_id": "http.request",
+                "capability_version": "2.0.0",
+                "configuration": {"api_definition_id": api_id},
+                "bindings": [],
+            }
+        )
+    else:
+        request_node.update({"type": "api", "config": {"api_definition_id": api_id}})
+    definition["regions"] = [
+        {
+            "id": "body",
+            "owner_node_id": "api",
+            "role": "body",
+            "nodes": [request_node],
+            "entry_node_id": "request",
+            "exit_node_ids": ["request"],
+        }
+    ]
+    created = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/workflows",
+        headers=headers,
+        json={"name": "区域接口固定版本", "definition": definition},
+    )
+    assert created.status_code == 201, created.text
+    workflow_id = created.json()["id"]
+    path = f"/api/v1/projects/{project_id}/workflows/{workflow_id}"
+    published = await workflow_client.post(f"{path}/versions", headers=headers)
+    assert published.status_code == 200, published.text
+    field = "configuration" if native_http else "config"
+    assert published.json()["definition"]["regions"][0]["nodes"][0][field].get("api_version") == 1
+    fingerprint = published.json()["fingerprint"]
+    updated_api = await workflow_client.post(
+        f"/api/v1/projects/{project_id}/apis/{api_id}/versions",
+        headers=headers,
+        json={"method": "GET", "path": "/users/v2", "body_kind": "none"},
+    )
+    assert updated_api.status_code == 201, updated_api.text
+    versions = await workflow_client.get(f"{path}/versions", headers=headers)
+    assert versions.status_code == 200, versions.text
+    assert versions.json()[0]["fingerprint"] == fingerprint
+    assert versions.json()[0]["definition"]["regions"][0]["nodes"][0][field]["api_version"] == 1
+    draft = await workflow_client.get(path, headers=headers)
+    assert draft.status_code == 200, draft.text
+    assert "api_version" not in draft.json()["draft_definition"]["regions"][0]["nodes"][0][field]

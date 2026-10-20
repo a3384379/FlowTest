@@ -899,8 +899,16 @@ class WorkflowService:
         return published
 
     async def _pin_api_versions(self, definition: WorkflowDefinition) -> WorkflowDefinition:
+        nodes = await self._pin_nodes_api_versions(definition.nodes)
+        regions = [
+            region.model_copy(update={"nodes": await self._pin_nodes_api_versions(region.nodes)})
+            for region in definition.regions
+        ]
+        return definition.model_copy(update={"nodes": nodes, "regions": regions})
+
+    async def _pin_nodes_api_versions(self, source: list[WorkflowNode]) -> list[WorkflowNode]:
         nodes: list[WorkflowNode] = []
-        for node in definition.nodes:
+        for node in source:
             if node.effective_type is not NodeType.API:
                 nodes.append(node)
                 continue
@@ -913,7 +921,7 @@ class WorkflowService:
                 nodes.append(node)
                 continue
             nodes.append(_with_api_version(node, api_definition.current_version))
-        return definition.model_copy(update={"nodes": nodes})
+        return nodes
 
     async def list_versions(
         self, *, actor: User, project_id: UUID, workflow_id: UUID

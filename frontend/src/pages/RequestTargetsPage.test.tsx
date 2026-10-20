@@ -118,7 +118,7 @@ describe('RequestTargetsPage', () => {
       }),
     )
     renderPage()
-    expect(await screen.findByRole('button', { name: service.name, exact: true })).toBeVisible()
+    expect(await screen.findByRole('button', { name: service.name })).toBeVisible()
     await userEvent.click(screen.getByRole('button', { name: /新建逻辑服务/ }))
     expect(screen.getByPlaceholderText('orders')).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '环境默认服务' })).toBeDisabled()
@@ -231,7 +231,7 @@ describe('RequestTargetsPage', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByRole('heading', { name: '请求目标' })).toBeVisible()
-    expect(await screen.findByRole('button', { name: '订单服务', exact: true })).toBeVisible()
+    expect(await screen.findByRole('button', { name: '订单服务' })).toBeVisible()
     expect(await screen.findByText('https://orders.example.com')).toBeVisible()
     expect(screen.getByText('环境默认服务')).toBeVisible()
 
@@ -446,10 +446,10 @@ describe('RequestTargetsPage', () => {
       ),
     )
     renderPage()
-    expect(await screen.findByRole('button', { name: service.name, exact: true })).toBeVisible()
+    expect(await screen.findByRole('button', { name: service.name })).toBeVisible()
     name = 'Updated remote service'
     await userEvent.click(screen.getByRole('button', { name: /刷新/ }))
-    expect(await screen.findByRole('button', { name, exact: true })).toBeVisible()
+    expect(await screen.findByRole('button', { name })).toBeVisible()
   })
 
   it('shows a standard error envelope when the target data cannot be loaded', async () => {
