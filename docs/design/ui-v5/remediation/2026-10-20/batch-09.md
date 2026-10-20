@@ -58,7 +58,7 @@
 6. 最终后端：1841通过、14跳过、2项既有警告、覆盖率90.98%，格式/Ruff/mypy通过（440文件）。日志`remediation-protocol-final-backend-full.log`；后端树`ef5b46dba111d6f7da3ecf387050d987d0112a74`。
 7. 最终前端：154文件1020项通过，无未处理异常，语句/分支/函数/行覆盖率85.82% / 82.08% / 85.27% / 88.28%；完整格式、lint、TypeScript与生产构建通过。日志`remediation-protocol-final-frontend-full.log`；前端树`e31166020f136eb43d58d25b13a547e350dac280`。最终源码提交`a2968297293c14944d04357f63a9a3ee6f75a2dd`；后端完整运行时的前端补修不改变已验证后端树，两侧精确源码独立记录。
 8. API专项60项及真实Compose只读定位验证通过：23层重复Fragment引用有界去重定位到真实根字段，歧义操作返回422和Trace ID；没有执行请求。日志`remediation-protocol-ambiguous-invalid-after.log`、`remediation-protocol-readonly-location-browser.log`。凭据/权限失败后的具名UI补修42项通过，并纳入上述最终1020项完整前端运行。
-9. 分支将推送GitHub，待前置PR #139合并后按最新主分支建立/更新本批PR，再逐项确认正式Required Gate与审查线程。PR #139门禁只属于请求目标批次，不代表本批已合并。
+9. 分支已推送GitHub，并在前置PR #139合并为`722d72f`后同步main。仅解决重复合并产生的上下文冲突，合并后后端/前端树逐一确认与上述最终已验证树相同。接下来独立确认本批PR最新提交的正式Required Gate与审查线程；PR #139的门禁只属于请求目标批次，不代表本批已合并。
 
 ## 验收边界
 

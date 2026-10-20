@@ -52,3 +52,7 @@
 F-PROTO-02、03、04完成本地整改，当前合计33/73项本地完成、40项待完成。后端精确树`ef5b46dba111d6f7da3ecf387050d987d0112a74`：格式/Ruff/mypy440文件通过，1841项通过、14跳过、2项既有警告，覆盖率90.98%。前端精确树`e31166020f136eb43d58d25b13a547e350dac280`：154文件1020项通过，无未处理异常，覆盖率85.82% / 82.08% / 85.27% / 88.28%，格式/lint/类型/生产构建通过。两侧最终完整日志为`remediation-protocol-final-backend-full.log`和`remediation-protocol-final-frontend-full.log`；最终源码`a2968297293c14944d04357f63a9a3ee6f75a2dd`，文档收尾不改变源码树。
 
 实际浏览器覆盖四种协议的1440px与390px布局、第2页固定版本重载、真实契约树与样例、认证/草稿隔离、Kafka固定Schema刷新、离开模块保护、非法模式及只读错误路径定位；没有发送协议调试请求。损坏/歧义/预算和权限/凭据读取失败的公开行为均先复现后修复。合同、专项、限制及GitHub边界详见[第九批](batch-09.md)。前置请求目标PR #139在`9798cde`的远端运行因服务目录一项60秒测试超时失败，修正后已推送`d90db72`，等待该最新HEAD的正式门禁；未将失败运行改记为成功。
+
+## 请求目标合并回执
+
+[PR #139](https://github.com/a3384379/FlowTest/pull/139) 最终HEAD `d90db72b1d2b7e2da4161a23ba4a6e1110655d2b` 的正式Required Gate通过，审查线程全部解决；按匹配SHA命令合并main为`722d72f196d58b5f1693dd15a0daa474faa8fd0e`。合并后[Full Regression 39494968109](https://github.com/a3384379/FlowTest/actions/runs/39494968109) 已启动并核对精确head，等待结果。当前33项本地完成、其中30项已合并；多协议独立PR待门禁，不以该前置PR的成功替代本批验收。
