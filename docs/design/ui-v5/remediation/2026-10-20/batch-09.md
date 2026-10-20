@@ -66,3 +66,13 @@
 - 生成的是契约结构样例，业务取值仍由使用者填写；无法可靠生成时明确停止。
 - 源文档64 KiB是预览边界，不把截断内容宣称为完整导出。
 - GitHub最新提交正式门禁、合并后回归与正式部署单独记录。
+
+## 远端验收补修与依赖修复
+
+PR #140 在 `5a2f958a620e38efd716b1b75711d96cbdc95761` 的 Compose 验收失败：S24 仍断言旧版说明文字。当前界面已显示“手动发送与有界读取，不自动提交消费位点”和“单次会话最多接收10条消息，完成后关闭连接”。只更新对应两处定位，保留 Registry 导入、真实 Produce/Consume、禁止自动提交及完整 WebSocket 会话断言，没有放宽超时或跳过测试。测试清单、ESLint及格式检查通过。
+
+在专用项目 `5e69dd8e-a39a-41e7-bdbb-2b8e5c063c45` 实际运行上述链路：Registry导入成功、Kafka发送/有界消费成功且结果为 `auto_commit: false`，WebSocket完整会话成功并读回 `order-42`。日志 `remediation-protocol-pr140-event-browser-final.log`，截图 `remediation-protocol-pr140-kafka-executed.png`、`remediation-protocol-pr140-websocket-executed.png`。初次手动脚本把Produce按钮名称设置为精确匹配，未包含图标可访问名称而超时；修正测试定位后在同一项目继续，未重复创建或发送该次未执行的请求。
+
+前置PR #139合并后的Full Regression安全检查另发现新公布的 [GHSA-6q48-6c7w-9gw2](https://github.com/advisories/GHSA-6q48-6c7w-9gw2)。按维护者修复说明仅将锁文件中的certifi从2026.7.22更新为2026.10.19，不改变其他依赖。重新安装锁定的dev环境后，pip-audit未发现已知漏洞；项目自身未发布PyPI的既有跳过提示保留。更新依赖后的完整后端格式、Ruff、mypy440文件通过，1841通过、14跳过、2项既有警告，覆盖率90.99%，日志 `remediation-protocol-certifi-backend-full.log`。应用源码与此前最终1020项前端全量验证一致，此次前端只改E2E定位，没有用定向测试替代远端Compose门禁。
+
+源码补修提交为 `e9f1137`（S24定位）、`efdaf0a`（certifi锁文件）。最新PR正式门禁和合并后回归仍需单独核对；旧PR运行的Compose失败、main旧依赖的安全失败均保留为失败记录。

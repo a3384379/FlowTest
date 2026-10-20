@@ -56,3 +56,9 @@ F-PROTO-02、03、04完成本地整改，当前合计33/73项本地完成、40�
 ## 请求目标合并回执
 
 [PR #139](https://github.com/a3384379/FlowTest/pull/139) 最终HEAD `d90db72b1d2b7e2da4161a23ba4a6e1110655d2b` 的正式Required Gate通过，审查线程全部解决；按匹配SHA命令合并main为`722d72f196d58b5f1693dd15a0daa474faa8fd0e`。合并后[Full Regression 39494968109](https://github.com/a3384379/FlowTest/actions/runs/39494968109) 已启动并核对精确head，等待结果。当前33项本地完成、其中30项已合并；多协议独立PR待门禁，不以该前置PR的成功替代本批验收。
+
+## PR #140 验收补修
+
+`5a2f958` 的S24浏览器验收仍断言旧界面文字，已在 `e9f1137` 更新两处说明定位，保留真实协议执行断言、原超时和重试规则。隔离Chromium在专用项目真实完成Registry导入、Kafka Produce/Consume（不自动提交）与WebSocket Exchange；详见[第九批补修记录](batch-09.md#远端验收补修与依赖修复)。
+
+前置main回归39494968109的安全检查检测到新公布的certifi公告，`efdaf0a`只更新其锁定版本至2026.10.19。pip-audit通过，完整后端1841通过、14跳过、2项既有警告、90.99%，格式/Ruff/mypy通过。此次依赖修复的日志和旧失败证据分开保存。尚未取得最新PR的正式Required Gate，也未将旧main回归标为成功；整改数量仍为33本地完成、30已合并。
