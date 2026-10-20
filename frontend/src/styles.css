@@ -2515,3 +2515,10 @@ body {
     display: none;
   }
 }
+
+.request-target-review-modal .ant-modal-body {
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 8px;
+}

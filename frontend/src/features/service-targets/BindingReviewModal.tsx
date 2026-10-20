@@ -42,6 +42,8 @@ export default function BindingReviewModal({
   return (
     <Modal
       open
+      centered
+      className="request-target-review-modal"
       title="确认默认服务变更"
       width={920}
       okText="确认保存"

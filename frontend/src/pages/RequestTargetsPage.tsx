@@ -706,6 +706,8 @@ function RequestTargetEditModal({
   return (
     <Modal
       open={Boolean(target)}
+      centered
+      className="request-target-review-modal"
       width={860}
       title={isService ? '逻辑服务影响预览 / 编辑' : '部署地址影响预览 / 编辑'}
       okText={review ? '确认保存' : '分析影响与目标'}
