@@ -259,7 +259,12 @@ class MockServiceManager:
 
     async def _check_preview_catalog(self, service_id: UUID, limits: MockPreviewLimits) -> None:
         size = await self._repository.mock_preview_catalog_size(service_id)
-        if size.count > limits.candidate_count or size.metadata_characters > limits.metadata_bytes:
+        # Stored JSON may encode each Unicode character as a six-character escape.
+        # The domain budget checks the actual UTF-8 representation after this bounded read.
+        if (
+            size.count > limits.candidate_count
+            or size.metadata_characters > limits.metadata_bytes * 6
+        ):
             raise MockPreviewError(
                 "规则目录超过预览数量或元数据大小上限, 未进行局部匹配",
                 field="request",
@@ -274,14 +279,15 @@ class MockServiceManager:
             return decision
         if selected.route_id is None:
             raise AppError(code="MOCK_ROUTE_NOT_FOUND", message="Mock 路由不存在", status_code=404)
+        maximum_characters = limits.source_bytes * 6
         stored = await self._repository.get_mock_preview_body(
-            selected.route_id, maximum_characters=limits.source_bytes
+            selected.route_id, maximum_characters=maximum_characters
         )
         if stored is None or _preview_stored_rule(stored.route) != selected:
             raise AppError(
                 code="MOCK_PREVIEW_CHANGED", message="规则目录已变化, 请重新预览", status_code=409
             )
-        if stored.character_count > limits.source_bytes:
+        if stored.character_count > maximum_characters:
             raise MockPreviewError(
                 "已保存模板超过64KiB预览上限",
                 field="response_body",

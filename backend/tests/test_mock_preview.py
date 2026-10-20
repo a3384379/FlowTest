@@ -316,7 +316,7 @@ async def test_preview_does_not_load_oversized_selected_saved_templates_or_trunc
     async with data_context.sessions() as session:
         stored = await session.get(MockRoute, UUID(fixture.route_id))
         assert stored is not None
-        stored.response_body = "x" * 65537
+        stored.response_body = "x" * 400_000
         await session.commit()
     preview = await data_context.client.post(
         fixture.endpoint,
@@ -395,7 +395,7 @@ async def test_preview_rejects_an_oversized_saved_catalog_before_loading_metadat
     async with data_context.sessions() as session:
         stored = await session.get(MockRoute, UUID(fixture.route_id))
         assert stored is not None
-        stored.header_conditions = {"X-Large": "x" * (512 * 1024)}
+        stored.header_conditions = {"X-Large": "x" * (6 * 512 * 1024)}
         await session.commit()
     response = await data_context.client.post(
         fixture.endpoint,
@@ -410,3 +410,60 @@ async def test_preview_rejects_an_oversized_saved_catalog_before_loading_metadat
     error = response.json()["error"]
     assert error["code"] == "MOCK_PREVIEW_LIMIT_EXCEEDED"
     assert error["trace_id"] and error["details"]["field"] == "request"
+
+
+@pytest.mark.asyncio
+async def test_preview_budgets_stored_unicode_by_utf8_instead_of_database_json_escapes(
+    data_context: DataTestContext,
+) -> None:
+    fixture = await _preview_fixture(data_context)
+    template = "中" * 20_000
+    async with data_context.sessions() as session:
+        stored = await session.get(MockRoute, UUID(fixture.route_id))
+        assert stored is not None
+        stored.response_body = template
+        await session.commit()
+    response = await data_context.client.post(
+        fixture.endpoint,
+        headers=fixture.headers,
+        json={"draft": fixture.draft.model_dump(mode="json"), "request": _request_sample()},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["route_id"] == fixture.route_id
+    assert response.json()["response"]["body"] == template
+
+
+@pytest.mark.asyncio
+async def test_preview_accepts_unicode_catalog_metadata_within_its_actual_utf8_budget(
+    data_context: DataTestContext,
+) -> None:
+    fixture = await _preview_fixture(data_context)
+    async with data_context.sessions() as session:
+        stored = await session.get(MockRoute, UUID(fixture.route_id))
+        assert stored is not None
+        session.add_all(
+            [
+                MockRoute(
+                    mock_service_id=stored.mock_service_id,
+                    created_by_id=stored.created_by_id,
+                    name=f"Unicode目录规则{index}",
+                    method="GET",
+                    path_pattern=f"/unicode/{index}",
+                    query_conditions={"unicode": "中" * 5_000},
+                    response_body=None,
+                )
+                for index in range(18)
+            ]
+        )
+        await session.commit()
+    response = await data_context.client.post(
+        fixture.endpoint,
+        headers=fixture.headers,
+        json={
+            "draft": fixture.draft.model_dump(mode="json"),
+            "route_id": fixture.route_id,
+            "request": _request_sample(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["selected"]["route_id"] == fixture.route_id
