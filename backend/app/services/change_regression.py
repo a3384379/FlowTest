@@ -4348,9 +4348,9 @@ def _transition(run: ChangeRegressionRun, target: ChangeRegressionStatus) -> Non
 
 
 def _ensure_review_content_current(item: AIChangeItem, payload: ChangeRegressionReview) -> None:
-    if payload.expected_content is not None and payload.expected_content != item.proposed_content:
+    if payload.expected_content is None or payload.expected_content != item.proposed_content:
         raise AppError(
             code="CHANGE_REGRESSION_REVIEW_STALE",
-            message="草案内容已更新，请刷新后重新审核",
+            message="缺少审核快照或草案内容已更新，请刷新后重新审核",
             status_code=409,
         )

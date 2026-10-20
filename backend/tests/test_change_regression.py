@@ -389,15 +389,22 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert len(missing_body["missing_tests"]) == 1
     item_id = missing_body["missing_tests"][0]["item_id"]
     for stale_decision in ("accept", "reject"):
-        stale_review = await context.client.post(
-            f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}"
-            f"/change-set-items/{item_id}/{stale_decision}",
-            headers=headers,
-            json={"expected_content": {}, "note": "过期内容不能审核"},
-        )
-        assert stale_review.status_code == 409, stale_review.text
-        assert stale_review.json()["error"]["code"] == "CHANGE_REGRESSION_REVIEW_STALE"
-        assert stale_review.json()["error"]["trace_id"]
+        for stale_payload in ({}, {"expected_content": None}, {"expected_content": {}}):
+            stale_review = await context.client.post(
+                f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}"
+                f"/change-set-items/{item_id}/{stale_decision}",
+                headers=headers,
+                json=stale_payload,
+            )
+            assert stale_review.status_code == 409, stale_review.text
+            assert stale_review.json()["error"]["code"] == "CHANGE_REGRESSION_REVIEW_STALE"
+            assert stale_review.json()["error"]["trace_id"]
+    unchanged_review = await context.client.get(
+        f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}", headers=headers
+    )
+    assert unchanged_review.status_code == 200
+    assert unchanged_review.json()["missing_tests"][0]["review_status"] == "pending"
+    assert unchanged_review.json()["missing_tests"][0]["materialized_resource_id"] is None
     reviewed = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}"
         f"/change-set-items/{item_id}/accept",
@@ -766,6 +773,7 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         headers=headers,
         json={
             "note": "错误 API 目标必须被拒绝",
+            "expected_content": draft,
             "materialization": {
                 "api_definition_id": inventory_api.json()["definition"]["id"],
                 "environment_id": environment_id,
@@ -781,6 +789,7 @@ async def test_semantic_gap_is_independent_from_asset_mapping_and_uses_current_c
         headers=headers,
         json={
             "note": "确认新边界语义并物化",
+            "expected_content": draft,
             "materialization": {
                 "api_definition_id": api_definition_id,
                 "environment_id": environment_id,
