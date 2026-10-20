@@ -36,3 +36,11 @@
 本地自动验证、Compose专项、GitHub最新提交门禁、合并后CI与正式环境验收分别记账。其余待实施项继续见[73项进度](progress.md)，不因本次补充标记为全站达标。
 
 补充浏览器验收：从普通顶层断言的“检查点与日志”打开记录，区域实例误标不存在，来源入口保持原执行的 `api&attempt=1`。记录见本地 `remediation-root-checkpoint-browser.log`。
+
+## 镜像补丁复核
+
+首批交付中的环境实验室镜像安全补丁另行完成本机 `linux/arm64` 构建，未替换现有 Compose 服务。容器内核验 `containerd`/`ctr` 为 2.3.4，`libexpat` 为 2.9.0-r0；构建步骤还核验了 `dockerd` 内嵌的 containerd 模块为 2.3.4。
+
+使用与 CI 相同的 Grype 0.116.1、仓库现有 `.grype.yaml` 和当日有效数据库执行 `--only-fixed --fail-on high` 扫描通过：未忽略匹配中 High/Critical 为 0，Medium 16、Low 13；既有 44 条批准忽略保持不变。构建、二进制版本及 JSON 扫描记录分别保存在本地 `remediation-daemon-build-anonymous.log`、`remediation-daemon-runtime-versions.log`/`remediation-daemon-libexpat-version.log`、`remediation-daemon-grype.json`。
+
+该项确认本机架构的镜像构建和扫描，不代替 GitHub 最新提交的其他架构检查或实际环境实验室运行验收。
