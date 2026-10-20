@@ -1,5 +1,10 @@
 import { Alert, Button, Modal, Popconfirm, Select, Space, Typography } from 'antd'
-import { useState, type ReactNode } from 'react'
+import { useContext, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { RegionEditScopeContext } from './editor/region-edit-scope'
+import { DraftContext, useDraftSession } from '../features/drafts/draft-session'
+import { useNodeEditContext } from './editor/node-edit-session'
+import { regionEditorScope } from './editor/editor-identity'
+import { useNodeSelectionGuard } from './editor/use-node-selection-guard'
 import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
 import {
   insertNestedControlBlock,
@@ -38,6 +43,8 @@ export default function WorkflowRegionCanvasModal({
   onStructureChange,
   renderNestedControl,
 }: Props) {
+  const session = useDraftSession()
+  const { scope, guard, pending } = useRegionEditGuard(session, region.id, editable)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedApiId, setSelectedApiId] = useState<string | undefined>()
   const [controlKind, setControlKind] = useState<ControlBlockKind>('group')
@@ -118,63 +125,115 @@ export default function WorkflowRegionCanvasModal({
     setError(null)
   }
   return (
-    <Modal
-      title={`${region.role} 区域画布`}
-      open={open}
-      width={960}
-      footer={null}
-      onCancel={() => {
-        setSelectedNodeId(null)
-        onClose()
-      }}
-    >
-      <CanvasToolbar
-        region={region}
-        editable={editable}
-        selectedNodeId={selectedNode?.id ?? null}
-        selectedNodeName={selectedNode?.name}
-        availableApis={availableApis}
-        activeApiId={activeApiId}
-        onSelectApi={setSelectedApiId}
-        onInsert={applyInsertion}
-        controlKind={controlKind}
-        onSelectControlKind={setControlKind}
-        canInsertControl={Boolean(definition && onStructureChange)}
-        onInsertControl={applyNestedInsertion}
-        onMove={applyMove}
-        onMoveTo={applyMoveTo}
-        onRemove={applyDeletion}
-      />
-      {error && <Alert type="error" title={error} />}
-      <Typography.Paragraph type="secondary">
-        拖动连线可调整线性区域的执行顺序；会自动重接整条路径，不能创建隐式分支。
-      </Typography.Paragraph>
-      <WorkflowRegionCanvas
-        key={regionCanvasKey(region)}
-        region={region}
-        editable={editable}
-        selectedNodeId={selectedNodeId}
-        onSelectNode={setSelectedNodeId}
-        onUpdate={onUpdate}
-        onReorder={applyReconnection}
-      />
-      <NestedControlConfiguration
-        node={selectedNode}
-        region={region}
-        renderNestedControl={renderNestedControl}
-      />
-      <NestedRegionNavigation
-        open={open}
-        ownerId={selectedNodeId}
-        definition={definition}
-        apis={apis}
-        editable={editable}
-        onUpdate={onUpdate}
-        onStructureChange={onStructureChange}
-        renderNestedControl={renderNestedControl}
-      />
-    </Modal>
+    <DraftContext.Provider value={session}>
+      <RegionEditScopeContext.Provider value={scope}>
+        {guard.dialog}
+        <Modal
+          title={`${region.role} 区域画布`}
+          open={open}
+          width="min(1200px, calc(100vw - 32px))"
+          className="workflow-region-modal"
+          style={{ top: 24 }}
+          styles={{ body: { maxHeight: 'calc(100dvh - 144px)', overflowY: 'auto' } }}
+          footer={null}
+          onCancel={async () => {
+            if (await guard.request()) {
+              setSelectedNodeId(null)
+              onClose()
+            }
+          }}
+        >
+          <CanvasToolbar
+            region={region}
+            editable={editable && !pending}
+            selectedNodeId={selectedNode?.id ?? null}
+            selectedNodeName={selectedNode?.name}
+            availableApis={availableApis}
+            activeApiId={activeApiId}
+            onSelectApi={setSelectedApiId}
+            onInsert={applyInsertion}
+            controlKind={controlKind}
+            onSelectControlKind={setControlKind}
+            canInsertControl={Boolean(definition && onStructureChange)}
+            onInsertControl={applyNestedInsertion}
+            onMove={applyMove}
+            onMoveTo={applyMoveTo}
+            onRemove={applyDeletion}
+          />
+          {error && <Alert type="error" title={error} />}
+          <Typography.Paragraph type="secondary">
+            拖动连线可调整线性区域的执行顺序；会自动重接整条路径，不能创建隐式分支。
+          </Typography.Paragraph>
+          <RegionWorkspace
+            selected={Boolean(selectedNode)}
+            canvas={
+              <WorkflowRegionCanvas
+                key={regionCanvasKey(region)}
+                region={region}
+                editable={editable && !pending}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={async (id) => {
+                  if (id === selectedNodeId || !pending || (await guard.request()))
+                    setSelectedNodeId(id)
+                }}
+                onUpdate={onUpdate}
+                onReorder={applyReconnection}
+              />
+            }
+            configuration={
+              <NestedControlConfiguration
+                node={selectedNode}
+                region={region}
+                renderNestedControl={renderNestedControl}
+              />
+            }
+          />
+          <NestedRegionNavigation
+            open={open}
+            ownerId={selectedNodeId}
+            definition={definition}
+            apis={apis}
+            editable={editable}
+            onUpdate={onUpdate}
+            onStructureChange={onStructureChange}
+            renderNestedControl={renderNestedControl}
+          />
+        </Modal>
+      </RegionEditScopeContext.Provider>
+    </DraftContext.Provider>
   )
+}
+
+function RegionWorkspace({
+  selected,
+  canvas,
+  configuration,
+}: {
+  selected: boolean
+  canvas: ReactNode
+  configuration: ReactNode
+}) {
+  return (
+    <div className={`workflow-region-workspace${selected ? ' has-selection' : ''}`}>
+      {canvas}
+      {selected && (
+        <div className="workflow-region-node-panel workflow-inspector">{configuration}</div>
+      )}
+    </div>
+  )
+}
+
+function useRegionEditGuard(
+  session: ReturnType<typeof useDraftSession>,
+  regionId: string,
+  editable: boolean,
+) {
+  const context = useNodeEditContext()
+  const containingScope = useContext(RegionEditScopeContext)
+  const scope = regionEditorScope(containingScope ?? context?.scope ?? 'region-editor:', regionId)
+  const guard = useNodeSelectionGuard(session, scope, editable)
+  useSyncExternalStore(session.subscribe, session.snapshot)
+  return { scope, guard, pending: session.dirtyNodeEditorKeys(scope).length > 0 }
 }
 
 function NestedControlConfiguration({
@@ -186,7 +245,7 @@ function NestedControlConfiguration({
   region: WorkflowRegion
   renderNestedControl?: (node: WorkflowNode, region: WorkflowRegion) => ReactNode
 }) {
-  if (!node?.capability_id?.startsWith('flow.control.')) return null
+  if (!node) return null
   return renderNestedControl?.(node, region)
 }
 

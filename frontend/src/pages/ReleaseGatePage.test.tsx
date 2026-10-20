@@ -276,7 +276,7 @@ describe('ReleaseGatePage', () => {
         disabledEvidenceRequest()
         return HttpResponse.json(page([]))
       }),
-      http.get('/api/v1/execution-fabric/tasks', () => {
+      http.get(`/api/v1/projects/${project.id}/release-runner-evidence`, () => {
         disabledEvidenceRequest()
         return HttpResponse.json(page([]))
       }),
@@ -414,7 +414,7 @@ function handlers(overrides: Partial<V3FeatureFlags> = {}) {
     http.get(`/api/v1/projects/${project.id}/performance-runs`, () =>
       HttpResponse.json(page([{ id: performanceRunId, status: 'passed', scenario_version: 3 }])),
     ),
-    http.get('/api/v1/execution-fabric/tasks', () =>
+    http.get(`/api/v1/projects/${project.id}/release-runner-evidence`, () =>
       HttpResponse.json(
         page([
           {

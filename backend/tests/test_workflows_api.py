@@ -1198,6 +1198,20 @@ async def test_workflow_draft_publish_snapshot_and_retry(workflow_client: AsyncC
     assert sorted(item["attempt"] for item in log_items if item["node_id"] == "api") == [1, 2]
     assert all("output" not in item and "result" not in item for item in log_items)
     assert len({item["id"] for item in log_items}) == 4
+    filtered_log = await workflow_client.get(
+        checkpoint_log_url, headers=headers, params={"node_id": "api", "attempt": 2}
+    )
+    assert filtered_log.status_code == 200, filtered_log.text
+    assert filtered_log.json()["total"] == 1
+    assert [(item["node_id"], item["attempt"]) for item in filtered_log.json()["items"]] == [
+        ("api", 2)
+    ]
+    empty_log = await workflow_client.get(
+        checkpoint_log_url, headers=headers, params={"node_id": "missing"}
+    )
+    assert empty_log.json()["total"] == 0
+    assert empty_log.json()["items"] == []
+
     log_detail = await workflow_client.get(
         f"{checkpoint_log_url}/{log_items[0]['id']}", headers=headers
     )

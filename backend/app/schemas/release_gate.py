@@ -14,6 +14,19 @@ ReleaseCandidateRef = Annotated[
 ]
 
 
+class ReleaseRunnerEvidenceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    execution_id: UUID
+    status: str
+    required_runner_type: str
+    attempts: int
+    fencing_token: int
+    completed_at: datetime | None
+    created_at: datetime
+
+
 class ReleasePolicyWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -11,6 +11,37 @@ import { server } from '../../test/server'
 import GlobalSearch from './GlobalSearch'
 
 describe('GlobalSearch', () => {
+  it('shows a failed search and trace ID, then retries the same query', async () => {
+    let failed = true
+    server.use(
+      http.get('/api/v1/search', () =>
+        failed
+          ? HttpResponse.json(
+              {
+                error: {
+                  code: 'UNAVAILABLE',
+                  message: '搜索暂不可用',
+                  trace_id: 'search-trace-503',
+                },
+              },
+              { status: 503 },
+            )
+          : HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 }),
+      ),
+    )
+    renderSearch()
+    const browser = userEvent.setup()
+    await browser.click(screen.getByLabelText('全局搜索'))
+    await browser.type(screen.getByLabelText('全局搜索'), '订单')
+    expect(await screen.findByText('搜索暂不可用')).toBeVisible()
+    expect(screen.getByText('search-trace-503')).toBeVisible()
+    expect(screen.queryByText('未找到可访问的资产')).not.toBeInTheDocument()
+    failed = false
+    await browser.click(screen.getByRole('button', { name: '重试搜索' }))
+    expect(await screen.findByText('未找到可访问的资产')).toBeVisible()
+    expect(screen.getByLabelText('全局搜索')).toHaveValue('订单')
+  })
+
   it('debounces a query, labels the project, and navigates to the selected asset', async () => {
     let receivedQuery: string | null = null
     const path = `/projects/${project.id}/workflows?focus=workflow:workflow-id`

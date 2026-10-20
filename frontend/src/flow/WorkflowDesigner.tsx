@@ -294,6 +294,8 @@ function WorkflowDesignerReady({
     runtimeMode,
     runtimeExecutionId,
     focusNodeId,
+    onNodeFocus,
+    onAttemptFocus,
   )
   const dropPosition = useRef<{ x: number; y: number } | null>(null)
   const [dimensions, setDimensions] = useState<CanvasDimensions>(() => new Map())
@@ -361,7 +363,7 @@ function WorkflowDesignerReady({
         runtimeMode,
       ).data,
       canCopy: canvasEditable && resolveEffectiveNodeType(node) !== 'start',
-      ...nodePresentation(node, definition),
+      ...nodePresentation(node, definition, apis),
       canDelete: canvasEditable && canDeleteNode(definition, node),
       onConfigure: configureInspector,
       onCopy: copySelectedNode,
@@ -738,6 +740,7 @@ function WorkflowDesignerReady({
     <div className={`workflow-designer workflow-editor-${surface}${focusMode ? ' is-focus' : ''}`}>
       {selectionGuard.dialog}
       {modalHolder}
+      <RuntimeFocusNotice mode={runtimeMode} requestedId={focusNodeId} definition={definition} />
       <WorkflowContextMenu
         point={menuPoint}
         onClose={() => setMenuPoint(null)}
@@ -2161,7 +2164,9 @@ function WorkflowNodeCard({ data, selected }: NodeProps<CanvasNode>) {
             <small>{data.typeLabel}</small>
           </span>
         </div>
-        <div className="flow-node-summary">{data.summary}</div>
+        <div className="flow-node-summary" title={data.summary}>
+          {data.summary}
+        </div>
         <NodeRegionPreview regions={data.regions ?? []} />
         <NodeFooter data={data} />
         {!terminal &&
@@ -2588,19 +2593,39 @@ function RuntimeTrajectoryEntry({
   )
 }
 
+function RuntimeFocusNotice({
+  mode,
+  requestedId,
+  definition,
+}: {
+  mode?: string
+  requestedId?: string
+  definition: WorkflowDefinition
+}) {
+  if (!mode || !requestedId || definition.nodes.some((node) => node.id === requestedId)) return null
+  return <Alert type="warning" title="链接中的节点不属于本次执行，请从画布重新选择。" />
+}
+
 function runtimeNodeSelection(
   definition: WorkflowDefinition,
   nodes: WorkflowNodeExecution[],
   requestedId?: string,
 ): WorkflowSelection {
   const requested = definition.nodes.find((node) => node.id === requestedId)
-  const failed = nodes.find(
-    (node) => node.status === 'failed' && definition.nodes.some((item) => item.id === node.node_id),
+  if (requestedId) return requested ? { kind: 'node', id: requested.id } : emptySelection()
+  const available = nodes.filter((node) =>
+    definition.nodes.some((item) => item.id === node.node_id),
   )
+  const preferred =
+    available.find((node) => node.status === 'failed') ??
+    available.find(
+      (node) =>
+        !['start', 'end'].includes(node.node_type) && !['pending', 'skipped'].includes(node.status),
+    )
   const node =
-    requested ??
-    definition.nodes.find((item) => item.id === failed?.node_id) ??
-    definition.nodes.find((item) => item.type !== 'start' && item.type !== 'end')
+    definition.nodes.find((item) => item.id === preferred?.node_id) ??
+    definition.nodes.find((item) => item.type !== 'start' && item.type !== 'end') ??
+    definition.nodes[0]
   return node ? { kind: 'node', id: node.id } : emptySelection()
 }
 
@@ -2611,6 +2636,8 @@ function useRuntimeSelection(
   mode?: string,
   executionId?: string,
   requestedId?: string,
+  onNodeFocus?: (nodeId: string | null) => void,
+  onAttemptFocus?: (nodeId: string, attempt: number) => void,
 ) {
   const applied = useRef<string | null>(null)
   useEffect(() => {
@@ -2618,8 +2645,26 @@ function useRuntimeSelection(
     const key = JSON.stringify([mode, executionId, requestedId])
     if (applied.current === key) return
     applied.current = key
-    select(runtimeNodeSelection(definition, nodes, requestedId))
-  }, [definition, executionId, mode, nodes, requestedId, select])
+    const selection = runtimeNodeSelection(definition, nodes, requestedId)
+    select(selection)
+    if (!requestedId) canonicalRuntimeFocus(selection, nodes, onNodeFocus, onAttemptFocus)
+  }, [definition, executionId, mode, nodes, requestedId, select, onNodeFocus, onAttemptFocus])
+}
+
+function canonicalRuntimeFocus(
+  selection: WorkflowSelection,
+  nodes: WorkflowNodeExecution[],
+  onNodeFocus?: (id: string | null) => void,
+  onAttemptFocus?: (id: string, attempt: number) => void,
+) {
+  if (selection?.kind !== 'node') return
+  const attempts = defaultRuntimeAttempt(nodes.find((item) => item.node_id === selection.id))
+  if (attempts && onAttemptFocus) onAttemptFocus(selection.id, attempts)
+  else onNodeFocus?.(selection.id)
+}
+
+function defaultRuntimeAttempt(node: WorkflowNodeExecution | undefined): number | undefined {
+  return node?.result?.observations?.at(-1)?.attempt ?? node?.attempts
 }
 
 function useCanvasAutoFrame(

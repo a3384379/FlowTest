@@ -20,6 +20,7 @@ import {
   selectChangeRegressionOperation,
   waiveSemanticGap,
   type ChangeRegressionInput,
+  type MissingTestProposal,
 } from './change-regression-service'
 
 export function useChangeRegression(initialRunId?: string) {
@@ -65,13 +66,19 @@ export function useChangeRegression(initialRunId?: string) {
       createChangeRegression(required(projectId), input),
   })
   const review = useMutation({
-    mutationFn: (input: { runId: string; itemId: string; decision: 'accept' | 'reject' }) =>
+    mutationFn: (input: {
+      runId: string
+      itemId: string
+      decision: 'accept' | 'reject'
+      expectedContent?: MissingTestProposal['proposed_content']
+    }) =>
       reviewMissingTest(
         required(projectId),
         input.runId,
         input.itemId,
         input.decision,
         '前端人工审核',
+        input.expectedContent,
       ),
   })
   const approve = useMutation({
@@ -142,6 +149,7 @@ export function useChangeRegression(initialRunId?: string) {
     runId: string
     itemId: string
     decision: 'accept' | 'reject'
+    expectedContent?: MissingTestProposal['proposed_content']
   }): Promise<boolean> {
     if (!canEdit) return false
     try {

@@ -72,8 +72,11 @@ function Workspace() {
 
 function renderWorkspace(initialEntry = apiHref) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  client.setQueryData(['api-detail', project.id, apiDefinition.id], apiDetail(apiDefinition.id))
-  client.setQueryData(['api-detail', project.id, 'api-B'], apiDetail('api-B'))
+  client.setQueryData(
+    ['api-detail', project.id, apiDefinition.id, null],
+    apiDetail(apiDefinition.id),
+  )
+  client.setQueryData(['api-detail', project.id, 'api-B', null], apiDetail('api-B'))
   client.setQueryData(['workflow', project.id, workflow.id], { ...workflow, name: '流程A' })
   client.setQueryData(['report-detail', project.id, 'run-1'], {
     summary: { workflow_name: '流程A' },

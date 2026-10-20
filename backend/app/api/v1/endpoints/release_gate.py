@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, status
@@ -9,10 +10,44 @@ from app.schemas.release_gate import (
     ReleaseDecisionResponse,
     ReleasePolicyResponse,
     ReleasePolicyWrite,
+    ReleaseRunnerEvidenceResponse,
 )
 from app.services.release_gate import ReleaseGateService
 
 router = APIRouter(prefix="/projects/{project_id}")
+
+
+@router.get("/release-runner-evidence", response_model=Page[ReleaseRunnerEvidenceResponse])
+async def list_release_runner_evidence(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    status: Literal["queued", "leased", "completed", "failed", "cancelled"] | None = None,
+) -> Page[ReleaseRunnerEvidenceResponse]:
+    tasks, total = await ReleaseGateService(session).list_runner_evidence(
+        actor=current_user, project_id=project_id, page=page, page_size=page_size, status=status
+    )
+    return Page(
+        items=[ReleaseRunnerEvidenceResponse.model_validate(task) for task in tasks],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/release-runner-evidence/{task_id}", response_model=ReleaseRunnerEvidenceResponse)
+async def get_release_runner_evidence(
+    project_id: UUID,
+    task_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> ReleaseRunnerEvidenceResponse:
+    task = await ReleaseGateService(session).get_runner_evidence(
+        actor=current_user, project_id=project_id, task_id=task_id
+    )
+    return ReleaseRunnerEvidenceResponse.model_validate(task)
 
 
 @router.get("/release-policies", response_model=list[ReleasePolicyResponse])

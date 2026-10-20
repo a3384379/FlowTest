@@ -17,6 +17,7 @@ from app.domain.release_gate import (
 )
 from app.models.access import User
 from app.models.release_gate import ReleaseDecision, ReleasePolicy
+from app.models.runner_fabric import RunnerTask
 from app.repositories.release_gate import (
     ImpactEvidenceBundle,
     PerformanceEvidenceBundle,
@@ -102,6 +103,27 @@ class ReleaseGateService:
     async def list_policies(self, *, actor: User, project_id: UUID) -> list[ReleasePolicy]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._repository.list_policies(project_id)
+
+    async def list_runner_evidence(
+        self, *, actor: User, project_id: UUID, page: int, page_size: int, status: str | None
+    ) -> tuple[list[RunnerTask], int]:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        return await self._repository.list_project_runner_tasks(
+            project_id=project_id, offset=(page - 1) * page_size, limit=page_size, status=status
+        )
+
+    async def get_runner_evidence(
+        self, *, actor: User, project_id: UUID, task_id: UUID
+    ) -> RunnerTask:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        task = await self._repository.get_project_runner_task(
+            project_id=project_id, task_id=task_id
+        )
+        if task is None:
+            raise AppError(
+                code="RUNNER_EVIDENCE_NOT_FOUND", message="Runner 证据不存在", status_code=404
+            )
+        return task
 
     async def create_decision(
         self, *, actor: User, project_id: UUID, payload: ReleaseDecisionCreate

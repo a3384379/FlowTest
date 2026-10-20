@@ -75,6 +75,75 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it('explains the whole project export scope before downloading', async () => {
+    renderPage()
+    const button = screen.getByRole('button', { name: '导出接口' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          '当前分组、搜索筛选和批量选择不会影响本次全项目导出。当前版本暂不支持仅导出分组或已选接口。',
+        ),
+      ).toBeVisible(),
+    )
+    expect(screen.getByRole('button', { name: '导出整个项目' })).toBeEnabled()
+  })
+  it('shows the request method and path in the API directory', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({
+          items: [{ ...apiDefinition, method: 'POST', path: '/orders/create' }],
+          total: 1,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+    )
+    renderPage()
+    await waitFor(() => {
+      const entry = screen.getByRole('button', { name: `选择接口 ${apiDefinition.name}` })
+      expect(entry).toHaveTextContent('POST')
+      expect(entry).toHaveTextContent('/orders/create')
+    })
+  })
+  it.each([
+    [{ kind: 'status_code', operator: 'equals', target: null, expected: 200 }],
+    [{ kind: 'json_path', operator: 'equals', target: '$.ok', expected: true }],
+  ])(
+    'shows the saved validation rules instead of an ignored quick status input: %j',
+    async (rule) => {
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+          HttpResponse.json({
+            definition: apiDefinition,
+            version: {
+              id: 'api-v1',
+              api_definition_id: apiDefinition.id,
+              version: 1,
+              method: 'GET',
+              path: '/users/me',
+              query_parameters: [],
+              headers: {},
+              body_kind: 'none',
+              body: null,
+              auth_kind: 'none',
+              auth_config: {},
+              extraction_rules: [],
+              assertions: [rule],
+              created_at: '2026-08-09T08:00:00Z',
+            },
+          }),
+        ),
+      )
+      renderPage()
+      expect(await screen.findByText('按已保存断言校验（1 条）')).toBeVisible()
+      expect(screen.queryByRole('spinbutton', { name: '预期状态码' })).not.toBeInTheDocument()
+      if (rule.kind === 'json_path') expect(screen.getByText('未配置状态码断言')).toBeVisible()
+      else expect(screen.getByText('状态码 equals 200')).toBeVisible()
+    },
+  )
+
   it('retains cross-page checkbox selection without changing the active API', async () => {
     const payloads: unknown[] = []
     server.use(

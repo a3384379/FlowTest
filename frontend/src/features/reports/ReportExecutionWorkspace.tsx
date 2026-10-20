@@ -53,6 +53,7 @@ type WorkspaceProps = {
 export default function ReportExecutionWorkspace(props: WorkspaceProps) {
   const { detail, executionId, nodeId } = props
   const node = selectReportNode(detail?.nodes ?? [], nodeId)
+  useCanonicalReportSelection(props, node)
   const snapshot = useQuery({
     queryKey: ['workflow-execution', props.projectId, executionId],
     queryFn: () => getWorkflowExecution(props.projectId, executionId, true),
@@ -62,7 +63,7 @@ export default function ReportExecutionWorkspace(props: WorkspaceProps) {
     executionId,
     workflowId: detail?.summary.workflow_id,
     nodeId: node?.node_id,
-    attempt: props.attempt,
+    attempt: reportAttempt(props.attempt, node),
     ...props.evidence,
   })
   return (
@@ -75,6 +76,7 @@ export default function ReportExecutionWorkspace(props: WorkspaceProps) {
         props={props}
         environment={snapshotEnvironment(snapshot.data?.execution.snapshot)}
       />
+      <ReportFocusNotice requestedId={nodeId} detail={detail} node={node} />
       {props.loading && (
         <Spin description="正在加载当次执行证据">
           <div className="report-loading-placeholder" />
@@ -160,7 +162,7 @@ function ReportExecutionBody({
   snapshotError: boolean
   onRetrySnapshot: () => void
 }) {
-  const { executionId, nodeId } = props
+  const { executionId } = props
   return (
     <div className="report-execution-grid">
       <ReportTrajectory
@@ -169,14 +171,6 @@ function ReportExecutionBody({
         onSelect={props.onSelectNode}
       />
       <div className="report-execution-evidence">
-        {nodeId && !detail.nodes.some((item) => item.node_id === nodeId) && (
-          <Alert
-            type="warning"
-            showIcon
-            title="指定节点不在本次报告中"
-            description="已显示本次运行的首个失败节点或首个节点，请从执行轨迹重新选择。"
-          />
-        )}
         {node ? (
           <ReportNodeEvidence
             key={`${executionId}:${node.id}`}
@@ -251,12 +245,47 @@ function ReportExecutionBody({
   )
 }
 
+function ReportFocusNotice({
+  requestedId,
+  detail,
+  node,
+}: {
+  requestedId: string | null
+  detail: ReportExecutionDetail | undefined
+  node: ReportNode | undefined
+}) {
+  if (!requestedId || !detail || node) return null
+  return <Alert type="warning" title="链接中的节点不属于本次执行，请从轨迹中重新选择。" />
+}
+
 function selectReportNode(nodes: ReportNode[], nodeId: string | null): ReportNode | undefined {
+  if (nodeId) return nodes.find((node) => node.node_id === nodeId)
   return (
-    nodes.find((node) => node.node_id === nodeId) ??
     nodes.find((node) => node.status === 'failed') ??
+    nodes.find(
+      (node) =>
+        !['start', 'end'].includes(node.node_type) && !['pending', 'skipped'].includes(node.status),
+    ) ??
+    nodes.find((node) => !['start', 'end'].includes(node.node_type)) ??
     nodes[0]
   )
+}
+
+function useCanonicalReportSelection(props: WorkspaceProps, node: ReportNode | undefined) {
+  const attempt = reportAttempt(props.attempt, node)
+  useEffect(() => {
+    if (!node || props.attempt !== undefined) return
+    if (attempt && attempt > 0) props.onSelectAttempt(node.node_id, attempt)
+    else if (!props.nodeId) props.onSelectNode(node.node_id)
+  }, [attempt, node, props])
+}
+
+function reportAttempt(
+  explicit: number | undefined,
+  node: ReportNode | undefined,
+): number | undefined {
+  const attempt = explicit ?? node?.observations?.at(-1)?.attempt ?? node?.attempts
+  return attempt && attempt > 0 ? attempt : undefined
 }
 
 function ReportTrajectory({
@@ -352,6 +381,7 @@ function ReportNodeEvidence({
   evidence?: ExecutionEvidenceLocation
   onSelectEvidence?: (evidence: ExecutionEvidenceLocation) => void
 }) {
+  const checkpointNode = checkpointNodeId(node, evidence)
   const observations = node.observations ?? []
   const [attempt, setAttempt] = useRouteScopedState<number | undefined>(
     null,
@@ -429,8 +459,10 @@ function ReportNodeEvidence({
             label: '检查点与日志',
             children: (
               <ExecutionCheckpointLog
+                key={`${executionId}:${checkpointNode}`}
                 projectId={projectId}
                 executionId={executionId}
+                nodeId={checkpointNode}
                 running={node.status === 'running'}
               />
             ),
@@ -520,7 +552,7 @@ function ReportPayload({
   projectId?: string
 }) {
   return (
-    <section className="report-payload">
+    <section className="report-payload" aria-label={title}>
       <Typography.Text strong>{title}</Typography.Text>
       {value === null || value === undefined ? (
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本节点未提供此项证据" />
@@ -573,4 +605,11 @@ function filteredReportNodes(
       (filter === 'all' || node.status === 'failed') &&
       `${node.name} ${node.node_id}`.toLowerCase().includes(query),
   )
+}
+
+function checkpointNodeId(
+  node: ReportNode,
+  evidence: ExecutionEvidenceLocation | undefined,
+): string {
+  return evidence?.instanceId ?? node.node_id
 }

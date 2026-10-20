@@ -12,6 +12,7 @@ from app.domain.api_assets import (
 )
 from app.schemas.api_assets import (
     APIDefinitionCreate,
+    APIDefinitionListResponse,
     APIDefinitionResponse,
     APIDefinitionUpdate,
     APIDetailResponse,
@@ -216,7 +217,7 @@ async def write_secret(
     return SecretMetadata.model_validate(secret)
 
 
-@router.get("/apis", response_model=Page[APIDefinitionResponse])
+@router.get("/apis", response_model=Page[APIDefinitionListResponse])
 async def list_api_definitions(
     project_id: UUID,
     session: SessionDependency,
@@ -227,8 +228,8 @@ async def list_api_definitions(
     method: HttpMethod | None = None,
     folder_id: UUID | None = None,
     unfiled: bool = False,
-) -> Page[APIDefinitionResponse]:
-    definitions, total = await APIAssetService(session).list_definitions(
+) -> Page[APIDefinitionListResponse]:
+    definitions, total = await APIAssetService(session).list_definition_summaries(
         actor=current_user,
         project_id=project_id,
         page=page,
@@ -239,7 +240,14 @@ async def list_api_definitions(
         unfiled=unfiled,
     )
     return Page(
-        items=[APIDefinitionResponse.model_validate(item) for item in definitions],
+        items=[
+            APIDefinitionListResponse(
+                **APIDefinitionResponse.model_validate(item).model_dump(),
+                method=version.method,
+                path=version.path,
+            )
+            for item, version in definitions
+        ],
         total=total,
         page=page,
         page_size=page_size,

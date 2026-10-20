@@ -367,10 +367,12 @@ class DurableExecutionService:
         execution_id: UUID,
         page: int,
         page_size: int,
+        node_id: str | None = None,
+        attempt: int | None = None,
     ) -> tuple[list[ExecutionCheckpoint], int]:
         await self._require_readable_execution(actor, project_id, execution_id)
         return await self._repository.list_checkpoint_log(
-            execution_id, page=page, page_size=page_size
+            execution_id, page=page, page_size=page_size, node_id=node_id, attempt=attempt
         )
 
     async def get_checkpoint_log_entry(

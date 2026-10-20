@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -153,6 +153,57 @@ const baseRun: ChangeRegressionRun = {
 }
 
 describe('ChangeRegressionPage', () => {
+  it('requires opening the proposed content before accepting a missing test', async () => {
+    let current: ChangeRegressionRun = {
+      ...structuredClone(baseRun),
+      missing_tests: [
+        {
+          ...pendingItem,
+          proposed_content: {
+            target_type: 'api',
+            target_id: 'orders-api',
+            target_version: 2,
+            assertions: [{ kind: 'status_code', expected: 201 }],
+            evidence_refs: ['openapi://orders/create'],
+          },
+        },
+      ],
+    }
+    installHandlers(
+      () => current,
+      (next) => {
+        current = next as typeof current
+      },
+    )
+    const reviewedPayloads: unknown[] = []
+    const expectedContent = structuredClone(current.missing_tests[0].proposed_content)
+    server.use(
+      http.post(
+        `/api/v1/projects/${project.id}/change-regressions/${runId}/change-set-items/${itemId}/accept`,
+        async ({ request }) => {
+          reviewedPayloads.push(await request.json())
+          current = {
+            ...current,
+            missing_tests: current.missing_tests.map((item) => ({
+              ...item,
+              review_status: 'accepted',
+            })),
+          }
+          return HttpResponse.json(current)
+        },
+      ),
+    )
+    renderPage()
+    await screen.findByText('订单变更回归')
+    expect(screen.queryByRole('button', { name: '接受' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '查看并审核' }))
+    const review = screen.getByRole('dialog', { name: '缺失测试草案审核' })
+    expect(within(review).getByText(/openapi:\/\/orders\/create/)).toBeVisible()
+    expect(within(review).getByText(/"expected": 201/)).toBeVisible()
+    await userEvent.click(within(review).getByRole('button', { name: '接受草案' }))
+    await waitFor(() => expect(current.missing_tests[0].review_status).toBe('accepted'))
+    expect(reviewedPayloads).toEqual([{ note: '前端人工审核', expected_content: expectedContent }])
+  })
   it('preserves regression evidence while disabling viewer approval and creation', async () => {
     let current = structuredClone(baseRun)
     installHandlers(

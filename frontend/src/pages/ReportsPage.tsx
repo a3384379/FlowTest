@@ -84,6 +84,7 @@ export default function ReportsPage() {
         }}
         onSelectAttempt={(nodeId, attempt) => {
           const next = new URLSearchParams(searchParams)
+          if (nodeId !== searchParams.get('node')) clearExecutionEvidence(next)
           next.set('node', nodeId)
           next.set('attempt', String(attempt))
           setSearchParams(next, { replace: true })

@@ -29,7 +29,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 
@@ -336,9 +336,15 @@ function ProtocolEditor({
       </div>
     )
   return mode === 'graphql' ? (
-    <GraphQLEditor projectId={projectId} selected={selected} enabled={enabled} />
+    <GraphQLEditor
+      key={`${projectId}:${selected.id}:${selected.version}:${selected.content_sha256}`}
+      projectId={projectId}
+      selected={selected}
+      enabled={enabled}
+    />
   ) : (
     <GrpcEditor
+      key={`${projectId}:${selected.id}:${selected.version}:${selected.content_sha256}`}
       projectId={projectId}
       selected={selected}
       enabled={enabled}
@@ -348,24 +354,42 @@ function ProtocolEditor({
 }
 
 function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
+  const active = useRef(true)
+  const generation = useRef(0)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const [endpoint, setEndpoint] = useState('https://api.example.com/graphql')
   const [operation, setOperation] = useState('query User($id: ID!) { user(id: $id) { id name } }')
   const [variables, setVariables] = useState('{"id":"42"}')
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: { endpoint: string; operation: string; variables: string }) =>
       executeGraphQL({
         project_id: projectId,
         schema_id: selected.id,
-        endpoint,
-        operation,
-        variables: parseObject(variables, 'Variables'),
+        endpoint: input.endpoint,
+        operation: input.operation,
+        variables: parseObject(input.variables, 'Variables'),
         headers: {},
         timeout_seconds: 30,
       }),
-    onSuccess: setResult,
-    onError: (error) => void message.error(error.message),
+    onMutate: () => ++generation.current,
+    onSuccess: (value, _input, revision) => {
+      if (active.current && revision === generation.current) setResult(value)
+    },
+    onError: (error, _input, revision) => {
+      if (active.current && revision === generation.current) void message.error(error.message)
+    },
   })
+  function changeRequest(change: () => void) {
+    generation.current += 1
+    setResult(null)
+    change()
+  }
   return (
     <div className="protocol-editor">
       <Tabs
@@ -378,27 +402,27 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
                 <Input
                   aria-label="GraphQL Endpoint"
                   value={endpoint}
-                  onChange={(event) => setEndpoint(event.target.value)}
+                  onChange={(event) => changeRequest(() => setEndpoint(event.target.value))}
                   prefix={<CloudServerOutlined />}
                 />
                 <TextArea
                   aria-label="GraphQL Operation"
                   rows={10}
                   value={operation}
-                  onChange={(event) => setOperation(event.target.value)}
+                  onChange={(event) => changeRequest(() => setOperation(event.target.value))}
                 />
                 <TextArea
                   aria-label="GraphQL Variables"
                   rows={5}
                   value={variables}
-                  onChange={(event) => setVariables(event.target.value)}
+                  onChange={(event) => changeRequest(() => setVariables(event.target.value))}
                 />
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   disabled={!enabled}
                   loading={mutation.isPending}
-                  onClick={() => mutation.mutate()}
+                  onClick={() => mutation.mutate({ endpoint, operation, variables })}
                 >
                   执行 GraphQL
                 </Button>
@@ -413,6 +437,14 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
 }
 
 function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorProps) {
+  const active = useRef(true)
+  const generation = useRef(0)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const methods = descriptorMethods(selected)
   const [endpoint, setEndpoint] = useState('grpc.example.com:443')
   const [methodKey, setMethodKey] = useState(methods[0]?.value)
@@ -423,25 +455,41 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
   const selectedMethod = methods.find((item) => item.value === methodKey) ?? methods[0]
   const mutation = useMutation({
-    mutationFn: () => {
-      if (!selectedMethod) throw new Error('Descriptor 中没有可调用方法')
+    mutationFn: (input: {
+      endpoint: string
+      request: string
+      tlsMode: typeof tlsMode
+      credentialId: string | undefined
+      method: typeof selectedMethod
+    }) => {
+      if (!input.method) throw new Error('Descriptor 中没有可调用方法')
       return executeGrpc({
         project_id: projectId,
         descriptor_id: selected.id,
-        endpoint,
-        service: selectedMethod.service,
-        method: selectedMethod.method,
-        request: parseObject(request, 'Request'),
+        endpoint: input.endpoint,
+        service: input.method.service,
+        method: input.method.method,
+        request: parseObject(input.request, 'Request'),
         metadata: {},
-        call_type: selectedMethod.callType,
-        tls_mode: tlsMode,
-        credential_id: tlsMode === 'mtls' ? credentialId : undefined,
+        call_type: input.method.callType,
+        tls_mode: input.tlsMode,
+        credential_id: input.tlsMode === 'mtls' ? input.credentialId : undefined,
         timeout_seconds: 30,
       })
     },
-    onSuccess: setResult,
-    onError: (error) => void message.error(error.message),
+    onMutate: () => ++generation.current,
+    onSuccess: (value, _input, revision) => {
+      if (active.current && revision === generation.current) setResult(value)
+    },
+    onError: (error, _input, revision) => {
+      if (active.current && revision === generation.current) void message.error(error.message)
+    },
   })
+  function changeRequest(change: () => void) {
+    generation.current += 1
+    setResult(null)
+    change()
+  }
   return (
     <div className="protocol-editor">
       <Tabs
@@ -454,24 +502,24 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                 <Input
                   aria-label="gRPC Endpoint"
                   value={endpoint}
-                  onChange={(event) => setEndpoint(event.target.value)}
+                  onChange={(event) => changeRequest(() => setEndpoint(event.target.value))}
                   prefix={<CloudServerOutlined />}
                 />
                 <Select
                   aria-label="gRPC Method"
                   value={selectedMethod?.value}
                   options={methods}
-                  onChange={setMethodKey}
+                  onChange={(value) => changeRequest(() => setMethodKey(value))}
                   placeholder="选择 Service / Method"
                 />
-                <Segmented
+                <Segmented<'plaintext' | 'tls' | 'mtls'>
                   value={tlsMode}
                   options={[
                     { label: 'TLS', value: 'tls' },
                     { label: '明文', value: 'plaintext' },
                     { label: 'mTLS', value: 'mtls' },
                   ]}
-                  onChange={setTlsMode}
+                  onChange={(value) => changeRequest(() => setTlsMode(value))}
                 />
                 {tlsMode === 'mtls' && (
                   <Select
@@ -481,7 +529,7 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                       value: credential.id,
                       label: credential.name,
                     }))}
-                    onChange={setCredentialId}
+                    onChange={(value) => changeRequest(() => setCredentialId(value))}
                     placeholder="选择 mTLS Credential"
                   />
                 )}
@@ -489,14 +537,22 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
                   aria-label="gRPC Request"
                   rows={10}
                   value={request}
-                  onChange={(event) => setRequest(event.target.value)}
+                  onChange={(event) => changeRequest(() => setRequest(event.target.value))}
                 />
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   disabled={!enabled || !selectedMethod || (tlsMode === 'mtls' && !credentialId)}
                   loading={mutation.isPending}
-                  onClick={() => mutation.mutate()}
+                  onClick={() =>
+                    mutation.mutate({
+                      endpoint,
+                      request,
+                      tlsMode,
+                      credentialId,
+                      method: selectedMethod,
+                    })
+                  }
                 >
                   执行 gRPC
                 </Button>

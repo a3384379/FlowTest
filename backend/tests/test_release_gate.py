@@ -9,8 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.database import get_session
 from app.core.security import password_service
+from app.domain.access import ProjectRole
 from app.domain.release_gate import (
     ReleaseEvidenceFacts,
     ReleasePolicyRules,
@@ -18,13 +20,14 @@ from app.domain.release_gate import (
 )
 from app.main import app
 from app.models import Base
-from app.models.access import User
+from app.models.access import ProjectMember, User
 from app.models.contracts import DeploymentCompatibilityCheck, ServiceCatalogEntry
 from app.models.impact import CoverageSnapshot, ImpactRun
 from app.models.performance import PerformanceGateEvaluation, PerformanceRun, PerformanceScenario
 from app.models.quality import QualityGate, QualityGateEvaluation
 from app.models.quality_intelligence import ReleaseRisk
 from app.models.release_gate import ReleaseDecision
+from app.models.runner_fabric import RunnerTask
 from app.models.tasking import TestPlan as PlanModel
 from app.models.tasking import TestPlanRun as PlanRunModel
 
@@ -437,6 +440,83 @@ async def _login(client: AsyncClient) -> dict[str, str]:
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.mark.parametrize("role", [ProjectRole.OWNER, ProjectRole.EDITOR, ProjectRole.VIEWER])
+async def test_runner_evidence_is_project_scoped_paginated_and_read_only(
+    release_gate_context: ReleaseGateContext, role: ProjectRole, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "feature_runner_fabric_enabled", True)
+    client = release_gate_context.client
+    admin = await _login(client)
+    project_id = await _project(client, admin, "Runner evidence")
+    foreign_project_id = await _project(client, admin, "Foreign evidence")
+    email = f"runner-evidence-{role.value}@example.com"
+    async with release_gate_context.sessions() as session:
+        actor = User(
+            email=email,
+            display_name="Project member",
+            password_hash=password_service.hash(ADMIN_PASSWORD),
+            is_active=True,
+            is_system_admin=False,
+            requires_password_change=False,
+        )
+        session.add(actor)
+        await session.flush()
+        session.add(ProjectMember(project_id=UUID(project_id), user_id=actor.id, role=role))
+        tasks = [
+            RunnerTask(
+                project_id=UUID(project_id),
+                execution_id=uuid4(),
+                required_runner_type="python",
+                status="completed" if index < 2 else "failed",
+                available_at=datetime.now(UTC),
+                fencing_token=index + 1,
+            )
+            for index in range(4)
+        ]
+        foreign_task = RunnerTask(
+            project_id=UUID(foreign_project_id),
+            execution_id=uuid4(),
+            required_runner_type="python",
+            status="completed",
+            available_at=datetime.now(UTC),
+        )
+        session.add_all([*tasks, foreign_task])
+        await session.commit()
+        task_id, foreign_task_id = str(tasks[0].id), str(foreign_task.id)
+    login = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": ADMIN_PASSWORD}
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    route = f"/api/v1/projects/{project_id}/release-runner-evidence"
+    first = await client.get(route, headers=headers, params={"page_size": 2})
+    second = await client.get(route, headers=headers, params={"page_size": 2, "page": 2})
+    assert first.status_code == second.status_code == 200, first.text
+    assert first.json()["total"] == second.json()["total"] == 4
+    first_ids = {item["id"] for item in first.json()["items"]}
+    second_ids = {item["id"] for item in second.json()["items"]}
+    assert len(first_ids | second_ids) == 4
+    assert not first_ids & second_ids
+    assert foreign_task_id not in first_ids | second_ids
+    assert "required_labels" not in first.json()["items"][0]
+    filtered = await client.get(route, headers=headers, params={"status": "completed"})
+    assert filtered.json()["total"] == 2
+    detail = await client.get(f"{route}/{task_id}", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["id"] == task_id
+    foreign = await client.get(f"{route}/{foreign_task_id}", headers=headers)
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["code"] == "RUNNER_EVIDENCE_NOT_FOUND"
+    assert foreign.json()["error"]["trace_id"]
+    inaccessible = await client.get(
+        f"/api/v1/projects/{foreign_project_id}/release-runner-evidence", headers=headers
+    )
+    assert inaccessible.status_code in (403, 404)
+    global_tasks = await client.get("/api/v1/execution-fabric/tasks", headers=headers)
+    assert global_tasks.status_code == 403
+    assert (await client.post(route, headers=headers, json={})).status_code == 405
 
 
 async def _project(client: AsyncClient, headers: dict[str, str], name: str) -> str:

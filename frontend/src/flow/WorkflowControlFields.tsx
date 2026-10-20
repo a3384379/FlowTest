@@ -9,9 +9,13 @@ import {
   Space,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useContext, useState, type ReactNode } from 'react'
+import { RegionEditScopeContext } from './editor/region-edit-scope'
 import type { ApiDefinition, WorkflowDefinition, WorkflowNode, WorkflowRegion } from '../lib/api'
-import { NodeEditContext } from './editor/node-edit-session'
+import { useNodeEditContext, type WorkflowNodeEditorDraft } from './editor/node-edit-session'
+import { regionEditorScope } from './editor/editor-identity'
+import { replaceLocatedNode } from './editor/node-location'
+import WorkflowNodeEditSession from './WorkflowNodeEditSession'
 import ConditionLoopStateFields from './ConditionLoopStateFields'
 import ControlConditionFields from './ControlConditionFields'
 import ControlConfigurationJson from './ControlConfigurationJson'
@@ -41,6 +45,15 @@ import {
 import { switchToRules, switchToValue } from './editor/control-switch'
 import WorkflowRegionCanvasModal from './WorkflowRegionCanvasModal'
 
+export type RegionNodeEditorProps = {
+  node: WorkflowNode
+  region: WorkflowRegion
+  onUpdate: (node: WorkflowNode) => void
+  onRegionUpdate: (region: WorkflowRegion) => void
+  onStructureChange: (definition: WorkflowDefinition) => void
+}
+type RegionNodeRenderer = (props: RegionNodeEditorProps) => ReactNode
+
 type Props = {
   node: WorkflowNode
   definition?: WorkflowDefinition
@@ -51,6 +64,7 @@ type Props = {
   onStructureChange?: (definition: WorkflowDefinition) => void
   onRegionUpdate: (region: WorkflowRegion) => void
   inline?: boolean
+  renderRegionNode?: RegionNodeRenderer
 }
 
 export default function WorkflowControlFields({
@@ -63,6 +77,7 @@ export default function WorkflowControlFields({
   onStructureChange,
   onRegionUpdate,
   inline,
+  renderRegionNode,
 }: Props) {
   const configuration = node.configuration ?? {}
   const [configDirty, setConfigDirty] = useState(false)
@@ -100,13 +115,7 @@ export default function WorkflowControlFields({
         editable={configFieldsEditable}
         onChange={updateConfiguration}
       />
-      <ControlConfigurationJson
-        nodeId={node.id}
-        value={configuration}
-        editable={editable}
-        onChange={updateConfiguration}
-        onDirtyChange={setConfigDirty}
-      />
+
       <ControlEditHint inline={inline} />
       {configDirty && (
         <Typography.Text type="secondary">
@@ -150,8 +159,22 @@ export default function WorkflowControlFields({
           editable={editable}
           apis={apis}
           onUpdate={onRegionUpdate}
+          renderRegionNode={renderRegionNode}
         />
       ))}
+      <details className="workflow-advanced-json">
+        <summary>高级：控制块配置 JSON{configDirty ? '（有未应用输入）' : ''}</summary>
+        <Typography.Paragraph type="secondary">
+          应用配置只更新本节点输入；还需应用节点配置，才能写入本地流程草稿。
+        </Typography.Paragraph>
+        <ControlConfigurationJson
+          nodeId={node.id}
+          value={configuration}
+          editable={editable}
+          onChange={updateConfiguration}
+          onDirtyChange={setConfigDirty}
+        />
+      </details>
     </section>
   )
 }
@@ -847,6 +870,15 @@ function TryExpectedErrorCodes({
   )
 }
 
+function hasOtherNodeInputs(draft: WorkflowNodeEditorDraft | undefined, fieldKey: string): boolean {
+  if (!draft) return false
+  return (
+    draft.requestDirty ||
+    JSON.stringify(draft.draftNode) !== JSON.stringify(draft.baseNode) ||
+    Object.keys(draft.rawFields).some((key) => key !== fieldKey)
+  )
+}
+
 function TryCatchRow({
   item,
   index,
@@ -1033,6 +1065,7 @@ function RegionEditor({
   editable,
   apis,
   onUpdate,
+  renderRegionNode,
 }: {
   region: WorkflowRegion
   owner: WorkflowNode
@@ -1041,31 +1074,10 @@ function RegionEditor({
   editable: boolean
   apis: ApiDefinition[]
   onUpdate: (region: WorkflowRegion) => void
+  renderRegionNode?: RegionNodeRenderer
 }) {
-  const currentText = JSON.stringify(region, null, 2)
-  const [text, setText] = useState(currentText)
-  const [baseText, setBaseText] = useState(currentText)
-  const [dirty, setDirty] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { dirty, error, text, apply, edit, discard } = useRegionDefinitionDraft(region, onUpdate)
   const [canvasOpen, setCanvasOpen] = useState(false)
-  function apply() {
-    if (baseText !== currentText) {
-      setError('区域已从其他编辑更新。请先复制草稿，再丢弃并重新编辑。')
-      return
-    }
-    try {
-      const parsed: unknown = JSON.parse(text)
-      if (!validRegionDraft(parsed, region)) {
-        setError('区域标识与所属节点不能修改；节点、连线和边界必须是数组。')
-        return
-      }
-      onUpdate(parsed)
-      setDirty(false)
-      setError(null)
-    } catch {
-      setError('区域 JSON 格式错误。')
-    }
-  }
   return (
     <div className="workflow-control-region">
       <Typography.Title level={5}>{region.role} 区域</Typography.Title>
@@ -1094,6 +1106,7 @@ function RegionEditor({
             editable={editable && !dirty}
             onRegionUpdate={onUpdate}
             onStructureChange={onStructureChange}
+            renderRegionNode={renderRegionNode}
           />
         )}
         apis={apis}
@@ -1111,40 +1124,86 @@ function RegionEditor({
       {dirty && (
         <Typography.Text type="secondary">先应用或丢弃区域 JSON 草稿，再编辑步骤。</Typography.Text>
       )}
-      <Typography.Text strong>高级：区域定义 JSON</Typography.Text>
-      <Input.TextArea
-        aria-label={`${region.role} 区域定义`}
-        className="code-input"
-        rows={8}
-        disabled={!editable}
-        value={dirty ? text : currentText}
-        status={error ? 'error' : undefined}
-        onChange={(event) => {
-          if (!dirty) setBaseText(currentText)
-          setText(event.target.value)
-          setDirty(true)
-          setError(null)
-        }}
-      />
-      <Space>
-        <Button disabled={!editable || !dirty} onClick={apply}>
-          应用区域
-        </Button>
-        <Button
-          disabled={!editable || !dirty}
-          onClick={() => {
-            setText(currentText)
-            setBaseText(currentText)
-            setDirty(false)
-            setError(null)
-          }}
-        >
-          丢弃
-        </Button>
-      </Space>
-      {error && <Alert type="error" title={error} />}
+      <details className="workflow-advanced-json">
+        <summary>高级：区域定义 JSON</summary>
+        <Input.TextArea
+          aria-label={`${region.role} 区域定义`}
+          className="code-input"
+          rows={8}
+          disabled={!editable}
+          value={text}
+          status={error ? 'error' : undefined}
+          onChange={(event) => edit(event.target.value)}
+        />
+        <Space>
+          <Button disabled={!editable || !dirty} onClick={apply}>
+            应用区域
+          </Button>
+          <Button disabled={!editable || !dirty} onClick={discard}>
+            丢弃
+          </Button>
+        </Space>
+        {error && <Alert type="error" title={error} />}
+      </details>
     </div>
   )
+}
+
+function useRegionDefinitionDraft(
+  region: WorkflowRegion,
+  onUpdate: (region: WorkflowRegion) => void,
+) {
+  const session = useNodeEditContext()
+  const fieldKey = `region-definition-${region.id}`
+  const saved = session?.draft.rawFields[fieldKey]
+  const currentText = JSON.stringify(region, null, 2)
+  const [text, setText] = useState(saved?.text ?? currentText)
+  const [baseText, setBaseText] = useState(saved?.baseText ?? currentText)
+  const [dirty, setDirty] = useState(Boolean(saved))
+  const [error, setError] = useState<string | null>(saved?.error ?? null)
+  function apply() {
+    if (hasOtherNodeInputs(session?.draft, fieldKey)) {
+      setError('请先应用或丢弃其他节点输入，再应用区域 JSON。当前区域输入已保留。')
+      return
+    }
+    if (baseText !== currentText) {
+      setError('区域已从其他编辑更新。请先复制草稿，再丢弃并重新编辑。')
+      return
+    }
+    try {
+      const parsed: unknown = JSON.parse(text)
+      if (!validRegionDraft(parsed, region)) {
+        setError('区域标识与所属节点不能修改；节点、连线和边界必须是数组。')
+        return
+      }
+      session?.clearRaw(fieldKey)
+      onUpdate(parsed)
+      setDirty(false)
+      setError(null)
+    } catch {
+      setError('区域 JSON 格式错误。')
+    }
+  }
+  function edit(next: string) {
+    if (!dirty) setBaseText(currentText)
+    setText(next)
+    setDirty(true)
+    setError(null)
+    session?.setRaw(fieldKey, {
+      text: next,
+      error: null,
+      baseText: dirty ? baseText : currentText,
+      requiresApply: true,
+    })
+  }
+  function discard() {
+    session?.clearRaw(fieldKey)
+    setText(currentText)
+    setBaseText(currentText)
+    setDirty(false)
+    setError(null)
+  }
+  return { dirty, error, text: dirty ? text : currentText, apply, edit, discard }
 }
 
 function RegionBoundaryBindings({
@@ -1191,6 +1250,7 @@ function NestedControlEditor({
   editable,
   onRegionUpdate,
   onStructureChange,
+  renderRegionNode,
 }: {
   node: WorkflowNode
   containing: WorkflowRegion
@@ -1199,28 +1259,80 @@ function NestedControlEditor({
   editable: boolean
   onRegionUpdate: (region: WorkflowRegion) => void
   onStructureChange?: (definition: WorkflowDefinition) => void
+  renderRegionNode?: RegionNodeRenderer
 }) {
+  const context = useNodeEditContext()
+  const containingScope = useContext(RegionEditScopeContext)
   if (!definition) return null
+  if (!node.capability_id?.startsWith('flow.control.') && !renderRegionNode)
+    return <Typography.Text>此区域节点需要从完整流程检查器编辑。</Typography.Text>
   return (
-    <NodeEditContext.Provider value={null}>
-      <WorkflowControlFields
-        key={node.id}
-        node={node}
-        definition={definition}
-        regions={definition.regions?.filter((region) => region.owner_node_id === node.id) ?? []}
-        editable={editable}
-        inline
-        apis={apis}
-        onUpdate={(updated) =>
-          onRegionUpdate({
-            ...containing,
-            nodes: containing.nodes.map((item) => (item.id === node.id ? updated : item)),
+    <WorkflowNodeEditSession
+      key={`${containing.id}:${node.id}`}
+      scope={
+        containingScope ?? regionEditorScope(context?.scope ?? 'region-editor:', containing.id)
+      }
+      projectId={context?.projectId}
+      regionId={containing.id}
+      node={node}
+      definition={definition}
+      editable={editable}
+      onChange={(next) => {
+        const changed = next.regions?.find((region) => region.id === containing.id)
+        const otherRegions = (value: WorkflowDefinition) =>
+          value.regions?.filter((region) => region.id !== containing.id)
+        if (JSON.stringify(otherRegions(next)) !== JSON.stringify(otherRegions(definition)))
+          onStructureChange?.(next)
+        else if (changed) onRegionUpdate(changed)
+      }}
+    >
+      {(draftNode, update) =>
+        renderRegionNode ? (
+          renderRegionNode({
+            node: draftNode,
+            region: containing,
+            onUpdate: (updated) =>
+              update(replaceLocatedNode(definition, updated, containing.id), 'node'),
+            onRegionUpdate: (region) =>
+              update(
+                {
+                  ...definition,
+                  regions: definition.regions?.map((item) =>
+                    item.id === region.id ? region : item,
+                  ),
+                },
+                'regions',
+              ),
+            onStructureChange: (next) => update(next, 'structure'),
           })
-        }
-        onRegionUpdate={onRegionUpdate}
-        onStructureChange={onStructureChange}
-      />
-    </NodeEditContext.Provider>
+        ) : (
+          <WorkflowControlFields
+            node={draftNode}
+            definition={definition}
+            regions={definition.regions?.filter((region) => region.owner_node_id === node.id) ?? []}
+            editable={editable}
+            inline
+            apis={apis}
+            renderRegionNode={renderRegionNode}
+            onUpdate={(updated) =>
+              update(replaceLocatedNode(definition, updated, containing.id), 'node')
+            }
+            onRegionUpdate={(region) =>
+              update(
+                {
+                  ...definition,
+                  regions: definition.regions?.map((item) =>
+                    item.id === region.id ? region : item,
+                  ),
+                },
+                'regions',
+              )
+            }
+            onStructureChange={(next) => update(next, 'structure')}
+          />
+        )
+      }
+    </WorkflowNodeEditSession>
   )
 }
 

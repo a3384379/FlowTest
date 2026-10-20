@@ -429,10 +429,11 @@ export async function listWorkflowCheckpointLog(
   projectId: string,
   executionId: string,
   page: number,
+  filters: { nodeId?: string; attempt?: number } = {},
 ): Promise<Page<ExecutionCheckpointSummary>> {
   const response = await apiClient.get<Page<ExecutionCheckpointSummary>>(
     `/projects/${projectId}/workflow-executions/${executionId}/checkpoint-log`,
-    { params: { page, page_size: 20 } },
+    { params: { page, page_size: 20, node_id: filters.nodeId, attempt: filters.attempt } },
   )
   return response.data
 }

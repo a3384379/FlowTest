@@ -17,6 +17,7 @@ import AssertionEvidence from '../features/evidence/AssertionEvidence'
 import { workflowAssertionEvidence } from '../features/evidence/assertion-model'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowNodeRelations from './WorkflowNodeRelations'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 
 import type {
   ExecutionCheckpoint,
@@ -1079,7 +1080,6 @@ function Payload({
   const references = workflowOutputReferences(value)
   return (
     <section className="workflow-runtime-payload">
-      <Typography.Text strong>{title}</Typography.Text>
       {references.map((reference) => (
         <div key={reference.artifactId}>
           <Typography.Text type="secondary">
@@ -1103,7 +1103,7 @@ function Payload({
         </div>
       ))}
       {downloadError && <Alert type="error" title={`响应体不可用：${downloadError}`} />}
-      <pre>{serialize(value)}</pre>
+      <ResponseCodeReader title={title} value={value} />
     </section>
   )
 }
@@ -1223,10 +1223,4 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`
   return `${Math.round(value / 104857.6) / 10} MB`
-}
-
-function serialize(value: unknown): string {
-  if (value === undefined || value === null) return '—'
-  if (typeof value === 'string') return value
-  return JSON.stringify(value, null, 2)
 }

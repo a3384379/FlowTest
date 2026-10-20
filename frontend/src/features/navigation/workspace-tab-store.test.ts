@@ -9,6 +9,22 @@ import {
 beforeEach(() => localStorage.clear())
 
 describe('scoped object workspace tab storage', () => {
+  it('does not add module visits as object tabs and removes stored module entries', () => {
+    expect(routeWorkspaceTab('p', '/projects/p/dashboard')).toBeNull()
+    expect(routeWorkspaceTab('p', '/projects/p/apis')).toBeNull()
+    expect(routeWorkspaceTab('p', '/projects/p/quality')).toBeNull()
+    localStorage.setItem(
+      workspaceTabStorageKey('u', 'p'),
+      JSON.stringify({
+        schemaVersion: 2,
+        tabs: [
+          { href: '/projects/p/apis' },
+          { href: '/projects/p/reports?execution=R', label: '运行 R' },
+        ],
+      }),
+    )
+    expect(readWorkspaceTabs('u', 'p').tabs.map((tab) => tab.key)).toEqual(['reports:R'])
+  })
   it('keeps object identities distinct and the complete execution context through reload', () => {
     const one = routeWorkspaceTab(
       'p',
@@ -41,7 +57,7 @@ describe('scoped object workspace tab storage', () => {
       'flowtest:workspace-tabs:v1:u:p',
       JSON.stringify(['apis', 'invalid', 'toString']),
     )
-    expect(readWorkspaceTabs('u', 'p').tabs.map((tab) => tab.section)).toEqual(['apis'])
+    expect(readWorkspaceTabs('u', 'p').tabs.map((tab) => tab.section)).toEqual([])
     localStorage.setItem(
       workspaceTabStorageKey('u', 'p'),
       JSON.stringify({

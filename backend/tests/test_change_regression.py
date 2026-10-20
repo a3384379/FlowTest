@@ -388,11 +388,24 @@ async def test_change_to_release_gate_trace_and_missing_test_review(
     assert missing_body["change_set_id"]
     assert len(missing_body["missing_tests"]) == 1
     item_id = missing_body["missing_tests"][0]["item_id"]
+    for stale_decision in ("accept", "reject"):
+        stale_review = await context.client.post(
+            f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}"
+            f"/change-set-items/{item_id}/{stale_decision}",
+            headers=headers,
+            json={"expected_content": {}, "note": "过期内容不能审核"},
+        )
+        assert stale_review.status_code == 409, stale_review.text
+        assert stale_review.json()["error"]["code"] == "CHANGE_REGRESSION_REVIEW_STALE"
+        assert stale_review.json()["error"]["trace_id"]
     reviewed = await context.client.post(
         f"/api/v1/projects/{project_id}/change-regressions/{missing_body['id']}"
         f"/change-set-items/{item_id}/accept",
         headers=headers,
-        json={"note": "低置信度草案已人工确认"},
+        json={
+            "note": "低置信度草案已人工确认",
+            "expected_content": missing_body["missing_tests"][0]["proposed_content"],
+        },
     )
     assert reviewed.status_code == 200, reviewed.text
     assert reviewed.json()["missing_tests"][0]["review_status"] == "accepted"

@@ -157,19 +157,22 @@ export async function listApis(
     method?: HttpMethod
     folder?: string
   } = {},
-): Promise<Page<ApiDefinition>> {
-  const response = await apiClient.get<Page<ApiDefinition>>(`/projects/${projectId}/apis`, {
-    params: {
-      page: options.page ?? 1,
-      page_size: options.pageSize ?? 50,
-      ...(options.search?.trim() ? { search: options.search.trim() } : {}),
-      ...(options.method ? { method: options.method } : {}),
-      ...(options.folder === 'unfiled' ? { unfiled: true } : {}),
-      ...(options.folder && !['all', 'unfiled'].includes(options.folder)
-        ? { folder_id: options.folder }
-        : {}),
+): Promise<Page<ApiDefinition & { method: HttpMethod; path: string }>> {
+  const response = await apiClient.get<Page<ApiDefinition & { method: HttpMethod; path: string }>>(
+    `/projects/${projectId}/apis`,
+    {
+      params: {
+        page: options.page ?? 1,
+        page_size: options.pageSize ?? 50,
+        ...(options.search?.trim() ? { search: options.search.trim() } : {}),
+        ...(options.method ? { method: options.method } : {}),
+        ...(options.folder === 'unfiled' ? { unfiled: true } : {}),
+        ...(options.folder && !['all', 'unfiled'].includes(options.folder)
+          ? { folder_id: options.folder }
+          : {}),
+      },
     },
-  })
+  )
   return response.data
 }
 
@@ -379,6 +382,15 @@ export async function downloadArtifact(projectId: string, artifact: Artifact): P
   URL.revokeObjectURL(url)
 }
 
+export function effectiveApiAssertions(
+  assertions: ApiVersion['assertions'] | undefined,
+  expectedStatus: number,
+) {
+  return assertions?.length
+    ? assertions
+    : [{ kind: 'status_code', operator: 'equals', expected: expectedStatus }]
+}
+
 export async function executeApi(
   projectId: string,
   apiId: string,
@@ -394,15 +406,7 @@ export async function executeApi(
       ...(options.version ? { version: options.version } : {}),
       ...(options.serviceOverride ? { service_override: options.serviceOverride } : {}),
       ...(options.endpointVariant ? { endpoint_variant: options.endpointVariant } : {}),
-      assertions: assertions?.length
-        ? assertions
-        : [
-            {
-              kind: 'status_code',
-              operator: 'equals',
-              expected: expectedStatus,
-            },
-          ],
+      assertions: effectiveApiAssertions(assertions, expectedStatus),
     },
     { headers: { 'Idempotency-Key': crypto.randomUUID() } },
   )

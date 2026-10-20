@@ -6,6 +6,7 @@ import {
   Col,
   Descriptions,
   Divider,
+  Drawer,
   Form,
   Input,
   Layout,
@@ -246,73 +247,140 @@ function RunDetail({
       <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
-      {run.missing_tests.length > 0 && (
-        <>
-          <Divider titlePlacement="left">Missing Test / ChangeSet Review</Divider>
-          <Table
-            rowKey="item_id"
-            size="small"
-            pagination={false}
-            dataSource={run.missing_tests}
-            columns={[
-              { title: '草案', dataIndex: 'title' },
-              {
-                title: '审核',
-                dataIndex: 'review_status',
-                render: (value: MissingTestProposal['review_status']) => (
-                  <Tag
-                    color={
-                      value === 'accepted' ? 'green' : value === 'rejected' ? 'default' : 'orange'
-                    }
-                  >
-                    {value}
-                  </Tag>
-                ),
-              },
-              {
-                title: '操作',
-                render: (_: unknown, item: MissingTestProposal) =>
-                  item.review_status === 'pending' ? (
-                    <Space>
-                      <Button
-                        disabled={!state.canEdit}
-                        size="small"
-                        onClick={() =>
-                          void state.reviewItem({
-                            runId: run.id,
-                            itemId: item.item_id,
-                            decision: 'accept',
-                          })
-                        }
-                      >
-                        接受
-                      </Button>
-                      <Button
-                        disabled={!state.canEdit}
-                        size="small"
-                        danger
-                        onClick={() =>
-                          void state.reviewItem({
-                            runId: run.id,
-                            itemId: item.item_id,
-                            decision: 'reject',
-                          })
-                        }
-                      >
-                        拒绝
-                      </Button>
-                    </Space>
-                  ) : null,
-              },
-            ]}
-          />
-        </>
-      )}
+      <MissingTestReview key={run.id} run={run} state={state} />
       <RunActions run={run} state={state} />
       {Object.keys(run.failure_triage).length > 0 && (
         <FailureTriagePanel value={run.failure_triage} />
       )}
     </Space>
+  )
+}
+
+function MissingTestReview({
+  run,
+  state,
+}: {
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const selected = run.missing_tests.find((item) => item.item_id === selectedId)
+  async function review(decision: 'accept' | 'reject') {
+    if (!selected || submitting) return
+    setSubmitting(true)
+    try {
+      if (
+        await state.reviewItem({
+          runId: run.id,
+          itemId: selected.item_id,
+          decision,
+          expectedContent: selected.proposed_content,
+        })
+      )
+        setSelectedId(null)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  if (!run.missing_tests.length) return null
+  return (
+    <>
+      <Divider titlePlacement="left">缺失测试草案 / 人工审核</Divider>
+      <Table
+        rowKey="item_id"
+        size="small"
+        pagination={false}
+        dataSource={run.missing_tests}
+        columns={[
+          { title: '草案', dataIndex: 'title' },
+          {
+            title: '审核',
+            dataIndex: 'review_status',
+            render: (value: MissingTestProposal['review_status']) => (
+              <Tag>
+                {value === 'accepted' ? '已接受' : value === 'rejected' ? '已拒绝' : '待审核'}
+              </Tag>
+            ),
+          },
+          {
+            title: '操作',
+            render: (_: unknown, item: MissingTestProposal) => (
+              <Button size="small" onClick={() => setSelectedId(item.item_id)}>
+                查看并审核
+              </Button>
+            ),
+          },
+        ]}
+      />
+      <Drawer
+        title="缺失测试草案审核"
+        open={Boolean(selected)}
+        size={760}
+        closable={!submitting}
+        onClose={() => {
+          if (!submitting) setSelectedId(null)
+        }}
+        extra={
+          selected?.review_status === 'pending' && (
+            <Space>
+              <Button
+                disabled={!state.canEdit || submitting}
+                danger
+                onClick={() => void review('reject')}
+              >
+                拒绝草案
+              </Button>
+              <Button
+                disabled={!state.canEdit}
+                type="primary"
+                loading={submitting}
+                onClick={() => void review('accept')}
+              >
+                接受草案
+              </Button>
+            </Space>
+          )
+        }
+      >
+        {selected && (
+          <>
+            <Typography.Title level={4}>{selected.title}</Typography.Title>
+            <Button disabled={submitting} onClick={() => void state.detail.refetch()}>
+              刷新草案
+            </Button>
+            <Alert
+              type="info"
+              showIcon
+              title="请核对目标、版本、断言及来源后审核。接受草案后仍需人工批准与执行。"
+            />
+            <Descriptions
+              column={1}
+              bordered
+              size="small"
+              items={[
+                { key: 'source', label: '变更来源', children: run.source_ref || '未提供' },
+                { key: 'fingerprint', label: '来源指纹', children: run.source_fingerprint },
+                { key: 'candidate', label: '候选版本', children: run.candidate_ref },
+                { key: 'note', label: '审核说明', children: selected.review_note || '未填写' },
+                {
+                  key: 'resource',
+                  label: '生成资产',
+                  children: selected.materialized_resource_id ?? '尚未生成',
+                },
+              ]}
+            />
+            <Typography.Title level={5}>完整草案内容</Typography.Title>
+            <pre
+              aria-label="缺失测试草案内容"
+              style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+            >
+              {JSON.stringify(selected.proposed_content, null, 2)}
+            </pre>
+          </>
+        )}
+      </Drawer>
+    </>
   )
 }
 

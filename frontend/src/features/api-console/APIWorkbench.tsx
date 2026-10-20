@@ -21,6 +21,8 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import BodyEditor from './BodyEditor'
+import AuthConfigurationFields from './AuthConfigurationFields'
+import { validateAuthConfiguration } from './auth-configuration'
 import { toBodyFields, toBodyInput, type BodyEditorFields } from './body-edit'
 import {
   parseBulkHeaders,
@@ -611,6 +613,8 @@ function KeyValueFields({
 }
 
 function AuthFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
+  const form = Form.useFormInstance<WorkbenchFields>()
+  const kind = Form.useWatch('auth_kind', form) ?? 'none'
   return (
     <>
       <Form.Item name="auth_kind" label="认证方式">
@@ -623,10 +627,23 @@ function AuthFields({ redactionMode }: { redactionMode: BulkRedactionMode }) {
           ]}
         />
       </Form.Item>
-      <Typography.Paragraph type="secondary">
-        Bearer 使用 token；Basic 使用 username/password；API Key 使用 name/value/in。
-      </Typography.Paragraph>
-      <KeyValueFields name="auth_config" redactionMode={redactionMode} />
+      <Form.Item
+        name="auth_config"
+        rules={[
+          {
+            validator: (_, values: KeyValueField[]) => {
+              try {
+                validateAuthConfiguration(kind, values ?? [])
+                return Promise.resolve()
+              } catch (error) {
+                return Promise.reject(error)
+              }
+            },
+          },
+        ]}
+      >
+        <AuthConfigurationFields kind={kind} redactionMode={redactionMode} />
+      </Form.Item>
     </>
   )
 }
@@ -737,6 +754,7 @@ function toFields(version: ApiVersion): WorkbenchFields {
 }
 
 function toInput(values: WorkbenchFields): ApiVersionInput {
+  validateAuthConfiguration(values.auth_kind, values.auth_config ?? [])
   const body = toBodyInput(values)
   return {
     method: values.method,

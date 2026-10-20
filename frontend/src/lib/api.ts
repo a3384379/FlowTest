@@ -277,6 +277,8 @@ export type ApiDefinition = {
   description: string
   current_version: number
   is_active: boolean
+  method?: string
+  path?: string
 }
 
 export type AssertionResult = {

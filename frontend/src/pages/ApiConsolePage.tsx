@@ -11,7 +11,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Dropdown,
   Drawer,
   Empty,
   Form,
@@ -34,6 +33,8 @@ import RequestTargetSummary from '../features/api-console/RequestTargetSummary'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import APIWorkbench from '../features/api-console/APIWorkbench'
+import ApiWorkspace from '../features/api-console/ApiWorkspace'
+import { apiWorkspaceKey } from '../features/api-console/api-layout-preferences'
 import CreateDialogs from '../features/api-console/CreateDialogs'
 import EnvironmentManager from '../features/api-console/EnvironmentManager'
 import ExecutionResultPanel from '../features/api-console/ExecutionResultPanel'
@@ -45,8 +46,9 @@ import type {
   HttpMethod,
 } from '../features/api-console/api-service'
 import { useApiConsole } from '../features/api-console/use-api-console'
+import { effectiveApiAssertions } from '../features/api-console/api-service'
 import { useAuthStore } from '../features/auth/auth-store'
-import type { ApiDefinition } from '../lib/api'
+import { apiErrorMessage, type ApiDefinition } from '../lib/api'
 
 type DialogState = 'project' | 'environment' | 'api' | null
 
@@ -54,8 +56,11 @@ export default function ApiConsolePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [dialog, setDialog] = useState<DialogState>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<ApiDefinition | null>(null)
-  const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(false)
+  const [environmentManagerOpen, setEnvironmentManagerOpen] = useState(
+    searchParams.get('panel') === 'environments',
+  )
   const [artifactsOpen, setArtifactsOpen] = useState(searchParams.get('panel') === 'files')
   const consoleState = useConsoleFromRoute(searchParams)
   const userId = useAuthStore((state) => state.user?.id)
@@ -107,6 +112,7 @@ export default function ApiConsolePage() {
         canCreateAssets={canCreateAssets}
         onDialog={setDialog}
         onImport={() => setImportOpen(true)}
+        onExport={() => setExportOpen(true)}
         onArtifacts={() => setArtifactsOpen(true)}
         onEnvironments={() => setEnvironmentManagerOpen(true)}
       />
@@ -120,109 +126,111 @@ export default function ApiConsolePage() {
           consoleState.endpoints,
         ]}
       />
-      <div className="api-workspace">
-        <aside className="api-workspace-directory" aria-label="接口目录">
-          <Card
-            className="api-directory-card"
-            title="接口集合"
-            extra={
-              <Button
-                type="text"
-                icon={<PlusOutlined />}
-                aria-label="新建接口"
-                disabled={!canCreateAssets}
-                onClick={() => setDialog('api')}
+      <ApiWorkspace
+        key={apiWorkspaceKey(userId, consoleState.projectId)}
+        preferenceKey={apiWorkspaceKey(userId, consoleState.projectId)}
+        directory={
+          <aside className="api-workspace-directory" aria-label="接口目录">
+            <Card
+              className="api-directory-card"
+              title="接口集合"
+              extra={
+                <Button
+                  type="text"
+                  icon={<PlusOutlined />}
+                  aria-label="新建接口"
+                  disabled={!canCreateAssets}
+                  onClick={() => setDialog('api')}
+                />
+              }
+            >
+              <ApiFolderSection
+                state={consoleState}
+                onSelect={(folder) => {
+                  consoleState.setApiFolder(folder)
+                  const next = new URLSearchParams(searchParams)
+                  next.delete('focus')
+                  next.delete('execution')
+                  setSearchParams(next)
+                }}
               />
-            }
-          >
-            <ApiFolderSection
-              state={consoleState}
-              onSelect={(folder) => {
-                consoleState.setApiFolder(folder)
-                const next = new URLSearchParams(searchParams)
-                next.delete('focus')
-                next.delete('execution')
-                setSearchParams(next)
-              }}
+              <div className="api-directory-filters">
+                <Input.Search
+                  aria-label="搜索接口"
+                  allowClear
+                  placeholder="搜索名称、路径或说明"
+                  value={consoleState.apiSearchInput}
+                  onChange={(event) => consoleState.setApiSearchInput(event.target.value)}
+                />
+                <Select
+                  aria-label="接口方法筛选"
+                  allowClear
+                  placeholder="全部方法"
+                  value={consoleState.apiMethod ?? undefined}
+                  onChange={(value?: HttpMethod) => consoleState.setApiMethod(value ?? null)}
+                  options={httpMethods.map((method) => ({ value: method, label: method }))}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <ApiDirectorySelection
+                key={consoleState.projectId}
+                projectId={consoleState.projectId}
+                editable={consoleState.canEdit}
+                loading={consoleState.apis.isLoading}
+                items={apis}
+                selectedId={consoleState.apiId}
+                onSelect={selectApi}
+                onRename={setRenameTarget}
+                page={consoleState.apis.data?.page ?? consoleState.apiPage}
+                pageSize={consoleState.apis.data?.page_size ?? 50}
+                total={consoleState.apis.data?.total ?? 0}
+                onPageChange={consoleState.setApiPage}
+              />
+            </Card>
+          </aside>
+        }
+        request={
+          <>
+            <EmptyApiEnvironment state={consoleState} />
+            <APIWorkbench
+              key={apiWorkbenchKey(consoleState)}
+              detail={consoleState.apiDetail.data}
+              editable={apiWorkbenchEditable(consoleState)}
+              loading={consoleState.apiDetail.isLoading}
+              saving={consoleState.savingVersion}
+              previewing={consoleState.previewing}
+              onSave={consoleState.saveVersion}
+              onPreview={consoleState.previewRequest}
+              onRename={() => setRenameTarget(currentDefinition)}
+              artifacts={artifacts}
+              redactionMode={consoleState.redactionMode}
+              draftScope={
+                consoleState.selectedVersion === null
+                  ? apiDraftScope(userId, consoleState.projectId)
+                  : undefined
+              }
+              versionActions={<ApiVersionSelector state={consoleState} />}
+              requestActions={<RunnerActions state={consoleState} enabled={canExecute} />}
+              targetActions={<ApiTargetControls state={consoleState} />}
             />
-            <div className="api-directory-filters">
-              <Input.Search
-                aria-label="搜索接口"
-                allowClear
-                placeholder="搜索名称、路径或说明"
-                value={consoleState.apiSearchInput}
-                onChange={(event) => consoleState.setApiSearchInput(event.target.value)}
-              />
-              <Select
-                aria-label="接口方法筛选"
-                allowClear
-                placeholder="全部方法"
-                value={consoleState.apiMethod ?? undefined}
-                onChange={(value?: HttpMethod) => consoleState.setApiMethod(value ?? null)}
-                options={httpMethods.map((method) => ({ value: method, label: method }))}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <ApiDirectorySelection
-              key={consoleState.projectId}
-              projectId={consoleState.projectId}
-              editable={consoleState.canEdit}
-              loading={consoleState.apis.isLoading}
-              items={apis}
-              selectedId={consoleState.apiId}
-              onSelect={selectApi}
-              onRename={setRenameTarget}
-              page={consoleState.apis.data?.page ?? consoleState.apiPage}
-              pageSize={consoleState.apis.data?.page_size ?? 50}
-              total={consoleState.apis.data?.total ?? 0}
-              onPageChange={consoleState.setApiPage}
-            />
-          </Card>
-        </aside>
-        <div className="api-workspace-main">
-          <EmptyApiEnvironment state={consoleState} />
-          <APIWorkbench
-            key={apiWorkbenchKey(consoleState)}
-            detail={consoleState.apiDetail.data}
-            editable={apiWorkbenchEditable(consoleState)}
-            loading={consoleState.apiDetail.isLoading}
-            saving={consoleState.savingVersion}
-            previewing={consoleState.previewing}
-            onSave={consoleState.saveVersion}
-            onPreview={consoleState.previewRequest}
-            onRename={() => setRenameTarget(currentDefinition)}
-            artifacts={artifacts}
-            redactionMode={consoleState.redactionMode}
-            draftScope={
-              consoleState.selectedVersion === null
-                ? apiDraftScope(userId, consoleState.projectId)
-                : undefined
-            }
-            versionActions={<ApiVersionSelector state={consoleState} />}
-            requestActions={<RunnerActions state={consoleState} enabled={canExecute} />}
-            targetActions={<ApiTargetControls state={consoleState} />}
-          />
+          </>
+        }
+        response={
           <Card
             title="响应与验证"
             aria-label="接口响应与验证"
             className="api-response-panel"
-            extra={
-              <Space>
-                <Typography.Text type="secondary">预期状态码</Typography.Text>
-                <InputNumber
-                  aria-label="预期状态码"
-                  min={100}
-                  max={599}
-                  value={consoleState.expectedStatus}
-                  onChange={(value) => consoleState.setExpectedStatus(value ?? 200)}
-                />
-              </Space>
-            }
+            extra={<ExecutionAssertionSummary state={consoleState} />}
           >
             <RunnerContent state={consoleState} onSelectExecution={selectExecution} />
           </Card>
-        </div>
-      </div>
+        }
+      />
+      <ExportScopeDialog
+        open={exportOpen}
+        state={consoleState}
+        onClose={() => setExportOpen(false)}
+      />
       <Drawer
         title="文件仓库"
         open={artifactsOpen}
@@ -272,6 +280,41 @@ export default function ApiConsolePage() {
         onClose={() => setEnvironmentManagerOpen(false)}
       />
     </div>
+  )
+}
+
+function ExecutionAssertionSummary({ state }: { state: ReturnType<typeof useApiConsole> }) {
+  const saved = state.apiDetail.data?.version.assertions
+  const rules = effectiveApiAssertions(saved, state.expectedStatus)
+  if (saved?.length) {
+    const statuses = rules.filter((rule) => rule.kind === 'status_code')
+    return (
+      <Space wrap aria-label="本次执行断言">
+        <Typography.Text>按已保存断言校验（{rules.length} 条）</Typography.Text>
+        {statuses.length ? (
+          statuses.map((rule, index) => (
+            <Tag key={index}>
+              状态码 {rule.operator} {JSON.stringify(rule.expected)}
+            </Tag>
+          ))
+        ) : (
+          <Typography.Text type="secondary">未配置状态码断言</Typography.Text>
+        )}
+        <Typography.Text type="secondary">在断言页修改并保存后生效</Typography.Text>
+      </Space>
+    )
+  }
+  return (
+    <Space>
+      <Typography.Text type="secondary">预期状态码</Typography.Text>
+      <InputNumber
+        aria-label="预期状态码"
+        min={100}
+        max={599}
+        value={state.expectedStatus}
+        onChange={(value) => state.setExpectedStatus(value ?? 200)}
+      />
+    </Space>
   )
 }
 
@@ -492,6 +535,7 @@ function ApiConsoleHeading({
   canCreateAssets,
   onDialog,
   onImport,
+  onExport,
   onArtifacts,
   onEnvironments,
 }: {
@@ -499,6 +543,7 @@ function ApiConsoleHeading({
   canCreateAssets: boolean
   onDialog: (dialog: DialogState) => void
   onImport: () => void
+  onExport: () => void
   onArtifacts: () => void
   onEnvironments: () => void
 }) {
@@ -525,26 +570,82 @@ function ApiConsoleHeading({
         <Button icon={<ImportOutlined />} disabled={!canCreateAssets} onClick={onImport}>
           导入接口
         </Button>
-        <Dropdown
-          menu={{
-            items: [
-              { key: 'har', label: '导出 HAR' },
-              { key: 'curl', label: '导出 cURL' },
-              { key: 'bruno', label: '导出 Bruno' },
-              { key: 'excel', label: '导出 Excel' },
-            ],
-            onClick: ({ key }) => state.exportApis(key as 'har' | 'curl' | 'bruno' | 'excel'),
-          }}
+        <Button
+          aria-label="导出接口"
+          icon={<DownloadOutlined />}
+          disabled={!state.projectId}
+          onClick={onExport}
         >
-          <Button icon={<DownloadOutlined />} disabled={!state.projectId} loading={state.exporting}>
-            导出
-          </Button>
-        </Dropdown>
+          导出
+        </Button>
         <Button icon={<FolderOutlined />} disabled={!state.projectId} onClick={onArtifacts}>
           文件仓库
         </Button>
       </Space>
     </div>
+  )
+}
+
+function ExportScopeDialog({
+  open,
+  state,
+  onClose,
+}: {
+  open: boolean
+  state: ConsoleState
+  onClose: () => void
+}) {
+  const [format, setFormat] = useState<Parameters<ConsoleState['exportApis']>[0]>('har')
+  const [error, setError] = useState<string | null>(null)
+  async function download() {
+    setError(null)
+    try {
+      await state.exportApis(format)
+      onClose()
+    } catch (failure) {
+      setError(apiErrorMessage(failure))
+    }
+  }
+  return (
+    <Modal
+      title="导出接口资产"
+      open={open}
+      okText="导出整个项目"
+      cancelText="取消"
+      confirmLoading={state.exporting}
+      closable={!state.exporting}
+      cancelButtonProps={{ disabled: state.exporting }}
+      onCancel={() => {
+        if (!state.exporting) onClose()
+      }}
+      onOk={() => void download()}
+    >
+      <Typography.Paragraph>
+        导出范围：当前项目全部可导出的接口，使用各接口的已保存当前版本。
+      </Typography.Paragraph>
+      <Typography.Paragraph type="secondary">
+        当前分组、搜索筛选和批量选择不会影响本次全项目导出。当前版本暂不支持仅导出分组或已选接口。
+      </Typography.Paragraph>
+      <Form layout="vertical">
+        <Form.Item label="文件格式">
+          <Select
+            value={format}
+            onChange={setFormat}
+            options={[
+              { value: 'har', label: 'HAR' },
+              { value: 'curl', label: 'cURL' },
+              { value: 'bruno', label: 'Bruno' },
+              { value: 'excel', label: 'Excel' },
+            ]}
+          />
+        </Form.Item>
+      </Form>
+      {error && (
+        <Typography.Paragraph role="alert" type="danger">
+          {error}
+        </Typography.Paragraph>
+      )}
+    </Modal>
   )
 }
 
@@ -666,7 +767,7 @@ function ApiTable({
         {
           title: '名称',
           dataIndex: 'name',
-          render: (name: string, definition: ApiDefinition) => (
+          render: (name: string, definition: ApiTableProps['items'][number]) => (
             <Button
               type="text"
               className="api-directory-select"
@@ -677,7 +778,15 @@ function ApiTable({
                 onSelect(definition.id)
               }}
             >
-              {name}
+              <span className="api-directory-entry">
+                <span>
+                  <Tag>{definition.method ?? '方法未提供'}</Tag>
+                  {name}
+                </span>
+                <Typography.Text type="secondary" ellipsis={{ tooltip: definition.path }}>
+                  {definition.path ?? '路径未提供'}
+                </Typography.Text>
+              </span>
             </Button>
           ),
         },

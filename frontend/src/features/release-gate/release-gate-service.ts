@@ -33,6 +33,28 @@ export type ReleaseDecisionInput = {
   runner_task_id?: string
 }
 
+export type ReleaseRunnerEvidence = {
+  id: string
+  execution_id: string
+  status: string
+  required_runner_type: string
+  attempts: number
+  fencing_token: number
+  completed_at: string | null
+  created_at: string
+}
+
+export async function listReleaseRunnerEvidence(projectId: string, page = 1) {
+  return (
+    await apiClient.get<Page<ReleaseRunnerEvidence>>(
+      `/projects/${projectId}/release-runner-evidence`,
+      {
+        params: { page, page_size: 20 },
+      },
+    )
+  ).data
+}
+
 export type ReleaseReason = {
   code: string
   evidence_type:

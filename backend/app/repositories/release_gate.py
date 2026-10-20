@@ -77,6 +77,36 @@ class ReleaseGateRepository:
     async def get_decision(self, decision_id: UUID) -> ReleaseDecision | None:
         return await self._session.get(ReleaseDecision, decision_id)
 
+    async def list_project_runner_tasks(
+        self, *, project_id: UUID, offset: int, limit: int, status: str | None
+    ) -> tuple[list[RunnerTask], int]:
+        conditions = [RunnerTask.project_id == project_id]
+        if status is not None:
+            conditions.append(RunnerTask.status == status)
+        items = list(
+            (
+                await self._session.scalars(
+                    select(RunnerTask)
+                    .where(*conditions)
+                    .order_by(RunnerTask.created_at.desc(), RunnerTask.id.desc())
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(RunnerTask).where(*conditions)
+        )
+        return items, int(total or 0)
+
+    async def get_project_runner_task(
+        self, *, project_id: UUID, task_id: UUID
+    ) -> RunnerTask | None:
+        result = await self._session.scalars(
+            select(RunnerTask).where(RunnerTask.project_id == project_id, RunnerTask.id == task_id)
+        )
+        return result.one_or_none()
+
     async def list_decisions(
         self, *, project_id: UUID, offset: int, limit: int
     ) -> tuple[list[ReleaseDecision], int]:

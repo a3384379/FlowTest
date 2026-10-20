@@ -50,6 +50,7 @@ import { getProjectRedactionPolicy } from '../projects/project-service'
 import { useApiExecutions } from './use-api-executions'
 import { invalidateRequestTargets } from '../service-targets/request-target-cache'
 import { useAuthStore } from '../auth/auth-store'
+import { apiDetailKey, apiDefinitionKey } from './api-query-keys'
 
 export function useApiConsole(initialApiId?: string, initialExecutionId?: string) {
   const { message } = App.useApp()
@@ -370,7 +371,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     renamingApi: renameMutation.isPending,
     previewRequest: previewMutation.mutateAsync,
     previewing: previewMutation.isPending,
-    exportApis: exportMutation.mutate,
+    exportApis: exportMutation.mutateAsync,
     exporting: exportMutation.isPending,
     submitting: [
       projectMutation.isPending,
@@ -390,15 +391,26 @@ function useApiVersionQueries(
   apiId: string | null,
   selectedVersion: number | null,
 ) {
+  const client = useQueryClient()
   const versions = useQuery({
     queryKey: ['api-versions', projectId, apiId],
     queryFn: () => listApiVersions(requiredId(projectId), requiredId(apiId)),
     enabled: Boolean(projectId && apiId),
   })
   const apiDetail = useQuery({
-    queryKey: ['api-detail', projectId, apiId, selectedVersion],
-    queryFn: () =>
-      getApiDetail(requiredId(projectId), requiredId(apiId), selectedVersion ?? undefined),
+    queryKey: apiDetailKey(projectId, apiId, selectedVersion),
+    queryFn: async () => {
+      const detail = await getApiDetail(
+        requiredId(projectId),
+        requiredId(apiId),
+        selectedVersion ?? undefined,
+      )
+      client.setQueryData(
+        apiDefinitionKey(requiredId(projectId), requiredId(apiId)),
+        detail.definition,
+      )
+      return detail
+    },
     enabled: Boolean(projectId && apiId),
   })
   return { versions, apiDetail }

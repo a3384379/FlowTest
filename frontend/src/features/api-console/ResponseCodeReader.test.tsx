@@ -4,6 +4,20 @@ import { describe, expect, it, vi } from 'vitest'
 import ResponseCodeReader from './ResponseCodeReader'
 
 describe('response code reader', () => {
+  it('searches beyond the preview while copying the full current capture', async () => {
+    const browser = userEvent.setup()
+    const copied = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const text = Array.from({ length: 500 }, (_, index) => `line-${index}`).join('\n')
+    const view = render(<ResponseCodeReader value={text} title="证据" />)
+    fireEvent.change(screen.getByLabelText('证据搜索内容'), { target: { value: 'line-499' } })
+    expect(screen.getByText('line-499')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '复制完整内容' }))
+    expect(copied).toHaveBeenCalledWith(text)
+    view.rerender(<ResponseCodeReader value="new-capture" title="证据" />)
+    expect(screen.queryByText('已复制完整内容')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('证据搜索内容'), { target: { value: '' } })
+    expect(screen.getByText('new-capture')).toBeVisible()
+  })
   it('formats, highlights, and wraps the captured JSON without changing its value', async () => {
     const value = { id: 42, name: '<script>danger</script>', active: true }
     const browser = userEvent.setup()

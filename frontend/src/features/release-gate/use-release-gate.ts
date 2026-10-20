@@ -5,7 +5,6 @@ import { useSearchParams } from 'react-router-dom'
 
 import { getV3FeatureFlags, type V3FeatureFlags } from '../capabilities/capability-service'
 import { listDeploymentChecks } from '../contracts/contract-hub-service'
-import { listFabricTasks } from '../execution-fabric/execution-fabric-service'
 import { listImpactRuns } from '../impact/impact-service'
 import { listPerformanceRuns } from '../performance/performance-service'
 import { useProjectContext } from '../projects/use-project-context'
@@ -18,6 +17,7 @@ import {
   getReleaseDecision,
   listReleaseDecisions,
   listReleasePolicies,
+  listReleaseRunnerEvidence,
   type ReleaseDecisionInput,
   type ReleasePolicyInput,
 } from './release-gate-service'
@@ -107,11 +107,14 @@ export function useReleaseGate() {
     queryFn: () => listPerformanceRuns(required(projectId)),
     enabled: enabled && v3FeatureEnabled(featureFlags.data, 'performance_lab'),
   })
-  const runnerTasks = useQuery({
-    queryKey: ['release-runner-tasks', projectId],
-    queryFn: listFabricTasks,
-    enabled: enabled && v3FeatureEnabled(featureFlags.data, 'runner_fabric'),
-  })
+  const runnerTasks = useCatalogQuery(
+    'release-runner-tasks',
+    projectId,
+    (page) => listReleaseRunnerEvidence(required(projectId), page),
+    enabled && v3FeatureEnabled(featureFlags.data, 'runner_fabric'),
+    '',
+    {},
+  )
   const createPolicy = useMutation({
     mutationFn: (input: ReleasePolicyInput) => createReleasePolicy(required(projectId), input),
   })

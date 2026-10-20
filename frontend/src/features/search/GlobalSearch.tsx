@@ -1,6 +1,8 @@
 import { SearchOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { Select, Space, Spin, Typography } from 'antd'
+import { Button, Select, Space, Spin, Typography } from 'antd'
+import axios from 'axios'
+import { apiErrorMessage } from '../../lib/api'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
@@ -51,6 +53,36 @@ export default function GlobalSearch() {
       popupMatchSelectWidth={520}
       options={options}
       notFoundContent={<SearchEmpty query={query} loading={results.isFetching} />}
+      popupRender={(menu) => (
+        <>
+          {results.isError && (
+            <Space
+              orientation="vertical"
+              role="alert"
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <Typography.Text type="danger">{apiErrorMessage(results.error)}</Typography.Text>
+              {axios.isAxiosError(results.error) &&
+                typeof results.error.response?.data?.error?.trace_id === 'string' && (
+                  <Typography.Text copyable>
+                    {results.error.response.data.error.trace_id}
+                  </Typography.Text>
+                )}
+              {results.data && (
+                <Typography.Text type="secondary">以下为上次成功搜索结果</Typography.Text>
+              )}
+              <Button
+                aria-label="重试搜索"
+                loading={results.isFetching}
+                onClick={() => void results.refetch()}
+              >
+                重试搜索
+              </Button>
+            </Space>
+          )}
+          {!results.isError || results.data ? menu : null}
+        </>
+      )}
       onSearch={setSearchText}
       onClear={() => setSearchText('')}
       onSelect={(path) => {
