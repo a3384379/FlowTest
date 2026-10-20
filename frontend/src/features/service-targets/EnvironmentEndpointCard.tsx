@@ -45,11 +45,7 @@ type Props = {
 export default function EnvironmentEndpointCard(props: Props) {
   const endpoints = props.endpoints.filter((item) => item.service_id === props.service?.id)
   return (
-    <Card
-      title="环境 Endpoint Variant"
-      loading={props.loading}
-      className="request-target-environment"
-    >
+    <Card title="部署地址与变体" loading={props.loading} className="request-target-environment">
       <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
         <label>
           当前管理环境
@@ -103,9 +99,9 @@ function EnvironmentBinding(props: Props) {
     )
   return (
     <div>
-      <Typography.Text>环境默认 Service</Typography.Text>
+      <Typography.Text>环境默认服务</Typography.Text>
       <Select
-        aria-label="环境默认 Service"
+        aria-label="环境默认服务"
         allowClear
         style={{ width: '100%', minWidth: 0 }}
         value={props.selected.default_service_id ?? undefined}
@@ -137,23 +133,23 @@ function EndpointCreate(props: Props) {
         rules={[{ required: true, message: '请选择逻辑服务' }]}
       >
         <Select
-          aria-label="Endpoint Service"
+          aria-label="新增地址的逻辑服务"
           placeholder="选择逻辑服务"
           options={props.serviceOptions}
         />
       </Form.Item>
       <Form.Item name="variant" label="地址变体" initialValue="default">
-        <Input aria-label="Endpoint Variant" placeholder="default" />
+        <Input aria-label="新增地址变体" placeholder="default" />
       </Form.Item>
       <Form.Item
         name="base_url"
         label="部署地址"
         rules={[{ required: true, message: '请输入部署地址' }]}
       >
-        <Input aria-label="Endpoint Base URL" placeholder="https://orders.example.com" />
+        <Input aria-label="新增部署地址" placeholder="https://orders.example.com" />
       </Form.Item>
       <Button type="primary" htmlType="submit" loading={props.endpointSubmitting}>
-        添加 Endpoint
+        添加部署地址
       </Button>
     </Form>
   )

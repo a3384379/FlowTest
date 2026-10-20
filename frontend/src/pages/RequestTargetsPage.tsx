@@ -316,7 +316,7 @@ function RequestTargetsWorkspace({ projectId }: { projectId: string }) {
       checkServiceEndpointConnectivity(required(projectId), endpointId),
     onSuccess: (result) => {
       setConnectivity((current) => ({ ...current, [result.endpoint_id]: result }))
-      messageApi.success('Connectivity 检查已完成')
+      messageApi.success('连通性检查已完成')
     },
     onError: (reason) => messageApi.error(apiErrorMessage(reason)),
   })
@@ -414,7 +414,7 @@ function RequestTargetsWorkspace({ projectId }: { projectId: string }) {
           />
         </Col>
       </Row>
-      <CatalogPagination query={apis} label="API 默认 Service" />
+      <CatalogPagination query={apis} label="接口默认服务" />
       <ApiServiceCard
         readOnly={!canEdit}
         apis={apiItems}
@@ -510,34 +510,31 @@ function ServiceCard({
   selectedId?: string
   onSelect: (id: string) => void
 }) {
+  const selected = services.find((item) => item.id === selectedId)
   return (
     <Card title="逻辑服务" loading={loading}>
-      <Form<ServiceForm>
-        name="request-service-create"
-        form={form}
-        layout="vertical"
-        onFinish={onFinish}
-        disabled={readOnly}
-      >
-        <Form.Item
-          name="service_key"
-          label="服务标识（跨环境保持一致）"
-          rules={[{ required: true }]}
+      <div className="request-target-mobile-service-picker">
+        <Select
+          aria-label="逻辑服务目录"
+          value={selectedId}
+          options={toServiceOptions(services)}
+          onChange={onSelect}
+          style={{ width: '100%' }}
+        />
+        <Button
+          disabled={!selected}
+          onClick={() => {
+            if (selected) onEdit(selected)
+          }}
+          loading={editLoading}
+          style={{ marginTop: 8 }}
         >
-          <Input placeholder="orders" />
-        </Form.Item>
-        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-          <Input placeholder="订单服务" />
-        </Form.Item>
-        <Form.Item name="description" label="描述">
-          <Input.TextArea rows={2} />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={submitting}>
-          创建 Service
+          编辑所选逻辑服务
         </Button>
-      </Form>
+      </div>
+
       <Table<RequestService>
-        className="request-target-table"
+        className="request-target-table request-target-service-list"
         rowClassName={(item) => (item.id === selectedId ? 'request-target-row-selected' : '')}
         rowKey="id"
         size="small"
@@ -581,6 +578,46 @@ function ServiceCard({
           },
         ]}
       />
+      <Collapse
+        style={{ marginTop: 16 }}
+        items={[
+          {
+            key: 'create',
+            label: '新建逻辑服务',
+            children: (
+              <Form<ServiceForm>
+                name="request-service-create"
+                form={form}
+                layout="vertical"
+                onFinish={onFinish}
+                disabled={readOnly}
+              >
+                <Form.Item
+                  name="service_key"
+                  label="服务标识（跨环境保持一致）"
+                  rules={[{ required: true }]}
+                >
+                  <Input placeholder="orders" />
+                </Form.Item>
+                <Form.Item name="name" label="名称" rules={[{ required: true }]}>
+                  <Input placeholder="订单服务" />
+                </Form.Item>
+                <Form.Item name="description" label="描述">
+                  <Input.TextArea rows={2} />
+                </Form.Item>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  icon={<PlusOutlined />}
+                  loading={submitting}
+                >
+                  创建逻辑服务
+                </Button>
+              </Form>
+            ),
+          },
+        ]}
+      />
     </Card>
   )
 }
@@ -612,7 +649,7 @@ function ApiServiceCard({
               <Tag>当前 v{item.current_version}</Tag>
             </Space>
             <Select
-              aria-label={`${item.name} 默认 Service`}
+              aria-label={`${item.name} 默认服务`}
               allowClear
               disabled={readOnly}
               style={{ width: '100%', minWidth: 0 }}
@@ -670,7 +707,7 @@ function RequestTargetEditModal({
     <Modal
       open={Boolean(target)}
       width={860}
-      title={isService ? 'Service 影响预览 / 编辑' : 'Endpoint 影响预览 / 编辑'}
+      title={isService ? '逻辑服务影响预览 / 编辑' : '部署地址影响预览 / 编辑'}
       okText={review ? '确认保存' : '分析影响与目标'}
       mask={{ closable: false }}
       closable={!submitting}

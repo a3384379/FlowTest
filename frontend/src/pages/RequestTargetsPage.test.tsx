@@ -118,16 +118,15 @@ describe('RequestTargetsPage', () => {
       }),
     )
     renderPage()
-    expect(await screen.findByText(service.name)).toBeVisible()
+    expect(await screen.findByRole('button', { name: service.name, exact: true })).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: /新建逻辑服务/ }))
     expect(screen.getByPlaceholderText('orders')).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: '环境默认 Service' })).toBeDisabled()
-    expect(
-      screen.getByRole('combobox', { name: `${apiDefinition.name} 默认 Service` }),
-    ).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '环境默认服务' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: `${apiDefinition.name} 默认服务` })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '目标环境' })).not.toBeDisabled()
     await userEvent.click(screen.getAllByRole('button', { name: /影响预览/ })[0])
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText('Service 影响预览 / 编辑')).toBeInTheDocument()
+    expect(within(dialog).getByText('逻辑服务影响预览 / 编辑')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '分析影响与目标' })).toBeDisabled()
     expect(writes).toBe(0)
   })
@@ -179,7 +178,7 @@ describe('RequestTargetsPage', () => {
           strategy: 'request_target_dependency_v1',
           service_id: service.id,
           service_key: service.service_key,
-          affected_apis: [{ id: api.id, name: api.name, reason: 'API 默认 Service' }],
+          affected_apis: [{ id: api.id, name: api.name, reason: 'API 默认服务' }],
           affected_workflows: [],
           affected_test_plans: [],
           affected_scheduled_runs: [],
@@ -232,17 +231,18 @@ describe('RequestTargetsPage', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByRole('heading', { name: '请求目标' })).toBeVisible()
-    expect(await screen.findByText('订单服务')).toBeVisible()
+    expect(await screen.findByRole('button', { name: '订单服务', exact: true })).toBeVisible()
     expect(await screen.findByText('https://orders.example.com')).toBeVisible()
-    expect(screen.getByText('环境默认 Service')).toBeVisible()
+    expect(screen.getByText('环境默认服务')).toBeVisible()
 
+    await browser.click(screen.getByRole('button', { name: /新建逻辑服务/ }))
     await browser.type(screen.getByPlaceholderText('orders'), 'orders-new')
     await browser.type(screen.getByPlaceholderText('订单服务'), '副本')
-    await browser.click(screen.getByRole('button', { name: /创建 Service/ }))
+    await browser.click(screen.getByRole('button', { name: /创建逻辑服务/ }))
     await waitFor(() => expect(servicePayload).toMatchObject({ service_key: 'orders-new' }))
 
     const environmentSelect = screen
-      .getByRole('combobox', { name: '环境默认 Service' })
+      .getByRole('combobox', { name: '环境默认服务' })
       .closest('.ant-select') as HTMLElement | null
     await browser.click(within(environmentSelect!).getByRole('img', { name: 'close-circle' }))
     const defaultReview = await screen.findByRole('dialog')
@@ -263,16 +263,16 @@ describe('RequestTargetsPage', () => {
     await waitFor(() => expect(confirmedDefault).not.toBeInTheDocument())
 
     await browser.click(screen.getByRole('button', { name: /新增地址变体/ }))
-    await browser.click(screen.getByRole('combobox', { name: 'Endpoint Service' }))
+    await browser.click(screen.getByRole('combobox', { name: '新增地址的逻辑服务' }))
     await chooseOption(browser, '订单服务 · orders')
     await browser.type(
-      screen.getByRole('textbox', { name: 'Endpoint Base URL' }),
+      screen.getByRole('textbox', { name: '新增部署地址' }),
       'https://orders.example.com',
     )
-    await browser.click(screen.getByRole('button', { name: '添加 Endpoint' }))
+    await browser.click(screen.getByRole('button', { name: '添加部署地址' }))
     await waitFor(() => expect(endpointPayload).toMatchObject({ variant: 'default' }))
 
-    await browser.click(screen.getByRole('combobox', { name: '查询当前用户 默认 Service' }))
+    await browser.click(screen.getByRole('combobox', { name: '查询当前用户 默认服务' }))
     await chooseOption(browser, '订单服务 · orders')
     const apiReview = await screen.findByRole('dialog')
     expect(apiPayload).toBeNull()
@@ -287,7 +287,7 @@ describe('RequestTargetsPage', () => {
     await browser.click(screen.getAllByRole('button', { name: /影响预览 \/ 编辑/ })[0])
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('保存前请确认下游影响')).toBeInTheDocument()
-    await waitFor(() => expect(within(dialog).getByText('API 默认 Service')).toBeVisible())
+    await waitFor(() => expect(within(dialog).getByText('API 默认服务')).toBeVisible())
     expect(within(dialog).getByRole('link', { name: api.name })).toHaveAttribute(
       'href',
       `/projects/${project.id}/apis?focus=${api.id}`,
@@ -387,12 +387,10 @@ describe('RequestTargetsPage', () => {
         'https://orders.example.com/users/me',
       ),
     )
-    const endpointCard = screen
-      .getByText('环境 Endpoint Variant')
-      .closest<HTMLElement>('.ant-card')!
+    const endpointCard = screen.getByText('部署地址与变体').closest<HTMLElement>('.ant-card')!
     await browser.click(within(endpointCard).getByRole('button', { name: /影响预览 \/ 编辑/ }))
     const dialog = await screen.findByRole('dialog')
-    await waitFor(() => expect(within(dialog).getByText('Endpoint 影响预览 / 编辑')).toBeVisible())
+    await waitFor(() => expect(within(dialog).getByText('部署地址影响预览 / 编辑')).toBeVisible())
     await browser.clear(within(dialog).getByLabelText('部署地址'))
     await browser.type(within(dialog).getByLabelText('部署地址'), 'https://orders-new.example.com')
     await browser.click(within(dialog).getByRole('button', { name: /请求头与变量/ }))
@@ -448,10 +446,10 @@ describe('RequestTargetsPage', () => {
       ),
     )
     renderPage()
-    expect(await screen.findByText(service.name)).toBeVisible()
+    expect(await screen.findByRole('button', { name: service.name, exact: true })).toBeVisible()
     name = 'Updated remote service'
     await userEvent.click(screen.getByRole('button', { name: /刷新/ }))
-    expect(await screen.findByText(name)).toBeVisible()
+    expect(await screen.findByRole('button', { name, exact: true })).toBeVisible()
   })
 
   it('shows a standard error envelope when the target data cannot be loaded', async () => {
@@ -608,7 +606,7 @@ describe('RequestTargetsPage', () => {
     )
     renderPage()
     const browser = userEvent.setup()
-    const select = await screen.findByRole('combobox', { name: '环境默认 Service' })
+    const select = await screen.findByRole('combobox', { name: '环境默认服务' })
     await waitFor(() => expect(select).toBeEnabled())
     await browser.click(
       within(select.closest('.ant-select')!).getByRole('img', { name: 'close-circle' }),
@@ -652,7 +650,7 @@ describe('RequestTargetsPage', () => {
     )
     const { queryClient } = renderPage()
     const browser = userEvent.setup()
-    const select = await screen.findByRole('combobox', { name: '环境默认 Service' })
+    const select = await screen.findByRole('combobox', { name: '环境默认服务' })
     await waitFor(() => expect(select).toBeEnabled())
     await browser.click(
       within(select.closest('.ant-select')!).getByRole('img', { name: 'close-circle' }),

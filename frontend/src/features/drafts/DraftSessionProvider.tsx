@@ -2,7 +2,7 @@ import { useContext, useEffect, useState, useSyncExternalStore, type ReactNode }
 import { Alert, Modal } from 'antd'
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom'
 import {
-  DRAFT_DISCARD_PREFIX,
+  REQUEST_TARGET_DRAFT_PREFIX,
   DRAFT_NAVIGATION_CANCELLED,
   DraftContext,
   DraftSession,
@@ -21,7 +21,7 @@ function DraftProtection({ session }: { session: DraftSession }) {
   useSyncExternalStore(session.subscribe, session.snapshot)
   const dataRouter = useContext(UNSAFE_DataRouterContext)
   const unsafe = session.unsafe.size > 0
-  const discarding = [...session.unsafe].some((key) => key.startsWith(DRAFT_DISCARD_PREFIX))
+  const discarding = [...session.unsafe].some((key) => key.startsWith(REQUEST_TARGET_DRAFT_PREFIX))
   useEffect(() => {
     if (!unsafe) return
     const block = (event: BeforeUnloadEvent) => event.preventDefault()

@@ -1,5 +1,5 @@
 import { useContext, useEffect } from 'react'
-import { DRAFT_DISCARD_PREFIX, DraftContext } from '../drafts/draft-session'
+import { REQUEST_TARGET_DRAFT_PREFIX, DraftContext } from '../drafts/draft-session'
 
 export default function TargetDraftGuard({
   projectId,
@@ -10,7 +10,7 @@ export default function TargetDraftGuard({
 }) {
   const session = useContext(DraftContext)
   useEffect(() => {
-    const key = `${DRAFT_DISCARD_PREFIX}request-target:${projectId}`
+    const key = `${REQUEST_TARGET_DRAFT_PREFIX}${projectId}`
     session?.markUnsafe(key, dirty)
     return () => session?.markUnsafe(key, false)
   }, [session, projectId, dirty])

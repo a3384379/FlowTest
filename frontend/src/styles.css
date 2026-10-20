@@ -2503,3 +2503,15 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.request-target-mobile-service-picker {
+  display: none;
+}
+@media (max-width: 600px) {
+  .request-target-mobile-service-picker {
+    display: block;
+  }
+  .request-target-service-list {
+    display: none;
+  }
+}
