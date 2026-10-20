@@ -38,7 +38,9 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import ProtocolFailurePanel from '../features/protocols/ProtocolFailurePanel'
+import ProtocolContractBrowser from '../features/protocols/ProtocolContractBrowser'
 import { Link } from 'react-router-dom'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 
@@ -55,12 +57,14 @@ import {
   listGraphQLSchemas,
   listGrpcDescriptors,
   getGraphQLSchema,
+  locateGraphQLError,
   getGrpcDescriptor,
   type ProtocolDebugResult,
   type SchemaArtifact,
 } from '../features/protocols/protocol-service'
 import { apiErrorWithTrace, type Credential } from '../lib/api'
 import { DraftContext, useDraftSession } from '../features/drafts/draft-session'
+import { useProtocolImportFeedback } from '../features/protocols/use-protocol-import-feedback'
 import ProtocolHeadersEditor from '../features/protocols/ProtocolHeadersEditor'
 import { useProtocolRequestDraft } from '../features/protocols/use-protocol-request-draft'
 import {
@@ -181,7 +185,9 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
         />
       )}
       <ProtocolCatalogControls state={state} />
-      <ProtocolHeading onImport={eventMode || !canEdit ? undefined : () => setImportOpen(true)} />
+      <ProtocolHeading
+        onImport={eventMode || !canEdit || location.error ? undefined : () => setImportOpen(true)}
+      />
       <WorkflowResourceReturn projectId={projectId} />
       {!eventMode && <ProtocolFeatureAlert enabled={inventory.enabled} />}
       <ProtocolSummary graphql={inventory.graphqlTotal} grpc={inventory.grpcTotal} />
@@ -198,13 +204,17 @@ function ProjectProtocolWorkbench({ projectId }: { projectId: string }) {
         />
         <ProtocolBody projectId={projectId} state={state} />
       </Card>
-      <SchemaImportDialog
-        open={importOpen}
-        mode={schemaMode}
-        projectId={projectId}
-        onClose={() => setImportOpen(false)}
-        credentials={credentials.data ?? []}
-      />
+      {importOpen && !eventMode && (
+        <SchemaImportDialog
+          key={`${projectId}:${schemaMode}`}
+          open
+          editable={canEdit && !location.error}
+          mode={schemaMode}
+          projectId={projectId}
+          onClose={() => setImportOpen(false)}
+          credentials={credentials.data ?? []}
+        />
+      )}
     </div>
   )
 }
@@ -260,7 +270,6 @@ function ProtocolBody({ projectId, state }: { projectId: string; state: Protocol
         enabled={inventory.enabled && canExecute}
         credentials={credentials.data ?? []}
       />
-      <SchemaInspector asset={selected} />
     </div>
   )
 }
@@ -322,7 +331,7 @@ function ProtocolHeading({ onImport }: { onImport?: () => void }) {
       <div>
         <Space align="center">
           <Typography.Title level={2}>多协议接口工作台</Typography.Title>
-          <Tag color="purple">V3 · S24</Tag>
+          <Tag color="blue">协议资产与调试</Tag>
         </Space>
         <Typography.Text type="secondary">
           统一管理 GraphQL、gRPC、Kafka 与 WebSocket，并将协议资产版本固定到执行 Snapshot。
@@ -351,19 +360,19 @@ function ProtocolSummary({
 }) {
   return (
     <Row gutter={16} className="protocol-summary">
-      <Col span={8}>
+      <Col xs={24} sm={8}>
         <Card>
           <Typography.Text type="secondary">GraphQL Schema</Typography.Text>
           <Typography.Title level={3}>{graphql ?? '—'}</Typography.Title>
         </Card>
       </Col>
-      <Col span={8}>
+      <Col xs={24} sm={8}>
         <Card>
           <Typography.Text type="secondary">gRPC Descriptor</Typography.Text>
           <Typography.Title level={3}>{grpc ?? '—'}</Typography.Title>
         </Card>
       </Col>
-      <Col span={8}>
+      <Col xs={24} sm={8}>
         <Card>
           <Typography.Text type="secondary">协议安全边界</Typography.Text>
           <Typography.Title level={3}>4 MB / 300 秒</Typography.Title>
@@ -431,9 +440,12 @@ function ProtocolEditor({
 }) {
   if (!selected)
     return (
-      <div className="protocol-editor">
-        <Empty description="选择 Schema 版本开始调试" />
-      </div>
+      <>
+        <div className="protocol-editor">
+          <Empty description="选择 Schema 版本开始调试" />
+        </div>
+        <SchemaInspector asset={null} />
+      </>
     )
   return mode === 'graphql' ? (
     <GraphQLEditor
@@ -477,6 +489,9 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
     },
   )
   const { endpoint, operation, variables } = draft
+  const [requestError, setRequestError] = useState<unknown>(null)
+  const [contractFocus, setContractFocus] = useState<string>('root')
+  const [activeTab, setActiveTab] = useState('request')
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
   const mutation = useMutation({
     mutationFn: (input: GraphQLRequestDraft) =>
@@ -490,11 +505,32 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
         headers: protocolRequestHeaders('graphql', input.headers, input.authorization),
         timeout_seconds: input.timeoutSeconds,
       }),
-    onMutate: () => ++generation.current,
+    onMutate: () => {
+      setRequestError(null)
+      setResult(null)
+      return ++generation.current
+    },
     onSuccess: (value, _input, revision) => {
       if (active.current && revision === generation.current) setResult(value)
     },
     onError: (error, _input, revision) => {
+      if (active.current && revision === generation.current) {
+        setRequestError(error)
+        void message.error(apiErrorWithTrace(error))
+      }
+    },
+  })
+  const locate = useMutation({
+    mutationFn: (input: {
+      path: Array<string | number>
+      operation: string
+      operation_name?: string
+    }) => locateGraphQLError(selected, input),
+    onMutate: () => generation.current,
+    onSuccess: (node, _path, revision) => {
+      if (active.current && revision === generation.current) setContractFocus(node)
+    },
+    onError: (error, _path, revision) => {
       if (active.current && revision === generation.current)
         void message.error(apiErrorWithTrace(error))
     },
@@ -502,92 +538,140 @@ function GraphQLEditor({ projectId, selected, enabled }: EditorProps) {
   function changeRequest(change: () => void) {
     generation.current += 1
     setResult(null)
+    setRequestError(null)
+    setContractFocus('root')
     change()
   }
   return (
-    <div className="protocol-editor">
-      <Tabs
-        items={[
-          {
-            key: 'request',
-            label: '请求',
-            children: (
-              <Space orientation="vertical" className="protocol-form" size="middle">
-                <Input
-                  aria-label="GraphQL Endpoint"
-                  value={endpoint}
-                  onChange={(event) => changeRequest(() => patch({ endpoint: event.target.value }))}
-                  prefix={<CloudServerOutlined />}
-                />
-                <TextArea
-                  aria-label="GraphQL Operation"
-                  rows={10}
-                  value={operation}
-                  onChange={(event) =>
-                    changeRequest(() => patch({ operation: event.target.value }))
-                  }
-                />
-                <TextArea
-                  aria-label="GraphQL Variables"
-                  rows={5}
-                  value={variables}
-                  onChange={(event) =>
-                    changeRequest(() => patch({ variables: event.target.value }))
-                  }
-                />
-                <Input
-                  aria-label="GraphQL Operation Name"
-                  value={draft.operationName}
-                  placeholder="操作名称（可选）"
-                  onChange={(event) =>
-                    changeRequest(() => patch({ operationName: event.target.value }))
-                  }
-                />
-                <label>
-                  GraphQL超时（秒）
-                  <InputNumber
-                    aria-label="GraphQL超时"
-                    min={1}
-                    max={300}
-                    value={draft.timeoutSeconds}
-                    onChange={(value) =>
-                      changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+    <>
+      <div className="protocol-editor">
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'request',
+              label: '请求',
+              children: (
+                <Space orientation="vertical" className="protocol-form" size="middle">
+                  <Input
+                    aria-label="GraphQL Endpoint"
+                    value={endpoint}
+                    onChange={(event) =>
+                      changeRequest(() => patch({ endpoint: event.target.value }))
+                    }
+                    prefix={<CloudServerOutlined />}
+                  />
+                  <TextArea
+                    aria-label="GraphQL Operation"
+                    rows={10}
+                    value={operation}
+                    onChange={(event) =>
+                      changeRequest(() => patch({ operation: event.target.value }))
                     }
                   />
-                </label>
-                <ProtocolHeadersEditor
-                  mode="graphql"
-                  rows={draft.headers}
-                  authorization={draft.authorization}
-                  onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
-                  onChange={(update) =>
-                    changeRequest(() =>
-                      patch((current) => ({
-                        headers: typeof update === 'function' ? update(current.headers) : update,
-                      })),
-                    )
-                  }
-                />
-                <Typography.Text type="secondary">
-                  请求草稿只保留在当前会话，按协议与固定版本隔离；不会写入浏览器持久存储。
-                </Typography.Text>
-                <Button onClick={() => changeRequest(reset)}>重置GraphQL请求草稿</Button>
-                <Button
-                  type="primary"
-                  icon={<PlayCircleOutlined />}
-                  disabled={!enabled}
-                  loading={mutation.isPending}
-                  onClick={() => mutation.mutate(draft)}
-                >
-                  执行 GraphQL
-                </Button>
-              </Space>
-            ),
-          },
-          { key: 'result', label: '响应', children: <ResultPanel result={result} /> },
-        ]}
-      />
-    </div>
+                  <TextArea
+                    aria-label="GraphQL Variables"
+                    rows={5}
+                    value={variables}
+                    onChange={(event) =>
+                      changeRequest(() => patch({ variables: event.target.value }))
+                    }
+                  />
+                  <Input
+                    aria-label="GraphQL Operation Name"
+                    value={draft.operationName}
+                    placeholder="操作名称（可选）"
+                    onChange={(event) =>
+                      changeRequest(() => patch({ operationName: event.target.value }))
+                    }
+                  />
+                  <label>
+                    GraphQL超时（秒）
+                    <InputNumber
+                      aria-label="GraphQL超时"
+                      min={1}
+                      max={300}
+                      value={draft.timeoutSeconds}
+                      onChange={(value) =>
+                        changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+                      }
+                    />
+                  </label>
+                  <ProtocolHeadersEditor
+                    mode="graphql"
+                    rows={draft.headers}
+                    authorization={draft.authorization}
+                    onAuthorization={(authorization) =>
+                      changeRequest(() => patch({ authorization }))
+                    }
+                    onChange={(update) =>
+                      changeRequest(() =>
+                        patch((current) => ({
+                          headers: typeof update === 'function' ? update(current.headers) : update,
+                        })),
+                      )
+                    }
+                  />
+                  <Typography.Text type="secondary">
+                    请求草稿只保留在当前会话，按协议与固定版本隔离；不会写入浏览器持久存储。
+                  </Typography.Text>
+                  <Button onClick={() => changeRequest(reset)}>重置GraphQL请求草稿</Button>
+                  <Button
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    disabled={!enabled}
+                    loading={mutation.isPending}
+                    onClick={() => mutation.mutate(draft)}
+                  >
+                    执行 GraphQL
+                  </Button>
+                </Space>
+              ),
+            },
+            {
+              key: 'result',
+              label: '响应',
+              children: (
+                <>
+                  <ProtocolFailurePanel
+                    error={requestError}
+                    locating={locate.isPending}
+                    onLocate={(path) =>
+                      locate.mutate({
+                        path,
+                        operation: draft.operation,
+                        operation_name: draft.operationName || undefined,
+                      })
+                    }
+                  />
+                  <ResultPanel result={result} />
+                </>
+              ),
+            },
+          ]}
+        />
+      </div>
+      <SchemaInspector asset={selected}>
+        <ProtocolContractBrowser
+          key={contractFocus}
+          initialNode={contractFocus}
+          asset={selected}
+          onExample={(example) => {
+            const { operation, variables } = example
+            if (!operation || !variables) return
+            changeRequest(() =>
+              patch({
+                operation,
+                variables: JSON.stringify(variables, null, 2),
+                operationName: 'FlowTestExample',
+              }),
+            )
+            setActiveTab('request')
+          }}
+        />
+      </SchemaInspector>
+    </>
   )
 }
 
@@ -618,8 +702,13 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
     },
   )
   const { endpoint, methodKey, request, tlsMode, credentialId } = draft
+  const credentialAvailable = mtlsCredentials.some((credential) => credential.id === credentialId)
+  const [requestError, setRequestError] = useState<unknown>(null)
+  const [contractFocus, setContractFocus] = useState<string>('root')
+  const [activeTab, setActiveTab] = useState('request')
   const [result, setResult] = useState<ProtocolDebugResult | null>(null)
-  const selectedMethod = methods.find((item) => item.value === methodKey) ?? methods[0]
+  const methodOptions = availableGrpcMethods(methods, draft)
+  const selectedMethod = methodOptions.find((item) => item.value === methodKey)
   const mutation = useMutation({
     mutationFn: (input: GrpcRequestDraft & { method: typeof selectedMethod }) => {
       if (!input.method) throw new Error('Descriptor 中没有可调用方法')
@@ -637,119 +726,228 @@ function GrpcEditor({ projectId, selected, enabled, credentials = [] }: EditorPr
         timeout_seconds: input.timeoutSeconds,
       })
     },
-    onMutate: () => ++generation.current,
+    onMutate: () => {
+      setRequestError(null)
+      setResult(null)
+      return ++generation.current
+    },
     onSuccess: (value, _input, revision) => {
       if (active.current && revision === generation.current) setResult(value)
     },
     onError: (error, _input, revision) => {
-      if (active.current && revision === generation.current)
+      if (active.current && revision === generation.current) {
+        setRequestError(error)
         void message.error(apiErrorWithTrace(error))
+      }
     },
   })
   function changeRequest(change: () => void) {
     generation.current += 1
     setResult(null)
+    setRequestError(null)
+    setContractFocus('root')
     change()
   }
   return (
-    <div className="protocol-editor">
-      <Tabs
-        items={[
-          {
-            key: 'request',
-            label: '请求',
-            children: (
-              <Space orientation="vertical" className="protocol-form" size="middle">
-                <Input
-                  aria-label="gRPC Endpoint"
-                  value={endpoint}
-                  onChange={(event) => changeRequest(() => patch({ endpoint: event.target.value }))}
-                  prefix={<CloudServerOutlined />}
-                />
-                <Select
-                  aria-label="gRPC Method"
-                  value={selectedMethod?.value}
-                  options={methods}
-                  onChange={(value) => changeRequest(() => patch({ methodKey: value }))}
-                  placeholder="选择 Service / Method"
-                />
-                <Segmented<'plaintext' | 'tls' | 'mtls'>
-                  value={tlsMode}
-                  options={[
-                    { label: 'TLS', value: 'tls' },
-                    { label: '明文', value: 'plaintext' },
-                    { label: 'mTLS', value: 'mtls' },
-                  ]}
-                  onChange={(value) => changeRequest(() => patch({ tlsMode: value }))}
-                />
-                {tlsMode === 'mtls' && (
-                  <Select
-                    aria-label="gRPC mTLS Credential"
-                    value={credentialId}
-                    options={mtlsCredentials.map((credential) => ({
-                      value: credential.id,
-                      label: credential.name,
-                    }))}
-                    onChange={(value) => changeRequest(() => patch({ credentialId: value }))}
-                    placeholder="选择 mTLS Credential"
+    <>
+      <div className="protocol-editor">
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'request',
+              label: '请求',
+              children: (
+                <Space orientation="vertical" className="protocol-form" size="middle">
+                  <Input
+                    aria-label="gRPC Endpoint"
+                    value={endpoint}
+                    onChange={(event) =>
+                      changeRequest(() => patch({ endpoint: event.target.value }))
+                    }
+                    prefix={<CloudServerOutlined />}
                   />
-                )}
-                <TextArea
-                  aria-label="gRPC Request"
-                  rows={10}
-                  value={request}
-                  onChange={(event) => changeRequest(() => patch({ request: event.target.value }))}
-                />
-                <label>
-                  gRPC超时（秒）
-                  <InputNumber
-                    aria-label="gRPC超时"
-                    min={1}
-                    max={300}
-                    value={draft.timeoutSeconds}
+                  <Select
+                    aria-label="gRPC Method"
+                    value={selectedMethod?.value}
+                    options={methodOptions}
                     onChange={(value) =>
-                      changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+                      changeRequest(() => patch({ methodKey: value, methodContract: undefined }))
+                    }
+                    placeholder="选择 Service / Method"
+                  />
+                  <Segmented<'plaintext' | 'tls' | 'mtls'>
+                    value={tlsMode}
+                    options={[
+                      { label: 'TLS', value: 'tls' },
+                      { label: '明文', value: 'plaintext' },
+                      { label: 'mTLS', value: 'mtls' },
+                    ]}
+                    onChange={(value) => changeRequest(() => patch({ tlsMode: value }))}
+                  />
+                  {tlsMode === 'mtls' && (
+                    <GrpcCredentialSelect
+                      credentials={mtlsCredentials}
+                      credentialId={credentialId}
+                      available={credentialAvailable}
+                      onChange={(value) => changeRequest(() => patch({ credentialId: value }))}
+                    />
+                  )}
+                  <TextArea
+                    aria-label="gRPC Request"
+                    rows={10}
+                    value={request}
+                    onChange={(event) =>
+                      changeRequest(() => patch({ request: event.target.value }))
                     }
                   />
-                </label>
-                <ProtocolHeadersEditor
-                  mode="grpc"
-                  rows={draft.metadata}
-                  authorization={draft.authorization}
-                  onAuthorization={(authorization) => changeRequest(() => patch({ authorization }))}
-                  onChange={(update) =>
-                    changeRequest(() =>
-                      patch((current) => ({
-                        metadata: typeof update === 'function' ? update(current.metadata) : update,
-                      })),
-                    )
-                  }
-                />
-                <Typography.Text type="secondary">
-                  请求草稿只保留在当前会话，TLS/mTLS与凭据引用保持独立；不会读取凭据明文。
-                </Typography.Text>
-                <Button onClick={() => changeRequest(reset)}>重置gRPC请求草稿</Button>
-                <Button
-                  type="primary"
-                  icon={<PlayCircleOutlined />}
-                  disabled={!enabled || !selectedMethod || (tlsMode === 'mtls' && !credentialId)}
-                  loading={mutation.isPending}
-                  onClick={() =>
-                    mutation.mutate({
-                      ...draft,
-                      method: selectedMethod,
-                    })
-                  }
-                >
-                  执行 gRPC
-                </Button>
-              </Space>
-            ),
-          },
-          { key: 'result', label: '响应流', children: <ResultPanel result={result} /> },
-        ]}
+                  <label>
+                    gRPC超时（秒）
+                    <InputNumber
+                      aria-label="gRPC超时"
+                      min={1}
+                      max={300}
+                      value={draft.timeoutSeconds}
+                      onChange={(value) =>
+                        changeRequest(() => patch({ timeoutSeconds: value ?? 30 }))
+                      }
+                    />
+                  </label>
+                  <ProtocolHeadersEditor
+                    mode="grpc"
+                    rows={draft.metadata}
+                    authorization={draft.authorization}
+                    onAuthorization={(authorization) =>
+                      changeRequest(() => patch({ authorization }))
+                    }
+                    onChange={(update) =>
+                      changeRequest(() =>
+                        patch((current) => ({
+                          metadata:
+                            typeof update === 'function' ? update(current.metadata) : update,
+                        })),
+                      )
+                    }
+                  />
+                  <Typography.Text type="secondary">
+                    请求草稿只保留在当前会话，TLS/mTLS与凭据引用保持独立；不会读取凭据明文。
+                  </Typography.Text>
+                  <Button onClick={() => changeRequest(reset)}>重置gRPC请求草稿</Button>
+                  <Button
+                    type="primary"
+                    icon={<PlayCircleOutlined />}
+                    disabled={
+                      !enabled || !selectedMethod || (tlsMode === 'mtls' && !credentialAvailable)
+                    }
+                    loading={mutation.isPending}
+                    onClick={() =>
+                      mutation.mutate({
+                        ...draft,
+                        method: selectedMethod,
+                      })
+                    }
+                  >
+                    执行 gRPC
+                  </Button>
+                </Space>
+              ),
+            },
+            {
+              key: 'result',
+              label: '响应流',
+              children: (
+                <>
+                  <GrpcRequestFailure
+                    error={requestError}
+                    method={selectedMethod}
+                    onLocate={setContractFocus}
+                  />
+                  <ResultPanel result={result} />
+                </>
+              ),
+            },
+          ]}
+        />
+      </div>
+      <SchemaInspector asset={selected}>
+        <ProtocolContractBrowser
+          key={contractFocus}
+          initialNode={contractFocus}
+          asset={selected}
+          onExample={(example) => {
+            const { service, method, request, call_type } = example
+            if (!service || !method || !request || !call_type) return
+            changeRequest(() =>
+              patch({
+                methodKey: `${service}/${method}`,
+                methodContract: {
+                  service,
+                  method,
+                  callType: call_type,
+                },
+                request: JSON.stringify(request, null, 2),
+              }),
+            )
+            setActiveTab('request')
+          }}
+        />
+      </SchemaInspector>
+    </>
+  )
+}
+
+function GrpcRequestFailure({
+  error,
+  method,
+  onLocate,
+}: {
+  error: unknown
+  method: GrpcMethodOption | undefined
+  onLocate: (node: string) => void
+}) {
+  if (!error) return null
+  return (
+    <>
+      <ProtocolFailurePanel error={error} />
+      {method && (
+        <Button onClick={() => onLocate(`method:${method.service}/${method.method}`)}>
+          定位当前方法契约
+        </Button>
+      )}
+    </>
+  )
+}
+
+function GrpcCredentialSelect({
+  credentials,
+  credentialId,
+  available,
+  onChange,
+}: {
+  credentials: Credential[]
+  credentialId: string | undefined
+  available: boolean
+  onChange: (id: string) => void
+}) {
+  const options = credentials.map((credential) => ({
+    value: credential.id,
+    label: credential.name,
+    disabled: false,
+  }))
+  if (credentialId && !available)
+    options.push({ value: credentialId, label: '不可用凭据', disabled: true })
+  return (
+    <>
+      <Select
+        aria-label="gRPC mTLS Credential"
+        value={credentialId}
+        options={options}
+        onChange={onChange}
+        placeholder="选择 mTLS Credential"
       />
-    </div>
+      {!available && <Alert type="warning" title="所选mTLS凭据不可用，请重新选择。" />}
+    </>
   )
 }
 
@@ -773,15 +971,23 @@ function ResultPanel({ result }: { result: ProtocolDebugResult | null }) {
   )
 }
 
-function SchemaInspector({ asset }: { asset: SchemaArtifact | null }) {
+function SchemaInspector({
+  asset,
+  children,
+}: {
+  asset: SchemaArtifact | null
+  children?: ReactNode
+}) {
   return (
     <aside className="protocol-inspector">
-      <Typography.Title level={4}>Context Inspector</Typography.Title>
+      <Typography.Title level={4}>契约检查器</Typography.Title>
       {!asset ? (
         <Empty description="选择版本查看固定信息" />
       ) : (
         <>
-          <Typography.Text code>{asset.content_sha256.slice(0, 16)}…</Typography.Text>
+          <Typography.Paragraph code copyable>
+            {asset.content_sha256}
+          </Typography.Paragraph>
           <Descriptions column={1} size="small">
             <Descriptions.Item label="协议">{asset.protocol}</Descriptions.Item>
             <Descriptions.Item label="版本">v{asset.version}</Descriptions.Item>
@@ -790,10 +996,11 @@ function SchemaInspector({ asset }: { asset: SchemaArtifact | null }) {
             </Descriptions.Item>
             <Descriptions.Item label="类型/服务">{summaryCount(asset)}</Descriptions.Item>
           </Descriptions>
+          {children}
           <Alert
             showIcon
-            type="success"
-            title="Snapshot 已固定"
+            type="info"
+            title="执行时固定版本"
             description="执行记录保存该版本与 SHA-256；后续导入不会改变历史结果。"
           />
         </>
@@ -808,14 +1015,16 @@ function SchemaImportDialog({
   projectId,
   onClose,
   credentials,
+  editable,
 }: {
+  editable: boolean
   open: boolean
   mode: SchemaProtocolMode
   projectId: string
   onClose: () => void
   credentials: Credential[]
 }) {
-  const { message } = App.useApp()
+  const feedback = useProtocolImportFeedback(editable)
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{
     name: string
@@ -877,10 +1086,12 @@ function SchemaImportDialog({
         queryKey:
           mode === 'graphql' ? ['graphql-schemas', projectId] : ['grpc-descriptors', projectId],
       })
-      message.success('协议 Schema 已保存为不可变版本')
-      onClose()
+      if (feedback.allowed()) {
+        feedback.success('协议 Schema 已保存为不可变版本')
+        onClose()
+      }
     },
-    onError: (error) => void message.error(apiErrorWithTrace(error)),
+    onError: feedback.error,
   })
   const sourceOptions =
     mode === 'graphql'
@@ -897,14 +1108,18 @@ function SchemaImportDialog({
     <Modal
       title="导入协议 Schema"
       open={open}
-      confirmLoading={mutation.isPending}
       onCancel={onClose}
-      onOk={() => form.validateFields().then((values) => mutation.mutate(values))}
+      onOk={() => form.submit()}
+      okButtonProps={{ disabled: !editable || mutation.isPending, loading: mutation.isPending }}
       okText="校验并保存"
       destroyOnHidden
     >
       <Form
         form={form}
+        disabled={!editable || mutation.isPending}
+        onFinish={(values) => {
+          if (feedback.allowed() && !mutation.isPending) mutation.mutate(values)
+        }}
         layout="vertical"
         initialValues={{
           source_format: sourceOptions[0].value,
@@ -997,6 +1212,20 @@ type GrpcMethodOption = {
   callType: 'unary' | 'server_streaming'
 }
 
+function availableGrpcMethods(
+  methods: GrpcMethodOption[],
+  draft: GrpcRequestDraft,
+): GrpcMethodOption[] {
+  const contract = draft.methodContract
+  if (!contract || methods.some((item) => item.value === draft.methodKey)) return methods
+  const option = {
+    ...contract,
+    value: `${contract.service}/${contract.method}`,
+    label: `${contract.service} / ${contract.method}`,
+  }
+  return [...methods, option]
+}
+
 function descriptorMethods(asset: SchemaArtifact): GrpcMethodOption[] {
   const services = Array.isArray(asset.summary.services) ? asset.summary.services : []
   return services.flatMap((service) => {
@@ -1004,7 +1233,12 @@ function descriptorMethods(asset: SchemaArtifact): GrpcMethodOption[] {
       return []
     const serviceName = service.name
     return service.methods.flatMap((method) => {
-      if (!isRecord(method) || typeof method.name !== 'string') return []
+      if (
+        !isRecord(method) ||
+        typeof method.name !== 'string' ||
+        (method.call_type !== 'unary' && method.call_type !== 'server_streaming')
+      )
+        return []
       const callType: GrpcMethodOption['callType'] =
         method.call_type === 'server_streaming' ? 'server_streaming' : 'unary'
       return [

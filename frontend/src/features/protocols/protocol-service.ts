@@ -195,6 +195,18 @@ export async function listEventSchemas(
   ).data
 }
 
+export async function getEventSchema(
+  projectId: string,
+  sourceId: string,
+  id: string,
+): Promise<SchemaArtifact> {
+  return (
+    await apiClient.get<SchemaArtifact>(`/event-sources/${sourceId}/schemas/${id}`, {
+      params: { project_id: projectId },
+    })
+  ).data
+}
+
 export async function createEventSchema(
   projectId: string,
   sourceId: string,
@@ -281,4 +293,91 @@ export async function exchangeWebSocketMessage(
   return (
     await apiClient.post<EventDebugResult>(`/event-sources/${sourceId}/websocket/exchange`, input)
   ).data
+}
+
+export type ProtocolInputExample = {
+  operation: string | null
+  variables: Record<string, unknown> | null
+  service: string | null
+  method: string | null
+  call_type: 'unary' | 'server_streaming' | null
+  request: Record<string, unknown> | null
+}
+export type ProtocolStructureEntry = {
+  key: string
+  label: string
+  kind: string
+  type_label: string
+  required: boolean
+  description: string
+  expandable: boolean
+}
+export type ProtocolStructureResponse = {
+  artifact_id: string
+  project_id: string
+  protocol: 'graphql' | 'grpc'
+  version: number
+  content_sha256: string
+  view: {
+    node: string
+    label: string
+    entries: ProtocolStructureEntry[]
+    total: number
+    offset: number
+    limit: number
+    example: ProtocolInputExample | null
+    notice: string | null
+    document: string | null
+    document_format: 'text' | 'base64' | null
+  }
+}
+export async function inspectProtocolStructure(
+  asset: SchemaArtifact,
+  node: string,
+  page: number,
+): Promise<ProtocolStructureResponse> {
+  const result = (
+    await apiClient.get<ProtocolStructureResponse>(`/protocol-assets/${asset.id}/structure`, {
+      params: {
+        project_id: asset.project_id,
+        protocol: asset.protocol,
+        node,
+        offset: (page - 1) * 25,
+        limit: 25,
+      },
+    })
+  ).data
+  if (
+    result.artifact_id !== asset.id ||
+    result.project_id !== asset.project_id ||
+    result.protocol !== asset.protocol ||
+    result.version !== asset.version ||
+    result.content_sha256 !== asset.content_sha256 ||
+    result.view.node !== node
+  )
+    throw new Error('契约结构身份与所选版本不一致，请刷新后重试。')
+  return result
+}
+
+export async function locateGraphQLError(
+  asset: SchemaArtifact,
+  input: { operation: string; operation_name?: string; path: Array<string | number> },
+): Promise<string> {
+  const result = (
+    await apiClient.post<{
+      artifact_id: string
+      project_id: string
+      version: number
+      content_sha256: string
+      node: string
+    }>(`/graphql/schemas/${asset.id}/locate-error`, { project_id: asset.project_id, ...input })
+  ).data
+  if (
+    result.artifact_id !== asset.id ||
+    result.project_id !== asset.project_id ||
+    result.version !== asset.version ||
+    result.content_sha256 !== asset.content_sha256
+  )
+    throw new Error('错误定位结果与所选契约版本不一致。')
+  return result.node
 }

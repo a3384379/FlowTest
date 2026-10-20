@@ -1,8 +1,12 @@
+import base64
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.graphql_structure import inspect_graphql, locate_graphql_error_root
+from app.domain.grpc_structure import inspect_grpc
+from app.domain.protocol_structure import StructureNodeNotFound, StructureView
 from app.domain.protocols import (
     ProtocolKind,
     ProtocolSchemaError,
@@ -17,7 +21,11 @@ from app.domain.protocols import (
 from app.models.access import User
 from app.models.protocols import SchemaArtifact
 from app.repositories.protocols import ProtocolRepository
-from app.schemas.protocols import GraphQLSchemaCreate, GrpcDescriptorCreate
+from app.schemas.protocols import (
+    GraphQLErrorLocationRequest,
+    GraphQLSchemaCreate,
+    GrpcDescriptorCreate,
+)
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -103,6 +111,57 @@ class ProtocolAssetService:
     ) -> SchemaArtifact:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self.load(project_id=project_id, artifact_id=artifact_id, protocol=protocol)
+
+    async def locate_graphql_error(
+        self,
+        *,
+        actor: User,
+        artifact_id: UUID,
+        payload: GraphQLErrorLocationRequest,
+    ) -> tuple[SchemaArtifact, str]:
+        artifact = await self.get(
+            actor=actor,
+            project_id=payload.project_id,
+            artifact_id=artifact_id,
+            protocol=ProtocolKind.GRAPHQL,
+        )
+        try:
+            node = locate_graphql_error_root(
+                artifact.canonical_content, payload.operation, payload.operation_name, payload.path
+            )
+        except ProtocolSchemaError as error:
+            raise AppError(
+                code="SCHEMA_ERROR_PATH_UNAVAILABLE", message=str(error), status_code=422
+            ) from error
+        return artifact, node
+
+    async def structure(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        artifact_id: UUID,
+        protocol: ProtocolKind,
+        node: str,
+        offset: int,
+        limit: int,
+    ) -> tuple[SchemaArtifact, StructureView]:
+        artifact = await self.get(
+            actor=actor, project_id=project_id, artifact_id=artifact_id, protocol=protocol
+        )
+        try:
+            if node == "source":
+                return artifact, _source_view(artifact)
+            inspect = inspect_graphql if protocol is ProtocolKind.GRAPHQL else inspect_grpc
+            return artifact, inspect(artifact.canonical_content, node, offset, limit)
+        except StructureNodeNotFound as error:
+            raise AppError(
+                code="SCHEMA_STRUCTURE_NODE_NOT_FOUND", message="该契约路径不存在", status_code=404
+            ) from error
+        except ProtocolSchemaError as error:
+            raise AppError(
+                code="SCHEMA_STRUCTURE_UNAVAILABLE", message=str(error), status_code=422
+            ) from error
 
     async def load(
         self,
@@ -214,3 +273,29 @@ class ProtocolAssetService:
                 message=str(error),
                 status_code=422,
             ) from error
+
+
+def _source_view(artifact: SchemaArtifact) -> StructureView:
+    maximum = 65536
+    raw = artifact.source_content[:maximum]
+    encoding = "text"
+    try:
+        document = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        document = base64.b64encode(raw).decode("ascii")
+        encoding = "base64"
+    if artifact.source_format == SchemaSourceFormat.PROTO_DESCRIPTOR_SET.value:
+        document, encoding = base64.b64encode(raw).decode("ascii"), "base64"
+    return StructureView(
+        node="source",
+        label="导入源文档",
+        entries=(),
+        total=0,
+        offset=0,
+        limit=1,
+        notice="源文档超过64 KiB,当前仅显示前缀。"
+        if len(artifact.source_content) > maximum
+        else None,
+        document=document,
+        document_format="base64" if encoding == "base64" else "text",
+    )

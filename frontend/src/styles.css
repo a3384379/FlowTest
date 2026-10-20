@@ -2539,3 +2539,36 @@ body {
     grid-row: 2;
   }
 }
+
+.protocol-contract-path {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.protocol-contract-fields {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+}
+.protocol-contract-fields li {
+  border-bottom: 1px solid var(--border-color, #dbe8f5);
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.protocol-contract-fields .ant-btn-link {
+  padding: 0;
+  height: auto;
+  text-align: left;
+  white-space: normal;
+}
+.protocol-contract-source {
+  max-height: 420px;
+  overflow: auto;
+}
+.protocol-contract-view {
+  margin: 12px 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.protocol-inspector .ant-collapse {
+  margin: 16px 0;
+}

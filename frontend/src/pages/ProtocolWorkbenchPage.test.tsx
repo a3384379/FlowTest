@@ -156,6 +156,44 @@ describe('ProtocolWorkbenchPage', () => {
     expect(screen.getByLabelText('WebSocket Message')).toBeInTheDocument()
   })
 
+  it('restores a Kafka message schema outside its catalog page and keeps it fixed while paging', async () => {
+    installHandlers()
+    const schema = {
+      ...graphqlSchema,
+      id: '00000000-0000-4000-8000-000000000829',
+      protocol: 'kafka',
+      name: '页外订单消息',
+      version: 9,
+    }
+    const payloads: Array<{ schema_id: string }> = []
+    server.use(
+      http.get('/api/v1/event-sources/:sourceId/schemas', () =>
+        HttpResponse.json({ items: [], total: 60, page: 2, page_size: 20 }),
+      ),
+      http.get(`/api/v1/event-sources/${kafkaSource.id}/schemas/${schema.id}`, () =>
+        HttpResponse.json(schema),
+      ),
+      http.post('/api/v1/event-sources/:sourceId/kafka/produce', async ({ request }) => {
+        payloads.push((await request.json()) as (typeof payloads)[number])
+        return HttpResponse.json({ output: { operation: 'produce' }, duration_ms: 1 })
+      }),
+    )
+    renderPage(
+      `?mode=kafka&kafkaSource=${kafkaSource.id}&kafkaSchema=${schema.id}&kafkaSchemaPage=2`,
+    )
+    await screen.findByText('页外订单消息 · v9')
+    const pager = screen.getByText('项目消息 Schema共 60 项').closest('ul')!
+    await userEvent.click(within(pager).getByTitle('Next Page'))
+    await waitFor(() =>
+      expect(screen.getByTestId('protocol-location')).toHaveTextContent('kafkaSchemaPage=3'),
+    )
+    expect(screen.getByText('页外订单消息 · v9')).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: /Produce/ }))
+    await waitFor(() =>
+      expect(payloads).toEqual([expect.objectContaining({ schema_id: schema.id })]),
+    )
+  })
+
   it('restores request drafts separately for each protocol and fixed asset version', async () => {
     installHandlers()
     renderPage()
@@ -527,7 +565,7 @@ describe('ProtocolWorkbenchPage', () => {
     const browser = userEvent.setup()
 
     expect(await screen.findByText('用户 GraphQL')).toBeVisible()
-    expect(screen.getByText('aaaaaaaaaaaaaaaa…')).toBeVisible()
+    expect(screen.getByText(graphqlSchema.content_sha256)).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
     await browser.click(screen.getByText('响应'))
     expect(await screen.findByText(/Alice/)).toBeVisible()
@@ -614,7 +652,9 @@ describe('ProtocolWorkbenchPage', () => {
 
   it('imports Registry and manual Kafka schemas as immutable versions', async () => {
     const imports: string[] = []
-    const catalog = [{ ...graphqlSchema, id: 'kafka-schema', protocol: 'kafka' as const }]
+    const catalog = [
+      { ...graphqlSchema, id: '00000000-0000-4000-8000-000000000821', protocol: 'kafka' as const },
+    ]
     installHandlers()
     server.use(
       http.get('/api/v1/event-sources/:sourceId/schemas', () =>
@@ -625,14 +665,14 @@ describe('ProtocolWorkbenchPage', () => {
         imports.push(String(payload.subject))
         catalog.push({
           ...graphqlSchema,
-          id: 'registry-schema',
+          id: '00000000-0000-4000-8000-000000000822',
           name: 'Registry 订单',
           protocol: 'kafka',
         })
         return HttpResponse.json(
           {
             ...graphqlSchema,
-            id: 'registry-schema',
+            id: '00000000-0000-4000-8000-000000000822',
             protocol: 'kafka',
             source_format: 'json_schema',
           },
@@ -643,7 +683,12 @@ describe('ProtocolWorkbenchPage', () => {
         const payload = (await request.json()) as Record<string, unknown>
         imports.push(String(payload.schema_format))
         return HttpResponse.json(
-          { ...graphqlSchema, id: 'manual-schema', protocol: 'kafka', source_format: 'avro' },
+          {
+            ...graphqlSchema,
+            id: '00000000-0000-4000-8000-000000000823',
+            protocol: 'kafka',
+            source_format: 'avro',
+          },
           { status: 201 },
         )
       }),
@@ -826,6 +871,209 @@ describe('ProtocolWorkbenchPage', () => {
 
     expect(await screen.findByText('Variables 必须是 JSON 对象')).toBeInTheDocument()
     expect(executed).toBe(false)
+  })
+
+  it('fills real contract examples without executing and supports gRPC methods when a legacy summary is absent', async () => {
+    installHandlers()
+    const payloads: Array<{ service: string; method: string; request: object }> = []
+    server.use(
+      http.get('/api/v1/grpc/descriptors', () =>
+        HttpResponse.json({
+          items: [{ ...grpcDescriptor, summary: {} }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get('/api/v1/protocol-assets/:id/structure', () =>
+        HttpResponse.json({
+          artifact_id: grpcDescriptor.id,
+          project_id: project.id,
+          protocol: 'grpc',
+          version: 1,
+          content_sha256: grpcDescriptor.content_sha256,
+          view: {
+            node: 'root',
+            label: '真实方法',
+            entries: [],
+            total: 0,
+            offset: 0,
+            limit: 25,
+            notice: '样例只保证契约结构',
+            document: null,
+            document_format: null,
+            example: {
+              operation: null,
+              variables: null,
+              service: 'audit.Orders',
+              method: 'Get',
+              call_type: 'unary',
+              request: { orderId: 'from-contract' },
+            },
+          },
+        }),
+      ),
+      http.post('/api/v1/grpc/execute', async ({ request }) => {
+        payloads.push((await request.json()) as (typeof payloads)[number])
+        return HttpResponse.json({
+          output: {},
+          schema_id: grpcDescriptor.id,
+          schema_version: 1,
+          schema_hash: grpcDescriptor.content_sha256,
+          duration_ms: 1,
+        })
+      }),
+    )
+    renderPage('?mode=grpc')
+    expect(await screen.findByRole('button', { name: /执行 gRPC/ })).toBeDisabled()
+    await userEvent.click(await screen.findByRole('button', { name: '将样例填入请求草稿' }))
+    expect(screen.getByLabelText('gRPC Request')).toHaveValue(
+      JSON.stringify({ orderId: 'from-contract' }, null, 2),
+    )
+    expect(payloads).toHaveLength(0)
+    expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: /执行 gRPC/ }))
+    await waitFor(() =>
+      expect(payloads).toEqual([
+        expect.objectContaining({
+          service: 'audit.Orders',
+          method: 'Get',
+          request: { orderId: 'from-contract' },
+        }),
+      ]),
+    )
+  })
+
+  it('keeps GraphQL failure evidence scoped and explicitly locates aliases in the frozen contract', async () => {
+    installHandlers()
+    const lookups: unknown[] = []
+    server.use(
+      http.post('/api/v1/graphql/execute', () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'GRAPHQL_ERRORS',
+              message: '响应包含字段错误',
+              trace_id: 'graphql-field-trace',
+              details: {
+                output: {
+                  body: { errors: [{ path: ['alias', 0, 'id'], message: 'field failed' }] },
+                },
+              },
+            },
+          },
+          { status: 502 },
+        ),
+      ),
+      http.post('/api/v1/graphql/schemas/:id/locate-error', async ({ request }) => {
+        lookups.push(await request.json())
+        return HttpResponse.json({
+          artifact_id: graphqlSchema.id,
+          project_id: project.id,
+          version: 2,
+          content_sha256: graphqlSchema.content_sha256,
+          node: 'field:Query.user',
+        })
+      }),
+      http.get('/api/v1/protocol-assets/:id/structure', ({ request }) => {
+        const node = new URL(request.url).searchParams.get('node')
+        return HttpResponse.json({
+          artifact_id: graphqlSchema.id,
+          project_id: project.id,
+          protocol: 'graphql',
+          version: 2,
+          content_sha256: graphqlSchema.content_sha256,
+          view: {
+            node,
+            label: node === 'root' ? '结构首页内容' : 'Query.user真实契约字段',
+            entries: [],
+            total: 0,
+            offset: 0,
+            limit: 25,
+            example: null,
+            notice: null,
+            document: null,
+            document_format: null,
+          },
+        })
+      }),
+    )
+    renderPage()
+    fireEvent.change(await screen.findByLabelText('GraphQL Operation'), {
+      target: { value: 'query User { alias: user(id:"42") { id } }' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
+    await userEvent.click(screen.getByText('响应', { exact: true }))
+    await screen.findByRole('button', { name: '定位错误对应契约' })
+    expect(
+      screen.getByText(/Trace ID: graphql-field-trace/, { selector: '.ant-alert-description' }),
+    ).toBeInTheDocument()
+    expect(lookups).toHaveLength(0)
+    await userEvent.click(screen.getByRole('button', { name: '定位错误对应契约' }))
+    expect(await screen.findByText('Query.user真实契约字段')).toBeInTheDocument()
+    expect(lookups).toEqual([
+      expect.objectContaining({
+        project_id: project.id,
+        operation: 'query User { alias: user(id:"42") { id } }',
+        path: ['alias', 0, 'id'],
+      }),
+    ])
+    await userEvent.click(screen.getByText('请求', { exact: true }))
+    fireEvent.change(screen.getByLabelText('GraphQL Variables'), {
+      target: { value: '{"id":"edited"}' },
+    })
+    await userEvent.click(screen.getByText('响应', { exact: true }))
+    expect(screen.queryByRole('button', { name: '定位错误对应契约' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a newly opened import draft when a cancelled import completes late', async () => {
+    installHandlers()
+    let release: () => void = () => {}
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let received = false
+    server.use(
+      http.post('/api/v1/graphql/schemas', async () => {
+        received = true
+        await pending
+        return HttpResponse.json(graphqlSchema, { status: 201 })
+      }),
+    )
+    const view = renderPage()
+    await screen.findByLabelText('GraphQL Operation')
+    await userEvent.click(screen.getByRole('button', { name: /导入协议 Schema/ }))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '第一次导入' } })
+    await userEvent.click(screen.getByRole('button', { name: '校验并保存' }))
+    await waitFor(() => expect(received).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /导入协议 Schema/ }))
+    await screen.findByRole('dialog')
+    expect(await screen.findByLabelText('名称')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新的导入草稿' } })
+    release()
+    await waitFor(() => expect(view.queryClient.isMutating()).toBe(0))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('名称')).toHaveValue('新的导入草稿')
+    expect(screen.queryByText('协议 Schema 已保存为不可变版本')).not.toBeInTheDocument()
+  })
+
+  it('blocks mTLS execution when the referenced credential disappears after refresh', async () => {
+    installHandlers(true, [grpcCredential])
+    const view = renderPage('?mode=grpc')
+    await screen.findByLabelText('gRPC Request')
+    await userEvent.click(screen.getByText('mTLS', { selector: '.ant-segmented-item-label' }))
+    expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeEnabled()
+    server.use(http.get('/api/v1/credentials', () => HttpResponse.json([])))
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: ['credentials', project.id] })
+    })
+    await waitFor(() => expect(screen.getByRole('button', { name: /执行 gRPC/ })).toBeDisabled())
+    expect(screen.getByText('所选mTLS凭据不可用，请重新选择。')).toBeVisible()
+    expect(
+      screen.getByLabelText('gRPC mTLS Credential').closest('.ant-select-content'),
+    ).toHaveTextContent('不可用凭据')
   })
 
   it('imports gRPC Reflection and exposes mTLS credentials without values', async () => {
@@ -1018,12 +1266,37 @@ function installHandlers(enabled = true, credentials: Credential[] = []) {
     }),
     http.get('/api/v1/event-sources/:sourceId/schemas', () =>
       HttpResponse.json({
-        items: [{ ...graphqlSchema, id: 'kafka-schema', protocol: 'kafka' }],
+        items: [
+          { ...graphqlSchema, id: '00000000-0000-4000-8000-000000000821', protocol: 'kafka' },
+        ],
         total: 1,
         page: 1,
         page_size: 100,
       }),
     ),
+    http.get('/api/v1/protocol-assets/:id/structure', ({ params, request }) => {
+      const node = new URL(request.url).searchParams.get('node') ?? 'root'
+      const asset = params.id === grpcDescriptor.id ? grpcDescriptor : graphqlSchema
+      return HttpResponse.json({
+        artifact_id: params.id,
+        project_id: project.id,
+        protocol: asset.protocol,
+        version: asset.version,
+        content_sha256: asset.content_sha256,
+        view: {
+          node,
+          label: '测试契约结构',
+          entries: [],
+          total: 0,
+          offset: 0,
+          limit: 25,
+          example: null,
+          notice: null,
+          document: null,
+          document_format: null,
+        },
+      })
+    }),
     http.get('/api/v1/credentials', () => HttpResponse.json(credentials)),
     http.post('/api/v1/graphql/execute', () =>
       HttpResponse.json({

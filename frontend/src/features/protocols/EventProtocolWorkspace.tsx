@@ -1,5 +1,4 @@
 import CatalogPagination from '../../components/CatalogPagination'
-import { useCatalogQuery } from '../../lib/catalog-query'
 import {
   CloudServerOutlined,
   DatabaseOutlined,
@@ -10,7 +9,6 @@ import {
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
-  App,
   Button,
   Descriptions,
   Empty,
@@ -29,6 +27,7 @@ import {
 import { useState } from 'react'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { useProtocolLocation } from './protocol-location'
+import { useProtocolImportFeedback } from './use-protocol-import-feedback'
 import { useProtocolDebugResult } from './use-protocol-debug-result'
 import { useProtocolRequestDraft } from './use-protocol-request-draft'
 import type { KafkaRequestDraft, WebSocketRequestDraft } from './protocol-request-draft'
@@ -43,6 +42,7 @@ import {
   listEventSchemas,
   listEventSources,
   getEventSource,
+  getEventSchema,
   produceKafkaMessage,
   type EventDebugResult,
   type EventSource,
@@ -59,14 +59,14 @@ const EVENT_PRESENTATION: Record<
 > = {
   kafka: {
     color: 'gold',
-    label: 'Kafka · librdkafka',
-    boundary: '禁止 AdminClient、自动提交和无界消费',
+    label: 'Kafka · 消息调试',
+    boundary: '手动发送与有界读取，不自动提交消费位点',
     supportsSchema: true,
   },
   websocket: {
     color: 'cyan',
     label: 'WebSocket · 有界会话',
-    boundary: '连接固定到同一 Runner，丢失后从 Connect 重试',
+    boundary: '单次会话最多接收10条消息，完成后关闭连接',
     supportsSchema: false,
   },
 }
@@ -75,75 +75,105 @@ export default function EventProtocolWorkspace({
   projectId,
   mode,
   enabled,
-  editable = false,
-  executable = false,
+  editable,
+  executable,
 }: {
   projectId: string
   mode: EventProtocolMode
   enabled: boolean
-  editable?: boolean
-  executable?: boolean
+  editable: boolean
+  executable: boolean
 }) {
   const state = useEventWorkspace(projectId, mode)
   const presentation = EVENT_PRESENTATION[mode]
 
   return (
     <>
-      <QueryFailureNotice queries={[state.selectionQuery]} />
+      <QueryFailureNotice queries={[state.selectionQuery, state.schemaSelection.query]} />
       <EventFeatureAlert enabled={enabled} />
       <div className="catalog-controls">
         <CatalogPagination query={state.sources} label="事件来源" />
-        <CatalogPagination query={state.schemas} label="事件 Schema" />
+        {mode === 'kafka' && <CatalogPagination query={state.schemas} label="项目消息 Schema" />}
       </div>
       <EventToolbar
         presentation={presentation}
         canImportSchema={editable && presentation.supportsSchema && Boolean(state.selected)}
-        onImportSchema={() => state.setSchemaOpen(true)}
+        onImportSchema={state.openSchema}
         onCreateSource={editable ? () => state.setSourceOpen(true) : undefined}
       />
-      <div className="protocol-workspace-grid event-protocol-grid">
-        <div>
-          {state.selected && (
-            <Typography.Paragraph>
-              {state.selected.name} · v{state.selected.version}
-            </Typography.Paragraph>
-          )}
-          <EventSourceInventory
-            items={pageItems(state.sources.data)}
-            loading={state.sources.isLoading}
-            selectedId={state.selected?.id ?? null}
-            onSelect={(source) => state.setSelection(source.id)}
-          />
-        </div>
-        <EventConsole
-          projectId={projectId}
-          mode={mode}
-          source={state.selected}
-          schemas={pageItems(state.schemas.data)}
-          enabled={enabled && executable}
-        />
-        <EventSourceInspector source={state.selected} schemas={pageItems(state.schemas.data)} />
-      </div>
-      <EventSourceDialog
-        open={state.sourceOpen}
+      <EventWorkspaceBody
         projectId={projectId}
         mode={mode}
-        onClose={() => state.setSourceOpen(false)}
+        state={state}
+        enabled={enabled && executable}
       />
-      <EventSchemaDialog
-        open={state.schemaOpen}
-        projectId={projectId}
-        source={state.selected}
-        onClose={() => state.setSchemaOpen(false)}
-      />
+      {state.sourceOpen && (
+        <EventSourceDialog
+          open
+          editable={editable}
+          projectId={projectId}
+          mode={mode}
+          onClose={() => state.setSourceOpen(false)}
+        />
+      )}
+      {state.selected && state.schemaOpen === state.selected.id && (
+        <EventSchemaDialog
+          key={state.selected.id}
+          open
+          editable={editable}
+          projectId={projectId}
+          source={state.selected}
+          onClose={() => state.setSchemaOpen(null)}
+        />
+      )}
     </>
+  )
+}
+
+function EventWorkspaceBody({
+  projectId,
+  mode,
+  state,
+  enabled,
+}: {
+  projectId: string
+  mode: EventProtocolMode
+  state: ReturnType<typeof useEventWorkspace>
+  enabled: boolean
+}) {
+  return (
+    <div className="protocol-workspace-grid event-protocol-grid">
+      <div>
+        {state.selected && (
+          <Typography.Paragraph>
+            {state.selected.name} · v{state.selected.version}
+          </Typography.Paragraph>
+        )}
+        <EventSourceInventory
+          items={pageItems(state.sources.data)}
+          loading={state.sources.isLoading}
+          selectedId={state.selected?.id ?? null}
+          onSelect={(source) => state.setSelection(source.id)}
+        />
+      </div>
+      <EventConsole
+        projectId={projectId}
+        mode={mode}
+        source={state.selected}
+        schemas={pageItems(state.schemas.data)}
+        enabled={enabled && (!state.schemaId || Boolean(state.schemaSelection.selected))}
+        selectedSchema={state.schemaSelection.selected}
+        onSelectSchema={state.selectSchema}
+      />
+      <EventSourceInspector source={state.selected} schemaTotal={state.schemas.data?.total} />
+    </div>
   )
 }
 
 function useEventWorkspace(projectId: string, mode: EventProtocolMode) {
   const location = useProtocolLocation()
   const [sourceOpen, setSourceOpen] = useState(false)
-  const [schemaOpen, setSchemaOpen] = useState(false)
+  const [schemaOpen, setSchemaOpen] = useState<string | null>(null)
   const sources = useProtocolCatalog(
     'event-sources',
     projectId,
@@ -163,21 +193,37 @@ function useEventWorkspace(projectId: string, mode: EventProtocolMode) {
     !location.error,
   )
   const selected = selection.selected
-  const schemas = useCatalogQuery(
+  const schemas = useProtocolCatalog(
     'event-schemas',
     projectId,
+    selected?.id ?? '',
+    location.schemaPage,
+    location.setSchemaPage,
     (page) => listEventSchemas(projectId, requiredSource(selected).id, page, 20),
     mode === 'kafka' && Boolean(selected),
-    selected?.id ?? '',
+  )
+  const schemaSelection = useSelectedProtocolAsset(
+    projectId,
+    `event-schemas:${selected?.id ?? ''}`,
+    location.schemaId,
+    pageItems(schemas.data),
+    (id) => getEventSchema(projectId, requiredSource(selected).id, id),
+    location.selectSchema,
+    mode === 'kafka' && Boolean(selected) && !location.error,
+    false,
   )
 
   return {
+    schemaId: location.schemaId,
+    selectSchema: location.selectSchema,
+    schemaSelection,
     selectionQuery: selection.query,
     setSelection: location.selectAsset,
     sourceOpen,
     setSourceOpen,
     schemaOpen,
     setSchemaOpen,
+    openSchema: () => setSchemaOpen(requiredSource(selected).id),
     sources,
     selected,
     schemas,
@@ -277,12 +323,16 @@ function EventConsole({
   mode,
   source,
   schemas,
+  selectedSchema,
+  onSelectSchema,
   enabled,
 }: {
   projectId: string
   mode: EventProtocolMode
   source: EventSource | null
   schemas: SchemaArtifact[]
+  selectedSchema: SchemaArtifact | null
+  onSelectSchema: (id: string | null) => void
   enabled: boolean
 }) {
   if (!source)
@@ -293,10 +343,12 @@ function EventConsole({
     )
   return mode === 'kafka' ? (
     <KafkaConsole
-      key={`${projectId}:kafka:${source.id}:${source.version}:${source.config_sha256}`}
+      key={`${projectId}:kafka:${source.id}:${source.version}:${source.config_sha256}:${selectedSchema?.id ?? 'json'}`}
       projectId={projectId}
       source={source}
       schemas={schemas}
+      selectedSchema={selectedSchema}
+      onSelectSchema={onSelectSchema}
       enabled={enabled}
     />
   ) : (
@@ -313,11 +365,15 @@ function KafkaConsole({
   projectId,
   source,
   schemas,
+  selectedSchema,
+  onSelectSchema,
   enabled,
 }: {
   projectId: string
   source: EventSource
   schemas: SchemaArtifact[]
+  selectedSchema: SchemaArtifact | null
+  onSelectSchema: (id: string | null) => void
   enabled: boolean
 }) {
   const state = useProtocolDebugResult<EventDebugResult>()
@@ -325,13 +381,17 @@ function KafkaConsole({
     `${projectId}:kafka:${source.id}:${source.version}:${source.config_sha256}`,
     { mode: 'kafka', topic: 'flowtest.orders', payload: '{"id":"order-42"}' },
   )
-  const { topic, payload, schemaId } = draft
+  const { topic, payload } = draft
+  const schemaOptions =
+    selectedSchema && !schemas.some((item) => item.id === selectedSchema.id)
+      ? [selectedSchema, ...schemas]
+      : schemas
   function changeRequest(change: () => void) {
     state.invalidate()
     change()
   }
   const produce = useMutation({
-    mutationFn: (input: KafkaRequestDraft) =>
+    mutationFn: (input: KafkaRequestDraft & { schemaId?: string }) =>
       produceKafkaMessage(source.id, {
         project_id: projectId,
         topic: input.topic,
@@ -346,7 +406,7 @@ function KafkaConsole({
     onError: (error, _input, revision) => state.fail(error, revision),
   })
   const consume = useMutation({
-    mutationFn: (input: KafkaRequestDraft) =>
+    mutationFn: (input: KafkaRequestDraft & { schemaId?: string }) =>
       consumeKafkaMessages(source.id, {
         project_id: projectId,
         topic: input.topic,
@@ -372,13 +432,13 @@ function KafkaConsole({
       <Select
         aria-label="Kafka Schema"
         allowClear
-        value={schemaId}
-        options={schemas.map((schema) => ({
+        value={selectedSchema?.id ?? null}
+        options={schemaOptions.map((schema) => ({
           value: schema.id,
           label: `${schema.name} · v${schema.version}`,
         }))}
         placeholder="JSON 或选择固定 Schema"
-        onChange={(value) => changeRequest(() => patch({ schemaId: value }))}
+        onChange={(value) => changeRequest(() => onSelectSchema(value ?? null))}
       />
       <TextArea
         aria-label="Kafka Message"
@@ -393,7 +453,7 @@ function KafkaConsole({
           icon={<PlayCircleOutlined />}
           disabled={!enabled}
           loading={produce.isPending}
-          onClick={() => produce.mutate(draft)}
+          onClick={() => produce.mutate({ ...draft, schemaId: selectedSchema?.id })}
         >
           Produce
         </Button>
@@ -401,7 +461,7 @@ function KafkaConsole({
           icon={<PlayCircleOutlined />}
           disabled={!enabled}
           loading={consume.isPending}
-          onClick={() => consume.mutate(draft)}
+          onClick={() => consume.mutate({ ...draft, schemaId: selectedSchema?.id })}
         >
           Consume（最多 10 条）
         </Button>
@@ -542,14 +602,14 @@ function EventResult({ result, source }: { result: EventDebugResult | null; sour
 
 function EventSourceInspector({
   source,
-  schemas,
+  schemaTotal,
 }: {
   source: EventSource | null
-  schemas: SchemaArtifact[]
+  schemaTotal: number | undefined
 }) {
   return (
     <aside className="protocol-inspector">
-      <Typography.Title level={4}>Context Inspector</Typography.Title>
+      <Typography.Title level={4}>事件源检查器</Typography.Title>
       {!source ? (
         <Empty description="选择事件源查看固定信息" />
       ) : (
@@ -559,7 +619,9 @@ function EventSourceInspector({
             <Descriptions.Item label="协议">{source.kind}</Descriptions.Item>
             <Descriptions.Item label="版本">v{source.version}</Descriptions.Item>
             <Descriptions.Item label="端点">{source.endpoints.join(', ')}</Descriptions.Item>
-            <Descriptions.Item label="消息 Schema">{schemas.length}</Descriptions.Item>
+            <Descriptions.Item label="项目消息 Schema">
+              {source.kind === 'kafka' ? (schemaTotal ?? '未提供') : '不适用'}
+            </Descriptions.Item>
           </Descriptions>
           <Alert
             showIcon
@@ -578,13 +640,15 @@ function EventSourceDialog({
   projectId,
   mode,
   onClose,
+  editable,
 }: {
+  editable: boolean
   open: boolean
   projectId: string
   mode: EventProtocolMode
   onClose: () => void
 }) {
-  const { message } = App.useApp()
+  const feedback = useProtocolImportFeedback(editable)
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{ name: string; endpoint: string; registry?: string }>()
   const mutation = useMutation({
@@ -605,23 +669,31 @@ function EventSourceDialog({
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['event-sources', projectId, mode] })
-      form.resetFields()
-      onClose()
-      void message.success('事件源已保存为不可变版本')
+      if (feedback.allowed()) {
+        feedback.success('事件源已保存为不可变版本')
+        onClose()
+      }
     },
-    onError: (error) => void message.error(error.message),
+    onError: feedback.error,
   })
   return (
     <Modal
       title={`新建 ${mode === 'kafka' ? 'Kafka' : 'WebSocket'} 事件源`}
       open={open}
-      confirmLoading={mutation.isPending}
       onCancel={onClose}
-      onOk={() => form.validateFields().then((values) => mutation.mutate(values))}
+      onOk={() => form.submit()}
+      okButtonProps={{ disabled: !editable || mutation.isPending, loading: mutation.isPending }}
       okText="保存事件源"
       destroyOnHidden
     >
-      <Form form={form} layout="vertical">
+      <Form
+        form={form}
+        disabled={!editable || mutation.isPending}
+        onFinish={(values) => {
+          if (feedback.allowed() && !mutation.isPending) mutation.mutate(values)
+        }}
+        layout="vertical"
+      >
         <Form.Item label="名称" name="name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
@@ -649,13 +721,15 @@ function EventSchemaDialog({
   projectId,
   source,
   onClose,
+  editable,
 }: {
+  editable: boolean
   open: boolean
   projectId: string
   source: EventSource | null
   onClose: () => void
 }) {
-  const { message } = App.useApp()
+  const feedback = useProtocolImportFeedback(editable)
   const queryClient = useQueryClient()
   const [form] = Form.useForm<{
     mode: 'registry' | 'json_schema' | 'avro'
@@ -687,23 +761,32 @@ function EventSchemaDialog({
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['event-schemas', projectId, source?.id] })
-      form.resetFields()
-      onClose()
-      void message.success('消息 Schema 已保存为不可变版本')
+      if (feedback.allowed()) {
+        feedback.success('消息 Schema 已保存为不可变版本')
+        onClose()
+      }
     },
-    onError: (error) => void message.error(error.message),
+    onError: feedback.error,
   })
   return (
     <Modal
       title="导入 Kafka 消息 Schema"
       open={open}
-      confirmLoading={mutation.isPending}
       onCancel={onClose}
-      onOk={() => form.validateFields().then((values) => mutation.mutate(values))}
+      onOk={() => form.submit()}
+      okButtonProps={{ disabled: !editable || mutation.isPending, loading: mutation.isPending }}
       okText="校验并保存"
       destroyOnHidden
     >
-      <Form form={form} layout="vertical" initialValues={{ mode: 'registry' }}>
+      <Form
+        form={form}
+        disabled={!editable || mutation.isPending}
+        onFinish={(values) => {
+          if (feedback.allowed() && !mutation.isPending) mutation.mutate(values)
+        }}
+        layout="vertical"
+        initialValues={{ mode: 'registry' }}
+      >
         <Form.Item label="来源" name="mode">
           <Select
             options={[

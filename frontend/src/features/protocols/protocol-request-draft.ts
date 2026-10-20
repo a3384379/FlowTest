@@ -13,6 +13,7 @@ export type GrpcRequestDraft = {
   mode: 'grpc'
   endpoint: string
   methodKey?: string
+  methodContract?: { service: string; method: string; callType: 'unary' | 'server_streaming' }
   request: string
   tlsMode: 'plaintext' | 'tls' | 'mtls'
   credentialId?: string
@@ -20,7 +21,7 @@ export type GrpcRequestDraft = {
   metadata: ProtocolHeaderEntry[]
   timeoutSeconds: number
 }
-export type KafkaRequestDraft = { mode: 'kafka'; topic: string; payload: string; schemaId?: string }
+export type KafkaRequestDraft = { mode: 'kafka'; topic: string; payload: string }
 export type WebSocketRequestDraft = {
   mode: 'websocket'
   payloadKind: 'json' | 'text'

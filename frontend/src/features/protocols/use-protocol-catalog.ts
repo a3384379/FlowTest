@@ -28,9 +28,10 @@ export function useSelectedProtocolAsset<T extends Asset>(
   read: (id: string) => Promise<T>,
   select: (id: string, replace?: boolean) => void,
   enabled: boolean,
+  autoSelect = true,
 ) {
   const first = items.at(0)
-  const resolvedId = enabled ? (id ?? first?.id ?? null) : null
+  const resolvedId = enabled ? resolveSelectedId(id, autoSelect, first) : null
   const pageItem = items.find((item) => item.id === resolvedId && item.project_id === projectId)
   const query = useQuery({
     queryKey: [resource, projectId, 'by-id', resolvedId],
@@ -41,11 +42,17 @@ export function useSelectedProtocolAsset<T extends Asset>(
     retry: false,
   })
   useEffect(() => {
-    if (enabled && id === null && first?.project_id === projectId) select(first.id, true)
-  }, [enabled, first, id, projectId, select])
+    if (autoSelect && enabled && id === null && first?.project_id === projectId)
+      select(first.id, true)
+  }, [autoSelect, enabled, first, id, projectId, select])
   return { query, selected: query.isError ? null : (pageItem ?? query.data ?? null) }
 }
 function required(value: string | null): string {
   if (!value) throw new Error('未选择协议资产版本')
   return value
+}
+
+function resolveSelectedId(id: string | null, autoSelect: boolean, first: Asset | undefined) {
+  if (id !== null) return id
+  return autoSelect ? (first?.id ?? null) : null
 }
