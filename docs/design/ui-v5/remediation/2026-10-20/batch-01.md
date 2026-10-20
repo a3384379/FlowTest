@@ -108,7 +108,7 @@ GitHub安全门禁发现基线锁定的MCP 2.0.0命中CVE-2026-59951。[SDK官�
 - 新建计划弹窗改为内部滚动，底部操作区保持视口内；Cron 下拉等待完整进入视口后以鼠标选择。S19 浏览器用例创建自己的项目，不依赖其他脚本的 S11 数据。
 - 按三种尺寸逐张复核并更新 9 张“选择节点/调整检查器/全屏配置”基线；差异是已保存接口名称、固定版本、Method/Path 和检查器字段间距。另 18 张保持不变，未调整 0.003 像素差异门槛或增加遮罩。
 
-本机 Linux/arm64 Chromium 1.62.1 对相关 4 个 E2E 文件共 14 项测试通过，含三种尺寸下全部 27 个画布状态；最后一次使用正常比对模式而非更新基线模式。接口编辑器 23 项、计划页面 4 项专项通过。记录见本地 `remediation-ci-linux-final.log`、`remediation-reviewed-visual-baselines.json`、`remediation-ci-api-tabs-test.log` 与 `remediation-ci-plan-dialog-tests.log`。
+本机 Linux/arm64、Playwright 1.62.1 / Chromium 151.0.7922.34 对相关 4 个 E2E 文件共 14 项测试通过，含三种尺寸下全部 27 个画布状态；最后一次使用正常比对模式而非更新基线模式。接口编辑器 23 项、计划页面 4 项专项通过。记录见本地 `remediation-ci-linux-final.log`、`remediation-reviewed-visual-baselines.json`、`remediation-ci-api-tabs-test.log` 与 `remediation-ci-plan-dialog-tests.log`。
 
 前端全量另暴露变更回归页面两项单测超过 60 秒。诊断定位到 JSDOM 重复计算整页和祖先样式的开销：为真实审核区域及动作增加可访问标签，测试改为限定区域并仅对审核入口校验一次角色和可见性，保留审核内容快照、HTTP 负载和每一步状态断言；该文件 9 项在 CI 单 Worker 模式复核通过，未提高超时、跳过测试或降低覆盖率。诊断计时代码已移除，不增加产品日志或采集。
 

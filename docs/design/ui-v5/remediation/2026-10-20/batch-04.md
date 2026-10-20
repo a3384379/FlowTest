@@ -13,7 +13,7 @@
 ## 验证与边界
 
 - 4 个受影响测试文件、26 项通过，覆盖旧快照提交、来源指纹保留、主动刷新、409、刷新失败重试、迟到回包、只读限制，以及 trace 格式与原消息兼容。
-- 格式、lint/tsc、构建通过；当前补充修改继续运行完整前端检查和 GitHub 最新提交门禁。
+- 格式、lint/tsc、构建通过；随后完整前端检查 138 文件、896 项通过，详见[完整本地验证记录](validation.md)。GitHub 最新提交门禁单独核对。
 - 汇总基线 `572f2db80c27ab050a1be1b132e868268a795b1e` 的 `make check` 通过：后端 1746 项通过、13 跳过，覆盖率 90.78%；前端 138 文件、890 项通过，语句覆盖率 85.63%。本补充不改变该基线的后端源码或依赖；完整前端及远端最终结果单独记账。
 
 记录位于本地 `remediation-review-freeze-delivery-tests.log`、`remediation-review-freeze-lint-delivery.log`、`remediation-review-freeze-build.log` 和 `remediation-combined-make-check-r2.log`。尚待实施的 51 项仍以[进度表](progress.md)为准。
