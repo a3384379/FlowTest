@@ -37,7 +37,12 @@ export default function ControlConfigurationJson({
     setText(next)
     setDirty(true)
     setError(null)
-    session?.setRaw(fieldKey, { text: next, error: null, baseText: dirty ? baseText : currentText })
+    session?.setRaw(fieldKey, {
+      text: next,
+      error: null,
+      baseText: dirty ? baseText : currentText,
+      requiresApply: true,
+    })
   }
 
   function apply() {

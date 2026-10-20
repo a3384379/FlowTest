@@ -13,10 +13,15 @@ import {
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
-import AssertionEvidence from '../features/evidence/AssertionEvidence'
+import AssertionEvidence, {
+  type AssertionEvidenceItem,
+} from '../features/evidence/AssertionEvidence'
+import { useCheckpointAssertionSource } from '../features/evidence/use-checkpoint-assertion-source'
 import { workflowAssertionEvidence } from '../features/evidence/assertion-model'
+import { resolveEffectiveNodeType } from './editor/graph-analysis'
 import type { ExecutionEvidenceLocation } from '../features/workflows/execution-navigation'
 import WorkflowNodeRelations from './WorkflowNodeRelations'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 
 import type {
   ExecutionCheckpoint,
@@ -122,10 +127,28 @@ function RuntimeNodeDetail({
       </Space>
       <RuntimeSummary node={node} execution={execution} observation={observation} />
       {assertions.length > 0 && execution ? (
-        <AssertionEvidence items={assertions} source={`${execution.name} (${execution.node_id})`} />
+        <AssertionEvidence
+          items={assertions}
+          source={`${execution.name} (${execution.node_id})`}
+          location={
+            projectId && executionId
+              ? {
+                  projectId,
+                  executionId,
+                  assertionNodeId: node.id,
+                  nodes,
+                  frozenDefinition: definition,
+                }
+              : undefined
+          }
+        />
       ) : null}
       <ExecutionError execution={execution} />
-      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <MissingAttempt
+        initialAttempt={initialAttempt}
+        observations={observations}
+        nodeType={resolveEffectiveNodeType(node)}
+      />
       <WorkflowNodeRelations node={node} definition={definition} onLocateNode={onLocateNode} />
       <ControlIterations
         output={execution?.output}
@@ -174,10 +197,13 @@ function useRuntimeAttempt(
 function MissingAttempt({
   initialAttempt,
   observations,
+  nodeType,
 }: {
   initialAttempt?: number
   observations: WorkflowNodeObservation[]
+  nodeType: string
 }) {
+  if (observations.length === 0 && nodeType !== 'api') return null
   if (!initialAttempt || observations.some((item) => item.attempt === initialAttempt)) return null
   return (
     <Alert
@@ -780,22 +806,24 @@ export function WorkflowCheckpointEvidence({
   )
   const observation = selectedObservation(observations, attempt)
   const assertions = workflowAssertionEvidence({ ...checkpoint, name: checkpoint.node_name })
+  const labels = checkpointLabels(checkpoint.node_id)
   return (
-    <section aria-label="实例执行证据">
+    <section aria-label={labels.section}>
       <Typography.Paragraph>
         {checkpoint.node_name} · {checkpoint.status}
       </Typography.Paragraph>
       <Typography.Paragraph type="secondary">
-        实例：{checkpoint.node_id} · 阶段：{checkpoint.phase ?? '未提供'} · 检查点尝试：
+        {labels.owner}：{checkpoint.node_id} · 阶段：{checkpoint.phase ?? '未提供'} · 检查点尝试：
         {checkpoint.attempt ?? '未提供'}
       </Typography.Paragraph>
       {assertions.length > 0 && (
-        <AssertionEvidence
-          items={assertions}
-          source={`${checkpoint.node_name} (${checkpoint.node_id})`}
-        />
+        <CheckpointAssertions items={assertions} checkpoint={checkpoint} projectId={projectId} />
       )}
-      <MissingAttempt initialAttempt={initialAttempt} observations={observations} />
+      <MissingAttempt
+        initialAttempt={initialAttempt}
+        observations={observations}
+        nodeType={checkpoint.node_type}
+      />
       <ObservationPicker
         observations={observations}
         selected={observation}
@@ -811,38 +839,108 @@ export function WorkflowCheckpointEvidence({
             key: 'response',
             label: '响应',
             children: (
-              <Payload title="实例响应" value={observation?.response} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}响应`}
+                value={observation?.response}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'request',
             label: '请求',
             children: (
-              <Payload title="实例请求" value={observation?.request} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}请求`}
+                value={observation?.request}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'mapping',
             label: '变量映射',
             children: (
-              <Payload title="实例变量映射" value={observation?.mappings} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}变量映射`}
+                value={observation?.mappings}
+                projectId={projectId}
+              />
             ),
           },
           {
             key: 'output',
             label: '输出',
-            children: <Payload title="实例输出" value={checkpoint.output} projectId={projectId} />,
+            children: (
+              <Payload
+                title={`${labels.owner}输出`}
+                value={checkpoint.output}
+                projectId={projectId}
+              />
+            ),
           },
           {
             key: 'raw',
             label: '原始证据',
             children: (
-              <Payload title="实例完整结果" value={checkpoint.result} projectId={projectId} />
+              <Payload
+                title={`${labels.owner}完整结果`}
+                value={checkpoint.result}
+                projectId={projectId}
+              />
             ),
           },
         ]}
       />
     </section>
+  )
+}
+
+function checkpointLabels(nodeId: string) {
+  return nodeId.startsWith('__nested_request__:')
+    ? { section: '实例执行证据', owner: '实例' }
+    : { section: '检查点执行证据', owner: '检查点' }
+}
+function CheckpointAssertions({
+  items,
+  checkpoint,
+  projectId,
+}: {
+  items: AssertionEvidenceItem[]
+  checkpoint: ExecutionCheckpoint
+  projectId: string
+}) {
+  const state = useCheckpointAssertionSource(
+    projectId,
+    checkpoint,
+    checkpointObservations(checkpoint),
+  )
+  return (
+    <>
+      {state.loading && (
+        <Typography.Paragraph type="secondary">
+          正在读取同次执行的来源节点证据…
+        </Typography.Paragraph>
+      )}
+      {state.error && (
+        <Alert
+          type="error"
+          title="来源节点证据读取失败"
+          description={
+            <Space orientation="vertical">
+              <span>{state.error}</span>
+              {state.traceId && <Typography.Text copyable>{state.traceId}</Typography.Text>}
+            </Space>
+          }
+          action={<Button onClick={state.retry}>重试来源证据</Button>}
+        />
+      )}
+      <AssertionEvidence
+        items={items}
+        source={`${checkpoint.node_name} (${checkpoint.node_id})`}
+        location={state.location}
+      />
+    </>
   )
 }
 
@@ -1079,7 +1177,6 @@ function Payload({
   const references = workflowOutputReferences(value)
   return (
     <section className="workflow-runtime-payload">
-      <Typography.Text strong>{title}</Typography.Text>
       {references.map((reference) => (
         <div key={reference.artifactId}>
           <Typography.Text type="secondary">
@@ -1103,7 +1200,7 @@ function Payload({
         </div>
       ))}
       {downloadError && <Alert type="error" title={`响应体不可用：${downloadError}`} />}
-      <pre>{serialize(value)}</pre>
+      <ResponseCodeReader title={title} value={value} />
     </section>
   )
 }
@@ -1223,10 +1320,4 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${Math.round(value / 102.4) / 10} KB`
   return `${Math.round(value / 104857.6) / 10} MB`
-}
-
-function serialize(value: unknown): string {
-  if (value === undefined || value === null) return '—'
-  if (typeof value === 'string') return value
-  return JSON.stringify(value, null, 2)
 }

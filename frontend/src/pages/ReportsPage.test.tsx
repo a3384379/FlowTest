@@ -113,6 +113,47 @@ const artifact: Artifact = {
 }
 
 describe('ReportsPage', () => {
+  it('keeps the default business node and attempt in the shareable execution location', async () => {
+    const business = {
+      ...detail.nodes[0],
+      node_id: 'business',
+      node_type: 'api',
+      status: 'passed',
+      assertion: null,
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json({
+          ...detail,
+          nodes: [
+            { ...business, id: 'start-row', node_id: 'start', node_type: 'start' },
+            business,
+            { ...business, id: 'end-row', node_id: 'end', node_type: 'end' },
+          ],
+        }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}`)
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: '定位画布' })).toHaveAttribute(
+        'href',
+        expect.stringContaining('node=business&attempt=1'),
+      ),
+    )
+  })
+
+  it('keeps an invalid explicit node visible as a warning instead of showing another node evidence', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/reports/executions/${execution.id}`, () =>
+        HttpResponse.json(detail),
+      ),
+    )
+    renderPage(`/projects/${project.id}/reports?execution=${execution.id}&node=missing`)
+    expect(
+      await screen.findByText('链接中的节点不属于本次执行，请从轨迹中重新选择。'),
+    ).toBeVisible()
+    expect(screen.queryByText('期望值')).not.toBeInTheDocument()
+  })
   beforeEach(() => {
     server.use(
       http.get(`/api/v1/projects/${project.id}/permissions`, () =>
@@ -289,10 +330,11 @@ describe('ReportsPage', () => {
     const link = await screen.findByRole('link', { name: '定位画布' })
     expect(link).toHaveAttribute(
       'href',
-      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order`,
+      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order&attempt=1`,
     )
     expect(screen.getByText('期望值')).toBeVisible()
     expect(screen.getByText('"pending"')).toBeVisible()
+    expect(screen.queryByText('指定请求尝试不在本次证据中')).not.toBeInTheDocument()
   })
 
   it('loads the next report page from the server', async () => {
@@ -361,14 +403,14 @@ describe('ReportsPage', () => {
       'href',
       `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=api&attempt=1`,
     )
-    expect(screen.getByText(/"selected_attempt": 1/)).toBeVisible()
+    expect(screen.getByLabelText('本节点响应')).toHaveTextContent(/"selected_attempt": 1/)
     fireEvent.click(screen.getByRole('button', { name: /校验订单状态/ }))
     expect(await screen.findByText('期望值')).toBeVisible()
     expect(screen.getByRole('link', { name: '定位画布' })).toHaveAttribute(
       'href',
-      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order`,
+      `/projects/${project.id}/workflows?focus=${execution.workflow_id}&execution=${execution.id}&node=assert-order&attempt=1`,
     )
-    expect(screen.queryByText(/"selected_attempt": 1/)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('本节点响应')).not.toHaveTextContent('selected_attempt')
   })
 
   it('restores the exact control instance in reports and carries it back to the canvas', async () => {
@@ -536,6 +578,12 @@ describe('ReportsPage', () => {
     const browser = userEvent.setup()
     const trajectory = within(await screen.findByLabelText('执行轨迹'))
     expect(trajectory.getByRole('button', { name: /查询请求/ })).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: '定位画布' })).toHaveAttribute(
+        'href',
+        expect.stringContaining('attempt=1'),
+      ),
+    )
     const link = screen.getByRole('link', { name: '定位画布' }).getAttribute('href')
     await browser.click(trajectory.getByText('仅失败节点'))
     expect(trajectory.queryByRole('button', { name: /查询请求/ })).not.toBeInTheDocument()

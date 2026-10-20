@@ -749,6 +749,39 @@
   margin-bottom: 12px;
 }
 
+.workflow-region-workspace {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+  align-items: start;
+}
+
+.workflow-region-workspace.has-selection {
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 440px);
+}
+
+.workflow-region-node-panel {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--ft-border-subtle);
+  border-radius: 10px;
+}
+
+.workflow-region-node-panel .workflow-session-actions {
+  position: static;
+}
+
+@media (max-width: 900px) {
+  .workflow-region-workspace.has-selection {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-region-workspace .workflow-region-canvas {
+    min-height: 260px;
+    height: 36vh;
+  }
+}
+
 .workflow-config-section-heading {
   margin-bottom: 14px;
 }

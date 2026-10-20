@@ -603,8 +603,19 @@ def _verify_change_regression(
             "POST",
             f"/projects/{project_id}/change-regressions/{run['id']}"
             f"/change-set-items/{missing[0]['item_id']}/accept",
+            {},
+            token=token,
+        ),
+        "CHANGE_REGRESSION_REVIEW_STALE",
+    )
+    _expect_error_code(
+        lambda: client.json(
+            "POST",
+            f"/projects/{project_id}/change-regressions/{run['id']}"
+            f"/change-set-items/{missing[0]['item_id']}/accept",
             {
                 "note": "S47.3 wrong target rejection",
+                "expected_content": design,
                 "materialization": {
                     "api_definition_id": assets["apis"]["billing"]["id"],
                     "environment_id": assets["environment"]["id"],
@@ -621,6 +632,7 @@ def _verify_change_regression(
         f"/change-set-items/{missing[0]['item_id']}/accept",
         {
             "note": "S47.1 semantic boundary reviewed",
+            "expected_content": design,
             "materialization": {
                 "api_definition_id": api_definition_id,
                 "environment_id": assets["environment"]["id"],

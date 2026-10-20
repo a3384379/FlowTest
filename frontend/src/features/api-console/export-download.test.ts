@@ -56,3 +56,27 @@ it('decodes a JSON error Blob and never downloads a failed export', async () => 
   await expect(exportApis('project', 'excel')).rejects.toThrow('trace-export')
   expect(click).not.toHaveBeenCalled()
 })
+
+it('sends an explicit selection in a POST body without falling back to a whole-project export', async () => {
+  const post = vi
+    .spyOn(apiClient, 'post')
+    .mockResolvedValue({ data: new Blob(['content']), headers: {} })
+  const get = vi.spyOn(apiClient, 'get')
+  Object.defineProperty(URL, 'createObjectURL', {
+    configurable: true,
+    value: vi.fn(() => 'blob:selected'),
+  })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await exportApis('project', 'har', { scope: 'selected', definition_ids: ['page-1', 'page-2'] })
+  expect(post).toHaveBeenCalledWith(
+    '/projects/project/exports/apis',
+    {
+      format: 'har',
+      scope: 'selected',
+      definition_ids: ['page-1', 'page-2'],
+    },
+    { responseType: 'blob' },
+  )
+  expect(get).not.toHaveBeenCalled()
+})

@@ -152,15 +152,17 @@ describe('WorkflowsPage', () => {
       else fireEvent.click(screen.getByText('编排', { exact: true }))
       await waitFor(() => {
         const params = new URLSearchParams(router.state.location.search)
-        for (const key of [
-          'node',
-          'attempt',
-          'control_kind',
-          'control_ordinal',
-          'instance',
-          'instance_attempt',
-        ])
+        for (const key of ['control_kind', 'control_ordinal', 'instance', 'instance_attempt'])
           expect(params.has(key)).toBe(false)
+        if (destination === 'history') {
+          expect(params.get('node')).toBe('api')
+          expect(params.get('attempt')).toBe(
+            String(workflowExecutionDetail.nodes.find((node) => node.node_id === 'api')!.attempts),
+          )
+        } else {
+          expect(params.has('node')).toBe(false)
+          expect(params.has('attempt')).toBe(false)
+        }
         expect(params.get('focus')).toBe(workflow.id)
         expect(params.get('execution')).toBe(
           destination === 'history' ? workflowExecutionDetail.execution.id : null,

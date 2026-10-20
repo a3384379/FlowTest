@@ -75,6 +75,75 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it('explains the whole project export scope before downloading', async () => {
+    renderPage()
+    const button = screen.getByRole('button', { name: '导出接口' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          '使用各接口已保存的当前版本；搜索和方法筛选不影响范围。数量为当前查询结果，下载时由服务器重新校验。',
+        ),
+      ).toBeVisible(),
+    )
+    expect(screen.getByRole('button', { name: '导出整个项目' })).toBeEnabled()
+  })
+  it('shows the request method and path in the API directory', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/apis`, () =>
+        HttpResponse.json({
+          items: [{ ...apiDefinition, method: 'POST', path: '/orders/create' }],
+          total: 1,
+          page: 1,
+          page_size: 50,
+        }),
+      ),
+    )
+    renderPage()
+    await waitFor(() => {
+      const entry = screen.getByRole('button', { name: `选择接口 ${apiDefinition.name}` })
+      expect(entry).toHaveTextContent('POST')
+      expect(entry).toHaveTextContent('/orders/create')
+    })
+  })
+  it.each([
+    [{ kind: 'status_code', operator: 'equals', target: null, expected: 200 }],
+    [{ kind: 'json_path', operator: 'equals', target: '$.ok', expected: true }],
+  ])(
+    'shows the saved validation rules instead of an ignored quick status input: %j',
+    async (rule) => {
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/apis/${apiDefinition.id}`, () =>
+          HttpResponse.json({
+            definition: apiDefinition,
+            version: {
+              id: 'api-v1',
+              api_definition_id: apiDefinition.id,
+              version: 1,
+              method: 'GET',
+              path: '/users/me',
+              query_parameters: [],
+              headers: {},
+              body_kind: 'none',
+              body: null,
+              auth_kind: 'none',
+              auth_config: {},
+              extraction_rules: [],
+              assertions: [rule],
+              created_at: '2026-08-09T08:00:00Z',
+            },
+          }),
+        ),
+      )
+      renderPage()
+      expect(await screen.findByText('按已保存断言校验（1 条）')).toBeVisible()
+      expect(screen.queryByRole('spinbutton', { name: '预期状态码' })).not.toBeInTheDocument()
+      if (rule.kind === 'json_path') expect(screen.getByText('未配置状态码断言')).toBeVisible()
+      else expect(screen.getByText('状态码 equals 200')).toBeVisible()
+    },
+  )
+
   it('retains cross-page checkbox selection without changing the active API', async () => {
     const payloads: unknown[] = []
     server.use(
@@ -107,6 +176,15 @@ describe('ApiConsolePage', () => {
     await browser.click(await screen.findByRole('checkbox', { name: '勾选接口 第二页接口' }))
     expect(screen.getByText(apiDefinition.name, { exact: true })).toBeVisible()
     expect(screen.getByText('已选 2 个，本页 1 个，其他页 1 个')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '导出接口' }))
+    fireEvent.mouseDown(screen.getByRole('combobox', { name: '导出范围' }))
+    await browser.click(
+      await screen.findByText('已选接口（包含其他页保留的选择）', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(screen.getByText('已选接口（包含其他页保留的选择） · 当前共 2 个接口')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '取消' }))
     await browser.click(screen.getByRole('button', { name: '批量移动' }))
     expect(screen.getByRole('button', { name: '确认移动' })).toBeDisabled()
     await browser.click(screen.getByRole('combobox', { name: '接口目标分组' }))
@@ -384,6 +462,8 @@ describe('ApiConsolePage', () => {
     expect(screen.getByText('"测试用户"')).toBeVisible()
     expect(await screen.findByRole('button', { name: /保存新版本/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送请求' })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: `勾选接口 ${apiDefinition.name}` })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '导出接口' })).toBeEnabled()
     expect(screen.getByLabelText('请求路径')).toBeDisabled()
   })
 

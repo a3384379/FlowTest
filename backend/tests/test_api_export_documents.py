@@ -4,12 +4,13 @@ from datetime import UTC, datetime
 from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from openpyxl import load_workbook
 
 from app.core.errors import AppError
+from app.domain.api_exports import APIExportSelection
 from app.models.api_assets import APIDefinition, APIVersion
 from app.services.api_exports import (
     APIExportFormat,
@@ -92,6 +93,7 @@ async def test_export_refuses_truncation_and_missing_versions() -> None:
         await service.export(
             actor=SimpleNamespace(), project_id=uuid4(), export_format=APIExportFormat.HAR
         )
+
     item = api_item()
     service._assets = SimpleNamespace(
         list_definitions=AsyncMock(return_value=([item.definition], 1)),
@@ -101,6 +103,38 @@ async def test_export_refuses_truncation_and_missing_versions() -> None:
         await service.export(
             actor=SimpleNamespace(), project_id=uuid4(), export_format=APIExportFormat.HAR
         )
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        APIExportSelection(scope="selected"),
+        APIExportSelection(scope="project", unfiled=True),
+        APIExportSelection(scope="folder"),
+        APIExportSelection(scope="folder", folder_id=uuid4(), unfiled=True),
+        APIExportSelection(scope="selected", definition_ids=(UUID(int=1), UUID(int=1))),
+        APIExportSelection(
+            scope="selected", definition_ids=tuple(UUID(int=i) for i in range(1001))
+        ),
+    ],
+)
+async def test_non_http_export_callers_use_the_same_selection_policy(
+    selection: APIExportSelection,
+) -> None:
+    service = APIExportService(AsyncMock())
+    service._projects = SimpleNamespace(get=AsyncMock())
+    service._assets = AsyncMock()
+    with pytest.raises(AppError) as invalid:
+        await service.export(
+            actor=SimpleNamespace(),
+            project_id=uuid4(),
+            export_format=APIExportFormat.HAR,
+            selection=selection,
+        )
+    assert invalid.value.code == "INVALID_API_EXPORT_SELECTION"
+    assert invalid.value.status_code == 422
+    service._assets.get_definitions.assert_not_called()
+    service._assets.list_definitions.assert_not_called()
 
 
 @pytest.mark.parametrize(

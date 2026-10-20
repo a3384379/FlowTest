@@ -9,7 +9,8 @@ import {
   type DraftSession,
 } from '../drafts/draft-session'
 import { nodeEditorScope } from '../../flow/editor/editor-identity'
-import type { ApiDetail, ReportExecutionDetail, Workflow } from '../../lib/api'
+import type { ApiDefinition, ApiDetail, ReportExecutionDetail, Workflow } from '../../lib/api'
+import { apiDetailKey, apiDefinitionKey } from '../api-console/api-query-keys'
 import { projectPath } from '../projects/project-routing'
 import {
   readWorkflowDraft,
@@ -61,13 +62,14 @@ export default function WorkspaceObjectTabs({ userId, projectId }: Props) {
 
   useEffect(() => {
     const route = routeWorkspaceTab(projectId, href)
-    if (!route) return
+    if (!route && pending?.targetHref !== href) return
     queueMicrotask(() => {
       setTabs((previous) => {
         const retained =
           pending?.targetHref === href
             ? previous.filter((tab) => !pending.keys.includes(tab.key))
             : previous
+        if (!route) return retained
         const existing = retained.find((tab) => tab.key === route.key)
         return existing
           ? retained.map((tab) => (tab.key === route.key ? { ...tab, href } : tab))
@@ -115,7 +117,7 @@ export default function WorkspaceObjectTabs({ userId, projectId }: Props) {
           className="workspace-navigation-tabs"
           type="editable-card"
           hideAdd
-          activeKey={active?.key}
+          activeKey={active?.key ?? ''}
           items={tabs.map((tab) => ({
             key: tab.key,
             closable: tab.section !== 'dashboard',
@@ -258,8 +260,10 @@ function cachedLabel(client: QueryClient, projectId: string, tab: WorkspaceTab):
     return workflow ? `流程 · ${workflow.name}` : null
   }
   if (tab.section === 'apis') {
-    const detail = client.getQueryData<ApiDetail>(['api-detail', projectId, tab.objectId])
-    return detail ? `接口 · ${detail.definition.name}` : null
+    const definition =
+      client.getQueryData<ApiDefinition>(apiDefinitionKey(projectId, tab.objectId)) ??
+      client.getQueryData<ApiDetail>(apiDetailKey(projectId, tab.objectId))?.definition
+    return definition ? `接口 · ${definition.name}` : null
   }
   const detail = client.getQueryData<ReportExecutionDetail>([
     'report-detail',

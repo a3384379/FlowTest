@@ -114,11 +114,13 @@ async function editApiVersion(page: import('@playwright/test').Page, apiName: st
   await panel.getByLabel('原始 Body').fill('s14 raw payload')
 
   await panel.getByRole('tab', { name: '提取' }).click()
+  await expect(panel.getByRole('tab', { name: '提取' })).toHaveAttribute('aria-selected', 'true')
   await panel.getByRole('button', { name: '添加一行' }).click()
   await panel.getByPlaceholder('变量名').fill('echo_body')
   await panel.getByPlaceholder('$.data.token').fill('$.body')
 
   await panel.getByRole('tab', { name: '断言' }).click()
+  await expect(panel.getByRole('tab', { name: '断言' })).toHaveAttribute('aria-selected', 'true')
   await panel.getByRole('button', { name: '添加一行' }).click()
   await panel.getByRole('button', { name: '保存新版本' }).click()
   await expect(page.getByText('接口新版本已保存').last()).toBeVisible()

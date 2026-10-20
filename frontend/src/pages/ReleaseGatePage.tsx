@@ -369,9 +369,13 @@ function DecisionDialogContainer({
       impactRuns={pageItems(state.impactRuns.data)}
       releaseRisks={pageItems(state.releaseRisks.data)}
       performanceRuns={pageItems(state.performanceRuns.data)}
-      runnerTasks={pageItems(state.runnerTasks.data).filter(
-        (item) => item.project_id === state.projectId,
-      )}
+      runnerTasks={pageItems(state.runnerTasks.data)}
+      runnerPagination={
+        <>
+          <QueryFailureNotice queries={[state.runnerTasks]} />
+          <CatalogPagination query={state.runnerTasks} label="Runner 证据" />
+        </>
+      }
       onClose={onClose}
       onCreate={async (input) => {
         if (await state.evaluate(input)) onClose()
@@ -475,6 +479,7 @@ function DecisionDialog({
   releaseRisks,
   performanceRuns,
   runnerTasks,
+  runnerPagination,
   onClose,
   onCreate,
 }: {
@@ -487,6 +492,7 @@ function DecisionDialog({
   releaseRisks: Array<{ id: string; title: string; score: number }>
   performanceRuns: Array<{ id: string; status: string; scenario_version: number }>
   runnerTasks: Array<{ id: string; status: string; fencing_token: number }>
+  runnerPagination: React.ReactNode
   onClose: () => void
   onCreate: (input: ReleaseDecisionInput) => Promise<void>
 }) {
@@ -566,6 +572,7 @@ function DecisionDialog({
               label: `${short(item.id)} · ${item.status} · fence ${item.fencing_token}`,
             }))}
           />
+          {runnerPagination}
         </div>
       </Form>
     </Modal>

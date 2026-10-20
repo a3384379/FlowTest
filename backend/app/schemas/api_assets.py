@@ -224,6 +224,11 @@ class APIDefinitionResponse(BaseModel):
     updated_at: datetime
 
 
+class APIDefinitionListResponse(APIDefinitionResponse):
+    method: HttpMethod
+    path: str
+
+
 class APIDetailResponse(BaseModel):
     definition: APIDefinitionResponse
     version: APIVersionResponse

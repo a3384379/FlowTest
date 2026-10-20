@@ -10,6 +10,54 @@ import type { ApiVersionInput } from './api-service'
 import type { ApiDetail, ApiVersion, Artifact } from '../../lib/api'
 
 describe('APIWorkbench', () => {
+  it.each([
+    ['bearer', { token: 'old-token' }, 'Bearer Token', { token: 'new-value', legacy: 'preserved' }],
+    [
+      'basic',
+      { username: 'reader', password: 'old-password' },
+      'Basic 密码',
+      { username: 'reader', password: 'new-value', legacy: 'preserved' },
+    ],
+    [
+      'api_key',
+      { name: 'X-Token', value: 'old-key', in: 'query' },
+      'API Key 值',
+      { name: 'X-Token', value: 'new-value', in: 'query', legacy: 'preserved' },
+    ],
+  ] as const)(
+    'edits %s authentication through named fields and preserves legacy configuration',
+    async (kind, config, label, expected) => {
+      const save = vi.fn(async () => detail.version)
+      render(
+        <APIWorkbench
+          detail={{
+            ...detail,
+            version: {
+              ...detail.version,
+              auth_kind: kind,
+              auth_config: { ...config, legacy: 'preserved' },
+            },
+          }}
+          editable
+          loading={false}
+          saving={false}
+          previewing={false}
+          onSave={save}
+          onPreview={vi.fn()}
+          onRename={vi.fn()}
+        />,
+      )
+      await userEvent.click(screen.getByRole('tab', { name: 'Auth' }))
+      fireEvent.change(screen.getByLabelText(label), { target: { value: 'new-value' } })
+      await userEvent.click(screen.getByRole('button', { name: /保存新版本/ }))
+      await waitFor(() =>
+        expect(save).toHaveBeenCalledWith(
+          expect.objectContaining({ auth: { kind, values: expected } }),
+        ),
+      )
+    },
+  )
+
   it('saves interface variables, duplicate parameters and its exact editing baseline', async () => {
     const onSave = vi.fn(async (input: ApiVersionInput) => ({
       ...detail.version,

@@ -31,12 +31,13 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useState, type ReactNode } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useProjectContext } from '../features/projects/use-project-context'
 import { FolderManagementPanel } from '../features/projects/AssetManagementPanel'
+import AssetFolderSelect from '../features/projects/AssetFolderSelect'
 import AssetDetailDrawer from '../features/test-assets/AssetDetailDrawer'
 import AssetPlanDialog from '../features/test-assets/AssetPlanDialog'
 import AssetDeletionDialog from '../features/test-assets/AssetDeletionDialog'
@@ -63,6 +64,7 @@ import {
 import { listTestPlans } from '../features/task-plans/task-plan-service'
 import { listWorkflowVersions } from '../features/workflows/workflow-service'
 import { useTestAssets } from '../features/test-assets/use-test-assets'
+import { useSuiteEditDraft } from '../features/test-assets/use-suite-edit-draft'
 import type {
   TestCaseDraftInput,
   TestSuiteDraftInput,
@@ -731,6 +733,51 @@ function AssetLoadErrors({ state }: { state: AssetState }) {
   )
 }
 
+function CaseCreateNotice({ state }: { state: AssetState }) {
+  const resources = [state.workflows, state.environments, state.permissions]
+  if (resources.some((query) => query.isError))
+    return (
+      <Typography.Paragraph type="danger">
+        创建用例所需资源读取失败，请重新加载后再创建。
+      </Typography.Paragraph>
+    )
+  if (resources.some((query) => query.isLoading))
+    return <Typography.Paragraph type="secondary">正在读取创建用例所需资源…</Typography.Paragraph>
+  if (!state.canEdit)
+    return (
+      <Typography.Paragraph type="secondary">
+        当前为只读权限，创建用例需要项目编辑权限。
+      </Typography.Paragraph>
+    )
+  const workflows = pageItems(state.workflows.data)
+  const missingWorkflow = !workflows.some((workflow) => workflow.current_version !== null)
+  const missingEnvironment = !state.environments.data?.length
+  if (!missingWorkflow && !missingEnvironment) return null
+  return (
+    <Alert
+      type="info"
+      showIcon
+      title="创建用例前请补齐运行资源"
+      description={
+        <Space orientation="vertical">
+          {missingWorkflow && (
+            <span>
+              {workflows.length ? '工作流尚未发布。' : '项目还没有工作流。'}
+              <Link to={`/projects/${state.projectId}/workflows`}>前往编排并发布</Link>
+            </span>
+          )}
+          {missingEnvironment && (
+            <span>
+              项目还没有运行环境。
+              <Link to={`/projects/${state.projectId}/apis?panel=environments`}>管理环境</Link>
+            </span>
+          )}
+        </Space>
+      }
+    />
+  )
+}
+
 function caseTab(props: Parameters<typeof AssetTabs>[0]) {
   const { state, cases, selectedCases, folderId, setCaseEditor, setSelectedCases, setFolderId } =
     props
@@ -745,9 +792,13 @@ function caseTab(props: Parameters<typeof AssetTabs>[0]) {
         folders={folderItems(state)}
         createDisabled={
           !state.canEdit ||
+          [state.workflows, state.environments, state.permissions].some(
+            (query) => query.isLoading || query.isError,
+          ) ||
           !pageItems(state.workflows.data).some((workflow) => workflow.current_version !== null) ||
           !state.environments.data?.length
         }
+        createNotice={<CaseCreateNotice state={state} />}
         onFolderChange={setFolderId}
         onCreate={() => setCaseEditor(null)}
         onMove={() =>
@@ -891,6 +942,7 @@ function AssetDialogs({
         <SuiteDialog
           key={editorKey(suiteEditor, 'new-suite')}
           current={suiteEditor}
+          projectId={state.projectId ?? undefined}
           cases={publishedCases}
           folders={folderItems(state)}
           submitting={state.saving}
@@ -913,6 +965,7 @@ export function AssetPane({
   folderId,
   folders,
   createDisabled = false,
+  createNotice,
   onFolderChange,
   onCreate,
   onMove,
@@ -928,6 +981,7 @@ export function AssetPane({
   folderId: string | null
   folders: Folder[]
   createDisabled?: boolean
+  createNotice?: ReactNode
   onFolderChange: (value: string | null) => void
   onCreate: () => void
   onMove: () => void
@@ -944,12 +998,11 @@ export function AssetPane({
         <Button type="primary" icon={<PlusOutlined />} disabled={createDisabled} onClick={onCreate}>
           新建{title}
         </Button>
-        <Select
+        <AssetFolderSelect
           aria-label={`${title}批量目录`}
-          allowClear
           placeholder="移动到目录"
           value={folderId ?? undefined}
-          options={folders.map((folder) => ({ value: folder.id, label: folder.name }))}
+          folders={folders}
           onChange={(value?: string) => onFolderChange(value ?? null)}
         />
         <Button
@@ -971,6 +1024,7 @@ export function AssetPane({
         <AssetDeleteButton selected={selected} disabled={deleteDisabled} onDelete={onDelete} />
         <Typography.Text type="secondary">仅选择当前页</Typography.Text>
       </Space>
+      {createNotice}
       {children}
     </>
   )
@@ -1558,7 +1612,7 @@ export function CaseDialog({
           <Select showSearch optionFilterProp="label" options={environments.map(option)} />
         </Form.Item>
         <Form.Item name="folderId" label="目录">
-          <Select allowClear options={folders.map(option)} />
+          <AssetFolderSelect folders={folders} />
         </Form.Item>
         <Form.Item name="tags" label="标签">
           <Select mode="tags" tokenSeparators={[',']} />
@@ -1955,6 +2009,7 @@ function canJoinPlan(
 
 export function SuiteDialog({
   current,
+  projectId,
   cases,
   folders,
   submitting,
@@ -1964,6 +2019,7 @@ export function SuiteDialog({
   onSave,
 }: {
   current: TestSuite | null
+  projectId?: string
   cases: TestCase[]
   folders: Folder[]
   submitting: boolean
@@ -1973,58 +2029,117 @@ export function SuiteDialog({
   onSave: (input: TestSuiteDraftInput) => Promise<void>
 }) {
   const [form] = Form.useForm<SuiteFormValues>()
+  const draft = useSuiteEditDraft(
+    suiteProjectId(projectId, current, cases),
+    current?.id,
+    suiteDialogDefaults(current),
+  )
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const pending = submitting || saving
   const [error, setError] = useState<string | null>(null)
   async function save() {
-    const values = await form.validateFields().catch(() => null)
-    if (!values) return
+    if (pending || savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
     setError(null)
     try {
+      const values = await form.validateFields().catch(() => null)
+      if (!values) return
+      const generation = draft.remember(values)
       await onSave(suiteInput(values, cases, current ?? undefined))
+      draft.completeSave(generation)
     } catch (failure) {
       setError(apiErrorMessage(failure))
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
   return (
-    <Modal
-      title={suiteDialogTitle(current)}
-      open
-      destroyOnHidden
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => void save()}
-      okButtonProps={{
-        disabled: assetOptionsLoading || Boolean(assetOptionsError) || !cases.length,
-      }}
-    >
-      <SuiteAssetOptionsStatus
-        loading={assetOptionsLoading}
-        error={assetOptionsError}
-        empty={!cases.length}
-      />
-      <Form form={form} layout="vertical" initialValues={suiteDialogDefaults(current)}>
-        <Form.Item name="name" label="套件名称" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <SuiteCaseVersions form={form} cases={cases} current={current} />
-        <Form.Item name="description" label="说明">
-          <Input.TextArea rows={2} />
-        </Form.Item>
-        <Form.Item name="caseIds" label="已发布测试用例" rules={[{ required: true }]}>
-          <Select mode="multiple" showSearch optionFilterProp="label" options={cases.map(option)} />
-        </Form.Item>
-        <Typography.Text type="secondary">
-          套件成员独立运行；展示顺序不代表共享变量或响应。
-        </Typography.Text>
-        <Form.Item name="folderId" label="目录">
-          <Select allowClear options={folders.map(option)} />
-        </Form.Item>
-        <Form.Item name="tags" label="标签">
-          <Select mode="tags" tokenSeparators={[',']} />
-        </Form.Item>
-      </Form>
-      {error && <Alert type="error" showIcon title="保存套件失败" description={error} />}
-    </Modal>
+    <>
+      <Modal
+        title="放弃未保存的套件修改？"
+        open={discardOpen}
+        okText="放弃修改"
+        cancelText="继续编辑"
+        onCancel={() => setDiscardOpen(false)}
+        onOk={() => {
+          draft.clear()
+          setDiscardOpen(false)
+          onClose()
+        }}
+      >
+        套件名称、成员版本、顺序、目录和标签的未保存修改将被丢弃。
+      </Modal>
+      <Modal
+        title={suiteDialogTitle(current)}
+        open
+        destroyOnHidden
+        confirmLoading={pending}
+        closable={!pending}
+        cancelButtonProps={{ disabled: pending }}
+        onCancel={() => {
+          if (!pending) {
+            if (draft.dirty) setDiscardOpen(true)
+            else onClose()
+          }
+        }}
+        onOk={() => void save()}
+        okButtonProps={{
+          disabled: assetOptionsLoading || Boolean(assetOptionsError) || !cases.length,
+        }}
+      >
+        <SuiteAssetOptionsStatus
+          loading={assetOptionsLoading}
+          error={assetOptionsError}
+          empty={!cases.length}
+        />
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={draft.initial}
+          onValuesChange={(_, values: SuiteFormValues) => draft.remember(values)}
+          disabled={pending}
+        >
+          <Form.Item name="name" label="套件名称" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <SuiteCaseVersions form={form} cases={cases} current={current} />
+          <Form.Item name="description" label="说明">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+          <Form.Item name="caseIds" label="已发布测试用例" rules={[{ required: true }]}>
+            <Select
+              mode="multiple"
+              showSearch
+              optionFilterProp="label"
+              options={cases.map(option)}
+            />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            套件成员独立运行；展示顺序不代表共享变量或响应。
+          </Typography.Text>
+          <Form.Item name="folderId" label="目录">
+            <AssetFolderSelect folders={folders} />
+          </Form.Item>
+          <Form.Item name="tags" label="标签">
+            <Select mode="tags" tokenSeparators={[',']} />
+          </Form.Item>
+        </Form>
+        {error && <Alert type="error" showIcon title="保存套件失败" description={error} />}
+      </Modal>
+    </>
   )
+}
+
+function suiteProjectId(
+  projectId: string | undefined,
+  current: TestSuite | null,
+  cases: TestCase[],
+): string {
+  return projectId ?? current?.project_id ?? cases[0]?.project_id ?? ''
 }
 
 function SuiteAssetOptionsStatus({

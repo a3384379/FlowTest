@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { workflowDefinition } from '../../test/fixtures'
+import { apiDefinition, workflowDefinition } from '../../test/fixtures'
+import type { WorkflowNode } from '../../lib/api'
 import {
   dataReferences,
   nodeDataSources,
@@ -8,6 +9,109 @@ import {
 } from './node-presentation'
 
 describe('workflow presentation data', () => {
+  it('explains legacy extraction, comparison and iteration from the saved definition', () => {
+    const base = workflowDefinition.nodes[1]
+    const config = {
+      source_node_id: 'api',
+      expression: 'body.amount',
+      operator: 'gt',
+      expected: 10,
+    }
+    const summary = (type: WorkflowNode['type'], overrides = {}) =>
+      nodePresentation({ ...base, type, config: { ...config, ...overrides } }, workflowDefinition)
+        .summary
+    expect(summary('assert')).toBe('查询用户 · body.amount 大于 10')
+    expect(
+      summary('condition', {
+        expected_source_node_id: 'start',
+        expected_expression: 'variables.limit',
+      }),
+    ).toBe('查询用户 · body.amount 大于 开始 · variables.limit')
+    expect(summary('extract', { variable: 'amount' })).toBe('提取 查询用户 · body.amount → amount')
+    expect(
+      summary('for_each', { expression: 'body.items', workflow_version: 3, concurrency: 2 }),
+    ).toBe('遍历 查询用户 · body.items · 子流程 v3 · 并发 2')
+    expect(summary('assert', { source_node_id: 'missing' })).toContain('节点不存在（missing）')
+  })
+
+  it('explains compound conditions, unary checks and switch branches without inventing operands', () => {
+    const definition = structuredClone(workflowDefinition)
+    const compare = {
+      kind: 'compare',
+      left: { kind: 'variable', scope: 'state', path: ['ready'] },
+      operator: 'exists',
+    }
+    const node: WorkflowNode = {
+      ...definition.nodes[1],
+      type: 'capability',
+      capability_id: 'flow.control.until',
+      configuration: {
+        condition: {
+          kind: 'all',
+          conditions: [compare, { kind: 'not', condition: { kind: 'any', conditions: [compare] } }],
+        },
+        policy: { max_iterations: 8, timeout_seconds: 45 },
+      },
+    }
+    const before = structuredClone(node)
+    expect(nodePresentation(node, definition).summary).toBe(
+      '直到：（state.ready 存在 且 非（（state.ready 存在））） · 上限 8 轮 · 最长 45 秒',
+    )
+    node.capability_id = 'flow.control.switch'
+    node.configuration = {
+      mode: 'rules',
+      branches: [{ id: 'ready', label: '已就绪', condition: compare }],
+    }
+    expect(nodePresentation(node, definition).summary).toContain(
+      '1 个分支 · 按条件匹配 · 已就绪：state.ready 存在',
+    )
+    expect(before.configuration?.condition).toEqual({
+      kind: 'all',
+      conditions: [compare, { kind: 'not', condition: { kind: 'any', conditions: [compare] } }],
+    })
+    expect(definition).toEqual(workflowDefinition)
+  })
+
+  it('marks truncated values and unknown control expressions explicitly', () => {
+    const node: WorkflowNode = {
+      ...workflowDefinition.nodes[1],
+      type: 'capability',
+      capability_id: 'flow.control.if',
+      configuration: {
+        condition: {
+          kind: 'compare',
+          left: { kind: 'literal', value: 'x'.repeat(150) },
+          operator: 'equals',
+          right: { kind: 'literal', value: 'y' },
+        },
+      },
+    }
+    expect(nodePresentation(node, workflowDefinition).summary).toContain('…（配置中查看完整值）')
+    node.configuration = { condition: { kind: 'unknown' } }
+    expect(nodePresentation(node, workflowDefinition).summary).toContain('条件未解析（unknown）')
+  })
+
+  it('uses request metadata only when it belongs to the pinned API version', () => {
+    const node = {
+      ...workflowDefinition.nodes[1],
+      config: { api_definition_id: apiDefinition.id, api_version: 1 },
+    }
+    const asset = {
+      ...apiDefinition,
+      name: '订单查询',
+      current_version: 1,
+      method: 'GET',
+      path: '/orders',
+    }
+    expect(nodePresentation(node, workflowDefinition, [asset]).summary).toContain('GET /orders')
+    expect(
+      nodePresentation(node, workflowDefinition, [{ ...asset, current_version: 2 }]).summary,
+    ).toContain('固定版本请求摘要未提供')
+    expect(
+      nodePresentation(node, workflowDefinition, [{ ...asset, current_version: 2 }]).summary,
+    ).not.toContain('GET /orders')
+  })
+
   it('derives references from saved contracts without changing execution edges or interpreting literal values', () => {
     const definition = structuredClone(workflowDefinition)
     const target = {

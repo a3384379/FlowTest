@@ -322,6 +322,7 @@ export async function reviewMissingTest(
   itemId: string,
   decision: 'accept' | 'reject',
   note: string,
+  expectedContent?: MissingTestProposal['proposed_content'],
 ): Promise<ChangeRegressionRun> {
   return (
     await apiClient.post<ChangeRegressionRun>(
@@ -333,7 +334,7 @@ export async function reviewMissingTest(
         itemId +
         '/' +
         decision,
-      { note },
+      { note, ...(expectedContent === undefined ? {} : { expected_content: expectedContent }) },
     )
   ).data
 }

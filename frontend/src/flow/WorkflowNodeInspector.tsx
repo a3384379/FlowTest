@@ -2,7 +2,7 @@ import { analyzeGraph, editorNode, restoreEditedNode } from './editor/graph-anal
 import { getApiDetail } from '../features/api-console/api-service'
 import WorkflowResourceSelect from './WorkflowResourceSelect'
 import WorkflowJsonInput from './WorkflowJsonInput'
-import WorkflowControlFields from './WorkflowControlFields'
+import WorkflowControlFields, { type RegionNodeEditorProps } from './WorkflowControlFields'
 import MappingEditor from './WorkflowMappingEditor'
 import { DeleteOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
@@ -295,6 +295,22 @@ function InspectorNodeFields({
         onUpdate={onUpdate}
         onStructureChange={onStructureChange}
         onRegionUpdate={onRegionUpdate}
+        renderRegionNode={(regionProps) => (
+          <RegionNodeFields
+            regionProps={regionProps}
+            definition={definition}
+            projectId={projectId}
+            environmentId={environmentId}
+            apis={apis}
+            artifacts={artifacts}
+            workflows={workflows}
+            credentials={credentials}
+            graphqlSchemas={graphqlSchemas}
+            grpcDescriptors={grpcDescriptors}
+            eventSources={eventSources}
+            editable={editable}
+          />
+        )}
       />
     )
   }
@@ -365,6 +381,40 @@ function InspectorNodeFields({
       editable={editable}
       onUpdate={onUpdate}
     />
+  )
+}
+
+function RegionNodeFields({
+  regionProps,
+  ...resources
+}: Omit<
+  Parameters<typeof InspectorNodeFields>[0],
+  'node' | 'onUpdate' | 'onStructureChange' | 'onRegionUpdate'
+> & { regionProps: RegionNodeEditorProps }) {
+  const original = regionProps.node
+  const node = editorNode(original)
+  const definition = original.capability_id?.startsWith('flow.control.')
+    ? resources.definition
+    : { ...resources.definition, nodes: regionProps.region.nodes, edges: regionProps.region.edges }
+  return (
+    <section aria-label="区域节点配置">
+      <Field label="名称">
+        <Input
+          disabled={!resources.editable}
+          value={node.name}
+          onChange={(event) => regionProps.onUpdate({ ...original, name: event.target.value })}
+        />
+      </Field>
+      <Tag>{nodeTypeName(node)}</Tag>
+      <InspectorNodeFields
+        {...resources}
+        definition={definition}
+        node={node}
+        onUpdate={(updated) => regionProps.onUpdate(restoreEditedNode(original, updated))}
+        onRegionUpdate={regionProps.onRegionUpdate}
+        onStructureChange={regionProps.onStructureChange}
+      />
+    </section>
   )
 }
 

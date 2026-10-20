@@ -15,8 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
 from app.core.logging import redact
+from app.domain.api_exports import APIExportSelection, InvalidAPIExportSelection
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion
+from app.repositories.access import ProjectRepository
 from app.repositories.api_assets import APIAssetRepository
 from app.services.projects import ProjectService
 
@@ -45,20 +47,25 @@ class APIExportService:
     def __init__(self, session: AsyncSession) -> None:
         self._assets = APIAssetRepository(session)
         self._projects = ProjectService(session)
+        self._catalog = ProjectRepository(session)
 
     async def export(
-        self, *, actor: User, project_id: UUID, export_format: APIExportFormat
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        export_format: APIExportFormat,
+        selection: APIExportSelection | None = None,
     ) -> APIExportDocument:
         access = await self._projects.get(actor=actor, project_id=project_id)
-        definitions, total = await self._assets.list_definitions(
-            project_id=project_id,
-            offset=0,
-            limit=10_000,
-        )
-        if total > 10_000:
+        selected = selection or APIExportSelection()
+        try:
+            selected.validate()
+        except InvalidAPIExportSelection as error:
             raise AppError(
-                code="EXPORT_LIMIT_EXCEEDED", message="接口数量超过导出上限 10000", status_code=422
-            )
+                code="INVALID_API_EXPORT_SELECTION", message=str(error), status_code=422
+            ) from error
+        definitions = await self._select_definitions(project_id, selected)
         items = await self._load_versions(definitions)
         safe_name = (
             "".join(
@@ -90,6 +97,35 @@ class APIExportService:
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             _excel_document(items),
         )
+
+    async def _select_definitions(
+        self, project_id: UUID, selection: APIExportSelection
+    ) -> list[APIDefinition]:
+        if selection.scope == "selected":
+            definitions = await self._assets.get_definitions(
+                project_id=project_id, definition_ids=list(selection.definition_ids)
+            )
+            if len(definitions) != len(selection.definition_ids):
+                raise AppError(
+                    code="API_NOT_FOUND", message="所选接口不存在或不属于当前项目", status_code=404
+                )
+            return definitions
+        if selection.folder_id is not None:
+            folder = await self._catalog.get_folder(selection.folder_id)
+            if folder is None or folder.project_id != project_id:
+                raise AppError(code="FOLDER_NOT_FOUND", message="目录不存在", status_code=404)
+        definitions, total = await self._assets.list_definitions(
+            project_id=project_id,
+            offset=0,
+            limit=10_000,
+            folder_id=selection.folder_id,
+            unfiled=selection.unfiled,
+        )
+        if total > 10_000:
+            raise AppError(
+                code="EXPORT_LIMIT_EXCEEDED", message="接口数量超过导出上限 10000", status_code=422
+            )
+        return definitions
 
     async def _load_versions(self, definitions: list[APIDefinition]) -> list[ExportedAPI]:
         items: list[ExportedAPI] = []

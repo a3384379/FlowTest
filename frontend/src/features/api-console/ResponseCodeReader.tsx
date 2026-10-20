@@ -1,21 +1,21 @@
-import { Alert, Button, Space, Switch, Typography } from 'antd'
+import { Alert, Button, Input, Space, Switch, Typography } from 'antd'
 import { useMemo, useState, type ReactNode } from 'react'
 
 export default function ResponseCodeReader({ value, title }: { value: unknown; title: string }) {
   const [pretty, setPretty] = useState(true)
   const [wrap, setWrap] = useState(false)
-  const [copyStatus, setCopyStatus] = useState<string | null>(null)
+  const [copied, setCopied] = useState<{ text: string; status: string } | null>(null)
+  const [search, setSearch] = useState('')
   const text = useMemo(() => formatCode(value, pretty), [value, pretty])
-  const lines = text.slice(0, 64_000).split('\n').slice(0, 300)
-  const preview = lines.join('\n')
-  const truncated = preview.length < text.length
+  const { preview, truncated, matchCount, lineNumbers } = codePreview(text, search)
+  const copyStatus = copied?.text === text ? copied.status : null
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(text)
-      setCopyStatus('已复制完整内容')
+      setCopied({ text, status: '已复制完整内容' })
     } catch {
-      setCopyStatus('复制失败，请下载内容或手动选择复制')
+      setCopied({ text, status: '复制失败，请下载内容或手动选择复制' })
     }
   }
 
@@ -45,12 +45,25 @@ export default function ResponseCodeReader({ value, title }: { value: unknown; t
         </Button>
         {copyStatus && <Typography.Text role="status">{copyStatus}</Typography.Text>}
       </Space>
+      <Input.Search
+        aria-label={`${title}搜索内容`}
+        placeholder="搜索已捕获内容，按行筛选预览"
+        allowClear
+        maxLength={200}
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      {search && (
+        <Typography.Text role="status">
+          匹配 {matchCount} 行；复制与下载仍包含完整已捕获内容。
+        </Typography.Text>
+      )}
       {truncated && (
         <Alert type="info" title="仅预览前 300 行或 64,000 字符，复制和下载包含完整已捕获内容。" />
       )}
       <div className={`response-reader-code${wrap ? ' is-wrapped' : ''}`} tabIndex={0}>
         <pre className="response-line-numbers" aria-hidden="true">
-          {lines.map((_, index) => index + 1).join('\n')}
+          {lineNumbers.join('\n')}
         </pre>
         <pre className="response-reader-text">
           {typeof value === 'object' ? highlightJson(preview) : preview}
@@ -58,6 +71,24 @@ export default function ResponseCodeReader({ value, title }: { value: unknown; t
       </div>
     </section>
   )
+}
+
+function codePreview(text: string, search: string) {
+  const lines = text.split('\n').map((value, index) => ({ value, number: index + 1 }))
+  const matching = search
+    ? lines.filter((line) => line.value.toLowerCase().includes(search.toLowerCase()))
+    : lines
+  const selected = matching
+    .slice(0, 300)
+    .map((line) => line.value)
+    .join('\n')
+  const preview = selected.slice(0, 64_000)
+  return {
+    preview,
+    lineNumbers: matching.slice(0, preview.split('\n').length).map((line) => line.number),
+    truncated: matching.length > 300 || selected.length > 64_000,
+    matchCount: matching.length,
+  }
 }
 
 function highlightJson(text: string): ReactNode[] {

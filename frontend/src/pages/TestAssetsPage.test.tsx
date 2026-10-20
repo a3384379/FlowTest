@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { App as AntdApp } from 'antd'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { App as AntdApp, ConfigProvider } from 'antd'
+import { DraftContext, DraftSession } from '../features/drafts/draft-session'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { Environment, Folder, TestCase, TestSuite, Workflow } from '../lib/api'
@@ -275,6 +276,123 @@ describe('TestAssetsPage', () => {
         }),
       ),
     )
+  })
+
+  it('guards closing a suite and restores its fields from the same project session', async () => {
+    const session = new DraftSession()
+    const close = vi.fn()
+    const dialog = () => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <DraftContext.Provider value={session}>
+            <SuiteDialog
+              current={testSuite}
+              cases={[testCase]}
+              folders={[folder]}
+              submitting={false}
+              onClose={close}
+              onSave={vi.fn()}
+            />
+          </DraftContext.Provider>
+        </AntdApp>
+      </ConfigProvider>
+    )
+    const view = render(dialog())
+    fireEvent.change(screen.getByLabelText('套件名称'), { target: { value: '审计未保存套件' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(close).not.toHaveBeenCalled()
+    const confirmation = (await screen.findByText('放弃未保存的套件修改？')).closest(
+      '.ant-modal',
+    )! as HTMLElement
+    fireEvent.click(within(confirmation).getByRole('button', { name: '继续编辑' }))
+    expect(screen.getByLabelText('套件名称')).toHaveValue('审计未保存套件')
+    expect(session.unsafe.size).toBe(1)
+    view.unmount()
+    render(dialog())
+    expect(screen.getByLabelText('套件名称')).toHaveValue('审计未保存套件')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    const discard = (await screen.findByText('放弃未保存的套件修改？')).closest(
+      '.ant-modal',
+    )! as HTMLElement
+    fireEvent.click(within(discard).getByRole('button', { name: '放弃修改' }))
+    expect(close).toHaveBeenCalledOnce()
+    expect(session.suiteForms.size).toBe(0)
+    expect(session.unsafe.size).toBe(0)
+  })
+
+  it('keeps suite edits after a failed save and blocks closing while the save is pending', async () => {
+    let reject!: (error: Error) => void
+    const save = vi.fn(
+      () =>
+        new Promise<void>((_, failure) => {
+          reject = failure
+        }),
+    )
+    const close = vi.fn()
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <SuiteDialog
+            current={testSuite}
+            cases={[testCase]}
+            folders={[folder]}
+            submitting={false}
+            onClose={close}
+            onSave={save}
+          />
+        </AntdApp>
+      </ConfigProvider>,
+    )
+    fireEvent.change(screen.getByLabelText('套件名称'), { target: { value: '保留失败草稿' } })
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(close).not.toHaveBeenCalled()
+    reject(new Error('保存暂不可用'))
+    expect(await screen.findByText('保存暂不可用')).toBeVisible()
+    expect(screen.getByLabelText('套件名称')).toHaveValue('保留失败草稿')
+  })
+
+  it('does not clear a newer suite draft when an earlier save finishes after reopening', async () => {
+    let finish!: () => void
+    const save = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        }),
+    )
+    const session = new DraftSession()
+    const dialog = () => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <DraftContext.Provider value={session}>
+            <SuiteDialog
+              current={testSuite}
+              cases={[testCase]}
+              folders={[folder]}
+              submitting={false}
+              onClose={vi.fn()}
+              onSave={save}
+            />
+          </DraftContext.Provider>
+        </AntdApp>
+      </ConfigProvider>
+    )
+    const first = render(dialog())
+    fireEvent.change(screen.getByLabelText('套件名称'), { target: { value: '早一版保存' } })
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(save).toHaveBeenCalledOnce())
+    first.unmount()
+    const reopened = render(dialog())
+    fireEvent.change(screen.getByLabelText('套件名称'), { target: { value: '保存期间的新输入' } })
+    await act(async () => {
+      finish()
+    })
+    expect(session.unsafe.size).toBe(1)
+    reopened.unmount()
+    render(dialog())
+    expect(screen.getByLabelText('套件名称')).toHaveValue('保存期间的新输入')
   })
 
   it('loads an existing suite draft for editing', () => {

@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import { ConfigProvider } from 'antd'
+import { DraftContext, DraftSession } from '../features/drafts/draft-session'
 import type { WorkflowRegion } from '../lib/api'
 import { workflowDefinition } from '../test/fixtures'
 import {
@@ -13,6 +15,58 @@ import {
 } from './editor/control-blocks'
 import { NodeEditContext, type NodeEditContextValue } from './editor/node-edit-session'
 import WorkflowControlFields from './WorkflowControlFields'
+
+it('guards nested raw configuration when switching nodes or closing the region canvas', async () => {
+  const base = addControlBlock(workflowDefinition, 'group')
+  const parent = base.regions![0]
+  const definition = insertNestedControlBlock(base, parent.id, parent.entry_node_id!, 'group')!
+  const region = definition.regions!.find((item) => item.id === parent.id)!
+  const nested = region.nodes.at(-1)!
+  const onRegionUpdate = vi.fn()
+  const session = new DraftSession()
+  render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <DraftContext.Provider value={session}>
+        <WorkflowControlFields
+          node={definition.nodes.at(-1)!}
+          definition={definition}
+          regions={[region]}
+          editable
+          onUpdate={vi.fn()}
+          onRegionUpdate={onRegionUpdate}
+        />
+      </DraftContext.Provider>
+    </ConfigProvider>,
+  )
+  await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+  const canvas = screen.getByRole('dialog', { name: 'body 区域画布' })
+  fireEvent.click(within(canvas).getByTestId(`rf__node-${nested.id}`))
+  const raw = advancedEditor('控制块配置 JSON', within(canvas))
+  const rawText = JSON.stringify({
+    ...nested.configuration,
+    inputs: { audit: { kind: 'literal', value: 1 } },
+  })
+  fireEvent.change(raw, { target: { value: rawText } })
+  expect(
+    session.dirtyNodeEditorKeys(`region-editor:region:${encodeURIComponent(region.id)}:`),
+  ).toHaveLength(1)
+  fireEvent.click(within(canvas).getByTestId(`rf__node-${parent.entry_node_id}`))
+  await waitFor(() => expect(screen.getByText('节点配置尚未应用')).toBeVisible())
+  await userEvent.click(screen.getByRole('button', { name: '取消切换' }))
+  expect(raw).toHaveValue(rawText)
+  await userEvent.click(within(canvas).getByRole('button', { name: '应用节点配置' }))
+  expect(onRegionUpdate).not.toHaveBeenCalled()
+  expect(within(canvas).getByText('请先应用或丢弃原始字段草稿，再应用节点配置。')).toBeVisible()
+  fireEvent.click(within(canvas).getByRole('button', { name: 'Close' }))
+  await waitFor(() => expect(screen.getByText('节点配置尚未应用')).toBeVisible())
+  await userEvent.click(screen.getByRole('button', { name: '取消切换' }))
+  await userEvent.click(within(canvas).getByRole('button', { name: '应用配置' }))
+  await userEvent.click(within(canvas).getByRole('button', { name: '应用节点配置' }))
+  expect(
+    onRegionUpdate.mock.lastCall?.[0].nodes.find((item: { id: string }) => item.id === nested.id)
+      .configuration.inputs.audit.value,
+  ).toBe(1)
+})
 
 it('adds a serial step through the control region panel', async () => {
   const definition = addControlBlock(workflowDefinition, 'foreach')
@@ -468,6 +522,7 @@ it('edits a nested control configuration through the parent region canvas', asyn
   await userEvent.clear(count)
   await userEvent.type(count, '5')
   await userEvent.tab()
+  await userEvent.click(within(canvas).getByRole('button', { name: '应用节点配置' }))
   const updated = onRegionUpdate.mock.lastCall?.[0] as WorkflowRegion
   expect(updated.nodes.find((item) => item.id === nested.id)?.configuration?.count).toBe(5)
 })
@@ -508,6 +563,7 @@ it('keeps a nested condition value draft out of the outer node edit session', as
   )
   await userEvent.click(within(canvas).getAllByRole('button', { name: '应用值' })[1])
   expect(outerSetRaw).not.toHaveBeenCalled()
+  await userEvent.click(within(canvas).getByRole('button', { name: '应用节点配置' }))
   const updated = onRegionUpdate.mock.lastCall?.[0] as WorkflowRegion
   const condition = updated.nodes.find((item) => item.id === nested.id)?.configuration?.condition
   expect(condition).toEqual(expect.objectContaining({ right: { kind: 'literal', value: false } }))
@@ -730,7 +786,7 @@ it('keeps an unfinished region JSON draft while visual actions are disabled', as
       onRegionUpdate={onRegionUpdate}
     />,
   )
-  const editor = screen.getByRole('textbox', { name: 'body 区域定义' })
+  const editor = advancedEditor('body 区域定义')
   await userEvent.type(editor, 'x')
   expect(screen.getByRole('button', { name: '添加等待步骤' })).toBeDisabled()
   expect(screen.getByRole('button', { name: '添加退出循环' })).toBeDisabled()
@@ -754,7 +810,7 @@ it('does not apply an old region JSON draft over a newer region revision', async
       onRegionUpdate={onRegionUpdate}
     />,
   )
-  const editor = screen.getByRole('textbox', { name: 'body 区域定义' })
+  const editor = advancedEditor('body 区域定义')
   await userEvent.type(editor, 'x')
   view.rerender(
     <WorkflowControlFields
@@ -1247,7 +1303,7 @@ it('protects an unfinished control configuration draft from a newer visual edit'
     onRegionUpdate: vi.fn(),
   }
   const view = render(<WorkflowControlFields node={node} {...props} />)
-  const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+  const editor = advancedEditor('控制块配置 JSON')
   fireEvent.change(editor, { target: { value: `${JSON.stringify(node.configuration, null, 2)}x` } })
   expect(screen.getByRole('button', { name: '添加状态字段' })).toBeDisabled()
   expect(screen.getByRole('button', { name: '添加控制块输入' })).toBeDisabled()
@@ -1277,7 +1333,7 @@ it('rejects invalid control JSON and restores visual editing after discard', asy
       onRegionUpdate={vi.fn()}
     />,
   )
-  const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+  const editor = advancedEditor('控制块配置 JSON')
   fireEvent.change(editor, { target: { value: '[' } })
   expect(screen.getAllByRole('spinbutton')[0]).toBeDisabled()
   await userEvent.click(screen.getByRole('button', { name: '应用配置' }))
@@ -1405,3 +1461,10 @@ it('edits a node-output source with an array index and keeps other state fields'
     keep: { kind: 'literal', value: true },
   })
 })
+
+function advancedEditor(label: string, scope: Pick<typeof screen, 'getByLabelText'> = screen) {
+  const input = scope.getByLabelText(label)
+  const details = input.closest('details')!
+  if (!details.open) fireEvent.click(details.querySelector('summary')!)
+  return input
+}

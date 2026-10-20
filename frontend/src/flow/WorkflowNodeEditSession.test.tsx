@@ -174,7 +174,7 @@ describe('node edit transactions', () => {
         </WorkflowNodeEditSession>
       </DraftContext.Provider>,
     )
-    const editor = screen.getByRole('textbox', { name: '控制块配置 JSON' })
+    const editor = advancedEditor('控制块配置 JSON')
     fireEvent.change(editor, { target: { value: '[' } })
     expect(session.nodeEditors.size).toBe(1)
     expect(screen.getByText('配置尚未应用')).toBeVisible()
@@ -431,3 +431,10 @@ describe('node edit transactions', () => {
     expect(screen.getByText(/节点内容已从外部更新/)).toBeVisible()
   })
 })
+
+function advancedEditor(label: string, scope: Pick<typeof screen, 'getByLabelText'> = screen) {
+  const input = scope.getByLabelText(label)
+  const details = input.closest('details')!
+  if (!details.open) fireEvent.click(details.querySelector('summary')!)
+  return input
+}

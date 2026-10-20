@@ -2,6 +2,7 @@ import type { WorkflowNodeEditorDraft } from '../../flow/editor/node-edit-sessio
 import { createContext, useContext, useState } from 'react'
 import type { WorkbenchFields } from '../api-console/APIWorkbench'
 import type { WorkflowDraftEdit } from '../workflows/use-workflows'
+import type { SuiteFormValues } from '../test-assets/test-asset-view-model'
 
 export const DRAFT_NAVIGATION_CANCELLED = 'flowtest:draft-navigation-cancelled'
 
@@ -12,6 +13,7 @@ type ApiDraft = {
   baseVersion: number
 }
 export class DraftSession {
+  readonly suiteForms = new Map<string, { values: Partial<SuiteFormValues>; generation: number }>()
   readonly nodeEditors = new Map<string, WorkflowNodeEditorDraft>()
   readonly nodeEditorActions = new Map<string, () => Promise<boolean>>()
   updateNodeEditor(key: string, draft: WorkflowNodeEditorDraft) {

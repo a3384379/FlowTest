@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { ConfigProvider } from 'antd'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { useState } from 'react'
@@ -9,12 +10,63 @@ import type { ApiDefinition, RequestService, ServiceEndpoint, WorkflowDefinition
 import { apiDefinition, environment, project, workflowDefinition } from '../test/fixtures'
 import { server } from '../test/server'
 import WorkflowNodeInspector from './WorkflowNodeInspector'
+import { addControlBlock, appendRegionApi } from './editor/control-blocks'
 
 const orderService = requestService('service-orders', 'orders', '订单服务', true)
 const authService = requestService('service-auth', 'auth', '认证服务', true)
 const legacyService = requestService('service-legacy', 'legacy', '旧版服务', false)
 
 describe('WorkflowNodeInspector request target', () => {
+  it('edits a pinned API inside a control region with the same service and request inspector', async () => {
+    targetHandlers([
+      endpoint('endpoint-auth', authService.id, 'default', 'https://auth.example.com', true),
+    ])
+    const base = addControlBlock(workflowDefinition, 'group')
+    const region = appendRegionApi(base.regions![0], apiDefinition.id, 1)!
+    const nested = region.nodes.at(-1)!
+    const definition = { ...base, regions: [region] }
+    const changed = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <QueryClientProvider client={client}>
+          <WorkflowNodeInspector
+            node={definition.nodes.at(-1)!}
+            definition={definition}
+            projectId={project.id}
+            environmentId={environment.id}
+            apis={[apiDefinition]}
+            artifacts={[]}
+            credentials={[]}
+            editable
+            onChange={changed}
+            onDelete={vi.fn()}
+          />
+        </QueryClientProvider>
+      </ConfigProvider>,
+    )
+    await userEvent.click(screen.getByRole('button', { name: '打开区域画布' }))
+    const canvas = (await screen.findByText('body 区域画布')).closest<HTMLElement>('.ant-modal')!
+    fireEvent.click(within(canvas).getByTestId(`rf__node-${nested.id}`))
+    const inspector = within(canvas).getByLabelText('区域节点配置')
+    fireEvent.change(within(inspector).getByLabelText('名称'), {
+      target: { value: '区域订单请求' },
+    })
+    await userEvent.click(within(inspector).getByRole('radio', { name: '覆盖 Service' }))
+    await userEvent.click(within(inspector).getByRole('combobox', { name: '覆盖 Service' }))
+    await userEvent.click(await screen.findByText('认证服务 · auth'))
+    await waitFor(() =>
+      expect(within(inspector).getByText('最终目标：https://auth.example.com')).toBeVisible(),
+    )
+    expect(changed).not.toHaveBeenCalled()
+    await userEvent.click(within(canvas).getByRole('button', { name: '应用节点配置' }))
+    const result = changed.mock.lastCall?.[0] as WorkflowDefinition
+    expect(result.nodes).toEqual(definition.nodes)
+    expect(result.regions![0].nodes.at(-1)).toMatchObject({
+      name: '区域订单请求',
+      config: { api_definition_id: apiDefinition.id, api_version: 1, service_override: 'auth' },
+    })
+  })
   it('selects typed services and endpoint variants without memorizing keys', async () => {
     targetHandlers([
       endpoint('endpoint-orders', orderService.id, 'default', 'https://orders.example.com', true),

@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
 import { useAuthStore } from './features/auth/auth-store'
-import { project, user } from './test/fixtures'
+import { apiDefinition, project, user } from './test/fixtures'
+import { workspaceTabStorageKey } from './features/navigation/workspace-tab-store'
 import { server } from './test/server'
 
 describe('App authentication', () => {
@@ -124,41 +125,55 @@ describe('App authentication', () => {
     expect(await screen.findByRole('heading', { name: '登录账号' })).toBeVisible()
   })
 
-  it('restores and navigates project workspace tabs', async () => {
+  it('restores object tabs while keeping module visits in the main navigation', async () => {
     authenticateExistingUser()
+    installApiWorkspaceHandlers()
     localStorage.setItem(
-      `flowtest:workspace-tabs:v1:${user.id}:${project.id}`,
-      JSON.stringify(['apis', 'invalid-section']),
+      workspaceTabStorageKey(user.id, project.id),
+      JSON.stringify({
+        schemaVersion: 2,
+        tabs: [
+          {
+            href: `/projects/${project.id}/apis?focus=${apiDefinition.id}`,
+            label: '接口 · 已存名称',
+          },
+          { href: `/projects/${project.id}/dashboard`, label: '质量总览' },
+        ],
+      }),
     )
     renderApp(`/projects/${project.id}/dashboard`)
     const browser = userEvent.setup()
-
-    expect(await screen.findByRole('tab', { name: '质量总览' })).toBeVisible()
-    const apiTab = screen.getByRole('tab', { name: '接口管理' })
-    const close = apiTab.closest('.ant-tabs-tab')?.querySelector('.ant-tabs-tab-remove')
-    expect(close).toBeInstanceOf(HTMLElement)
-    fireEvent.click(close as HTMLElement)
-    expect(screen.queryByRole('tab', { name: '接口管理' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('tab', { name: '接口 · 已存名称' })).toBeVisible()
+    expect(screen.queryByRole('tab', { name: '质量总览' })).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('tab', { name: '接口 · 已存名称' }))
+    const apiTab = await screen.findByRole('tab', { name: `接口 · ${apiDefinition.name}` })
+    const close = apiTab
+      .closest('.ant-tabs-tab')!
+      .querySelector<HTMLElement>('.ant-tabs-tab-remove')!
+    fireEvent.click(close)
+    expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
     await browser.click(screen.getByRole('link', { name: '接口管理' }))
-    expect(await screen.findByRole('tab', { name: '接口管理' })).toBeVisible()
-    await browser.click(screen.getByRole('tab', { name: '质量总览' }))
+    expect(await screen.findByRole('heading', { name: '接口管理' })).toBeVisible()
+    expect(
+      within(screen.getByLabelText('全局对象工作区')).queryByRole('tab'),
+    ).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('link', { name: '质量总览' }))
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
   })
 
-  it('recovers from a corrupt workspace draft and closes the active tab safely', async () => {
+  it('reconstructs an object tab from its deep link when stored workspace data is corrupt', async () => {
     authenticateExistingUser()
+    installApiWorkspaceHandlers()
     localStorage.setItem(`flowtest:workspace-tabs:v1:${user.id}:${project.id}`, '{corrupt')
-    renderApp(`/projects/${project.id}/apis`)
-
-    const apiTab = await screen.findByRole('tab', { name: '接口管理' })
-    const close = apiTab.closest('.ant-tabs-tab')?.querySelector('.ant-tabs-tab-remove')
-    expect(close).toBeInstanceOf(HTMLElement)
-    fireEvent.click(close as HTMLElement)
-
+    renderApp(`/projects/${project.id}/apis?focus=${apiDefinition.id}`)
+    const tab = await screen.findByRole('tab', { name: `接口 · ${apiDefinition.name}` })
+    fireEvent.click(
+      tab.closest('.ant-tabs-tab')!.querySelector<HTMLElement>('.ant-tabs-tab-remove')!,
+    )
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
   })
 
-  it('ignores non-array workspace data when browser storage cannot be updated', async () => {
+  it('keeps module navigation available when malformed workspace data cannot be persisted', async () => {
     authenticateExistingUser()
     localStorage.setItem(
       `flowtest:workspace-tabs:v1:${user.id}:${project.id}`,
@@ -167,11 +182,15 @@ describe('App authentication', () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('Storage is unavailable')
     })
-
     renderApp(`/projects/${project.id}/dashboard`)
-
-    expect(await screen.findByRole('tab', { name: '质量总览' })).toBeVisible()
     expect(await screen.findByRole('heading', { name: '质量指挥中心' })).toBeVisible()
+    expect(
+      within(screen.getByLabelText('全局对象工作区')).queryByRole('tab'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '接口管理' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/apis`,
+    )
     setItem.mockRestore()
   })
 
@@ -457,5 +476,44 @@ function invalidRefreshResponse() {
   return HttpResponse.json(
     { error: { code: 'INVALID_REFRESH_TOKEN', message: '登录状态已失效' } },
     { status: 401 },
+  )
+}
+
+function installApiWorkspaceHandlers() {
+  const root = `/api/v1/projects/${project.id}`
+  const emptyPage = { items: [], total: 0, page: 1, page_size: 20 }
+  server.use(
+    http.get(`${root}/apis`, () =>
+      HttpResponse.json({ ...emptyPage, items: [apiDefinition], total: 1 }),
+    ),
+    http.get(`${root}/environments`, () => HttpResponse.json([])),
+    http.get(`${root}/services`, () => HttpResponse.json([])),
+    http.get(`${root}/folders`, () => HttpResponse.json([])),
+    http.get(`${root}/files`, () => HttpResponse.json(emptyPage)),
+    http.get(`${root}/executions`, () => HttpResponse.json(emptyPage)),
+    http.get(`${root}/apis/${apiDefinition.id}/versions`, () =>
+      HttpResponse.json([{ version: 1 }]),
+    ),
+    http.get(`${root}/apis/${apiDefinition.id}`, () =>
+      HttpResponse.json({
+        definition: apiDefinition,
+        version: {
+          id: 'api-v1',
+          api_definition_id: apiDefinition.id,
+          version: 1,
+          method: 'GET',
+          path: '/users',
+          query_parameters: [],
+          headers: {},
+          body_kind: 'none',
+          body: null,
+          auth_kind: 'none',
+          auth_config: {},
+          extraction_rules: [],
+          assertions: [],
+          created_at: '2026-10-20T00:00:00Z',
+        },
+      }),
+    ),
   )
 }

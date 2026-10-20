@@ -400,6 +400,8 @@ async def test_api_list_supports_server_side_search_and_method_filter(
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["name"] == "创建订单"
+    assert filtered.json()["items"][0]["method"] == "POST"
+    assert filtered.json()["items"][0]["path"] == "/orders"
 
 
 async def _login_headers(client: AsyncClient) -> dict[str, str]:

@@ -6,7 +6,9 @@ import {
   ReactFlow,
   type Edge,
   type Node,
+  type ReactFlowInstance,
 } from '@xyflow/react'
+import { useEffect, useRef, useState } from 'react'
 import type { WorkflowRegion } from '../lib/api'
 import { iceColors } from '../theme/ice-theme'
 import { linearRegionPath } from './editor/control-blocks'
@@ -55,8 +57,18 @@ export default function WorkflowRegionCanvas({
   onReorder,
 }: Props) {
   const canConnect = editable && Boolean(linearRegionPath(region))
+  const container = useRef<HTMLDivElement>(null)
+  const [flow, setFlow] = useState<ReactFlowInstance | null>(null)
+  useEffect(() => {
+    if (!flow || !container.current) return
+    const observer = new ResizeObserver(() => {
+      void flow.fitView({ padding: 0.2, maxZoom: 1 })
+    })
+    observer.observe(container.current)
+    return () => observer.disconnect()
+  }, [flow])
   return (
-    <div className="workflow-region-canvas" aria-label={`${region.role} 区域画布`}>
+    <div ref={container} className="workflow-region-canvas" aria-label={`${region.role} 区域画布`}>
       <ReactFlow
         colorMode="light"
         defaultNodes={canvasNodes(region, selectedNodeId)}
@@ -66,7 +78,8 @@ export default function WorkflowRegionCanvas({
         edgesReconnectable={canConnect}
         deleteKeyCode={null}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+        onInit={setFlow}
         onNodeClick={(_, node) => onSelectNode(node.id)}
         onPaneClick={() => onSelectNode(null)}
         onConnect={(connection) => onReorder(connection.source, connection.target)}

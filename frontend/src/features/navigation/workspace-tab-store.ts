@@ -26,8 +26,9 @@ export function routeWorkspaceTab(projectId: string, href: string): WorkspaceTab
     return null
   const typedSection = section as ProjectSection
   const objectId = objectIdentity(typedSection, route.searchParams)
+  if (!objectId) return null
   return {
-    key: objectId ? `${section}:${objectId}` : section,
+    key: `${section}:${objectId}`,
     section: typedSection,
     objectId,
     href: `${route.pathname}${route.search}${route.hash}`,
@@ -74,7 +75,11 @@ function parseWorkspaceTabs(value: unknown, projectId: string): WorkspaceTabRead
     const tab = parseTab(item, projectId)
     if (tab && !tabs.some((existing) => existing.key === tab.key)) tabs.push(tab)
   }
-  return { tabs, error: tabs.length === value.tabs.length ? null : '部分无效工作区标签未恢复' }
+  return {
+    tabs,
+    error:
+      tabs.length === value.tabs.length ? null : '部分无效或旧版模块标签已清理，资产草稿仍保留',
+  }
 }
 
 function isWorkspacePayload(value: unknown): value is { schemaVersion: 2; tabs: unknown[] } {

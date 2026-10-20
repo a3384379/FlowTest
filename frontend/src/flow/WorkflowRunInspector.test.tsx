@@ -34,6 +34,7 @@ describe('WorkflowRunInspector', () => {
         execution={execution}
         nodes={[execution]}
         context={{}}
+        initialAttempt={1}
       />,
     )
     const evidence = within(screen.getByLabelText('断言证据'))
@@ -42,6 +43,22 @@ describe('WorkflowRunInspector', () => {
     expect(evidence.getByText('差值（实际 − 期望）：-1 · 单位：未提供')).toBeVisible()
     expect(evidence.getByText('证据来源：状态码断言 (assert-status)')).toBeVisible()
     expect(screen.queryByText('未提供断言证据')).not.toBeInTheDocument()
+    expect(screen.queryByText('指定请求尝试未保存证据')).not.toBeInTheDocument()
+  })
+  it('still warns about an unavailable attempt on an HTTP node', () => {
+    const execution = apiNodeExecution()
+    render(
+      <WorkflowRunInspector
+        mode="history"
+        node={workflowDefinition.nodes[1]}
+        definition={workflowDefinition}
+        execution={execution}
+        nodes={[execution]}
+        context={{}}
+        initialAttempt={99}
+      />,
+    )
+    expect(screen.getByText('指定请求尝试未保存证据')).toBeVisible()
   })
   it('opens the linked attempt and reports a later attempt selection', async () => {
     const browser = userEvent.setup()
@@ -210,13 +227,13 @@ describe('WorkflowRunInspector', () => {
     await browser.click(await screen.findByText('第 21 项 · failed'))
     expect(await screen.findByText('check · failed')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: '查看实例详情' }))
-    expect(await screen.findByText(/"actual": 409/)).toBeVisible()
+    expect(await screen.findByLabelText('实例输出')).toHaveTextContent(/"actual": 409/)
     await browser.click(
       within(screen.getByRole('region', { name: '实例执行证据' })).getByRole('tab', {
         name: '原始证据',
       }),
     )
-    expect(screen.getByText(/"status_code": 409/)).toBeVisible()
+    expect(screen.getByLabelText('实例完整结果')).toHaveTextContent(/"status_code": 409/)
     expect(requestedPages).toEqual([1, 2])
   })
 
@@ -401,12 +418,12 @@ describe('WorkflowRunInspector', () => {
 
     await browser.click(screen.getByRole('tab', { name: '请求' }))
     expect(screen.getByText('https://api.example.com/users?id=42')).toBeVisible()
-    expect(screen.getByText(/"Authorization": "\*\*\*\*\*\*"/)).toBeVisible()
-    expect(screen.getByText(/"target_key": "id"/)).toBeVisible()
+    expect(screen.getByLabelText('请求头')).toHaveTextContent(/"Authorization": "\*\*\*\*\*\*"/)
+    expect(screen.getByLabelText('变量映射')).toHaveTextContent(/"target_key": "id"/)
 
     await browser.click(screen.getByRole('tab', { name: '响应' }))
     expect(screen.getByText('HTTP 200')).toBeVisible()
-    expect(screen.getByText(/"name": "Ada"/)).toBeVisible()
+    expect(screen.getByLabelText('响应体')).toHaveTextContent(/"name": "Ada"/)
     expect(screen.getByText('128 B')).toBeVisible()
   })
 

@@ -2,7 +2,7 @@ import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
@@ -20,6 +20,7 @@ import {
   selectChangeRegressionOperation,
   waiveSemanticGap,
   type ChangeRegressionInput,
+  type MissingTestProposal,
 } from './change-regression-service'
 
 export function useChangeRegression(initialRunId?: string) {
@@ -65,13 +66,19 @@ export function useChangeRegression(initialRunId?: string) {
       createChangeRegression(required(projectId), input),
   })
   const review = useMutation({
-    mutationFn: (input: { runId: string; itemId: string; decision: 'accept' | 'reject' }) =>
+    mutationFn: (input: {
+      runId: string
+      itemId: string
+      decision: 'accept' | 'reject'
+      expectedContent?: MissingTestProposal['proposed_content']
+    }) =>
       reviewMissingTest(
         required(projectId),
         input.runId,
         input.itemId,
         input.decision,
         '前端人工审核',
+        input.expectedContent,
       ),
   })
   const approve = useMutation({
@@ -142,6 +149,7 @@ export function useChangeRegression(initialRunId?: string) {
     runId: string
     itemId: string
     decision: 'accept' | 'reject'
+    expectedContent?: MissingTestProposal['proposed_content']
   }): Promise<boolean> {
     if (!canEdit) return false
     try {
@@ -150,7 +158,7 @@ export function useChangeRegression(initialRunId?: string) {
       void message.success(input.decision === 'accept' ? '缺失测试已接受' : '缺失测试已拒绝')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      void message.error(apiErrorWithTrace(error))
       return false
     }
   }

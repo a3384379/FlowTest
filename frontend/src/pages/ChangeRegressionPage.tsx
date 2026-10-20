@@ -6,6 +6,7 @@ import {
   Col,
   Descriptions,
   Divider,
+  Drawer,
   Form,
   Input,
   Layout,
@@ -19,7 +20,7 @@ import {
   Typography,
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   ChangeRegressionRun,
   ChangeRegressionStatus,
@@ -30,7 +31,7 @@ import type {
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
 import { useProjectContext } from '../features/projects/use-project-context'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorMessage, apiErrorWithTrace } from '../lib/api'
 import RegressionMaintenancePanel from '../features/change-regression/RegressionMaintenancePanel'
 
 const { TextArea } = Input
@@ -246,74 +247,237 @@ function RunDetail({
       <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
       <Steps size="small" current={Math.max(run.stages.length - 1, 0)} items={stageItems} />
-      {run.missing_tests.length > 0 && (
-        <>
-          <Divider titlePlacement="left">Missing Test / ChangeSet Review</Divider>
-          <Table
-            rowKey="item_id"
-            size="small"
-            pagination={false}
-            dataSource={run.missing_tests}
-            columns={[
-              { title: '草案', dataIndex: 'title' },
-              {
-                title: '审核',
-                dataIndex: 'review_status',
-                render: (value: MissingTestProposal['review_status']) => (
-                  <Tag
-                    color={
-                      value === 'accepted' ? 'green' : value === 'rejected' ? 'default' : 'orange'
-                    }
-                  >
-                    {value}
-                  </Tag>
-                ),
-              },
-              {
-                title: '操作',
-                render: (_: unknown, item: MissingTestProposal) =>
-                  item.review_status === 'pending' ? (
-                    <Space>
-                      <Button
-                        disabled={!state.canEdit}
-                        size="small"
-                        onClick={() =>
-                          void state.reviewItem({
-                            runId: run.id,
-                            itemId: item.item_id,
-                            decision: 'accept',
-                          })
-                        }
-                      >
-                        接受
-                      </Button>
-                      <Button
-                        disabled={!state.canEdit}
-                        size="small"
-                        danger
-                        onClick={() =>
-                          void state.reviewItem({
-                            runId: run.id,
-                            itemId: item.item_id,
-                            decision: 'reject',
-                          })
-                        }
-                      >
-                        拒绝
-                      </Button>
-                    </Space>
-                  ) : null,
-              },
-            ]}
-          />
-        </>
-      )}
+      <MissingTestReview key={run.id} run={run} state={state} />
       <RunActions run={run} state={state} />
       {Object.keys(run.failure_triage).length > 0 && (
         <FailureTriagePanel value={run.failure_triage} />
       )}
     </Space>
   )
+}
+
+function MissingTestReview({
+  run,
+  state,
+}: {
+  run: ChangeRegressionRun
+  state: ReturnType<typeof useChangeRegression>
+}) {
+  const { selected, source, submitting, refreshing, refreshError, open, close, review, refresh } =
+    useMissingTestReview(run, state)
+  const busy = submitting || refreshing
+  if (!run.missing_tests.length) return null
+  return (
+    <section aria-label="缺失测试草案">
+      <Divider titlePlacement="left">缺失测试草案 / 人工审核</Divider>
+      <Table
+        rowKey="item_id"
+        size="small"
+        pagination={false}
+        dataSource={run.missing_tests}
+        columns={[
+          { title: '草案', dataIndex: 'title' },
+          {
+            title: '审核',
+            dataIndex: 'review_status',
+            render: (value: MissingTestProposal['review_status']) => (
+              <Tag>
+                {value === 'accepted' ? '已接受' : value === 'rejected' ? '已拒绝' : '待审核'}
+              </Tag>
+            ),
+          },
+          {
+            title: '操作',
+            render: (_: unknown, item: MissingTestProposal) => (
+              <Button size="small" disabled={busy} onClick={() => open(item)}>
+                查看并审核
+              </Button>
+            ),
+          },
+        ]}
+      />
+      <Drawer
+        title="缺失测试草案审核"
+        open={Boolean(selected)}
+        size={760}
+        closable={!submitting}
+        onClose={close}
+        extra={
+          <MissingTestReviewActions
+            selected={selected}
+            canEdit={state.canEdit}
+            submitting={submitting}
+            refreshing={refreshing}
+            onReview={review}
+          />
+        }
+      >
+        {selected && (
+          <>
+            <Typography.Title level={4}>{selected.title}</Typography.Title>
+            <Button loading={refreshing} disabled={submitting} onClick={() => void refresh()}>
+              刷新草案
+            </Button>
+            {refreshError && <Alert type="error" showIcon title={refreshError} />}
+            <Alert
+              type="info"
+              showIcon
+              title="请核对目标、版本、断言及来源后审核。接受草案后仍需人工批准与执行。"
+              description="窗口保留打开或主动刷新时的内容；服务器变化会拒绝过期审核。"
+            />
+            <Descriptions
+              column={1}
+              bordered
+              size="small"
+              items={[
+                { key: 'source', label: '变更来源', children: source.source_ref || '未提供' },
+                { key: 'fingerprint', label: '来源指纹', children: source.source_fingerprint },
+                { key: 'candidate', label: '候选版本', children: source.candidate_ref },
+                { key: 'note', label: '审核说明', children: selected.review_note || '未填写' },
+                {
+                  key: 'resource',
+                  label: '生成资产',
+                  children: selected.materialized_resource_id ?? '尚未生成',
+                },
+              ]}
+            />
+            <Typography.Title level={5}>完整草案内容</Typography.Title>
+            <pre
+              aria-label="缺失测试草案内容"
+              style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+            >
+              {JSON.stringify(selected.proposed_content, null, 2)}
+            </pre>
+          </>
+        )}
+      </Drawer>
+    </section>
+  )
+}
+
+function MissingTestReviewActions({
+  selected,
+  canEdit,
+  submitting,
+  refreshing,
+  onReview,
+}: {
+  selected: MissingTestProposal | null
+  canEdit: boolean
+  submitting: boolean
+  refreshing: boolean
+  onReview: (decision: 'accept' | 'reject') => Promise<void>
+}) {
+  if (selected?.review_status !== 'pending') return null
+  const disabled = !canEdit || submitting || refreshing
+  return (
+    <Space>
+      <Button disabled={disabled} danger onClick={() => void onReview('reject')}>
+        拒绝草案
+      </Button>
+      <Button
+        disabled={disabled}
+        type="primary"
+        loading={submitting}
+        onClick={() => void onReview('accept')}
+      >
+        接受草案
+      </Button>
+    </Space>
+  )
+}
+
+function useMissingTestReview(
+  run: ChangeRegressionRun,
+  state: ReturnType<typeof useChangeRegression>,
+) {
+  type ReviewSource = Pick<
+    ChangeRegressionRun,
+    'source_ref' | 'source_fingerprint' | 'candidate_ref'
+  >
+  const generation = useRef(0)
+  const [snapshot, setSnapshot] = useState<{
+    item: MissingTestProposal
+    source: ReviewSource
+  } | null>(null)
+  const selected = snapshot?.item ?? null
+  const [submitting, setSubmitting] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+
+  function open(item: MissingTestProposal, source: ReviewSource = run) {
+    generation.current += 1
+    setSnapshot({
+      item: structuredClone(item),
+      source: {
+        source_ref: source.source_ref,
+        source_fingerprint: source.source_fingerprint,
+        candidate_ref: source.candidate_ref,
+      },
+    })
+    setRefreshing(false)
+    setRefreshError(null)
+  }
+  function close() {
+    if (submitting) return
+    generation.current += 1
+    setSnapshot(null)
+    setRefreshing(false)
+    setRefreshError(null)
+  }
+  async function review(decision: 'accept' | 'reject') {
+    if (!selected || submitting || refreshing) return
+    setSubmitting(true)
+    try {
+      const accepted = await state.reviewItem({
+        runId: run.id,
+        itemId: selected.item_id,
+        decision,
+        expectedContent: selected.proposed_content,
+      })
+      if (accepted) {
+        generation.current += 1
+        setSnapshot(null)
+      }
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  async function refresh() {
+    if (!selected || submitting || refreshing) return
+    const currentGeneration = generation.current
+    setRefreshing(true)
+    setRefreshError(null)
+    try {
+      const result = await state.detail.refetch()
+      if (generation.current !== currentGeneration) return
+      if (!result.isSuccess) {
+        setRefreshError(apiErrorWithTrace(result.error))
+        return
+      }
+      const item = result.data.missing_tests.find((item) => item.item_id === selected.item_id)
+      if (!item) {
+        setRefreshError('草案已不存在，请关闭审核窗口后重新选择。')
+        return
+      }
+      open(item, result.data)
+    } catch (error) {
+      if (generation.current === currentGeneration) setRefreshError(apiErrorWithTrace(error))
+    } finally {
+      if (generation.current === currentGeneration) setRefreshing(false)
+    }
+  }
+  return {
+    selected,
+    source: snapshot?.source ?? run,
+    submitting,
+    refreshing,
+    refreshError,
+    open,
+    close,
+    review,
+    refresh,
+  }
 }
 
 function RunActions({
@@ -326,7 +490,7 @@ function RunActions({
   const pending = run.missing_tests.filter((item) => item.review_status === 'pending')
   const planGateOpen = Boolean(run.selection_summary.unresolved_current_plan_gap_count)
   return (
-    <Space wrap>
+    <Space wrap role="group" aria-label="变更回归动作">
       {run.status === 'review_required' && pending.length === 0 && (
         <Button
           type="primary"

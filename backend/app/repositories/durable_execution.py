@@ -103,11 +103,21 @@ class DurableExecutionRepository:
         return sorted(latest.values(), key=lambda item: item.node_id)
 
     async def list_checkpoint_log(
-        self, execution_id: UUID, *, page: int, page_size: int
+        self,
+        execution_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        node_id: str | None = None,
+        attempt: int | None = None,
     ) -> tuple[list[ExecutionCheckpoint], int]:
-        predicate = ExecutionCheckpoint.execution_id == execution_id
+        predicates = [ExecutionCheckpoint.execution_id == execution_id]
+        if node_id is not None:
+            predicates.append(ExecutionCheckpoint.node_id == node_id)
+        if attempt is not None:
+            predicates.append(ExecutionCheckpoint.attempt == attempt)
         total = await self._session.scalar(
-            select(func.count()).select_from(ExecutionCheckpoint).where(predicate)
+            select(func.count()).select_from(ExecutionCheckpoint).where(*predicates)
         )
         rows = list(
             (
@@ -127,7 +137,7 @@ class DurableExecutionRepository:
                             ExecutionCheckpoint.finished_at,
                         )
                     )
-                    .where(predicate)
+                    .where(*predicates)
                     .order_by(ExecutionCheckpoint.finished_at, ExecutionCheckpoint.id)
                     .offset((page - 1) * page_size)
                     .limit(page_size)

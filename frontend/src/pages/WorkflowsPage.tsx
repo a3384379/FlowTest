@@ -1624,6 +1624,7 @@ function designerFocusProps(
     },
     onAttemptFocus: (nodeId: string, attempt: number) => {
       const next = new URLSearchParams(params)
+      if (nodeId !== params.get('node')) clearExecutionEvidence(next)
       next.set('node', nodeId)
       next.set('attempt', String(attempt))
       setParams(next, { replace: true })

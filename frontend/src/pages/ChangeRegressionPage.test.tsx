@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
@@ -153,6 +153,62 @@ const baseRun: ChangeRegressionRun = {
 }
 
 describe('ChangeRegressionPage', () => {
+  it('requires opening the proposed content before accepting a missing test', async () => {
+    let current: ChangeRegressionRun = {
+      ...structuredClone(baseRun),
+      missing_tests: [
+        {
+          ...pendingItem,
+          proposed_content: {
+            target_type: 'api',
+            target_id: 'orders-api',
+            target_version: 2,
+            assertions: [{ kind: 'status_code', expected: 201 }],
+            evidence_refs: ['openapi://orders/create'],
+          },
+        },
+      ],
+    }
+    installHandlers(
+      () => current,
+      (next) => {
+        current = next as typeof current
+      },
+    )
+    const reviewedPayloads: unknown[] = []
+    const expectedContent = structuredClone(current.missing_tests[0].proposed_content)
+    server.use(
+      http.post(
+        `/api/v1/projects/${project.id}/change-regressions/${runId}/change-set-items/${itemId}/accept`,
+        async ({ request }) => {
+          reviewedPayloads.push(await request.json())
+          current = {
+            ...current,
+            missing_tests: current.missing_tests.map((item) => ({
+              ...item,
+              review_status: 'accepted',
+            })),
+          }
+          return HttpResponse.json(current)
+        },
+      ),
+    )
+    renderPage()
+    await screen.findByText('订单变更回归')
+    const missing = within(screen.getByRole('region', { name: '缺失测试草案' }))
+    expect(missing.queryByRole('button', { name: '接受' })).not.toBeInTheDocument()
+    // Check the semantic button and its visibility once instead of repeating ancestor-style queries.
+    const openReview = missing.getByText('查看并审核').closest('button')
+    expect(openReview).toHaveRole('button')
+    expect(openReview).toBeVisible()
+    fireEvent.click(openReview!)
+    const review = screen.getByRole('dialog', { name: '缺失测试草案审核' })
+    expect(within(review).getByText(/openapi:\/\/orders\/create/)).toBeVisible()
+    expect(within(review).getByText(/"expected": 201/)).toBeVisible()
+    await userEvent.click(within(review).getByRole('button', { name: '接受草案' }))
+    await waitFor(() => expect(current.missing_tests[0].review_status).toBe('accepted'))
+    expect(reviewedPayloads).toEqual([{ note: '前端人工审核', expected_content: expectedContent }])
+  })
   it('preserves regression evidence while disabling viewer approval and creation', async () => {
     let current = structuredClone(baseRun)
     installHandlers(
@@ -179,6 +235,149 @@ describe('ChangeRegressionPage', () => {
     expect(screen.getByRole('button', { name: '分析并创建链路' })).toBeDisabled()
   })
 
+  it('keeps the viewed snapshot through background refresh and replaces it only on explicit refresh', async () => {
+    let current: ChangeRegressionRun = {
+      ...structuredClone(baseRun),
+      missing_tests: [{ ...pendingItem, proposed_content: { expected: 201 } }],
+    }
+    installHandlers(
+      () => current,
+      (next) => {
+        current = next
+      },
+    )
+    const payloads: unknown[] = []
+    server.use(
+      http.post(
+        `/api/v1/projects/${project.id}/change-regressions/${runId}/change-set-items/${itemId}/accept`,
+        async ({ request }) => {
+          payloads.push(await request.json())
+          return HttpResponse.json(
+            {
+              error: {
+                code: 'STALE_REVIEW',
+                message: '草案已变化，请重新审核',
+                trace_id: 'stale-draft',
+              },
+            },
+            { status: 409 },
+          )
+        },
+      ),
+    )
+    const { queryClient } = renderPage()
+    await screen.findByText(pendingItem.title)
+    const region = within(screen.getByRole('region', { name: '缺失测试草案' }))
+    fireEvent.click(region.getByText('查看并审核').closest('button')!)
+    const review = within(screen.getByRole('dialog', { name: '缺失测试草案审核' }))
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 201')
+
+    current = {
+      ...current,
+      source_fingerprint: 'b'.repeat(64),
+      missing_tests: [
+        { ...pendingItem, title: '服务器更新的草案', proposed_content: { expected: 500 } },
+      ],
+    }
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['change-regression', project.id, runId] })
+    })
+    await screen.findByText('服务器更新的草案')
+    expect(review.getByText(baseRun.source_fingerprint)).toBeInTheDocument()
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 201')
+    await userEvent.click(review.getByRole('button', { name: '接受草案' }))
+    await screen.findByText(/stale-draft/)
+    expect(payloads).toEqual([{ note: '前端人工审核', expected_content: { expected: 201 } }])
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 201')
+
+    await userEvent.click(review.getByRole('button', { name: '刷新草案' }))
+    await waitFor(() =>
+      expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 500'),
+    )
+    expect(review.getByText('b'.repeat(64))).toBeInTheDocument()
+    expect(payloads).toHaveLength(1)
+
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/change-regressions/${runId}`, () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '刷新失败', trace_id: 'refresh-draft' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await userEvent.click(review.getByRole('button', { name: '刷新草案' }))
+    await waitFor(() => expect(review.getByText(/refresh-draft/)).toBeInTheDocument())
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 500')
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/change-regressions/${runId}`, () =>
+        HttpResponse.json(current),
+      ),
+    )
+    await userEvent.click(review.getByRole('button', { name: '刷新草案' }))
+    await waitFor(() => expect(review.queryByText(/refresh-draft/)).not.toBeInTheDocument())
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"expected": 500')
+  })
+
+  it('does not replace a newly opened review when the previous refresh completes late', async () => {
+    const otherItem = {
+      ...pendingItem,
+      item_id: 'other-item',
+      title: '草案 B',
+      proposed_content: { marker: 'B' },
+    }
+    let current: ChangeRegressionRun = {
+      ...structuredClone(baseRun),
+      missing_tests: [
+        { ...pendingItem, title: '草案 A', proposed_content: { marker: 'A' } },
+        otherItem,
+      ],
+    }
+    installHandlers(
+      () => current,
+      (next) => {
+        current = next
+      },
+    )
+    let delayed = false
+    let release: (() => void) | undefined
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/change-regressions/${runId}`, async () => {
+        const response = structuredClone(current)
+        if (delayed)
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+        return HttpResponse.json(response)
+      }),
+    )
+    renderPage()
+    const row = (title: string) => within(screen.getByText(title).closest('tr')!)
+    await screen.findByText('草案 A')
+    fireEvent.click(row('草案 A').getByText('查看并审核').closest('button')!)
+    let review = within(screen.getByRole('dialog', { name: '缺失测试草案审核' }))
+    delayed = true
+    current = {
+      ...current,
+      missing_tests: [
+        { ...pendingItem, title: '草案 A 已更新', proposed_content: { marker: 'updated-A' } },
+        otherItem,
+      ],
+    }
+    await userEvent.click(review.getByRole('button', { name: '刷新草案' }))
+    await waitFor(() => expect(release).toBeDefined())
+    expect(review.getByRole('button', { name: '接受草案' })).toBeDisabled()
+    fireEvent.click(review.getByRole('button', { name: /Close|关闭/ }))
+    fireEvent.click(row('草案 B').getByText('查看并审核').closest('button')!)
+    review = within(screen.getByRole('dialog', { name: '缺失测试草案审核' }))
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"marker": "B"')
+    await act(async () => {
+      release!()
+    })
+    await screen.findByText('草案 A 已更新')
+    expect(review.getByLabelText('缺失测试草案内容')).toHaveTextContent('"marker": "B"')
+    expect(review.getByRole('button', { name: '接受草案' })).toBeEnabled()
+  })
+
   it('runs the review, approval, execution and release-gate actions', async () => {
     let currentRun = structuredClone(baseRun)
     installHandlers(
@@ -197,17 +396,18 @@ describe('ChangeRegressionPage', () => {
     expect(screen.getByText(/00000000-0000-4000-8000-000000003010 · v2/)).toBeVisible()
     expect(screen.getByText('100 → 999')).toBeVisible()
     expect(screen.getByText('contract:openapi://orders/GET')).toBeVisible()
-    await waitFor(() => expect(screen.getByRole('button', { name: '人工批准' })).toBeVisible())
+    const actions = within(await screen.findByRole('group', { name: '变更回归动作' }))
+    await waitFor(() => expect(actions.getByRole('button', { name: '人工批准' })).toBeVisible())
 
-    await browser.click(screen.getByRole('button', { name: '人工批准' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '执行回归' })).toBeVisible())
+    await browser.click(actions.getByRole('button', { name: '人工批准' }))
+    await waitFor(() => expect(actions.getByRole('button', { name: '执行回归' })).toBeVisible())
 
-    await browser.click(screen.getByRole('button', { name: '执行回归' }))
+    await browser.click(actions.getByRole('button', { name: '执行回归' }))
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '评估 Release Gate' })).toBeVisible(),
+      expect(actions.getByRole('button', { name: '评估 Release Gate' })).toBeVisible(),
     )
 
-    await browser.click(screen.getByRole('button', { name: '评估 Release Gate' }))
+    await browser.click(actions.getByRole('button', { name: '评估 Release Gate' }))
     await waitFor(() => expect(screen.getAllByText('passed').length).toBeGreaterThan(0))
     expect(currentRun.status).toBe('passed')
   })
@@ -833,13 +1033,16 @@ function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="change-regression">
-          <ChangeRegressionPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+  const rendered = render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="change-regression">
+            <ChangeRegressionPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
+  return { ...rendered, queryClient }
 }

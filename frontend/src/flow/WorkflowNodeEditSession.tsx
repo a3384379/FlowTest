@@ -12,6 +12,7 @@ import {
   type WorkflowNodeEditKind,
 } from './editor/node-edit-session'
 import { jsonEqual } from './editor/editor-types'
+import { locatedNodes, replaceLocatedNode } from './editor/node-location'
 import {
   applyRequestEditorDraft,
   requestIdentityMatches,
@@ -38,6 +39,7 @@ function hasPendingNodeEdits(
 export default function WorkflowNodeEditSession({
   scope,
   projectId = '',
+  regionId,
   node,
   definition,
   editable,
@@ -46,6 +48,7 @@ export default function WorkflowNodeEditSession({
 }: {
   scope: string
   projectId?: string | null
+  regionId?: string
   node: WorkflowNode
   definition: WorkflowDefinition
   editable: boolean
@@ -134,7 +137,7 @@ export default function WorkflowNodeEditSession({
       setError('请求目标已变更，请重新载入请求配置。')
       return false
     }
-    const current = definition.nodes.find((item) => item.id === node.id)
+    const current = locatedNodes(definition, regionId).find((item) => item.id === node.id)
     if (!current || !jsonEqual(nodeContent(current), nodeContent(latest.current.baseNode))) {
       setError('节点内容已从外部更新，请保留输入并重新载入后处理冲突。')
       return false
@@ -147,11 +150,12 @@ export default function WorkflowNodeEditSession({
       setError('请检查节点名称与 JSON 字段，修正错误后再应用。')
       return false
     }
+    if (Object.values(latest.current.rawFields).some((field) => field.requiresApply)) {
+      setError('请先应用或丢弃原始字段草稿，再应用节点配置。')
+      return false
+    }
     const next = { ...restoreEditedNode(current, replacement), position: current.position }
-    onChange({
-      ...definition,
-      nodes: definition.nodes.map((item) => (item.id === node.id ? next : item)),
-    })
+    onChange(replaceLocatedNode(definition, next, regionId))
     session.clearNodeEditor(key)
     const clean = {
       ...latest.current,
@@ -170,7 +174,12 @@ export default function WorkflowNodeEditSession({
   const applyRef = useRef<() => Promise<boolean>>(async () => false)
   useEffect(() => {
     applyRef.current = async () => {
-      if (requestApply.current) return requestApply.current()
+      if (requestApply.current) {
+        const applied = await requestApply.current()
+        if (!applied)
+          setError((current) => current ?? '请求配置尚未通过校验，请打开节点请求配置修正后再应用。')
+        return applied
+      }
       if (!latest.current.requestDraft) return apply()
       try {
         return apply(applyRequestEditorDraft(latest.current.draftNode, latest.current.requestDraft))
@@ -245,7 +254,7 @@ export default function WorkflowNodeEditSession({
   }
   function updateDefinition(next: WorkflowDefinition, kind: WorkflowNodeEditKind) {
     if (kind === 'node') {
-      const updated = next.nodes.find((item) => item.id === node.id)
+      const updated = locatedNodes(next, regionId).find((item) => item.id === node.id)
       if (updated && !jsonEqual(updated, latest.current.draftNode)) void updateNode(updated)
     } else if (kind === 'structure') {
       updateStructure(next)
@@ -262,6 +271,8 @@ export default function WorkflowNodeEditSession({
   return (
     <NodeEditContext.Provider
       value={{
+        scope,
+        projectId: projectId ?? '',
         draft,
         setRaw,
         clearRaw,

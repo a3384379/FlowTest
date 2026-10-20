@@ -785,6 +785,8 @@ async def list_execution_checkpoint_log(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    node_id: str | None = Query(default=None, min_length=1, max_length=128),
+    attempt: int | None = Query(default=None, ge=1),
 ) -> Page[ExecutionCheckpointSummaryResponse]:
     items, total = await DurableExecutionService(session).list_checkpoint_log(
         actor=current_user,
@@ -792,6 +794,8 @@ async def list_execution_checkpoint_log(
         execution_id=execution_id,
         page=page,
         page_size=page_size,
+        node_id=node_id,
+        attempt=attempt,
     )
     return Page(
         items=[ExecutionCheckpointSummaryResponse.model_validate(item) for item in items],

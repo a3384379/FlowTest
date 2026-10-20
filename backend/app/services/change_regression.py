@@ -1162,6 +1162,7 @@ class ChangeRegressionService:
                 message="缺失测试审核项已经处理",
                 status_code=409,
             )
+        _ensure_review_content_current(item, payload)
         document = self._review_document(item=item, decision=decision, payload=payload)
         materialized_id: UUID | None = None
         if decision == "accept":
@@ -4344,3 +4345,12 @@ def _transition(run: ChangeRegressionRun, target: ChangeRegressionStatus) -> Non
             status_code=409,
         ) from error
     run.status = target
+
+
+def _ensure_review_content_current(item: AIChangeItem, payload: ChangeRegressionReview) -> None:
+    if payload.expected_content is None or payload.expected_content != item.proposed_content:
+        raise AppError(
+            code="CHANGE_REGRESSION_REVIEW_STALE",
+            message="缺少审核快照或草案内容已更新，请刷新后重新审核",
+            status_code=409,
+        )

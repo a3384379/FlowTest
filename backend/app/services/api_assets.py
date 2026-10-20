@@ -368,6 +368,33 @@ class APIAssetService:
             unfiled=unfiled,
         )
 
+    async def list_definition_summaries(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        method: str | None = None,
+        folder_id: UUID | None = None,
+        unfiled: bool = False,
+    ) -> tuple[list[tuple[APIDefinition, APIVersion]], int]:
+        definitions, total = await self.list_definitions(
+            actor=actor,
+            project_id=project_id,
+            page=page,
+            page_size=page_size,
+            search=search,
+            method=method,
+            folder_id=folder_id,
+            unfiled=unfiled,
+        )
+        versions = await self._assets.get_selected_versions(definitions)
+        if len(versions) != len(definitions):
+            raise AppError(code="API_VERSION_NOT_FOUND", message="API 版本不存在", status_code=404)
+        return [(item, versions[item.id]) for item in definitions], total
+
     async def list_directory(
         self,
         *,

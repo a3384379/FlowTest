@@ -75,6 +75,87 @@ const websocketSource: EventSource = {
 }
 
 describe('ProtocolWorkbenchPage', () => {
+  it('invalidates completed and pending evidence when the same schema request is edited', async () => {
+    installHandlers()
+    renderPage()
+    await screen.findByText('用户 GraphQL')
+    await userEvent.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
+    await userEvent.click(screen.getByText('响应', { exact: true }))
+    expect(await screen.findByText(/Alice/)).toBeVisible()
+    await userEvent.click(screen.getByText('请求', { exact: true }))
+    let release!: () => void
+    let received!: () => void
+    const started = new Promise<void>((resolve) => {
+      received = resolve
+    })
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.post('/api/v1/graphql/execute', async () => {
+        received()
+        await pending
+        return HttpResponse.json({
+          output: { body: { data: 'outdated-operation' } },
+          schema_id: graphqlSchema.id,
+          schema_version: 2,
+          schema_hash: graphqlSchema.content_sha256,
+          duration_ms: 1,
+        })
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
+    await started
+    fireEvent.change(screen.getByLabelText('GraphQL Operation'), {
+      target: { value: 'query NewOperation { id }' },
+    })
+    release()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /执行 GraphQL/ })).not.toHaveClass(
+        'ant-btn-loading',
+      ),
+    )
+    await userEvent.click(screen.getByText('响应', { exact: true }))
+    expect(screen.getByText('尚未执行')).toBeVisible()
+    expect(screen.queryByText(/Alice|outdated-operation/)).not.toBeInTheDocument()
+  })
+
+  it('isolates a late debug response from another schema and starts with an empty result', async () => {
+    installHandlers()
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const second = { ...graphqlSchema, id: 'second-schema', name: '订单 GraphQL', version: 3 }
+    server.use(
+      http.get('/api/v1/graphql/schemas', () =>
+        HttpResponse.json({ items: [graphqlSchema, second], total: 2, page: 1, page_size: 20 }),
+      ),
+      http.post('/api/v1/graphql/execute', async () => {
+        await pending
+        return HttpResponse.json({
+          output: { body: { data: 'late-first-schema-result' } },
+          schema_id: graphqlSchema.id,
+          schema_version: 2,
+          schema_hash: graphqlSchema.content_sha256,
+          duration_ms: 1,
+        })
+      }),
+    )
+    renderPage()
+    await screen.findByText('用户 GraphQL')
+    fireEvent.change(screen.getByLabelText('GraphQL Endpoint'), {
+      target: { value: 'https://first.example/graphql' },
+    })
+    await userEvent.click(screen.getByRole('button', { name: /执行 GraphQL/ }))
+    await userEvent.click(screen.getByText('订单 GraphQL'))
+    expect(screen.getByLabelText('GraphQL Endpoint')).toHaveValue('https://api.example.com/graphql')
+    release()
+    await userEvent.click(screen.getByText('响应'))
+    expect(screen.getByText('尚未执行')).toBeVisible()
+    expect(screen.queryByText(/late-first-schema-result/)).not.toBeInTheDocument()
+  })
+
   it('executes GraphQL and gRPC against pinned schema versions', async () => {
     installHandlers()
     renderPage()

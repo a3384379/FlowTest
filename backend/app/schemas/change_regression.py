@@ -55,6 +55,7 @@ class ChangeRegressionReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: dict[str, JsonValue] | None = None
+    expected_content: dict[str, JsonValue] | None = None
     note: str = Field(default="", max_length=2000)
     materialization: ChangeRegressionMaterializationInput | None = None
 
