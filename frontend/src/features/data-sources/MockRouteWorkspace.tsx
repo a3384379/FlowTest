@@ -1,6 +1,6 @@
 import { DeleteOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Col, Popconfirm, Row, Space, Switch, Table, Tabs, Typography } from 'antd'
+import { App, Button, Popconfirm, Space, Switch, Table, Tabs, Typography } from 'antd'
 import { useLayoutEffect, useRef, useState } from 'react'
 
 import CatalogPagination from '../../components/CatalogPagination'
@@ -172,24 +172,8 @@ function MockWorkspaceView({ state }: { state: ReturnType<typeof useMockRouteWor
     changeDirty,
   } = state
   return (
-    <Row gutter={16}>
-      {showEditor && (
-        <Col xs={24} xl={9}>
-          <MockRouteForm
-            key={`${selected?.id ?? 'new'}:${revision}`}
-            projectId={projectId}
-            serviceId={serviceId}
-            route={selected}
-            canEdit={canEdit}
-            readable={readable && routes.isSuccess}
-            pending={pending}
-            previewScope={`${serviceEnabled}:${routes.dataUpdatedAt}`}
-            onDirty={() => changeDirty(true)}
-            onFinish={saveRouteMutation.mutate}
-          />
-        </Col>
-      )}
-      <Col xs={24} xl={showEditor ? 15 : 24}>
+    <div className="mock-route-workspace">
+      <div>
         <QueryFailureNotice queries={[routes, logs]} />
         <Space wrap>
           {canEdit && (
@@ -282,8 +266,22 @@ function MockWorkspaceView({ state }: { state: ReturnType<typeof useMockRouteWor
             },
           ]}
         />
-      </Col>
-    </Row>
+      </div>
+      {showEditor && (
+        <MockRouteForm
+          key={`${selected?.id ?? 'new'}:${revision}`}
+          projectId={projectId}
+          serviceId={serviceId}
+          route={selected}
+          canEdit={canEdit}
+          readable={readable && routes.isSuccess}
+          pending={pending}
+          previewScope={`${serviceEnabled}:${routes.dataUpdatedAt}`}
+          onDirty={() => changeDirty(true)}
+          onFinish={saveRouteMutation.mutate}
+        />
+      )}
+    </div>
   )
 }
 

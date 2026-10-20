@@ -67,6 +67,7 @@ export default function MockPreviewPanel({
   }
   return (
     <Collapse
+      defaultActiveKey={['preview']}
       items={[
         {
           key: 'preview',

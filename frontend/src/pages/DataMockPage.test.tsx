@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { HttpResponse, http } from 'msw'
@@ -284,8 +284,12 @@ describe('DataMockPage', () => {
   it('retains dirty rule fields but disables writes when the service directory refresh fails', async () => {
     installMockHandlers()
     const client = renderMockPanel(true)
-    await userEvent.click(await screen.findByRole('button', { name: '编辑 Mock 路由：查询用户' }))
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '读取失败仍保留草稿' } })
+    await userEvent.click(await screen.findByLabelText('编辑 Mock 路由：查询用户'))
+    const nameInput = screen.getByLabelText('名称')
+    const editor = nameInput.closest('form')!
+    fireEvent.change(nameInput, { target: { value: '读取失败仍保留草稿' } })
+    const saveButton = within(editor).getByRole('button', { name: '保存路由' })
+    const editServiceButton = screen.getByText('编辑服务').closest('button')!
     server.use(
       http.get(`/api/v1/projects/${project.id}/mock-services`, () =>
         HttpResponse.json(
@@ -300,11 +304,15 @@ describe('DataMockPage', () => {
         ),
       ),
     )
-    await client.invalidateQueries({ queryKey: ['mock-services', project.id] })
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['mock-services', project.id] })
+    })
     await screen.findByText(/服务目录读取失败/)
-    expect(screen.getByLabelText('名称')).toHaveValue('读取失败仍保留草稿')
-    expect(screen.getByRole('button', { name: '保存路由' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '编辑服务' })).toBeDisabled()
+    expect(nameInput).toHaveValue('读取失败仍保留草稿')
+    expect(saveButton).toBeInTheDocument()
+    expect(saveButton).toBeDisabled()
+    expect(editServiceButton).toBeInTheDocument()
+    expect(editServiceButton).toBeDisabled()
   })
 })
 

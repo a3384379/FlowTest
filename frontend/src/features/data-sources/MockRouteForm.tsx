@@ -1,5 +1,7 @@
 import { Card, Form, Input, InputNumber, Select, Space, Switch, Button, Typography } from 'antd'
 
+import './mock-route-workspace.css'
+
 import type { MockRoute } from '../../lib/api'
 import type { MockRouteInput } from './data-source-service'
 import {
@@ -40,76 +42,79 @@ export default function MockRouteForm({
   const disabled = !canEdit || !readable || pending
   return (
     <Card title={routeTitle(route, canEdit)} size="small">
-      <Form
-        name="mock-route"
-        form={form}
-        layout="vertical"
-        disabled={disabled}
-        initialValues={mockRouteFields(route)}
-        onValuesChange={() => {
-          preview.invalidate()
-          onDirty()
-        }}
-        onFinish={(values) => {
-          if (!disabled) onFinish(mockRouteInput(values))
-        }}
-      >
-        <Form.Item name="name" label="名称" rules={[{ required: true, whitespace: true }]}>
-          <Input maxLength={160} />
-        </Form.Item>
-        <Space wrap align="start">
-          <Form.Item name="method" label="方法">
-            <Select className="method-select" options={mockHttpMethods} />
+      <div className="mock-route-edit-layout">
+        <Form
+          name="mock-route"
+          form={form}
+          layout="vertical"
+          disabled={disabled}
+          initialValues={mockRouteFields(route)}
+          onValuesChange={() => {
+            preview.invalidate()
+            onDirty()
+          }}
+          onFinish={(values) => {
+            if (!disabled) onFinish(mockRouteInput(values))
+          }}
+        >
+          <Form.Item name="name" label="名称" rules={[{ required: true, whitespace: true }]}>
+            <Input maxLength={160} />
           </Form.Item>
-          <Form.Item
-            name="path_pattern"
-            label="路径"
-            rules={[{ required: true, pattern: /^\//, message: '路径必须以 / 开头' }]}
-          >
-            <Input maxLength={1024} placeholder="/users/{user_id}" />
+          <Space wrap align="start">
+            <Form.Item name="method" label="方法">
+              <Select className="method-select" options={mockHttpMethods} />
+            </Form.Item>
+            <Form.Item
+              name="path_pattern"
+              label="路径"
+              rules={[{ required: true, pattern: /^\//, message: '路径必须以 / 开头' }]}
+            >
+              <Input maxLength={1024} placeholder="/users/{user_id}" />
+            </Form.Item>
+          </Space>
+          <Form.Item name="scenario" label="场景（可选）">
+            <Input maxLength={80} placeholder="happy" />
           </Form.Item>
-        </Space>
-        <Form.Item name="scenario" label="场景（可选）">
-          <Input maxLength={80} placeholder="happy" />
-        </Form.Item>
-        <Form.Item name="query_conditions" label="Query 条件" rules={[mapRule(false)]}>
-          <MockStringMapEditor label="Query 条件" disabled={disabled} />
-        </Form.Item>
-        <Form.Item name="header_conditions" label="Header 条件" rules={[mapRule(true)]}>
-          <MockStringMapEditor label="Header 条件" header disabled={disabled} />
-        </Form.Item>
-        <MockResponseBodyFields disabled={disabled} />
-        <Form.Item name="response_headers" label="响应 Header" rules={[mapRule(true)]}>
-          <MockStringMapEditor label="响应 Header" header disabled={disabled} />
-        </Form.Item>
-        <Space wrap align="start">
-          <Form.Item name="response_status" label="状态码" rules={[{ required: true }]}>
-            <InputNumber min={100} max={599} />
+          <Form.Item name="query_conditions" label="Query 条件" rules={[mapRule(false)]}>
+            <MockStringMapEditor label="Query 条件" disabled={disabled} />
           </Form.Item>
-          <Form.Item name="delay_ms" label="延迟 ms" rules={[{ required: true }]}>
-            <InputNumber min={0} max={30000} />
+          <Form.Item name="header_conditions" label="Header 条件" rules={[mapRule(true)]}>
+            <MockStringMapEditor label="Header 条件" header disabled={disabled} />
           </Form.Item>
-          <Form.Item name="priority" label="优先级" rules={[{ required: true }]}>
-            <InputNumber min={-1000} max={1000} />
+          <MockResponseBodyFields disabled={disabled} />
+          <Form.Item name="response_headers" label="响应 Header" rules={[mapRule(true)]}>
+            <MockStringMapEditor label="响应 Header" header disabled={disabled} />
           </Form.Item>
-        </Space>
-        <Form.Item name="is_enabled" label="启用此规则" valuePropName="checked">
-          <Switch />
-        </Form.Item>
-        {canEdit && (
-          <Button type="primary" htmlType="submit" loading={pending} disabled={!readable}>
-            保存路由
-          </Button>
-        )}
-      </Form>
-      <MockPreviewPanel
-        projectId={projectId}
-        serviceId={serviceId}
-        routeId={route?.id ?? null}
-        draftForm={form}
-        readable={readable && !pending}
-        state={preview}
-      />
+          <Space wrap align="start">
+            <Form.Item name="response_status" label="状态码" rules={[{ required: true }]}>
+              <InputNumber min={100} max={599} />
+            </Form.Item>
+            <Form.Item name="delay_ms" label="延迟 ms" rules={[{ required: true }]}>
+              <InputNumber min={0} max={30000} />
+            </Form.Item>
+            <Form.Item name="priority" label="优先级" rules={[{ required: true }]}>
+              <InputNumber min={-1000} max={1000} />
+            </Form.Item>
+          </Space>
+          <Form.Item name="is_enabled" label="启用此规则" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          {canEdit && (
+            <Button type="primary" htmlType="submit" loading={pending} disabled={!readable}>
+              保存路由
+            </Button>
+          )}
+        </Form>
+
+        <MockPreviewPanel
+          projectId={projectId}
+          serviceId={serviceId}
+          routeId={route?.id ?? null}
+          draftForm={form}
+          readable={readable && !pending}
+          state={preview}
+        />
+      </div>
     </Card>
   )
 }

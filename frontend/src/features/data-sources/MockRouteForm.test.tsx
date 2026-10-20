@@ -74,7 +74,6 @@ function renderForm(canEdit = true) {
   }
 }
 async function openPreview() {
-  await userEvent.click(screen.getByText('合成请求与只读预览'))
   fireEvent.change(screen.getByLabelText('合成请求路径'), { target: { value: '/orders/42' } })
 }
 
