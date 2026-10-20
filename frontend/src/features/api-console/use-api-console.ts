@@ -29,6 +29,7 @@ import {
   previewApiDocument,
   previewApiDocumentUrl,
   exportApis,
+  type ApiExportRequest,
   getApiDetail,
   listApis,
   listApiVersions,
@@ -222,8 +223,8 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     onError: (error) => void message.error(apiErrorMessage(error)),
   })
   const exportMutation = useMutation({
-    mutationFn: (format: 'har' | 'curl' | 'bruno' | 'excel') =>
-      exportApis(requiredId(projectId), format),
+    mutationFn: ({ format, ...selection }: ApiExportRequest) =>
+      exportApis(requiredId(projectId), format, selection),
     onSuccess: () => void message.success('接口资产已导出'),
     onError: (error) => void message.error(apiErrorMessage(error)),
   })

@@ -3,6 +3,7 @@ import json
 from collections.abc import AsyncIterator
 from io import BytesIO
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -843,6 +844,102 @@ async def test_export_unicode_filename(
         assert isinstance(response.json(), dict)
     elif export_format == "excel":
         assert load_workbook(BytesIO(response.content)).active.max_row == 1
+
+
+async def test_export_selection_keeps_project_and_exact_folder_scope(
+    import_client: AsyncClient,
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    foreign_id = await _create_project(import_client, headers)
+    root = f"/api/v1/projects/{project_id}"
+    folder = await import_client.post(f"{root}/folders", headers=headers, json={"name": "分组"})
+    folder_id = folder.json()["id"]
+    child = await import_client.post(
+        f"{root}/folders", headers=headers, json={"name": "子组", "parent_id": folder_id}
+    )
+    foreign_folder = await import_client.post(
+        f"/api/v1/projects/{foreign_id}/folders", headers=headers, json={"name": "外部"}
+    )
+    definitions: list[str] = []
+    for name, project, selected_folder in (
+        ("本级", project_id, folder_id),
+        ("子级", project_id, child.json()["id"]),
+        ("未分组", project_id, None),
+        ("其他项目", foreign_id, None),
+    ):
+        created = await import_client.post(
+            f"/api/v1/projects/{project}/apis",
+            headers=headers,
+            json={
+                "name": name,
+                "folder_id": selected_folder,
+                "request": {"method": "GET", "path": f"/{len(definitions)}"},
+            },
+        )
+        assert created.status_code == 201, created.text
+        definitions.append(created.json()["definition"]["id"])
+    updated = await import_client.post(
+        f"{root}/apis/{definitions[0]}/versions",
+        headers=headers,
+        json={"method": "POST", "path": "/current"},
+    )
+    assert updated.status_code == 201, updated.text
+    for selection, expected in (
+        ({"scope": "project"}, ["本级", "子级", "未分组"]),
+        ({"scope": "folder", "folder_id": folder_id}, ["本级"]),
+        ({"scope": "folder", "unfiled": True}, ["未分组"]),
+        (
+            {"scope": "selected", "definition_ids": [definitions[0], definitions[2]]},
+            ["本级", "未分组"],
+        ),
+    ):
+        response = await import_client.post(
+            f"{root}/exports/apis", headers=headers, json={"format": "har", **selection}
+        )
+        assert response.status_code == 200, response.text
+        entries = response.json()["log"]["entries"]
+        assert {entry["comment"] for entry in entries} == set(expected)
+        if "本级" in expected:
+            entry = next(entry for entry in entries if entry["comment"] == "本级")
+            assert entry["request"]["url"] == "http://flowtest.invalid/current"
+            assert entry["request"]["method"] == "POST"
+    for selection in (
+        {"scope": "selected", "definition_ids": [definitions[0], definitions[3]]},
+        {"scope": "selected", "definition_ids": [str(uuid4())]},
+        {"scope": "folder", "folder_id": foreign_folder.json()["id"]},
+        {"scope": "folder", "folder_id": str(uuid4())},
+    ):
+        response = await import_client.post(
+            f"{root}/exports/apis", headers=headers, json={"format": "har", **selection}
+        )
+        assert response.status_code == 404, response.text
+        assert response.json()["error"]["trace_id"]
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        {"scope": "selected", "definition_ids": []},
+        {"scope": "selected", "definition_ids": ["00000000-0000-4000-8000-000000000001"] * 2},
+        {"scope": "selected", "definition_ids": [str(uuid4())] * 1001},
+        {"scope": "folder"},
+        {"scope": "folder", "folder_id": str(uuid4()), "unfiled": True},
+        {"scope": "project", "unfiled": True},
+    ],
+)
+async def test_export_rejects_ambiguous_or_empty_selection(
+    import_client: AsyncClient, selection: dict[str, object]
+) -> None:
+    headers = await _login_headers(import_client)
+    project_id = await _create_project(import_client, headers)
+    response = await import_client.post(
+        f"/api/v1/projects/{project_id}/exports/apis",
+        headers=headers,
+        json={"format": "har", **selection},
+    )
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["trace_id"]
 
 
 async def _login_headers(client: AsyncClient) -> dict[str, str]:

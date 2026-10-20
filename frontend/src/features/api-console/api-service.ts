@@ -285,18 +285,28 @@ export async function previewApi(
   ).data
 }
 
+export type ApiExportFormat = 'har' | 'curl' | 'bruno' | 'excel'
+export type ApiExportSelection =
+  | { scope: 'project' }
+  | { scope: 'folder'; folder_id: string; unfiled?: never }
+  | { scope: 'folder'; unfiled: true; folder_id?: never }
+  | { scope: 'selected'; definition_ids: string[] }
+
+export type ApiExportRequest = { format: ApiExportFormat } & ApiExportSelection
+
 export async function exportApis(
   projectId: string,
-  exportFormat: 'har' | 'curl' | 'bruno' | 'excel',
+  exportFormat: ApiExportFormat,
+  selection: ApiExportSelection = { scope: 'project' },
 ): Promise<void> {
-  const response = await apiClient
-    .get<Blob>(`/projects/${projectId}/exports/apis`, {
-      params: { format: exportFormat },
-      responseType: 'blob',
-    })
-    .catch(async (error: unknown) => {
-      throw await exportError(error)
-    })
+  const path = `/projects/${projectId}/exports/apis`
+  const request =
+    selection.scope === 'project'
+      ? apiClient.get<Blob>(path, { params: { format: exportFormat }, responseType: 'blob' })
+      : apiClient.post<Blob>(path, { ...selection, format: exportFormat }, { responseType: 'blob' })
+  const response = await request.catch(async (error: unknown) => {
+    throw await exportError(error)
+  })
   const disposition = String(response.headers['content-disposition'] ?? '')
   const filename = exportFilename(disposition, exportFormat)
   const url = URL.createObjectURL(response.data)
