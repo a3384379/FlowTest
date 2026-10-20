@@ -46,3 +46,16 @@
 最终源码为 `af4659f58f295fad4e15eb0dad489f3196391c68`，后端树 `b15a36616bb120dd0b196550d4401acc3fb90e38`、前端树 `31e3db9dd13f3b63f6f5a5f1ceab3b27e3a49c16`。已同步前置协议PR中的S24定位及certifi锁定修复，最终完整检查针对这两个精确源码树通过：后端1843通过、14跳过、2项既有警告、91.01%；前端157文件1034项通过，无未处理异常，覆盖率85.89% / 82.15% / 85.44% / 88.34%。格式、Ruff、mypy440文件、lint、类型和生产构建全部通过。日志为 `remediation-project-final-backend-full.log`、`remediation-project-final-frontend-full.log` 和 `remediation-project-final-frontend-build.log`。
 
 GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最终HEAD `c163ba5` 的正式Required Gate通过，审查线程全部核清，已合并为main `4a27c3b14743be4d0df756f83238766a294adee8`。该main的[Full Regression 39505978249](https://github.com/a3384379/FlowTest/actions/runs/39505978249)已启动并核对精确head，等待结果。旧main回归39494968109的certifi安全失败保留为失败记录。项目治理[PR #141](https://github.com/a3384379/FlowTest/pull/141)同步main后逐一核对源码树未变；其正式门禁、合并与正式环境验收另行确认。
+
+## 最新远程检查补修（2026-10-21）
+
+`bc781bd` 的 PR 检查发现两项交付阻断，未将旧本地通过视为新门禁通过：
+
+1. S14 仍通过旧下拉框索引和邮箱纯文本定位成员。搜索分页选择器的候选显示名称与邮箱组合，旧定位命中了隐藏文本。改为按“管理团队”“团队用户”“授权团队”可访问名称搜索，并点击可见候选；成员和授权结果仍通过真实列表断言验证，不延长超时或跳过测试。
+2. npm 高危扫描新增 Vite 的 Windows 编辑器路径漏洞 [GHSA-587h-7wmj-h5pm](https://github.com/advisories/GHSA-587h-7wmj-h5pm)。按公告将 Vite 从8.2.1更新至同分支修补版8.2.4，锁文件同步必要构建器依赖；不降低扫描级别或添加忽略。
+
+补修源码提交 `65fb43d`：backend树仍为 `b15a36616bb120dd0b196550d4401acc3fb90e38`，frontend树为 `824af86f6f2add63812813817d908711fb59120b`。后端源码和依赖未变，沿用已记录的完整验证；前端重新完成格式、lint/TypeScript、157文件1034用例、覆盖率85.89/82.15/85.44/88.34%及生产构建。`pnpm audit --audit-level high`退出0，剩余2项moderate未绕过也未标为已修复。
+
+在隔离Compose页面、原独立Chromium测试会话中重新走通真实团队创建→按名称搜索团队→按邮箱搜索成员→添加团队成员→按名称搜索并授权团队，结果均通过。证据日志：`remediation-project-directory-ci-browser-r2.log`。首轮脚本最后一步误用了带图标按钮的完整名称，改用实际可访问名称后复跑整条路径通过；没有将失败首轮算通过。此浏览器专项不等同于CI的完整S14和Compose套件，后者由最新HEAD门禁确认。
+
+多协议合并后main `4a27c3b`的Full Regression已确认Compose、后端、基础设施、升级和Windows通过，前端仍待终态；其安全扫描同样被本次新Vite公告阻断。将由包含修补版的后续main重新验证，不将该次回归写成全绿。

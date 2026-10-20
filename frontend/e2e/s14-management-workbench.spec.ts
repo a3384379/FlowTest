@@ -197,16 +197,22 @@ async function manageTeam(page: import('@playwright/test').Page, name: string) {
   await expect(page.getByText('成员与团队配置已更新').last()).toBeVisible()
 
   await expect(page.getByText(name, { exact: true }).last()).toBeVisible()
-  await organization.getByRole('combobox').nth(1).click()
-  await page.getByText(administratorEmail, { exact: true }).last().click()
-  await page.getByRole('button', { name: '添加到团队' }).click()
-  await expect(page.getByRole('row').filter({ hasText: administratorEmail })).toBeVisible()
+  await organization.getByRole('combobox', { name: '管理团队', exact: true }).fill(name)
+  await page.locator('.ant-select-dropdown:visible').getByText(name, { exact: true }).click()
+  await organization
+    .getByRole('combobox', { name: '团队用户', exact: true })
+    .fill(administratorEmail)
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option')
+    .filter({ hasText: administratorEmail })
+    .click()
+  await organization.getByRole('button', { name: '添加到团队' }).click()
+  await expect(organization.getByRole('row').filter({ hasText: administratorEmail })).toBeVisible()
 
   await page.getByRole('tab', { name: '团队授权' }).click()
   const grants = page.getByRole('tabpanel', { name: '团队授权' })
-  await grants.getByRole('combobox').first().click()
-  await page.keyboard.press('End')
-  await page.keyboard.press('Enter')
+  await grants.getByRole('combobox', { name: '授权团队', exact: true }).fill(name)
+  await page.locator('.ant-select-dropdown:visible').getByText(name, { exact: true }).click()
   await page.getByRole('button', { name: '授权团队' }).click()
   await expect(grants.getByRole('row').filter({ hasText: 'viewer' }).last()).toBeVisible()
 }
