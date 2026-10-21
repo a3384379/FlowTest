@@ -584,3 +584,34 @@ async def test_scenario_detail_is_versioned_project_scoped_and_feature_guarded(
     disabled = await context.client.get(path, headers=headers)
     assert disabled.status_code == 409
     assert disabled.json()["error"]["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_performance_evidence_search_is_global_project_scoped_and_literal(
+    performance_environment: PerformanceEnvironment,
+) -> None:
+    context = performance_environment
+    headers = await _login_headers(context.client)
+    project_id = await _create_project(context.client, headers)
+    scenario_id = await _create_published_scenario(context.client, headers, project_id)
+    older = await _queue_run(context, headers, project_id, scenario_id)
+    await _queue_run(context, headers, project_id, scenario_id)
+    route = f"/api/v1/projects/{project_id}/performance-runs"
+    response = await context.client.get(
+        route, headers=headers, params={"page_size": 1, "search": str(older)[8:]}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["id"] == str(older)
+    literal = await context.client.get(route, headers=headers, params={"search": "%_"})
+    assert literal.json()["total"] == 0
+    separator = await context.client.get(route, headers=headers, params={"search": "--"})
+    assert separator.json()["total"] == 0
+    foreign_id = await _create_project(context.client, headers)
+    foreign = await context.client.get(
+        f"/api/v1/projects/{foreign_id}/performance-runs",
+        headers=headers,
+        params={"search": str(older)},
+    )
+    assert foreign.json()["total"] == 0
+    assert len(context.queue.run_ids) == 2

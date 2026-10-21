@@ -503,6 +503,14 @@ async def test_runner_evidence_is_project_scoped_paginated_and_read_only(
     assert "required_labels" not in first.json()["items"][0]
     filtered = await client.get(route, headers=headers, params={"status": "completed"})
     assert filtered.json()["total"] == 2
+    searched = await client.get(route, headers=headers, params={"search": task_id[8:]})
+    assert searched.status_code == 200
+    assert searched.json()["total"] == 1
+    assert searched.json()["items"][0]["id"] == task_id
+    literal = await client.get(route, headers=headers, params={"search": "%_"})
+    assert literal.json()["total"] == 0
+    separator = await client.get(route, headers=headers, params={"search": "--"})
+    assert separator.json()["total"] == 0
     detail = await client.get(f"{route}/{task_id}", headers=headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["id"] == task_id

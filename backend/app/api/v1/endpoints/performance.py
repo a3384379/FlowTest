@@ -148,6 +148,7 @@ async def list_performance_runs(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[PerformanceRunResponse]:
     service = PerformanceRunService(session)
     items, total = await service.list_runs(
@@ -155,6 +156,7 @@ async def list_performance_runs(
         project_id=project_id,
         page=page,
         page_size=page_size,
+        search=search,
     )
     return Page(
         items=[PerformanceRunResponse.model_validate(item) for item in items],

@@ -232,11 +232,12 @@ export async function getProviderVerification(projectId: string, verificationId:
 }
 
 export async function getDeploymentCheck(projectId: string, checkId: string) {
-  return (
-    await apiClient.get<DeploymentCheck>(
-      `/projects/${projectId}/contract-hub/deployment-checks/${checkId}`,
-    )
-  ).data
+  const response = await apiClient.get<DeploymentCheck>(
+    `/projects/${projectId}/contract-hub/deployment-checks/${checkId}`,
+  )
+  if (response.data.id !== checkId || response.data.project_id !== projectId)
+    throw new Error('契约判断响应身份与当前项目或ID不一致')
+  return response.data
 }
 
 export async function verifyPactProvider(

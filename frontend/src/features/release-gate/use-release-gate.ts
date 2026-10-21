@@ -1,7 +1,9 @@
 import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useSearchParams } from 'react-router-dom'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 
 import { getV3FeatureFlags, type V3FeatureFlags } from '../capabilities/capability-service'
 import { listDeploymentChecks } from '../contracts/contract-hub-service'
@@ -10,7 +12,7 @@ import { listPerformanceRuns } from '../performance/performance-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listQualityGates, listQualityRuns, listReleaseRisks } from '../quality/quality-service'
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorWithTrace } from '../../lib/api'
 import {
   createReleaseDecision,
   createReleasePolicy,
@@ -26,7 +28,15 @@ export function useReleaseGate() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const { canEdit } = useProjectCapabilities()
+  const access = useProjectCapabilities()
+  const canEdit = access.canEdit && access.permissions.isSuccess
+  const isCurrent = useReleaseCommandContext(projectId)
+  const [performanceSearch, setPerformanceSearch] = useRouteScopedState(
+    projectId,
+    'performance-evidence',
+    '',
+  )
+  const [runnerSearch, setRunnerSearch] = useRouteScopedState(projectId, 'runner-evidence', '')
   const [params, setParams] = useSearchParams()
   const decisionId = params.get('decision')
   const enabled = Boolean(projectId)
@@ -60,10 +70,13 @@ export function useReleaseGate() {
   })
 
   function selectDecision(id: string | null) {
-    const next = new URLSearchParams(params)
-    if (id) next.set('decision', id)
-    else next.delete('decision')
-    setParams(next)
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (id) next.set('decision', id)
+      else next.delete('decision')
+      next.delete('source')
+      return next
+    })
   }
   const qualityGates = useQuery({
     queryKey: ['quality-gates', projectId],
@@ -82,7 +95,7 @@ export function useReleaseGate() {
     'deployment-checks',
     projectId,
     (page) => listDeploymentChecks(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags.data, 'contract_hub'),
+    enabled && v3FeatureEnabled(featureFlags, 'contract_hub'),
     '',
     {},
   )
@@ -90,7 +103,7 @@ export function useReleaseGate() {
     'impact-runs',
     projectId,
     (page) => listImpactRuns(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags.data, 'impact_engine'),
+    enabled && v3FeatureEnabled(featureFlags, 'impact_engine'),
     '',
     {},
   )
@@ -98,61 +111,77 @@ export function useReleaseGate() {
     'release-risks',
     projectId,
     (page) => listReleaseRisks(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags.data, 'quality_intelligence'),
+    enabled && v3FeatureEnabled(featureFlags, 'quality_intelligence'),
     '',
     {},
   )
-  const performanceRuns = useQuery({
-    queryKey: ['performance-runs', projectId],
-    queryFn: () => listPerformanceRuns(required(projectId)),
-    enabled: enabled && v3FeatureEnabled(featureFlags.data, 'performance_lab'),
-  })
+  const performanceRuns = useCatalogQuery(
+    'release-performance-runs',
+    projectId,
+    (page) => listPerformanceRuns(required(projectId), page, 20, performanceSearch),
+    enabled && v3FeatureEnabled(featureFlags, 'performance_lab'),
+    performanceSearch,
+    {},
+  )
   const runnerTasks = useCatalogQuery(
     'release-runner-tasks',
     projectId,
-    (page) => listReleaseRunnerEvidence(required(projectId), page),
-    enabled && v3FeatureEnabled(featureFlags.data, 'runner_fabric'),
-    '',
+    (page) => listReleaseRunnerEvidence(required(projectId), page, runnerSearch),
+    enabled && v3FeatureEnabled(featureFlags, 'runner_fabric'),
+    runnerSearch,
     {},
   )
   const createPolicy = useMutation({
-    mutationFn: (input: ReleasePolicyInput) => createReleasePolicy(required(projectId), input),
+    mutationFn: (input: { projectId: string; definition: ReleasePolicyInput }) =>
+      createReleasePolicy(input.projectId, input.definition),
   })
   const createDecision = useMutation({
-    mutationFn: (input: ReleaseDecisionInput) => createReleaseDecision(required(projectId), input),
+    mutationFn: (input: { projectId: string; definition: ReleaseDecisionInput }) =>
+      createReleaseDecision(input.projectId, input.definition),
   })
 
   async function addPolicy(input: ReleasePolicyInput): Promise<boolean> {
-    if (!canEdit) return false
+    if (!canEdit || !isCurrent()) return false
     try {
-      await createPolicy.mutateAsync(input)
+      await createPolicy.mutateAsync({ projectId: required(projectId), definition: input })
       await queryClient.invalidateQueries({ queryKey: ['release-policies', projectId] })
+      if (!isCurrent()) return false
       void message.success('发布策略已创建')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
     }
   }
 
   async function evaluate(input: ReleaseDecisionInput): Promise<boolean> {
-    if (!canEdit) return false
+    if (!canEdit || !isCurrent()) return false
     try {
-      const decision = await createDecision.mutateAsync(input)
+      const decision = await createDecision.mutateAsync({
+        projectId: required(projectId),
+        definition: input,
+      })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['release-decisions', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['release-latest-decision', projectId] }),
       ])
+      if (!isCurrent()) return false
+      selectDecision(decision.id)
       void message.success(decision.status === 'pass' ? '发布判断：PASS' : '发布判断：BLOCK')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
     }
   }
 
   return {
     canEdit,
+    featureFlags,
+    performanceSearch,
+    setPerformanceSearch,
+    runnerSearch,
+    setRunnerSearch,
     decisionId,
     selectedDecision,
     selectDecision,
@@ -180,8 +209,23 @@ function required(value: string | null): string {
 }
 
 function v3FeatureEnabled(
-  flags: V3FeatureFlags | undefined,
+  flags: { isSuccess: boolean; data?: V3FeatureFlags },
   feature: keyof V3FeatureFlags,
 ): boolean {
-  return Boolean(flags?.[feature])
+  return flags.isSuccess && flags.data?.[feature] === true
+}
+
+function useReleaseCommandContext(projectId: string | null) {
+  const location = useLocation()
+  const router = useContext(UNSAFE_DataRouterContext)
+  const context = useMemo(() => ({ projectId, key: location.key }), [projectId, location.key])
+  const active = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    active.current = context
+    return () => {
+      active.current = null
+    }
+  }, [context])
+  return () =>
+    active.current === context && (!router || router.router.state.location.key === location.key)
 }

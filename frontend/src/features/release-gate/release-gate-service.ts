@@ -44,15 +44,26 @@ export type ReleaseRunnerEvidence = {
   created_at: string
 }
 
-export async function listReleaseRunnerEvidence(projectId: string, page = 1) {
+export async function listReleaseRunnerEvidence(projectId: string, page = 1, search = '') {
   return (
     await apiClient.get<Page<ReleaseRunnerEvidence>>(
       `/projects/${projectId}/release-runner-evidence`,
       {
-        params: { page, page_size: 20 },
+        params: { page, page_size: 20, search },
       },
     )
   ).data
+}
+
+export async function getReleaseRunnerEvidence(
+  projectId: string,
+  taskId: string,
+): Promise<ReleaseRunnerEvidence> {
+  const response = await apiClient.get<ReleaseRunnerEvidence>(
+    `/projects/${projectId}/release-runner-evidence/${taskId}`,
+  )
+  if (response.data.id !== taskId) throw new Error('Runner任务响应身份不一致')
+  return response.data
 }
 
 export type ReleaseReason = {
@@ -193,17 +204,21 @@ export async function createReleasePolicy(
   projectId: string,
   input: ReleasePolicyInput,
 ): Promise<ReleasePolicy> {
-  return (await apiClient.post<ReleasePolicy>(`/projects/${projectId}/release-policies`, input))
-    .data
+  const response = await apiClient.post<ReleasePolicy>(
+    `/projects/${projectId}/release-policies`,
+    input,
+  )
+  return releaseResponse(response.data, projectId)
 }
 
 export async function getReleaseDecision(
   projectId: string,
   decisionId: string,
 ): Promise<ReleaseDecision> {
-  return (
-    await apiClient.get<ReleaseDecision>(`/projects/${projectId}/release-decisions/${decisionId}`)
-  ).data
+  const response = await apiClient.get<ReleaseDecision>(
+    `/projects/${projectId}/release-decisions/${decisionId}`,
+  )
+  return releaseResponse(response.data, projectId, decisionId)
 }
 
 export async function listReleaseDecisions(
@@ -222,6 +237,19 @@ export async function createReleaseDecision(
   projectId: string,
   input: ReleaseDecisionInput,
 ): Promise<ReleaseDecision> {
-  return (await apiClient.post<ReleaseDecision>(`/projects/${projectId}/release-decisions`, input))
-    .data
+  const response = await apiClient.post<ReleaseDecision>(
+    `/projects/${projectId}/release-decisions`,
+    input,
+  )
+  return releaseResponse(response.data, projectId)
+}
+
+function releaseResponse<T extends { project_id: string; id: string }>(
+  record: T,
+  projectId: string,
+  id?: string,
+): T {
+  if (record.project_id !== projectId || (id !== undefined && record.id !== id))
+    throw new Error('发布数据响应身份与当前项目或ID不一致')
+  return record
 }

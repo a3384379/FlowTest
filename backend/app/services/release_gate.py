@@ -105,11 +105,22 @@ class ReleaseGateService:
         return await self._repository.list_policies(project_id)
 
     async def list_runner_evidence(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int, status: str | None
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        page: int,
+        page_size: int,
+        status: str | None,
+        search: str = "",
     ) -> tuple[list[RunnerTask], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._repository.list_project_runner_tasks(
-            project_id=project_id, offset=(page - 1) * page_size, limit=page_size, status=status
+            project_id=project_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+            status=status,
+            search=search.strip(),
         )
 
     async def get_runner_evidence(
