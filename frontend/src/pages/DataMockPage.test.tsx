@@ -259,10 +259,15 @@ describe('DataMockPage', () => {
       ),
     )
     renderMockPanel(true)
-    await userEvent.click(await screen.findByRole('button', { name: '编辑 Mock 路由：查询用户' }))
-    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '未保存的规则名称' } })
+    const edit = await screen.findByLabelText('编辑 Mock 路由：查询用户')
+    expect(edit).toHaveRole('button')
+    await userEvent.click(edit)
+    const nameInput = screen.getByLabelText('名称')
+    fireEvent.change(nameInput, { target: { value: '未保存的规则名称' } })
+    const servicePicker = screen.getByLabelText('Mock 服务')
+    expect(servicePicker).toHaveRole('combobox')
     async function switchService() {
-      await userEvent.click(screen.getByRole('combobox', { name: 'Mock 服务' }))
+      await userEvent.click(servicePicker)
       await userEvent.click(
         screen.getByText(another.name, { selector: '.ant-select-item-option-content' }),
       )
