@@ -502,7 +502,10 @@ function useOrganizationWorkspace({
     mutationFn: ({ userId, role }: { userId: string; role: OrganizationRole }) =>
       upsertOrganizationMember(organization.id, userId, role),
     onSuccess: async () => {
-      await invalidate('organization-members')
+      await Promise.all([
+        invalidate('organization-members'),
+        queryClient.invalidateQueries({ queryKey: ['organizations'], exact: true }),
+      ])
       onMessage('success', '组织角色已更新')
     },
   })

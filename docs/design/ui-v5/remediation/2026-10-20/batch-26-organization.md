@@ -40,6 +40,21 @@
 
 本次没有运行全量覆盖率、完整后端检查、共享 GUI、Compose 或 QA；整合后的完整门禁和环境验收仍需单独记录。
 
+## 独立复审：自降级后刷新当前组织角色
+
+开发基线 `9bac24cd191f661e74a7c268f6fd8a0704cbb88a`。成员更新原来只刷新成员目录，而“当前角色”、成员管理、服务账号、治理和密钥轮换权限来自独立的组织目录。因此非系统管理员将自己从 Admin 降为 Viewer，或存在另一位 Owner 时将自己从 Owner 降为 Viewer，服务端已成功但页面仍显示旧角色和管理操作；既有后端写授权仍会拒绝越权请求，本次不修改该权限合同。
+
+成功回调现在并行等待成员目录和准确的 `['organizations']` 目录刷新。组织目录键不附加组织 ID；仅精确失效现有目录，不从成员响应推断组织权限。刷新完成前保持本次成员操作等待状态，避免旧角色期间继续提交或提前提示成功。
+
+- 两条真实页面反例分别覆盖非系统 Admin、具有另一位 Owner 的当前 Owner 自降级：当前角色变为 Viewer，成员角色控件禁用，成员表单、账号签发/轮换/撤销、治理保存和密钥轮换操作收敛，PUT 负载及请求次数恰好一次。修复前均因仍显示旧角色而失败。
+- 第三条反例挂起组织目录刷新，确认成员操作持续等待、不能重复提交、不提前报成功，刷新完成后才显示新角色。修复前组织目录没有再次读取，反例失败。
+- `make test-frontend-targeted TARGETS='["src/pages/OrganizationGovernancePage.test.tsx","src/features/projects/DirectoryPicker.test.tsx","src/pages/organization-governance-rotation.test.tsx"]'`：3 文件、34 项通过。
+- 全前端 `pnpm lint`（ESLint 零警告及 TypeScript）和 `pnpm build`（`tsc -b && vite build`）通过；修改文件 Prettier、`git diff --check` 通过。
+
+原始日志在本修复工作树忽略目录 `output/validation/m24-self-role/`：`02-role-regression-before-fix.log`、`03-pending-regression-before-fix.log`、`05-targeted-final.log`、`06-lint-types.log`、`07-types-build.log`、`08-final-format.log`。首轮反例曾误用不包含图标名称的精确标签定位，原日志 `01-regression-before-fix.log` 保留；修正定位后才取得上述业务红灯，没有修改产品标签、超时、重试或业务断言。
+
+本次仅改组织页面的失效刷新、页面行为测试及本节回执；不改后端、共享选择器、冻结审计和方案、共享进度或验收环境。未运行完整覆盖率、Compose/GUI、最新远端门禁、合并后回归或正式部署；整合负责人分别记录。
+
 ## 改动文件
 
 - 前端：`OrganizationGovernancePage.tsx`、`OrganizationGovernancePage.test.tsx`、新增 `OrganizationAuditPanel.tsx` 与 `OrganizationQueryBoundary.tsx`、组织 `organization-service.ts`。

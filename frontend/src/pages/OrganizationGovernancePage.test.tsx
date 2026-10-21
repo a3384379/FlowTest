@@ -254,6 +254,120 @@ describe('OrganizationGovernancePage', () => {
     },
   )
 
+  it.each(['admin', 'owner'] as const)(
+    'refreshes the current %s role and permission controls after self-demotion',
+    async (initialRole) => {
+      authenticateTestUser({ ...user, is_system_admin: false })
+      let currentRole: 'admin' | 'owner' | 'viewer' = initialRole
+      let directoryReads = 0
+      const submissions: unknown[] = []
+      server.use(
+        http.get('/api/v1/organizations', () => {
+          directoryReads += 1
+          return HttpResponse.json([{ ...organization, role: currentRole, member_count: 2 }])
+        }),
+        http.get(`/api/v1/organizations/${organizationId}/members`, () =>
+          HttpResponse.json([
+            { ...member, role: currentRole },
+            { ...member, id: 'other-owner', user_id: organizationId, role: 'owner' },
+          ]),
+        ),
+        http.put(
+          `/api/v1/organizations/${organizationId}/members/${user.id}`,
+          async ({ request }) => {
+            submissions.push(await request.json())
+            currentRole = 'viewer'
+            return HttpResponse.json({ ...member, role: currentRole })
+          },
+        ),
+      )
+      renderPage()
+      const browser = userEvent.setup()
+      await screen.findByText('当前角色')
+      const organizationInfo = within(screen.getByText('当前角色').closest('table') as HTMLElement)
+      expect(organizationInfo.getByText(initialRole)).toBeVisible()
+      await browser.click(screen.getByRole('tab', { name: /审计与安全/ }))
+      await screen.findByText('密钥轮换能力已确认')
+      if (initialRole === 'owner')
+        expect(screen.getByRole('button', { name: '创建轮换版本' })).toBeVisible()
+      await browser.click(screen.getByRole('tab', { name: /组织与角色/ }))
+      await browser.click(screen.getByRole('combobox', { name: `更新 ${user.id} 角色` }))
+      await browser.click(
+        screen.getByText('只读成员 Viewer', { selector: '.ant-select-item-option-content' }),
+      )
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByText('当前角色').closest('table') as HTMLElement).getByText('viewer'),
+        ).toBeVisible(),
+      )
+      expect(directoryReads).toBe(2)
+      expect(submissions).toEqual([{ user_id: user.id, role: 'viewer' }])
+      expect(screen.getByRole('combobox', { name: `更新 ${user.id} 角色` })).toBeDisabled()
+      expect(screen.queryByRole('button', { name: '添加 / 更新' })).not.toBeInTheDocument()
+      await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+      const accounts = within(screen.getByRole('tabpanel'))
+      expect(accounts.queryByRole('button', { name: '签发令牌' })).not.toBeInTheDocument()
+      expect(accounts.queryByRole('button', { name: '轮换' })).not.toBeInTheDocument()
+      expect(accounts.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument()
+      await browser.click(screen.getByRole('tab', { name: '配额与 Runner' }))
+      expect(screen.queryByRole('button', { name: '保存治理策略' })).not.toBeInTheDocument()
+      await browser.click(screen.getByRole('tab', { name: /审计与安全/ }))
+      expect(screen.queryByRole('button', { name: '创建轮换版本' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Rollback' })).not.toBeInTheDocument()
+      expect(submissions).toHaveLength(1)
+    },
+  )
+
+  it('keeps a self-demotion pending until the organization directory finishes refreshing', async () => {
+    authenticateTestUser({ ...user, is_system_admin: false })
+    let writes = 0
+    let releaseDirectory: (() => void) | undefined
+    server.use(
+      http.get('/api/v1/organizations', async () => {
+        if (writes) {
+          await new Promise<void>((resolve) => {
+            releaseDirectory = resolve
+          })
+        }
+        return HttpResponse.json([{ ...organization, role: writes ? 'viewer' : 'admin' }])
+      }),
+      http.get(`/api/v1/organizations/${organizationId}/members`, () =>
+        HttpResponse.json([{ ...member, role: writes ? 'viewer' : 'admin' }]),
+      ),
+      http.put(`/api/v1/organizations/${organizationId}/members/${user.id}`, () => {
+        writes += 1
+        return HttpResponse.json({ ...member, role: 'viewer' })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: `更新 ${user.id} 角色` }))
+    await browser.click(
+      screen.getByText('只读成员 Viewer', { selector: '.ant-select-item-option-content' }),
+    )
+    try {
+      await waitFor(() => expect(releaseDirectory).toBeTypeOf('function'))
+      const selfRole = await screen.findByRole('combobox', { name: `更新 ${user.id} 角色` })
+      expect(selfRole).toBeDisabled()
+      const submit = screen.getByRole('button', { name: '添加 / 更新' })
+      expect(submit).toBeDisabled()
+      await browser.click(submit)
+      expect(writes).toBe(1)
+      expect(screen.queryByText('组织角色已更新')).not.toBeInTheDocument()
+    } finally {
+      await act(async () => releaseDirectory?.())
+    }
+    await waitFor(() =>
+      expect(
+        within(screen.getByText('当前角色').closest('table') as HTMLElement).getByText('viewer'),
+      ).toBeVisible(),
+    )
+    expect(screen.queryByRole('button', { name: '添加 / 更新' })).not.toBeInTheDocument()
+    expect(writes).toBe(1)
+  })
+
   it.each([404, 500])(
     'keeps exact account ID, selected role and old row role after %s',
     async (status) => {
