@@ -39,7 +39,7 @@ import {
   QualityRiskHistory,
 } from '../features/quality/QualityEvidence'
 import { reportExecutionPath } from '../features/workflows/execution-navigation'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
 import type { TestPlanRun } from '../lib/api'
 import '../features/quality/quality-center.css'
 
@@ -47,8 +47,8 @@ export default function QualityCenterPage() {
   const state = useQualityCenter()
   const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
   const [riskOpen, setRiskOpen] = useRouteScopedState(state.projectId, null, false)
-  const records = pageItems(state.flaky.data)
-  const latest = firstPageItem(state.latestRun.data)
+  const records = pageItems(successfulData(state.flaky))
+  const latest = firstPageItem(successfulData(state.latestRun))
   return (
     <div className="quality-center-page">
       <div className="page-heading">
@@ -97,8 +97,8 @@ export default function QualityCenterPage() {
             rowKey="id"
             size="small"
             pagination={false}
-            dataSource={listItems(state.gates.data)}
-            locale={{ emptyText: '暂无质量门禁' }}
+            dataSource={listItems(successfulData(state.gates))}
+            locale={{ emptyText: state.gates.isError ? '门禁记录未提供' : '暂无质量门禁' }}
             columns={[
               { title: '名称', dataIndex: 'name' },
               {
@@ -129,7 +129,7 @@ export default function QualityCenterPage() {
               row.id === state.linkedRecordId ? 'quality-selected-evidence' : ''
             }
             dataSource={records}
-            locale={{ emptyText: '暂无 Flaky 记录' }}
+            locale={{ emptyText: state.flaky.isError ? 'Flaky 目录未提供' : '暂无 Flaky 记录' }}
             columns={[
               {
                 title: '资产',
@@ -176,8 +176,8 @@ export default function QualityCenterPage() {
           size="small"
           pagination={false}
           scroll={{ x: 760 }}
-          dataSource={pageItems(state.runs.data)}
-          locale={{ emptyText: '暂无运行数据' }}
+          dataSource={pageItems(successfulData(state.runs))}
+          locale={{ emptyText: state.runs.isError ? '运行目录未提供' : '暂无运行数据' }}
           columns={[
             {
               title: '运行 ID',
@@ -592,6 +592,10 @@ function listItems<T>(value: T[] | undefined): T[] {
   return value ?? []
 }
 
+function successfulData<T>(query: { isSuccess: boolean; data?: T }): T | undefined {
+  return query.isSuccess ? query.data : undefined
+}
+
 function pageItems<T>(value: { items: T[] } | undefined): T[] {
   return value?.items ?? []
 }
@@ -611,7 +615,7 @@ function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCe
       <Alert
         type="error"
         title="功能状态读取失败"
-        description={apiErrorMessage(state.featureFlags.error)}
+        description={apiErrorWithTrace(state.featureFlags.error)}
         action={<Button onClick={() => void state.featureFlags.refetch()}>重试</Button>}
       />
     )
@@ -622,6 +626,7 @@ function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCe
         title={state.featureFlags.isPending ? '正在读取风险分析功能状态' : '发布风险分析尚未开放'}
       />
     )
+  if (!state.activeRiskId && state.risks.isError) return null
   return (
     <>
       {state.linkedRiskId && <Alert type="info" title={`冻结风险快照 ${state.linkedRiskId}`} />}
@@ -630,7 +635,7 @@ function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCe
           showIcon
           type="error"
           title="风险快照读取失败"
-          description={apiErrorMessage(state.risk.error)}
+          description={apiErrorWithTrace(state.risk.error)}
           action={<Button onClick={() => void state.risk.refetch()}>重试</Button>}
         />
       ) : (
@@ -638,9 +643,13 @@ function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCe
           key={`${state.projectId}:${state.activeRiskId}`}
           projectId={state.projectId ?? ''}
           risk={state.risk.data}
-          loading={state.risk.isLoading}
+          loading={qualityRiskLoading(state)}
         />
       )}
     </>
   )
+}
+
+function qualityRiskLoading(state: ReturnType<typeof useQualityCenter>): boolean {
+  return state.risk.isLoading || (!state.activeRiskId && state.risks.isLoading)
 }

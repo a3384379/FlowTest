@@ -40,7 +40,10 @@ export function QualityRiskHistory({ state }: { state: QualityState }) {
       }
     >
       {!expanded ? (
-        <Typography.Text type="secondary">展开选择已保存快照，翻页保持当前证据。</Typography.Text>
+        <>
+          <QueryFailureNotice queries={[state.risks]} />
+          <Typography.Text type="secondary">展开选择已保存快照，翻页保持当前证据。</Typography.Text>
+        </>
       ) : (
         <>
           <CatalogPagination query={state.risks} label="风险记录" />
@@ -50,8 +53,8 @@ export function QualityRiskHistory({ state }: { state: QualityState }) {
             pagination={false}
             scroll={{ x: 700, y: 300 }}
             loading={state.risks.isLoading}
-            dataSource={state.risks.data?.items ?? []}
-            locale={{ emptyText: '暂无风险快照' }}
+            dataSource={state.risks.isSuccess ? state.risks.data.items : []}
+            locale={{ emptyText: state.risks.isError ? '风险目录未提供' : '暂无风险快照' }}
             rowClassName={(row) =>
               row.id === state.linkedRiskId ? 'quality-selected-evidence' : ''
             }

@@ -171,6 +171,55 @@ describe('QualityCenterPage', () => {
     const metric = screen.getByText('启用门禁').closest('.ant-card')!
     expect(within(metric as HTMLElement).getByText('未提供')).toBeVisible()
     expect(within(metric as HTMLElement).queryByText('0')).not.toBeInTheDocument()
+    expect(screen.queryByText('暂无质量门禁')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['flaky-tests', 'Flaky 检测与隔离', '暂无 Flaky 记录', 'Flaky 目录未提供'],
+    ['test-plan-runs', '最近运行与基线', '暂无运行数据', '运行目录未提供'],
+    ['release-risks', '风险快照历史', '暂无风险快照', '风险目录未提供'],
+  ])(
+    'keeps failed %s catalogs distinct from successful empty data',
+    async (resource, title, empty, unavailable) => {
+      const message = '目录读取失败-' + resource
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/${resource}`, () =>
+          HttpResponse.json(
+            { error: { code: 'UNAVAILABLE', message, trace_id: 'catalog-error-trace' } },
+            { status: 503 },
+          ),
+        ),
+      )
+      renderPage()
+      const card = within((await screen.findByText(title)).closest('.ant-card')! as HTMLElement)
+      expect(await card.findByText(message)).toBeVisible()
+      expect(card.getByText('Trace ID: catalog-error-trace')).toBeVisible()
+      expect(card.queryByText(empty)).not.toBeInTheDocument()
+      if (resource === 'release-risks')
+        await userEvent.setup().click(card.getByRole('button', { name: '切换风险快照' }))
+      expect(await card.findByText(unavailable)).toBeVisible()
+      expect(card.queryByText(empty)).not.toBeInTheDocument()
+    },
+  )
+
+  it('shows the trace for an unavailable selected risk and preserves its exact locator', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks/missing-risk`, () =>
+        HttpResponse.json(
+          {
+            error: { code: 'NOT_FOUND', message: '指定风险已失效', trace_id: 'risk-detail-trace' },
+          },
+          { status: 404 },
+        ),
+      ),
+    )
+    renderPage(`/projects/${project.id}/quality?risk=missing-risk`)
+    expect(await screen.findByText('指定风险已失效（Trace ID: risk-detail-trace）')).toBeVisible()
+    expect(
+      new URL(screen.getByTestId('quality-location').textContent!, 'http://test').searchParams.get(
+        'risk',
+      ),
+    ).toBe('missing-risk')
   })
 
   it('shows quality evidence and creates gates and quarantines flaky assets', async () => {
