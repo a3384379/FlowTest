@@ -58,3 +58,22 @@
   white-space: normal;
   max-width: 100%;
 }
+
+.environment-template-dialog .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 200px);
+}
+.environment-template-dialog .ant-modal-header,
+.environment-template-dialog .ant-modal-footer {
+  flex-shrink: 0;
+}
+.environment-template-dialog .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+@media (max-width: 600px) {
+  .environment-template-dialog .ant-modal-container {
+    max-height: calc(100dvh - 48px);
+  }
+}

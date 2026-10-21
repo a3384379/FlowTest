@@ -126,7 +126,8 @@ export default function PerformanceLabPage() {
                     <Space>
                       <Button
                         type="link"
-                        disabled={!state.canEdit}
+                        disabled={!state.canEdit || row.status !== 'published'}
+                        title="仅已发布场景可创建新版本"
                         onClick={() => setVersionBase(row)}
                       >
                         新建版本

@@ -43,3 +43,22 @@
 .performance-scenario-dialog .ant-form {
   padding-inline: 8px;
 }
+
+.performance-scenario-dialog .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 200px);
+}
+.performance-scenario-dialog .ant-modal-header,
+.performance-scenario-dialog .ant-modal-footer {
+  flex-shrink: 0;
+}
+.performance-scenario-dialog .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+@media (max-width: 600px) {
+  .performance-scenario-dialog .ant-modal-container {
+    max-height: calc(100dvh - 48px);
+  }
+}

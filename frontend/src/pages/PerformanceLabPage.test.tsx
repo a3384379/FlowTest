@@ -183,6 +183,18 @@ describe('PerformanceLabPage', () => {
     await waitFor(() => expect(published).toBe(1))
   })
 
+  it('requires publishing a draft before offering version creation', async () => {
+    installHandlers({ scenarios: [{ ...scenario, status: 'draft' }] })
+    renderPage()
+    await screen.findByText(scenario.name)
+    const version = screen.getByRole('button', { name: '新建版本' })
+    expect(version).toBeDisabled()
+    expect(version).toHaveAttribute('title', '仅已发布场景可创建新版本')
+    await userEvent.click(version)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发布' })).toBeEnabled()
+  })
+
   it('explains an unsuccessful run without baseline, gate, metrics, or artifact', async () => {
     const ramping = {
       ...scenario,
