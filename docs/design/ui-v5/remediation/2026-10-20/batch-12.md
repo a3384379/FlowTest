@@ -46,6 +46,8 @@
 
 整合Mock及手机补修后源码 `cc93e93695a145fcaa9c4a2676109148217e1882`：backend树 `f222dd90d1277f84a0f60dbb9227058794319b1a`，frontend树 `9843d80a4f372915dde61f2d0f538ee8c0617590`。8项受影响测试、格式/ESLint和构建通过；一次校验提示刚进入DOM尚不可见的测试失败，已等待同一提示实际可见，保留断言，未提高超时或跳过。该精确整合树完整检查已结束通过：后端1877项、14跳过、2项既有警告、覆盖率91.06%，Ruff格式/检查与mypy442文件通过；前端161文件1063项、无未处理异常，覆盖率85.92/82.01/85.50/88.38%，格式、lint/类型和构建通过。完整检查期间应用与测试源码冻结。日志 `remediation-contract-cc93e93-backend-full.log`、`remediation-contract-cc93e93-frontend-full.log`。
 
+同步已合并Mock原始JSON重复键补修后的源码 `a4e20689d74de0ebc201e27d44568ee6345fb6bc`，backend树仍为 `f222dd90d1277f84a0f60dbb9227058794319b1a`，与1877项完整检查完全一致；frontend树变为 `51b9e9c325cb19c7c3d2aaddeb35fec81c162e42`，已独立重新完成格式、lint/类型、162文件1070项测试及构建，无未处理异常，覆盖率85.94/82.05/85.50/88.40%。完整日志 `remediation-contract-a4e2068-frontend-full.log`。检查期间应用与测试源码冻结，未把旧树结果套用为新树结果。
+
 ## 真实 PostgreSQL 与浏览器验收
 
 使用独立Compose `flowtest-product-completion`、端口13078及隔离Chromium，专用合成项目 `119ec67b-a137-4f60-8d8b-8b99af94adbd`。未修改用户3000端口或其他项目；重启backend/worker后readiness200。
