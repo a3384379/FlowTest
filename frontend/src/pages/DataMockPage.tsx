@@ -1,5 +1,5 @@
-import CatalogPagination from '../components/CatalogPagination'
-import { useCatalogQuery } from '../lib/catalog-query'
+import MockRouteWorkspace from '../features/data-sources/MockRouteWorkspace'
+import MockServiceEditor from '../features/data-sources/MockServiceEditor'
 import {
   DeleteOutlined,
   LinkOutlined,
@@ -25,23 +25,18 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { WorkflowResourceReturn } from '../flow/WorkflowResourceNavigation'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 
 import {
   createCredential,
-  createMockRoute,
   createMockService,
   deleteCredential,
-  deleteMockRoute,
   listCredentials,
-  listMockLogs,
-  listMockRoutes,
   listMockServices,
   updateMockService,
   type CredentialInput,
-  type MockRouteInput,
 } from '../features/data-sources/data-source-service'
 import { useProjectContext } from '../features/projects/use-project-context'
 import { apiErrorMessage, type Credential, type MockService } from '../lib/api'
@@ -64,12 +59,12 @@ export default function DataMockPage() {
           {
             key: 'credentials',
             label: 'Credential',
-            children: <CredentialPanel projectId={projectId} canEdit={canEdit} />,
+            children: <CredentialPanel key={projectId} projectId={projectId} canEdit={canEdit} />,
           },
           {
             key: 'mock',
             label: 'Mock 服务',
-            children: <MockPanel projectId={projectId} canEdit={canEdit} />,
+            children: <MockPanel key={projectId} projectId={projectId} canEdit={canEdit} />,
           },
         ]}
       />
@@ -250,9 +245,41 @@ function CredentialForm({
 }
 
 export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  const active = useRef(true)
+  const [editingService, setEditingService] = useState(false)
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty
+  }, [dirty])
+  useLayoutEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+  function selectService(id: string) {
+    setDirty(false)
+    setSelectedId(id)
+    setEditingService(false)
+  }
+  function requestService(id: string) {
+    if (id === selectedId) return
+    if (!dirtyRef.current) {
+      selectService(id)
+      return
+    }
+    modal.confirm({
+      title: '切换服务前放弃未保存规则？',
+      content: '当前规则尚未保存，切换后会加载另一个服务的规则。',
+      okText: '放弃并切换',
+      cancelText: '继续编辑',
+      onOk: () => selectService(id),
+    })
+  }
   const services = useQuery({
     queryKey: ['mock-services', projectId],
     queryFn: () => listMockServices(projectId),
@@ -262,18 +289,23 @@ export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: 
     mutationFn: (input: { name: string; slug: string; description: string }) =>
       createMockService(projectId, input),
     onSuccess: async (created) => {
-      setSelectedId(created.id)
       await queryClient.invalidateQueries({ queryKey: ['mock-services', projectId] })
+      if (!active.current) return
+      requestService(created.id)
       void message.success('Mock 服务已创建')
     },
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: (error) => {
+      if (active.current) void message.error(apiErrorMessage(error))
+    },
   })
   const toggleMutation = useMutation({
     mutationFn: (service: MockService) =>
       updateMockService(projectId, service.id, { is_enabled: !service.is_enabled }),
     onSuccess: async () =>
       queryClient.invalidateQueries({ queryKey: ['mock-services', projectId] }),
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: (error) => {
+      if (active.current) void message.error(apiErrorMessage(error))
+    },
   })
   return (
     <Space orientation="vertical" className="full-width">
@@ -287,14 +319,70 @@ export function MockPanel({ projectId, canEdit }: { projectId: string; canEdit: 
         <Select
           aria-label="Mock 服务"
           className="management-select"
+          style={{ width: 240, maxWidth: '100%' }}
           value={selected?.id}
           options={services.data?.map((item) => ({ value: item.id, label: item.name }))}
-          onChange={setSelectedId}
+          onChange={requestService}
         />
-        <MockServiceSummary service={selected} canEdit={canEdit} onToggle={toggleMutation.mutate} />
+        <MockServiceSummary
+          service={selected}
+          canEdit={canEdit && services.isSuccess && !toggleMutation.isPending}
+          onToggle={toggleMutation.mutate}
+        />
+        <MockServiceEditing
+          projectId={projectId}
+          service={selected}
+          canEdit={canEdit}
+          readable={services.isSuccess}
+          open={editingService}
+          onOpen={() => setEditingService(true)}
+          onClose={() => setEditingService(false)}
+        />
       </Space>
-      <SelectedMockWorkspace projectId={projectId} service={selected} canEdit={canEdit} />
+      <SelectedMockWorkspace
+        projectId={projectId}
+        service={selected}
+        canEdit={canEdit}
+        readable={services.isSuccess}
+        onDirtyChange={setDirty}
+      />
     </Space>
+  )
+}
+
+function MockServiceEditing({
+  projectId,
+  service,
+  canEdit,
+  readable,
+  open,
+  onOpen,
+  onClose,
+}: {
+  projectId: string
+  service?: MockService
+  canEdit: boolean
+  readable: boolean
+  open: boolean
+  onOpen: () => void
+  onClose: () => void
+}) {
+  if (!service || !canEdit) return null
+  return (
+    <>
+      <Button disabled={!readable} onClick={onOpen}>
+        编辑服务
+      </Button>
+      {open && (
+        <MockServiceEditor
+          key={service.id}
+          projectId={projectId}
+          service={service}
+          canEdit={readable}
+          onClose={onClose}
+        />
+      )}
+    </>
   )
 }
 
@@ -340,20 +428,33 @@ function SelectedMockWorkspace({
   projectId,
   service,
   canEdit,
+  readable,
+  onDirtyChange,
 }: {
   projectId: string
   service: MockService | undefined
   canEdit: boolean
+  readable: boolean
+  onDirtyChange: (dirty: boolean) => void
 }) {
-  if (!service) return <Card>暂无 Mock 服务</Card>
-  return <MockRouteWorkspace projectId={projectId} service={service} canEdit={canEdit} />
+  if (!service)
+    return <Card>{readable ? '暂无 Mock 服务' : '尚未取得 Mock 服务目录，请先重试读取'}</Card>
+  return (
+    <MockRouteWorkspace
+      projectId={projectId}
+      service={service}
+      canEdit={canEdit}
+      readable={readable}
+      onDirtyChange={onDirtyChange}
+    />
+  )
 }
 
 function selectedMockService(
   services: MockService[] | undefined,
   selectedId: string | null,
 ): MockService | undefined {
-  return services?.find((item) => item.id === selectedId) ?? services?.at(0)
+  return selectedId ? services?.find((item) => item.id === selectedId) : services?.at(0)
 }
 
 function MockServiceForm({
@@ -396,240 +497,12 @@ function MockServiceForm({
   )
 }
 
-function MockRouteWorkspace({
-  projectId,
-  service,
-  canEdit,
-}: {
-  projectId: string
-  service: MockService
-  canEdit: boolean
-}) {
-  const { message } = App.useApp()
-  const queryClient = useQueryClient()
-  const routes = useQuery({
-    queryKey: ['mock-routes', projectId, service.id],
-    queryFn: () => listMockRoutes(projectId, service.id),
-  })
-  const logs = useCatalogQuery(
-    'mock-logs',
-    projectId,
-    (page) => listMockLogs(projectId, service.id, page, 20),
-    true,
-    service.id,
-    { refetchInterval: 2_000 },
-  )
-  const createRouteMutation = useMutation({
-    mutationFn: (input: MockRouteInput) => createMockRoute(projectId, service.id, input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['mock-routes', projectId, service.id] })
-      void message.success('Mock 路由已创建')
-    },
-    onError: (error) => void message.error(apiErrorMessage(error)),
-  })
-  const removeRouteMutation = useMutation({
-    mutationFn: (routeId: string) => deleteMockRoute(projectId, service.id, routeId),
-    onSuccess: async () =>
-      queryClient.invalidateQueries({ queryKey: ['mock-routes', projectId, service.id] }),
-    onError: (error) => void message.error(apiErrorMessage(error)),
-  })
-  return (
-    <Row gutter={16}>
-      {canEdit && (
-        <Col xs={24} xl={9}>
-          <MockRouteForm
-            pending={createRouteMutation.isPending}
-            onFinish={createRouteMutation.mutate}
-          />
-        </Col>
-      )}
-      <Col xs={24} xl={canEdit ? 15 : 24}>
-        <QueryFailureNotice queries={[routes, logs]} />
-        <CatalogPagination query={logs} label="Mock 请求日志" />
-        <Tabs
-          items={[
-            {
-              key: 'routes',
-              label: '路由规则',
-              children: (
-                <Table
-                  rowKey="id"
-                  size="small"
-                  loading={routes.isLoading}
-                  dataSource={routes.data ?? []}
-                  pagination={false}
-                  columns={[
-                    { title: '名称', dataIndex: 'name' },
-                    { title: '方法', dataIndex: 'method' },
-                    { title: '路径', dataIndex: 'path_pattern' },
-                    { title: '场景', dataIndex: 'scenario', render: (value) => value || '默认' },
-                    { title: '状态码', dataIndex: 'response_status' },
-                    {
-                      title: '操作',
-                      render: (_, item) =>
-                        canEdit ? (
-                          <Popconfirm
-                            title="确认删除路由？"
-                            onConfirm={() => removeRouteMutation.mutate(item.id)}
-                          >
-                            <Button
-                              type="text"
-                              danger
-                              icon={<DeleteOutlined />}
-                              aria-label="删除 Mock 路由"
-                            />
-                          </Popconfirm>
-                        ) : null,
-                    },
-                  ]}
-                />
-              ),
-            },
-            {
-              key: 'logs',
-              label: '请求日志',
-              children: (
-                <Table
-                  rowKey="id"
-                  size="small"
-                  loading={logs.isLoading}
-                  dataSource={logs.data?.items ?? []}
-                  columns={[
-                    { title: '时间', dataIndex: 'created_at' },
-                    { title: '方法', dataIndex: 'method' },
-                    { title: '路径', dataIndex: 'path' },
-                    {
-                      title: '匹配',
-                      dataIndex: 'matched',
-                      render: (value) => (value ? '是' : '否'),
-                    },
-                    { title: '状态码', dataIndex: 'response_status' },
-                    { title: '耗时', dataIndex: 'duration_ms', render: (value) => `${value} ms` },
-                  ]}
-                />
-              ),
-            },
-          ]}
-        />
-      </Col>
-    </Row>
-  )
-}
-
-function MockRouteForm({
-  pending,
-  onFinish,
-}: {
-  pending: boolean
-  onFinish: (input: MockRouteInput) => void
-}) {
-  const [form] = Form.useForm<Record<string, unknown>>()
-  return (
-    <Card title="新增路由规则" size="small">
-      <Form
-        name="mock-route"
-        form={form}
-        layout="vertical"
-        initialValues={{
-          method: 'GET',
-          response_status: 200,
-          delay_ms: 0,
-          priority: 0,
-          is_enabled: true,
-          query_conditions: '{}',
-          header_conditions: '{}',
-          response_headers: '{}',
-          response_body: '{}',
-        }}
-        onFinish={(values) => onFinish(mockRouteInput(values))}
-      >
-        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Space align="start">
-          <Form.Item name="method" label="方法">
-            <Select className="method-select" options={httpMethodOptions} />
-          </Form.Item>
-          <Form.Item name="path_pattern" label="路径" rules={[{ required: true }]}>
-            <Input placeholder="/users/{user_id}" />
-          </Form.Item>
-        </Space>
-        <Form.Item name="scenario" label="场景（可选）">
-          <Input placeholder="happy" />
-        </Form.Item>
-        <Form.Item name="query_conditions" label="Query 条件（JSON）" rules={[jsonRule]}>
-          <Input.TextArea rows={2} className="code-input" />
-        </Form.Item>
-        <Form.Item name="header_conditions" label="Header 条件（JSON）" rules={[jsonRule]}>
-          <Input.TextArea rows={2} className="code-input" />
-        </Form.Item>
-        <Form.Item name="response_body" label="响应模板（JSON）" rules={[jsonRule]}>
-          <Input.TextArea rows={5} className="code-input" />
-        </Form.Item>
-        <Form.Item name="response_headers" label="响应 Header（JSON）" rules={[jsonRule]}>
-          <Input.TextArea rows={2} className="code-input" />
-        </Form.Item>
-        <Space align="start">
-          <Form.Item name="response_status" label="状态码">
-            <InputNumber min={100} max={599} />
-          </Form.Item>
-          <Form.Item name="delay_ms" label="延迟 ms">
-            <InputNumber min={0} max={30000} />
-          </Form.Item>
-          <Form.Item name="priority" label="优先级">
-            <InputNumber min={-1000} max={1000} />
-          </Form.Item>
-        </Space>
-        <Button type="primary" htmlType="submit" loading={pending}>
-          保存路由
-        </Button>
-      </Form>
-    </Card>
-  )
-}
-
-function mockRouteInput(values: Record<string, unknown>): MockRouteInput {
-  return {
-    name: String(values.name),
-    method: values.method as MockRouteInput['method'],
-    path_pattern: String(values.path_pattern),
-    query_conditions: jsonRecord(values.query_conditions),
-    header_conditions: jsonRecord(values.header_conditions),
-    response_status: Number(values.response_status),
-    response_headers: jsonRecord(values.response_headers),
-    response_body: JSON.parse(String(values.response_body)),
-    delay_ms: Number(values.delay_ms),
-    scenario: values.scenario ? String(values.scenario) : null,
-    priority: Number(values.priority),
-    is_enabled: true,
-  }
-}
-
-function jsonRecord(value: unknown): Record<string, string> {
-  return JSON.parse(String(value)) as Record<string, string>
-}
-
-const jsonRule = {
-  validator: async (_: unknown, value: string) => {
-    try {
-      JSON.parse(value)
-      return Promise.resolve()
-    } catch {
-      return Promise.reject(new Error('请输入有效 JSON'))
-    }
-  },
-}
-
 const credentialKindOptions = [
   { value: 'postgresql', label: 'PostgreSQL' },
   { value: 'mysql', label: 'MySQL' },
   { value: 'redis', label: 'Redis' },
   { value: 'grpc_mtls', label: 'gRPC mTLS' },
 ]
-const httpMethodOptions = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((value) => ({
-  value,
-  label: value,
-}))
 
 function credentialKindLabel(kind: Credential['kind']) {
   return credentialKindOptions.find((item) => item.value === kind)?.label ?? kind

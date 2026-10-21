@@ -16,6 +16,8 @@ from app.schemas.data_sources import (
     CredentialMetadata,
     CredentialUpdate,
     MockRequestLogResponse,
+    MockRoutePreviewInput,
+    MockRoutePreviewResponse,
     MockRouteResponse,
     MockRouteWrite,
     MockServiceCreate,
@@ -193,6 +195,23 @@ async def create_mock_route(
         payload=payload,
     )
     return MockRouteResponse.model_validate(route)
+
+
+@router.post(
+    "/projects/{project_id}/mock-services/{service_id}/routes/preview",
+    response_model=MockRoutePreviewResponse,
+)
+async def preview_mock_route(
+    project_id: UUID,
+    service_id: UUID,
+    payload: MockRoutePreviewInput,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> MockRoutePreviewResponse:
+    outcome = await MockServiceManager(session).preview_route(
+        actor=current_user, project_id=project_id, service_id=service_id, payload=payload
+    )
+    return MockRoutePreviewResponse.model_validate(outcome)
 
 
 @router.put(

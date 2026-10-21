@@ -1,0 +1,25 @@
+.mock-route-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.mock-route-edit-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  min-width: 0;
+}
+
+.mock-route-edit-layout > *,
+.mock-route-workspace > * {
+  min-width: 0;
+}
+
+@media (min-width: 1200px) {
+  .mock-route-edit-layout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}

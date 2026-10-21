@@ -111,6 +111,75 @@ class MockRouteResponse(MockRouteWrite):
     updated_at: datetime
 
 
+class MockPreviewRequestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: str = Field(pattern=r"^(GET|POST|PUT|PATCH|DELETE)$")
+    path: str = Field(min_length=1, max_length=1024, pattern=r"^/")
+    query: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: JsonValue = None
+
+
+class MockPreviewDraftInput(MockRouteWrite):
+    model_config = ConfigDict(extra="forbid")
+
+
+class MockRoutePreviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    draft: MockPreviewDraftInput
+    route_id: UUID | None = None
+    request: MockPreviewRequestInput
+
+
+class MockPreviewSelectedResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    route_id: UUID | None
+    name: str
+    is_draft: bool
+    priority: int
+    scenario: str | None
+    delay_ms: int
+
+
+class MockPreviewCheckResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    field: str
+    matched: bool
+    message: str
+
+
+class MockPreviewWarningResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    field: str
+    pointer: str
+    message: str
+    route_id: UUID | None
+
+
+class MockPreviewResponseValue(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status_code: int
+    headers: dict[str, str]
+    body: JsonValue
+
+
+class MockRoutePreviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    service_enabled: bool
+    draft_matches: bool
+    selected: MockPreviewSelectedResponse | None
+    checks: list[MockPreviewCheckResponse]
+    warnings: list[MockPreviewWarningResponse]
+    response: MockPreviewResponseValue | None
+
+
 class MockRequestLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

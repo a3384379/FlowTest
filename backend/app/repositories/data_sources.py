@@ -1,9 +1,26 @@
+from dataclasses import dataclass
+from typing import cast as typing_cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from pydantic import JsonValue
+from sqlalchemy import Text, case, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.models.data_sources import Credential, MockRequestLog, MockRoute, MockService
+
+
+@dataclass(frozen=True, slots=True)
+class MockStoredPreviewBody:
+    route: MockRoute
+    character_count: int
+    body: JsonValue
+
+
+@dataclass(frozen=True, slots=True)
+class MockPreviewCatalogSize:
+    count: int
+    metadata_characters: int
 
 
 class DataSourceRepository:
@@ -96,10 +113,21 @@ class DataSourceRepository:
             query = query.where(MockRoute.id != excluding_id)
         return (await self._session.execute(query)).scalar_one_or_none()
 
-    async def list_mock_routes(self, service_id: UUID, *, enabled_only: bool) -> list[MockRoute]:
+    async def list_mock_routes(
+        self,
+        service_id: UUID,
+        *,
+        enabled_only: bool,
+        limit: int | None = None,
+        include_response_body: bool = True,
+    ) -> list[MockRoute]:
         query = select(MockRoute).where(MockRoute.mock_service_id == service_id)
         if enabled_only:
             query = query.where(MockRoute.is_enabled.is_(True))
+        if not include_response_body:
+            query = query.options(defer(MockRoute.response_body))
+        if limit is not None:
+            query = query.limit(limit)
         return list(
             (
                 await self._session.scalars(
@@ -107,6 +135,42 @@ class DataSourceRepository:
                 )
             ).all()
         )
+
+    async def mock_preview_catalog_size(self, service_id: UUID) -> MockPreviewCatalogSize:
+        size = (
+            func.length(MockRoute.name)
+            + func.length(MockRoute.path_pattern)
+            + func.coalesce(func.length(MockRoute.scenario), 0)
+            + func.length(cast(MockRoute.query_conditions, Text))
+            + func.length(cast(MockRoute.header_conditions, Text))
+            + func.length(cast(MockRoute.response_headers, Text))
+        )
+        row = (
+            await self._session.execute(
+                select(func.count(), func.coalesce(func.sum(size), 0))
+                .select_from(MockRoute)
+                .where(MockRoute.mock_service_id == service_id)
+            )
+        ).one()
+        return MockPreviewCatalogSize(int(row[0]), int(row[1]))
+
+    async def get_mock_preview_body(
+        self, route_id: UUID, *, maximum_characters: int
+    ) -> MockStoredPreviewBody | None:
+        size = func.coalesce(func.length(cast(MockRoute.response_body, Text)), 0)
+        body = case((size <= maximum_characters, MockRoute.response_body), else_=None)
+        row = (
+            await self._session.execute(
+                select(MockRoute, size, body)
+                .where(MockRoute.id == route_id)
+                .options(defer(MockRoute.response_body))
+                .execution_options(populate_existing=True)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        route, count, value = row
+        return MockStoredPreviewBody(route, int(count), typing_cast(JsonValue, value))
 
     async def list_mock_logs(
         self,

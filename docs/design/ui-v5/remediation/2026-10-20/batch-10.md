@@ -65,3 +65,11 @@ GitHub边界：前置[PR #140](https://github.com/a3384379/FlowTest/pull/140)最
 最新门禁的 `test_running_workflow_can_be_cancelled` 在立即启动第二次执行后，未确认Runner已进入目标请求便发起强制取消；SQLite后台写入与取消写入冲突，报 `database is locked`。本地原用例单次检查通过，未把偶发通过当作远程故障消失。
 
 测试改为受控的请求开始事件和阻塞响应：确认请求实际进入运行阶段后，分别检查普通取消、强制取消和协调器关闭；不再用固定5秒响应或0.1秒等待猜测状态。保留原有状态、审计原因、检查点尝试和input_hash断言，新增强制执行创建成功断言；不增加SQLite重试或超时，不改变生产取消逻辑。整个 `tests/test_workflows_api.py` 的26项及相关Ruff检查通过，最新远程门禁仍须重新完成。
+
+该用例补修限定为“已进入目标请求的执行取消”验收。SQLite刚启动就立即强制取消的并发交错，仍需独立复现并分析生产路径；本次没有修改其生产事务处理，不能据此声明Standalone并发取消问题已修复或完成发布验收。
+
+## 项目治理合并与Mock后续交付
+
+[PR #141](https://github.com/a3384379/FlowTest/pull/141)最终HEAD `b4f0ea592c082b6153022da47ae408e279525e2a` 的[正式Required Gate 39513064716](https://github.com/a3384379/FlowTest/actions/runs/39513064716)成功，审查线程为空且无下一页，按匹配SHA命令合并main为 `9e9d95ce6deb3a5dfd669ae6b4a7eae731055d33`。合并后[Full Regression 39517147484](https://github.com/a3384379/FlowTest/actions/runs/39517147484)已启动，核对精确head一致，结果待结束；PR门禁成功不代替合并后回归成功。
+
+数据与Mock [PR #142](https://github.com/a3384379/FlowTest/pull/142)同步该main时仅保留三份包含最新验证回执的整改文档，后端树 `d0096a516e80d991a72c9a0b3305ccef2b525121`、前端树 `f5245a50446913511c1f55c0a4a21301f308ce3c` 均与最终完整本地验证一致。当前37/73项本地完成、36项待完成、35项已合并；Mock的2项尚未合并。

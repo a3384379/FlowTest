@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
 
 import DataMockPage, { CredentialPanel, MockPanel } from './DataMockPage'
 import type { Credential, MockRequestLog, MockRoute, MockService } from '../lib/api'
@@ -97,6 +98,9 @@ describe('DataMockPage', () => {
     const serviceCard = screen.getByText('新建 Mock 服务').closest('.ant-card') as HTMLElement
     fireEvent.click(within(serviceCard).getByRole('button', { name: /新建/ }))
 
+    await waitFor(() => expect(calls.serviceCreates).toBe(1))
+    await screen.findByText('无路由规则')
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存路由' })).toBeEnabled())
     const routeCard = screen.getByText('新增路由规则').closest('.ant-card') as HTMLElement
     const routeName = within(routeCard).getByLabelText('名称')
     fireEvent.change(routeName, {
@@ -112,8 +116,16 @@ describe('DataMockPage', () => {
     fireEvent.click(within(routeCard).getByRole('button', { name: '保存路由' }))
 
     await waitFor(() => expect(calls).toEqual({ toggles: 1, serviceCreates: 1, routeCreates: 1 }))
-    fireEvent.change(scenario, { target: { value: '' } })
-    fireEvent.click(within(routeCard).getByRole('button', { name: '保存路由' }))
+    await screen.findByText('编辑路由规则')
+    fireEvent.click(screen.getByRole('button', { name: '新建规则' }))
+    const freshCard = screen.getByText('新增路由规则').closest('.ant-card') as HTMLElement
+    fireEvent.change(within(freshCard).getByLabelText('名称'), {
+      target: { value: '默认订单场景' },
+    })
+    fireEvent.change(within(freshCard).getByPlaceholderText('/users/{user_id}'), {
+      target: { value: '/orders/{order_id}' },
+    })
+    fireEvent.click(within(freshCard).getByRole('button', { name: '保存路由' }))
     await waitFor(() => expect(calls.routeCreates).toBe(2))
   })
 
@@ -190,6 +202,123 @@ describe('DataMockPage', () => {
       ),
     ).toBe(true)
   })
+
+  it('edits service metadata without changing the slug and retains failed input', async () => {
+    installMockHandlers()
+    let current = mockService
+    let failed = true
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/mock-services`, () => HttpResponse.json([current])),
+      http.patch(
+        `/api/v1/projects/${project.id}/mock-services/${mockService.id}`,
+        async ({ request }) => {
+          const input = (await request.json()) as { name: string; description: string }
+          expect(input).toEqual({ name: '订单服务新名称', description: '保留访问地址的服务说明' })
+          if (failed)
+            return HttpResponse.json(
+              {
+                error: {
+                  message: '服务更新暂不可用',
+                  trace_id: 'service-edit-failed',
+                  code: 'UNAVAILABLE',
+                },
+              },
+              { status: 503 },
+            )
+          current = { ...current, ...input }
+          return HttpResponse.json(current)
+        },
+      ),
+    )
+    renderMockPanel(true)
+    await userEvent.click(await screen.findByRole('button', { name: '编辑服务' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('服务名称'), {
+      target: { value: '订单服务新名称' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('服务说明'), {
+      target: { value: '保留访问地址的服务说明' },
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存服务' }))
+    await screen.findByText(/服务更新暂不可用/)
+    expect(within(dialog).getByLabelText('服务名称')).toHaveValue('订单服务新名称')
+    expect(dialog).toHaveTextContent(mockService.slug)
+    failed = false
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存服务' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(current.slug).toBe(mockService.slug)
+    expect(await screen.findByText('订单服务新名称')).toBeInTheDocument()
+  })
+
+  it('requires an explicit discard before switching a service with unsaved rule fields', async () => {
+    installMockHandlers()
+    const another = { ...mockService, id: 'another-mock-service', name: '另外一个 Mock' }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/mock-services`, () =>
+        HttpResponse.json([mockService, another]),
+      ),
+    )
+    renderMockPanel(true)
+    const edit = await screen.findByLabelText('编辑 Mock 路由：查询用户')
+    expect(edit).toHaveRole('button')
+    await userEvent.click(edit)
+    const nameInput = screen.getByLabelText('名称')
+    fireEvent.change(nameInput, { target: { value: '未保存的规则名称' } })
+    const servicePicker = screen.getByLabelText('Mock 服务')
+    expect(servicePicker).toHaveRole('combobox')
+    async function switchService() {
+      await userEvent.click(servicePicker)
+      await userEvent.click(
+        screen.getByText(another.name, { selector: '.ant-select-item-option-content' }),
+      )
+    }
+    await switchService()
+    let dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('切换服务前放弃未保存规则？')
+    await userEvent.click(within(dialog).getByRole('button', { name: '继续编辑' }))
+    expect(screen.getByLabelText('名称')).toHaveValue('未保存的规则名称')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await switchService()
+    dialog = screen.getByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: '放弃并切换' }))
+    await screen.findByText('无路由规则')
+    expect(screen.getByLabelText('名称')).toHaveValue('')
+    expect(screen.queryByDisplayValue('未保存的规则名称')).not.toBeInTheDocument()
+  })
+
+  it('retains dirty rule fields but disables writes when the service directory refresh fails', async () => {
+    installMockHandlers()
+    const client = renderMockPanel(true)
+    await userEvent.click(await screen.findByLabelText('编辑 Mock 路由：查询用户'))
+    const nameInput = screen.getByLabelText('名称')
+    const editor = nameInput.closest('form')!
+    fireEvent.change(nameInput, { target: { value: '读取失败仍保留草稿' } })
+    const saveButton = within(editor).getByRole('button', { name: '保存路由' })
+    const editServiceButton = screen.getByText('编辑服务').closest('button')!
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/mock-services`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'UNAVAILABLE',
+              message: '服务目录读取失败',
+              trace_id: 'mock-directory-failed',
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['mock-services', project.id] })
+    })
+    await screen.findByText(/服务目录读取失败/)
+    expect(nameInput).toHaveValue('读取失败仍保留草稿')
+    expect(saveButton).toBeInTheDocument()
+    expect(saveButton).toBeDisabled()
+    expect(editServiceButton).toBeInTheDocument()
+    expect(editServiceButton).toBeDisabled()
+  })
 })
 
 function renderPage() {
@@ -210,12 +339,15 @@ function renderPage() {
 function renderMockPanel(canEdit: boolean) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <MockPanel projectId={project.id} canEdit={canEdit} />
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <MockPanel projectId={project.id} canEdit={canEdit} />
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
+  return queryClient
 }
 
 function renderCredentialPanel(canEdit = false) {
@@ -243,29 +375,74 @@ function installMockHandlers(
   service: MockService = mockService,
   route: MockRoute = mockRoute,
 ) {
+  const services = [service]
+  const rules = new Map<string, MockRoute[]>([[service.id, [route]]])
   server.use(
-    http.get(`/api/v1/projects/${project.id}/mock-services`, () => HttpResponse.json([service])),
-    http.get(`/api/v1/projects/${project.id}/mock-services/${mockService.id}/routes`, () =>
-      HttpResponse.json([route]),
+    http.get(`/api/v1/projects/${project.id}/mock-services`, () => HttpResponse.json(services)),
+    http.get(`/api/v1/projects/${project.id}/mock-services/:serviceId/routes`, ({ params }) =>
+      HttpResponse.json(rules.get(String(params.serviceId)) ?? []),
     ),
-    http.get(`/api/v1/projects/${project.id}/mock-services/${mockService.id}/request-logs`, () =>
-      HttpResponse.json({ items: [mockLog], total: 1, page: 1, page_size: 50 }),
+    http.get(`/api/v1/projects/${project.id}/mock-services/:serviceId/request-logs`, ({ params }) =>
+      HttpResponse.json({
+        items: params.serviceId === service.id ? [mockLog] : [],
+        total: params.serviceId === service.id ? 1 : 0,
+        page: 1,
+        page_size: 20,
+      }),
     ),
-    http.patch(`/api/v1/projects/${project.id}/mock-services/${mockService.id}`, () => {
-      calls.toggles += 1
-      return HttpResponse.json({ ...mockService, is_enabled: false })
-    }),
-    http.post(`/api/v1/projects/${project.id}/mock-services`, () => {
+    http.patch(
+      `/api/v1/projects/${project.id}/mock-services/:serviceId`,
+      async ({ request, params }) => {
+        const input = (await request.json()) as Partial<MockService>
+        if ('is_enabled' in input) calls.toggles += 1
+        const index = services.findIndex((item) => item.id === params.serviceId)
+        services[index] = { ...services[index], ...input }
+        return HttpResponse.json(services[index])
+      },
+    ),
+    http.post(`/api/v1/projects/${project.id}/mock-services`, async ({ request }) => {
       calls.serviceCreates += 1
-      return HttpResponse.json(
-        { ...mockService, id: 'mock-2', slug: 'payment-mock' },
-        { status: 201 },
-      )
+      const created = {
+        ...service,
+        ...((await request.json()) as Partial<MockService>),
+        id: 'mock-2',
+      }
+      services.push(created)
+      rules.set(created.id, [])
+      return HttpResponse.json(created, { status: 201 })
     }),
-    http.post(`/api/v1/projects/${project.id}/mock-services/${mockService.id}/routes`, () => {
-      calls.routeCreates += 1
-      return HttpResponse.json({ ...mockRoute, id: 'route-2' }, { status: 201 })
-    }),
+    http.post(
+      `/api/v1/projects/${project.id}/mock-services/:serviceId/routes`,
+      async ({ request, params }) => {
+        calls.routeCreates += 1
+        const id = String(params.serviceId)
+        const created = {
+          ...route,
+          ...((await request.json()) as Partial<MockRoute>),
+          id: `created-route-${calls.routeCreates}`,
+          mock_service_id: id,
+        }
+        rules.set(id, [...(rules.get(id) ?? []), created])
+        return HttpResponse.json(created, { status: 201 })
+      },
+    ),
+    http.put(
+      `/api/v1/projects/${project.id}/mock-services/:serviceId/routes/:routeId`,
+      async ({ request, params }) => {
+        const id = String(params.serviceId)
+        const updated = {
+          ...route,
+          ...((await request.json()) as Partial<MockRoute>),
+          id: String(params.routeId),
+          mock_service_id: id,
+        }
+        rules.set(
+          id,
+          (rules.get(id) ?? []).map((item) => (item.id === updated.id ? updated : item)),
+        )
+        return HttpResponse.json(updated)
+      },
+    ),
   )
 }
 
