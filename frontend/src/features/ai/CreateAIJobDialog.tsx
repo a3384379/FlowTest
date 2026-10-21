@@ -365,7 +365,7 @@ function AIInputPolicyNotice({
         showIcon
         title={
           policy.isSuccess
-            ? `当前自动脱敏策略：${policy.data.mode.toUpperCase()}（${policy.data.source}，版本 ${policy.data.policy_version}）`
+            ? `当前自动脱敏策略：${policy.data.mode.toUpperCase()}（${policy.data.source === 'project' ? '项目覆盖' : '安装默认'}，版本 ${policy.data.policy_version}）`
             : '正在读取当前处理策略'
         }
         description={
@@ -487,7 +487,7 @@ function AIInputPreviewSummary({
         {
           key: 'version',
           label: '固定版本',
-          children: source?.metadata.version ?? '未提供数字版本。身份及指纹见完整负载。',
+          children: materialVersionLabel(source),
         },
         {
           key: 'schema',
@@ -507,4 +507,9 @@ function AIInputPreviewSummary({
       ]}
     />
   )
+}
+
+function materialVersionLabel(source: AIPublicSource | null): string | number {
+  if (!source) return '手动材料，无来源版本'
+  return source.metadata.version ?? '使用来源固定 ID；其他版本信息见完整负载。'
 }

@@ -59,6 +59,7 @@ export function useAIReview() {
     refetchInterval: (query) =>
       query.state.data && ['pending', 'running'].includes(query.state.data.status) ? 2000 : false,
   })
+  const canReview = canEdit && selectedJob.isSuccess && selectedJob.data.job_type !== 'change_set'
   const suggestions = useQuery({
     queryKey: ['ai-suggestions', projectId, activeJobId, selectedJob.data?.status],
     queryFn: () => listAISuggestions(activeJobId!),
@@ -127,7 +128,7 @@ export function useAIReview() {
     if (
       !projectId ||
       !activeJobId ||
-      !canEdit ||
+      !canReview ||
       !commandCurrent() ||
       !suggestions.data?.some((item) => item.id === input.id && item.review_status === 'pending')
     )
@@ -170,6 +171,7 @@ export function useAIReview() {
     projectId,
     canEdit,
     canManageSecurity,
+    canReview,
     permissions: access.permissions,
     status,
     jobs,

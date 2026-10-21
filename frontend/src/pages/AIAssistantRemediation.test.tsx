@@ -517,4 +517,37 @@ describe('AI audit remediation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(writes).toBe(1)
   })
+  it('keeps change-set jobs read-only in the generic assistant and points to their dedicated review module', async () => {
+    setup(`/projects/${project.id}/ai?job=${job.id}&suggestion=change-item`)
+    let writes = 0
+    server.use(
+      http.get('/api/v1/ai/jobs/:id', () =>
+        HttpResponse.json({ ...job, status: 'completed', job_type: 'change_set' }),
+      ),
+      http.get('/api/v1/ai/jobs/:id/suggestions', () =>
+        HttpResponse.json([
+          {
+            id: 'change-item',
+            job_id: job.id,
+            suggestion_type: 'assertion',
+            title: '变更集候选',
+            content: { expression: 'status_code' },
+            review_status: 'pending',
+            review_note: '',
+          },
+        ]),
+      ),
+      http.post('/api/v1/ai/*', () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    await waitFor(() => expect(screen.getByLabelText('审核备注')).toHaveAttribute('readonly'))
+    expect(screen.queryByRole('button', { name: '确认接受' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '前往本项目 AI 变更集核对和审核' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/ai-changes`,
+    )
+    expect(writes).toBe(0)
+  })
 })

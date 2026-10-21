@@ -13,6 +13,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
+import { Link } from 'react-router-dom'
+import { projectPath } from '../features/projects/project-routing'
 import { useState } from 'react'
 import type { AIJob, AIJobInput, AISuggestion } from '../features/ai/ai-service'
 import { useAIReview } from '../features/ai/use-ai-review'
@@ -75,7 +77,7 @@ function AIReviewWorkspace() {
           projectId={state.projectId}
           suggestion={suggestion}
           decision={state.reviewDecision}
-          canEdit={state.canEdit}
+          canEdit={state.canReview}
           submitting={state.reviewing}
           onClose={() => state.selectSuggestion(null)}
           onSubmit={state.review}
@@ -192,6 +194,7 @@ function AIJobDetails({ job }: { job?: AIJob }) {
   if (!job) return null
   return (
     <Card size="small" title="任务详情" style={{ marginBottom: 16 }}>
+      <AIChangeSetJobNotice job={job} />
       {job.status === 'failed' ? (
         <Alert
           type="error"
@@ -262,7 +265,7 @@ function AISuggestionsCard({ state }: { state: AIReviewState }) {
                   size="small"
                   type="link"
                   icon={<CheckOutlined />}
-                  disabled={!state.canEdit || suggestion.review_status !== 'pending'}
+                  disabled={!state.canReview || suggestion.review_status !== 'pending'}
                   onClick={() => state.selectSuggestion(suggestion.id, 'accept')}
                 >
                   接受
@@ -272,7 +275,7 @@ function AISuggestionsCard({ state }: { state: AIReviewState }) {
                   type="link"
                   danger
                   icon={<CloseOutlined />}
-                  disabled={!state.canEdit || suggestion.review_status !== 'pending'}
+                  disabled={!state.canReview || suggestion.review_status !== 'pending'}
                   onClick={() => state.selectSuggestion(suggestion.id, 'reject')}
                 >
                   拒绝
@@ -335,4 +338,17 @@ function AICreateDialog({
 
 function missingSuggestion(state: AIReviewState, present: boolean): boolean {
   return Boolean(state.suggestionId && state.suggestions.isSuccess && !present)
+}
+
+function AIChangeSetJobNotice({ job }: { job: AIJob }) {
+  if (job.job_type !== 'change_set') return null
+  return (
+    <Alert
+      type="info"
+      title="此任务属于 AI 变更集，普通 AI 助手只读展示"
+      description={
+        <Link to={projectPath(job.project_id, 'ai-changes')}>前往本项目 AI 变更集核对和审核</Link>
+      }
+    />
+  )
 }
