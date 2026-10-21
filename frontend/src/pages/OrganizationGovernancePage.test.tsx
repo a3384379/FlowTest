@@ -405,6 +405,7 @@ describe('OrganizationGovernancePage', () => {
   )
 
   it('loads audit page 6 from server and applies identity, resource and time filters', async () => {
+    const browser = userEvent.setup()
     const requests: URL[] = []
     server.use(
       http.get(`/api/v1/organizations/${organizationId}/audit-logs`, ({ request }) => {
@@ -416,23 +417,42 @@ describe('OrganizationGovernancePage', () => {
     )
     renderPage()
     await screen.findByText('组织与角色')
-    await userEvent.click(screen.getByRole('tab', { name: /审计与安全/ }))
+    const auditTab = screen.getByText('审计与安全').closest('[role="tab"]')!
+    expect(auditTab).toHaveRole('tab')
+    expect(auditTab).toHaveAccessibleName(/审计与安全/)
+    expect(auditTab).toBeVisible()
+    expect(auditTab.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(auditTab)
     expect(await screen.findByText('共 61 条')).toBeVisible()
-    await userEvent.click(screen.getByTitle('6'))
-    expect(await screen.findByText('audit-resource-6')).toBeVisible()
+    const audit = within(screen.getByText('组织审计查询').closest('.ant-card')!)
+    await browser.click(audit.getByTitle('6'))
+    const resource = await audit.findByText('audit-resource-6')
+    expect(resource).toBeVisible()
     expect(requests.at(-1)?.searchParams.get('page')).toBe('6')
-    await userEvent.click(screen.getByRole('button', { name: '查看审计详情' }))
+    const view = within(resource.closest('tr')!).getByLabelText('查看审计详情', {
+      selector: 'button',
+    })
+    expect(view).toHaveRole('button')
+    expect(view).toHaveAccessibleName('查看审计详情')
+    expect(view).toBeVisible()
+    expect(view.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(view)
     const details = await screen.findByRole('dialog')
     expect(details).toHaveTextContent('audit-trace-6')
     expect(details).toHaveTextContent('仅服务端已授权详情')
-    await userEvent.click(screen.getByRole('button', { name: '关闭详情' }))
-    await userEvent.type(screen.getByLabelText('审计动作'), 'organization.updated')
-    await userEvent.type(screen.getByLabelText('操作者 ID'), user.id)
-    await userEvent.type(screen.getByLabelText('资源类型'), 'organization')
-    await userEvent.type(screen.getByLabelText('资源 ID'), organizationId)
-    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2026-10-01T12:00' } })
-    fireEvent.change(screen.getByLabelText('结束时间'), { target: { value: '2026-10-21T12:00' } })
-    await userEvent.click(screen.getByRole('button', { name: '查询审计' }))
+    await browser.click(within(details).getByRole('button', { name: '关闭详情' }))
+    for (const [label, value] of [
+      ['审计动作', 'organization.updated'],
+      ['操作者 ID', user.id],
+      ['资源类型', 'organization'],
+      ['资源 ID', organizationId],
+    ] as const) {
+      await browser.click(audit.getByLabelText(label))
+      await browser.paste(value)
+    }
+    fireEvent.change(audit.getByLabelText('开始时间'), { target: { value: '2026-10-01T12:00' } })
+    fireEvent.change(audit.getByLabelText('结束时间'), { target: { value: '2026-10-21T12:00' } })
+    await browser.click(audit.getByRole('button', { name: '查询审计' }))
     await waitFor(() => expect(requests.at(-1)?.searchParams.get('actor_user_id')).toBe(user.id))
     expect(Object.fromEntries(requests.at(-1)!.searchParams)).toMatchObject({
       page: '1',
@@ -468,6 +488,7 @@ describe('OrganizationGovernancePage', () => {
   })
 
   it('resets audit scope and hides old details when switching to an organization denied by server', async () => {
+    const browser = userEvent.setup()
     const otherId = '00000000-0000-4000-8000-000000000799'
     const reads: URL[] = []
     server.use(
@@ -496,20 +517,41 @@ describe('OrganizationGovernancePage', () => {
     )
     renderPage()
     await screen.findByText('组织与角色')
-    await userEvent.click(screen.getByRole('tab', { name: /审计与安全/ }))
+    const auditTab = screen.getByText('审计与安全').closest('[role="tab"]')!
+    expect(auditTab).toHaveRole('tab')
+    expect(auditTab).toHaveAccessibleName(/审计与安全/)
+    expect(auditTab).toBeVisible()
+    expect(auditTab.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(auditTab)
     await screen.findByText('共 61 条')
-    await userEvent.click(screen.getByTitle('6'))
-    await userEvent.click(await screen.findByRole('button', { name: '查看审计详情' }))
-    expect(await screen.findByRole('dialog')).toHaveTextContent('audit-resource-6')
-    await userEvent.click(screen.getByRole('button', { name: '关闭详情' }))
-    await userEvent.click(screen.getByRole('combobox', { name: '治理组织' }))
-    await userEvent.click(
+    const audit = within(screen.getByText('组织审计查询').closest('.ant-card')!)
+    await browser.click(audit.getByTitle('6'))
+    const resource = await audit.findByText('audit-resource-6')
+    expect(resource).toBeVisible()
+    const view = within(resource.closest('tr')!).getByLabelText('查看审计详情', {
+      selector: 'button',
+    })
+    expect(view).toHaveRole('button')
+    expect(view).toHaveAccessibleName('查看审计详情')
+    expect(view).toBeVisible()
+    expect(view.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(view)
+    const details = await screen.findByRole('dialog')
+    expect(details).toHaveTextContent('audit-resource-6')
+    await browser.click(within(details).getByRole('button', { name: '关闭详情' }))
+    await browser.click(screen.getByRole('combobox', { name: '治理组织' }))
+    await browser.click(
       await screen.findByText('其他组织 · other-org', {
         selector: '.ant-select-item-option-content',
       }),
     )
     await screen.findByText('无权读取组织成员')
-    await userEvent.click(screen.getByRole('tab', { name: /审计与安全/ }))
+    const otherAuditTab = screen.getByText('审计与安全').closest('[role="tab"]')!
+    expect(otherAuditTab).toHaveRole('tab')
+    expect(otherAuditTab).toHaveAccessibleName(/审计与安全/)
+    expect(otherAuditTab).toBeVisible()
+    expect(otherAuditTab.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(otherAuditTab)
     expect(await screen.findByText('无权读取组织审计')).toBeVisible()
     expect(screen.queryByText('audit-resource-6')).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
