@@ -107,7 +107,10 @@ export function useAIReview() {
       return next
     })
   }
-  async function createJob(input: Omit<AIJobInput, 'project_id'>): Promise<boolean> {
+  async function createJob(
+    input: Omit<AIJobInput, 'project_id'>,
+    onCreated?: () => void,
+  ): Promise<boolean> {
     if (!projectId || !canEdit || !status.isSuccess || !status.data.enabled || !commandCurrent())
       return false
     const project = projectId
@@ -115,6 +118,7 @@ export function useAIReview() {
       const job = await createMutation.mutateAsync({ ...input, project_id: project })
       void queryClient.invalidateQueries({ queryKey: ['ai-jobs', project] })
       if (!commandCurrent()) return false
+      onCreated?.()
       selectJob(job.id)
       void message.success('AI 任务已进入独立队列')
       return true

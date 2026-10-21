@@ -1,4 +1,4 @@
-import { Modal } from 'antd'
+import { Modal, theme } from 'antd'
 import { useContext, useEffect, type RefObject } from 'react'
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom'
 
@@ -23,9 +23,11 @@ export default function AIDraftProtection(props: Props) {
 }
 function AINavigationGuard({ dirty, allowLeaveRef, title, description }: Props) {
   const blocker = useBlocker(() => dirty && !allowLeaveRef.current)
+  const { token } = theme.useToken()
   return (
     <Modal
       open={blocker.state === 'blocked'}
+      zIndex={token.zIndexPopupBase + 100}
       title={title}
       okText="放弃修改并离开"
       cancelText="继续编辑"

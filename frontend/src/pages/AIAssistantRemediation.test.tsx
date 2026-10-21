@@ -517,6 +517,130 @@ describe('AI audit remediation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(writes).toBe(1)
   })
+  it.each([202, 503])(
+    'keeps task draft protection while creation awaits its server receipt (%s)',
+    async (responseStatus) => {
+      setupRequests()
+      let writes = 0
+      let release: (() => void) | undefined
+      server.use(
+        http.get('/api/v1/ai/jobs/:id', ({ params }) =>
+          HttpResponse.json({ ...job, id: params.id, status: 'pending' }),
+        ),
+        http.post('/api/v1/ai/jobs', async () => {
+          writes++
+          await new Promise<void>((resolve) => {
+            release = resolve
+          })
+          if (responseStatus === 503)
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'AI_QUEUE_UNAVAILABLE',
+                  message: '受控队列失败',
+                  trace_id: 'pending-submit-trace',
+                },
+              },
+              { status: 503 },
+            )
+          return HttpResponse.json(
+            { ...job, id: 'created-job', status: 'pending' },
+            { status: 202 },
+          )
+        }),
+      )
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })
+      const router = createMemoryRouter(
+        [
+          {
+            path: '/projects/:projectId/*',
+            element: (
+              <ProjectProvider>
+                <AIAssistantPage />
+              </ProjectProvider>
+            ),
+          },
+        ],
+        { initialEntries: [`/projects/${project.id}/ai`] },
+      )
+      render(
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <App>
+            <QueryClientProvider client={client}>
+              <RouterProvider router={router} />
+            </QueryClientProvider>
+          </App>
+        </ConfigProvider>,
+      )
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeEnabled(),
+      )
+      await userEvent.click(screen.getByRole('button', { name: /新建 AI 任务/ }))
+      const dialog = screen.getByRole('dialog', { name: '新建 AI 建议任务' })
+      await userEvent.click(within(dialog).getByLabelText('任务类型'))
+      await userEvent.click(
+        screen.getByText('失败归因', { selector: '.ant-select-item-option-content' }),
+      )
+      fireEvent.change(within(dialog).getByLabelText('失败现象'), {
+        target: { value: '明确提交的现象' },
+      })
+      await userEvent.click(within(dialog).getByRole('button', { name: '预览提交材料' }))
+      const unload = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(unload)
+      expect(unload.defaultPrevented).toBe(true)
+      await act(async () => {
+        await router.navigate(`/projects/${project.id}/ai?job=other`)
+      })
+      const title = await screen.findByText('提交材料尚未保存', { selector: '.ant-modal-title' })
+      await userEvent.click(
+        within(title.closest('.ant-modal') as HTMLElement).getByRole('button', {
+          name: '继续编辑',
+        }),
+      )
+      expect(screen.getByLabelText('最终提交负载')).toHaveTextContent('明确提交的现象')
+      await userEvent.click(within(dialog).getByRole('button', { name: '确认提交任务' }))
+      await waitFor(() => expect(writes).toBe(1))
+      try {
+        const pendingUnload = new Event('beforeunload', { cancelable: true })
+        window.dispatchEvent(pendingUnload)
+        expect(pendingUnload.defaultPrevented).toBe(true)
+        expect(within(dialog).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument()
+        expect(within(dialog).getByRole('button', { name: '返回编辑' })).toBeDisabled()
+        await act(async () => {
+          await router.navigate(`/projects/${project.id}/ai?job=pending-other`)
+        })
+        const pendingTitle = await screen.findByText('提交材料尚未保存', {
+          selector: '.ant-modal-title',
+        })
+        await userEvent.click(
+          within(pendingTitle.closest('.ant-modal') as HTMLElement).getByRole('button', {
+            name: '继续编辑',
+          }),
+        )
+        expect(new URLSearchParams(router.state.location.search).get('job')).toBeNull()
+        expect(screen.getByLabelText('最终提交负载')).toHaveTextContent('明确提交的现象')
+      } finally {
+        await act(async () => {
+          release?.()
+        })
+      }
+      if (responseStatus === 202) {
+        await waitFor(() =>
+          expect(new URLSearchParams(router.state.location.search).get('job')).toBe('created-job'),
+        )
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      } else {
+        expect(await screen.findByText(/提交结果未确认，已保留材料/)).toBeVisible()
+        expect(screen.getByLabelText('最终提交负载')).toHaveTextContent('明确提交的现象')
+        const failedUnload = new Event('beforeunload', { cancelable: true })
+        window.dispatchEvent(failedUnload)
+        expect(failedUnload.defaultPrevented).toBe(true)
+      }
+      expect(writes).toBe(1)
+    },
+  )
   it('keeps change-set jobs read-only in the generic assistant and points to their dedicated review module', async () => {
     setup(`/projects/${project.id}/ai?job=${job.id}&suggestion=change-item`)
     let writes = 0

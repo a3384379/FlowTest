@@ -63,7 +63,7 @@ export default function CreateAIJobDialog(props: {
   submitting: boolean
   sampleEnabled: boolean
   onClose: () => void
-  onCreate: (input: Omit<AIJobInput, 'project_id'>) => Promise<boolean>
+  onCreate: (input: Omit<AIJobInput, 'project_id'>, onCreated?: () => void) => Promise<boolean>
 }) {
   if (!props.open) return null
   return <CreateAIJobForm {...props} />
@@ -79,7 +79,7 @@ function CreateAIJobForm({
   submitting: boolean
   sampleEnabled: boolean
   onClose: () => void
-  onCreate: (input: Omit<AIJobInput, 'project_id'>) => Promise<boolean>
+  onCreate: (input: Omit<AIJobInput, 'project_id'>, onCreated?: () => void) => Promise<boolean>
 }) {
   const [form] = Form.useForm<JobForm>()
   const allowLeaveRef = useRef(false)
@@ -106,8 +106,11 @@ function CreateAIJobForm({
     if (!preview || !policy.isSuccess || (preview.sample !== undefined && !sampleEnabled)) return
     const { project_id: project, ...input } = preview
     if (project !== projectId) return
-    allowLeaveRef.current = true
-    if (await onCreate(input)) {
+    if (
+      await onCreate(input, () => {
+        allowLeaveRef.current = true
+      })
+    ) {
       setDirty(false)
       onClose()
     } else {
@@ -129,13 +132,25 @@ function CreateAIJobForm({
         width={760}
         style={{ top: 24 }}
         styles={{ body: { maxHeight: 'calc(100dvh - 190px)', overflowY: 'auto' } }}
-        onCancel={() => (dirty ? setDiscard(true) : onClose())}
+        closable={!submitting}
+        maskClosable={!submitting}
+        keyboard={!submitting}
+        onCancel={() => {
+          if (!submitting) {
+            if (dirty) setDiscard(true)
+            else onClose()
+          }
+        }}
         footer={
           <Space wrap>
             <Button disabled={submitting} onClick={() => (dirty ? setDiscard(true) : onClose())}>
               取消
             </Button>
-            {preview ? <Button onClick={() => setPreview(null)}>返回编辑</Button> : null}
+            {preview ? (
+              <Button disabled={submitting} onClick={() => setPreview(null)}>
+                返回编辑
+              </Button>
+            ) : null}
             <Button
               type="primary"
               loading={submitting}
