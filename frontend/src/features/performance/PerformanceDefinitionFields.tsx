@@ -258,12 +258,12 @@ function StepFields({ index }: { index: number }) {
                     <Input maxLength={128} />
                   </Form.Item>
                 </Col>
-                <Col xs={20} sm={11}>
+                <Col xs={24} sm={11}>
                   <Form.Item name={[field.name, 'value']} label={`请求头${position + 1}值`}>
                     <Input maxLength={8192} />
                   </Form.Item>
                 </Col>
-                <Col xs={4} sm={4}>
+                <Col xs={24} sm={4}>
                   <Button danger onClick={() => remove(field.name)}>
                     删除请求头
                   </Button>

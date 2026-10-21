@@ -29,3 +29,17 @@
     margin-inline-start: 0;
   }
 }
+
+@media (max-width: 600px) {
+  .performance-scenario-dialog .ant-card-head-title {
+    flex: 0 0 100%;
+    white-space: normal;
+  }
+  .performance-scenario-dialog .ant-card-extra {
+    width: 100%;
+  }
+}
+
+.performance-scenario-dialog .ant-form {
+  padding-inline: 8px;
+}
