@@ -63,6 +63,12 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_governance_tables(connection)
     await _ensure_test_context_tables(connection)
     await _ensure_flow_spec_change_set_columns(connection)
+    await _add_column_if_missing(
+        connection,
+        table="ai_change_sets",
+        column="review_baselines",
+        definition="JSON NOT NULL DEFAULT '[]'",
+    )
     await _ensure_s42_controlled_write_tables(connection)
     await _ensure_s62_test_plan_update_constraint(connection)
     await _ensure_s47_test_design_columns(connection)
