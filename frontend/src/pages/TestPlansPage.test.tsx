@@ -151,12 +151,23 @@ describe('TestPlansPage', () => {
         return HttpResponse.json({})
       }),
     )
-    renderPage('viewer')
-    expect(await screen.findByText('每日回归')).toBeVisible()
-    for (const name of [/新建计划/, /生成 CI Token/, /运行/, /取消/]) {
-      const button = screen.getByRole('button', { name })
+    const view = renderPage('viewer')
+    const workspace = within(view.container)
+    const planName = await workspace.findByText('每日回归')
+    expect(planName).toBeVisible()
+    const heading = within(view.container.querySelector('.page-heading')! as HTMLElement)
+    const planRow = within(planName.closest('tr')!)
+    const queue = within(workspace.getByText('运行队列').closest('.ant-card')! as HTMLElement)
+    const browser = userEvent.setup()
+    const buttons = [
+      heading.getByRole('button', { name: /新建计划/ }),
+      heading.getByRole('button', { name: /生成 CI Token/ }),
+      planRow.getByRole('button', { name: /运行/ }),
+      await queue.findByRole('button', { name: /取消/ }),
+    ]
+    for (const button of buttons) {
       expect(button).toBeDisabled()
-      await userEvent.click(button)
+      await browser.click(button)
     }
     expect(screen.queryByText('CI 凭据')).not.toBeInTheDocument()
     expect(forbiddenRequests).toBe(0)
