@@ -1,5 +1,5 @@
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -16,6 +16,14 @@ class MockRequestContext:
     query: Mapping[str, str]
     headers: Mapping[str, str]
     body: JsonValue
+
+
+@dataclass(frozen=True, slots=True)
+class MockTemplateReference:
+    source: str
+    path: str
+    start: int
+    end: int
 
 
 _PATH_SEGMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
@@ -64,6 +72,11 @@ def render_mock_template(template: JsonValue, context: MockRequestContext) -> Js
         lambda match: _string_value(_resolve_placeholder(match.group(1), match.group(2), context)),
         template,
     )
+
+
+def mock_template_references(template: str) -> Iterator[MockTemplateReference]:
+    for match in _PLACEHOLDER.finditer(template):
+        yield MockTemplateReference(match.group(1), match.group(2), match.start(), match.end())
 
 
 def match_mock_conditions(

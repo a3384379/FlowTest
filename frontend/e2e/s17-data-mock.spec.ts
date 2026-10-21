@@ -50,14 +50,17 @@ async function createAndDispatchMock(page: Page, suffix: string) {
     (response) =>
       response.url().endsWith('/mock-services') && response.request().method() === 'POST',
   )
-  await page.getByRole('button', { name: /新\s*建/ }).click()
+  const serviceCard = page.locator('.ant-card').filter({
+    has: page.getByText('新建 Mock 服务', { exact: true }),
+  })
+  await serviceCard.getByRole('button', { name: /新\s*建/ }).click()
   expect((await serviceCreated).ok()).toBeTruthy()
   await expect(page.getByText(`/api/v1/mock/${slug}/`)).toBeVisible()
 
   const routeCard = page.locator('.ant-card').filter({ hasText: '新增路由规则' })
-  await routeCard.getByLabel('名称').fill('查询用户')
-  await routeCard.getByLabel('路径').fill('/users/{user_id}')
-  await routeCard.getByLabel('响应模板（JSON）').fill('{"id":"{{path.user_id}}"}')
+  await routeCard.getByLabel('名称', { exact: true }).fill('查询用户')
+  await routeCard.getByLabel('路径', { exact: true }).fill('/users/{user_id}')
+  await routeCard.getByLabel('响应模板（JSON）', { exact: true }).fill('{"id":"{{path.user_id}}"}')
   const routeCreated = page.waitForResponse(
     (response) =>
       response.url().includes('/mock-services/') &&

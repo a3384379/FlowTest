@@ -80,3 +80,41 @@ F-PRJ-01、F-PRJ-02在源码 `af4659f58f295fad4e15eb0dad489f3196391c68` 完成�
 ### M06 门禁补修源码65fb43d
 
 S14旧目录定位与新Vite高危公告阻断远程检查，修补详情见batch-10“最新远程检查补修”。后端树b15a36616bb120dd0b196550d4401acc3fb90e38未变；前端树824af86f6f2add63812813817d908711fb59120b重新完成格式、lint/类型、157文件1034用例、覆盖率85.89/82.15/85.44/88.34%与生产构建。高危依赖审计退出0。真实隔离浏览器团队搜索、加成员、团队授权整条路径通过。最新HEAD正式门禁与合并后检查仍需另行确认。
+
+## 数据与Mock最终本地验证
+
+`F-DATA-01/02`在源码 `eb0b596fb4d13174726d8b60b4d7c5e3fb4cb060` 完成。后端树 `d0096a516e80d991a72c9a0b3305ccef2b525121`：格式、Ruff、mypy442文件通过；1874通过、14跳过、2项既有警告，覆盖率91.05%。前端树 `f5245a50446913511c1f55c0a4a21301f308ce3c`：格式、lint/类型、159文件1056用例及生产构建通过，无未处理异常，覆盖率85.94/82.01/85.52/88.41%。完整日志 `remediation-mock-eb0b596-backend-full.log`、`remediation-mock-eb0b596-frontend-full.log`；后续仅文档收尾。
+
+59个后端和30个前端具名专项、实际Mock/预览对照、同ID启停后备、失败保留字段、切服务保护、1440/390px布局及S17同路径真实UI创建通过。额外复核修复数据库JSON转义误判大小：同一已保存20000中文字符模板，实际UTF-8为60002字节，原422、补修后200且正文一致；实际预算未放宽。合同、精确源码、失败记录和证据文件见[第十一批](batch-11.md)。
+
+当前37/73项本地完成、36项待完成、33项已合并。项目治理PR #141和本批的最新正式门禁、合并及合并后回归独立确认；73项尚未完成。PR #140合并后39505978249因Vite新公告失败，其余检查通过；后续修复不改变该次失败记录。
+
+## 项目治理合并与Mock后续交付
+
+[PR #141](https://github.com/a3384379/FlowTest/pull/141)最终HEAD `b4f0ea592c082b6153022da47ae408e279525e2a` 的[正式Required Gate 39513064716](https://github.com/a3384379/FlowTest/actions/runs/39513064716)成功，审查线程为空且无下一页，按匹配SHA命令合并main为 `9e9d95ce6deb3a5dfd669ae6b4a7eae731055d33`。合并后[Full Regression 39517147484](https://github.com/a3384379/FlowTest/actions/runs/39517147484)已结束为成功，已核对精确head一致；该结果独立于PR门禁及正式环境验收。
+
+数据与Mock [PR #142](https://github.com/a3384379/FlowTest/pull/142)同步该main时仅保留三份包含最新验证回执的整改文档，后端树 `d0096a516e80d991a72c9a0b3305ccef2b525121`、前端树 `f5245a50446913511c1f55c0a4a21301f308ce3c` 均与最终完整本地验证一致。当前37/73项本地完成、36项待完成、35项已合并；Mock的2项尚未合并。
+
+## M09 远端失败定位与测试补修
+
+PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运行39517249183](https://github.com/a3384379/FlowTest/actions/runs/39517249183)最终失败：frontend-full中3个测试超时、1个错误提示唯一性断言失败，1052通过、4失败；backend/full与集成、Compose完整smoke（含S17）、Windows及升级作业通过。旧失败保留，不能将其他作业成功视为正式Required Gate通过。
+
+测试补修提交 `0e771b434c26305cbb0bdcc2709ee527c8e07939` 将查询限制到本次render及相应表单，复用具名控件，在测试中关闭动画，等待保存后启停控件可用；服务目录fixture按实际服务ID隔离。失败保存保留输入与唯一错误提示断言，并新增真实PUT调用恰好一次的断言。未提高超时、跳过测试或弱化失败断言，没有修改产品实现。
+
+3个具名文件30项定向测试通过，相关格式、ESLint和TypeScript通过。随后精确前端树 `eeaa1ebd93e4439fbb139ff219295e97108b2996` 的完整检查通过：159文件1056项、无未处理异常，覆盖率85.94/82.01/85.52/88.41%，格式、lint/类型和生产构建通过。后端树仍为 `d0096a516e80d991a72c9a0b3305ccef2b525121`，与最终1874项完整检查一致，未重复运行不变后端。日志 `remediation-mock-ci-scoped-targeted.log`、`remediation-mock-ci-followup-frontend-full.log`，旧失败完整日志 `remediation-mock-pr142-ci-failed.log`。
+
+本地37项完成、35项已合并的数量不变。下一步仅以推送后最新HEAD的正式Required Gate及审查状态决定合并；不把本地通过或旧HEAD的部分远端通过当作新HEAD门禁。
+
+## M09 审查补修：高级JSON原始重复键
+
+PR #142 在HEAD `cf4f92dbc02c9e4f9631a4d08fcd6d99f11d0fdb` 的[正式Required Gate 39524674004](https://github.com/a3384379/FlowTest/actions/runs/39524674004)成功；合并前核对仍有一项有效审查未解决：JSON.parse先折叠同名键，使高级JSON模式绕过重复键校验。因此尚未合并，没有把门禁成功视为审查完成。
+
+补修 `d13b9fb67e870e31a2e9dd0ed467e2330fac2ec7` 在确认合法JSON对象后直接读取原始字符串键值，再交给既有重复键检查；保留转义解码后的键身份、Header不区分大小写和字符串类型约束。无需新依赖，不改变响应体JSON的既有合同。即使非法值随后被同名键覆盖，也明确拒绝；引号、反斜杠、Unicode、空字符串、constructor和__proto__作为普通自有属性保持。
+
+先新增反例复现5失败/18通过；修复后4个具名文件37项通过，表单证明保存、预览与转回键值行均拒绝重复输入且原文保留。格式、ESLint和生产构建通过。日志 `remediation-mock-duplicate-keys-before.log`、`remediation-mock-duplicate-keys-targeted.log`、`remediation-mock-duplicate-keys-build.log`。
+
+最新前端树 `41c0371ab5964a9542a8d8e0de71656bcbc5e506` 完整检查正在运行，后端树d0096a5未改；更新提交后重新确认最新HEAD正式门禁及审查，不沿用cf4旧HEAD成功来合并。
+
+### 原始重复键补修的完整检查终态
+
+精确frontend树 `41c0371ab5964a9542a8d8e0de71656bcbc5e506` 完整检查通过：160文件1063项，无未处理异常，覆盖率85.96/82.05/85.52/88.43%，格式、lint/类型和生产构建通过。后端树d0096a5未变，沿用同树1874项完整后端结果。日志 `remediation-mock-raw-keys-frontend-full.log`。已据修复和反例验证解决原始重复键审查线程；本次文档提交不改变源码树，仍等待最新HEAD正式门禁才能合并。
