@@ -21,6 +21,7 @@ import {
 import { useSearchParams } from 'react-router-dom'
 
 import CreatePlanDialog from '../features/task-plans/CreatePlanDialog'
+import FocusedTestPlan from '../features/task-plans/FocusedTestPlan'
 import EditTestPlanDialog from '../features/task-plans/EditTestPlanDialog'
 import TestPlanRunDetails from '../features/task-plans/TestPlanRunDetails'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
@@ -40,6 +41,7 @@ function TaskPlanWorkspace() {
     <>
       <TaskHeading state={state} />
       <TaskErrorAlert state={state} />
+      {state.focusedId && <FocusedTestPlan state={state} />}
       <TaskWorkspace state={state} focusedId={searchParams.get('focus') ?? undefined} />
       <TokenCard state={state} />
       <TaskDialogs state={state} />
@@ -111,7 +113,10 @@ function TaskHeading({ state }: { state: TaskState }) {
           type="primary"
           icon={<PlusOutlined />}
           disabled={cannotCreate}
-          onClick={() => state.setCreateOpen(true)}
+          onClick={() => {
+            state.clearCreateError()
+            state.setCreateOpen(true)
+          }}
         >
           新建计划
         </Button>
@@ -132,9 +137,10 @@ function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: str
           total={state.plans.data?.total ?? 0}
           onPageChange={state.setPlanPage}
           onRun={state.execute}
+          onFocus={state.setFocusedId}
           onEdit={state.setEditingPlan}
           onToggle={state.togglePlan}
-          updating={state.updatingPlan}
+          updating={state.updatingPlan || state.running}
         />
       </Card>
       <Card title="运行队列" loading={state.runs.isLoading}>
@@ -213,6 +219,7 @@ function TaskDialogs({ state }: { state: TaskState }) {
         testCases={state.testCases.data?.items.filter(isPublished) ?? []}
         testSuites={state.testSuites.data?.items.filter(isPublished) ?? []}
         submitting={state.creating}
+        error={state.createError}
         onClose={() => state.setCreateOpen(false)}
         onCreate={state.addPlan}
       />
@@ -237,6 +244,7 @@ function PlanTable({
   total,
   onPageChange,
   onRun,
+  onFocus,
   onEdit,
   onToggle,
   updating,
@@ -248,6 +256,7 @@ function PlanTable({
   total: number
   onPageChange: (page: number) => void
   onRun: (id: string) => void
+  onFocus: (id: string) => void
   onEdit: (plan: TestPlan) => void
   onToggle: (plan: TestPlan) => Promise<void>
   updating: boolean
@@ -267,7 +276,14 @@ function PlanTable({
       rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       locale={{ emptyText: '暂无测试计划' }}
       columns={[
-        { title: '名称', dataIndex: 'name' },
+        {
+          title: '名称',
+          render: (_, plan: TestPlan) => (
+            <Button type="link" onClick={() => onFocus(plan.id)}>
+              {plan.name}
+            </Button>
+          ),
+        },
         {
           title: '启用',
           render: (_, plan: TestPlan) => (
@@ -317,7 +333,7 @@ function PlanTable({
               </Button>
               <Button
                 type="link"
-                disabled={readOnly}
+                disabled={readOnly || updating}
                 icon={<PlayCircleOutlined />}
                 onClick={() => onRun(plan.id)}
               >
