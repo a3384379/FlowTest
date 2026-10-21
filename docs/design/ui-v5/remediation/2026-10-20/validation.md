@@ -111,7 +111,6 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 
 整合Mock及手机补修后的精确源码cc93e93两侧完整检查已通过：后端1877项/14跳过/2项既有警告/91.06%，Ruff与mypy442文件通过；前端161文件1063项，无未处理异常，覆盖率85.92/82.01/85.50/88.38%，格式、lint/类型和构建通过。backend树f222dd90d1277f84a0f60dbb9227058794319b1a、frontend树9843d80a4f372915dde61f2d0f538ee8c0617590，未把此前3db检查套用为整合结果。GitHub最新门禁、合并后回归及正式环境验收独立记录。
 
-
 ## Mock合并与契约中心同步
 
 [PR #142](https://github.com/a3384379/FlowTest/pull/142)最终HEAD `2b332c04435509661f5f33fb21597f838f241616` 的[正式Required Gate 39536764845](https://github.com/a3384379/FlowTest/actions/runs/39536764845)成功，审查线程全部解决且无下一页；按匹配SHA命令合并为main `df1d481330b8d063ea0b18f5397d089fa6de4964`。该精确提交的合并后Full Regression已单独发起，尚未确认终态。
@@ -150,7 +149,6 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 
 源码68c088ae6217ec79af34e769e987b58c8eb9a74d、frontend树2e540bd619585c531edb26cbcfd8f0c8e55abc5a：166文件1103项完整通过，无未处理异常，覆盖率85.88/81.88/85.59/88.42%，格式/lint/类型/构建通过。4文件16项专项，原后端tasking27项及真实三类型三环境运行、21条目录页外读取、101/未发布/跨项目拒绝和迟到响应补验通过。backend树24f0584db804775d4b88af8853cbab0af63dff46与1882项/91.07%的完整通过一致，无后端改动。完整日志remediation-task-final-frontend-full.log，细节和未运行范围见[第十四批](batch-14.md)。当前44本地完成、29待完成、37已合并，新HEAD正式门禁、合并和合并后回归另行确认。
 
-
 ## M13 环境实验室最终验证
 
 详见[第十五批](batch-15.md)。backend树b10fd948e99922afa1dacaf6ced5914e8fd17622完整1886通过/14跳过/2既有警告/91.08%，Ruff和mypy442通过；具名read/lab11项通过。最终8101b8a的frontend树feb944c5676ae60a611d28940d4b8fd85f4eb2f2完整169文件1117项、无未处理异常、85.97/81.98/85.74/88.54%，格式/lint/类型/构建通过；4文件21项专项及手机详情页面10项通过。
@@ -161,5 +159,12 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 
 交付补充：PR143的194e376正式Required Gate39546205418成功并保护合并到main915ce9dbcaa0ea4492233143a3dd68218cd4bce5，当前39项已合并；其合并后Full Regression39550844459另行运行。PR144旧HEAD d9bed230门禁成功但有auth覆盖审查问题，552b81a已本地补修并通过25项专项，没有提前合并。
 
-
 2026-10-21 GitHub契约中心交付：PR #143 在head `194e376348811494aa04fd8ca492cded40259928` 的正式Required Gate运行39546205418成功，全部已选择的检查（含Compose/S27、后端、前端、升级和Windows）通过；reviewThreads为空且分页完整。按该head保护合并，main为`915ce9dbcaa0ea4492233143a3dd68218cd4bce5`，不是仅本地通过。合并后Full Regression另行跟踪，未用PR结果替代。已合并整改项39/73。
+
+## M14与R2最终整合验证
+
+详见[第十六批](batch-16.md)。最终源码989d4a1568a9227a1238a1822b80c22d53dcfa76，frontend树90ae16e9218941fb5ab24167c05b72c8c8df79f8的格式、lint/TypeScript、171文件1138项、生产构建完整通过，无未处理异常；覆盖率85.99/82.04/85.81/88.56%。日志remediation-r2-ownership-final-frontend-full.log。backend树b10fd948e99922afa1dacaf6ced5914e8fd17622未变，与1886项/14跳过/2既有警告/91.08%、Ruff/mypy442的完整验证一致；性能具名6项通过。
+
+真实k6双步骤健康检查v1/v2各显式运行一次，分别100/98请求通过，新运行返回ID正确选中、旧冻结配置及哈希不变，后退/刷新/前进恢复正确；实际额外队列命令0。复杂阶梯版本、503保留重试、0.015秒、差异/JSON应用/未保存保护及1440/390px通过。路由切换后React尚未提交的时序先在性能浏览器复现，又由M12/M13原生测试复现，再逐项修复；11文件64项通过，最终全量独立复验。S25本地仅更新标签/ID断言并完成静态/发现检查，未把CLI实际运行冒称完整框架S25/S26通过。
+
+当前48/73项本地完成、25待完成、39已合并，R2本地整改完成。PR144准备交付M11至M14九项，旧d9bed230正式门禁不能替代推送后最新HEAD的Required Gate及审查。契约中心合并后Full Regression39550844459已结束成功，精确main915ce9dbcaa0ea4492233143a3dd68218cd4bce5。
