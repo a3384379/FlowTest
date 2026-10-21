@@ -67,3 +67,15 @@
 - 前端：[批次审核](../../../../../frontend/src/features/contracts/ContractAutomationPanel.tsx)、[独立选择](../../../../../frontend/src/features/contracts/ContractReferencePicker.tsx)、[冻结证据](../../../../../frontend/src/features/contracts/ContractEvidenceDrawer.tsx)、[契约中心](../../../../../frontend/src/pages/ContractHubPage.tsx)、[样式](../../../../../frontend/src/styles.css)，及相关SDK和具名测试。
 - 尚需本批最新HEAD正式Required Gate与审查、GitHub合并及合并后回归。S18/S27正向流程保留，未凭猜测改定位/超时/跳过；完整Compose验收由本批PR独立确认。
 - 未访问真实外部Broker/Provider，未做正式部署及真实Windows终端运行；本批不代表全站设计签收。
+
+## PR143正式验收补修
+
+旧HEAD `2475a75166fa8173bebdef5c30a63a699b46e18e` 的正式运行39542617128结束失败：Compose浏览器66项通过、仅S27失败，其余原门禁作业通过。首次全局同名文字定位误点弹窗后背景Provider；重试又在导入弹窗未关闭时匹配两个提供方下拉框。`d49111d2cddddba2370ef305084477687f2e7c1b` 将三处引用选择限定为当前展开选项，等待OpenAPI弹窗隐藏后操作兼容矩阵，版本输入按真实标签定位，保留原180秒上限、重试规则和全部业务断言。
+
+真实浏览器又复现先验证再导入时两张保留表单共用provider_version ID，导致可见标签指向隐藏输入。新增顺序回归修复前1失败，两个Form添加独立名称后，点击当前标签正确聚焦当前输入。测试使用关闭动画及重新读取当前输入节点，未移除可见性/值断言。3个具名前端文件22项通过，格式/ESLint/类型、构建及既有S27用例发现检查通过。
+
+源码d49111d的frontend树 `92ad3e044604d3d9890adb8859991dadae5187b5` 独立完整检查通过：162文件1071项、无未处理异常，覆盖率85.97/82.05/85.56/88.44%，格式/lint/类型/构建通过。backend树 `f222dd90d1277f84a0f60dbb9227058794319b1a` 未变，仍对应1877项/91.06%的完整通过。日志 `remediation-contract-provider-label-frontend-full.log`；旧失败与复现日志分别保留。
+
+专用项目 `11582acc-199f-4961-8ca9-3ecd678762b9` 真实Pact导入及本地Provider验证201后，继续OpenAPI绑定、兼容矩阵通过、发布判断safe和两类资产切换，页面异常0。另按先验证弹窗再OpenAPI的顺序做只读检查，两个输入ID不同、点击标签聚焦正确，命令0、异常0；日志 `remediation-contract-s27-browser-followup-resume.log`、`remediation-contract-label-focus-browser.log`。补验分阶段继续同一专用样本，没有重复提交失败阶段的已完成命令，也没有访问外部Provider/Broker。
+
+当前39项本地完成、34项待完成、37项已合并；本批新HEAD正式门禁、合并及合并后回归另行确认。Mock合并后Full Regression39541655090已结束成功，精确head为df1d481330b8d063ea0b18f5397d089fa6de4964；不会将该main结果替代本PR的新门禁。
