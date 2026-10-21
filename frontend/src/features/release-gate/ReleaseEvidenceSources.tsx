@@ -158,6 +158,8 @@ function sourceMetadata(snapshot: Record<string, unknown>, id: string | null) {
     ['decision', '兼容性结果'],
     ['provider_version', '提供方版本'],
     ['scenario_version', '场景版本'],
+    ['scenario_id', '场景 ID'],
+    ['algorithm_version', '算法版本'],
     ['evaluated_at', '评估时间'],
     ['checked_at', '契约检查时间'],
     ['completed_at', '完成时间'],
@@ -166,6 +168,8 @@ function sourceMetadata(snapshot: Record<string, unknown>, id: string | null) {
     ['source_fingerprint', '来源指纹'],
     ['quality_gate_id', '质量门禁 ID'],
     ['fencing_token', '隔离令牌编号'],
+    ['attempts', '尝试次数'],
+    ['completed_lease_count', '完成租约数'],
   ] as const
   return [
     { key: 'id', label: '来源 ID', children: id ?? '未提供' },
