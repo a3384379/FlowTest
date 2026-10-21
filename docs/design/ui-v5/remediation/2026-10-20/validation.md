@@ -91,6 +91,16 @@ S14旧目录定位与新Vite高危公告阻断远程检查，修补详情见batc
 
 ## 项目治理合并与Mock后续交付
 
-[PR #141](https://github.com/a3384379/FlowTest/pull/141)最终HEAD `b4f0ea592c082b6153022da47ae408e279525e2a` 的[正式Required Gate 39513064716](https://github.com/a3384379/FlowTest/actions/runs/39513064716)成功，审查线程为空且无下一页，按匹配SHA命令合并main为 `9e9d95ce6deb3a5dfd669ae6b4a7eae731055d33`。合并后[Full Regression 39517147484](https://github.com/a3384379/FlowTest/actions/runs/39517147484)已启动，核对精确head一致，结果待结束；PR门禁成功不代替合并后回归成功。
+[PR #141](https://github.com/a3384379/FlowTest/pull/141)最终HEAD `b4f0ea592c082b6153022da47ae408e279525e2a` 的[正式Required Gate 39513064716](https://github.com/a3384379/FlowTest/actions/runs/39513064716)成功，审查线程为空且无下一页，按匹配SHA命令合并main为 `9e9d95ce6deb3a5dfd669ae6b4a7eae731055d33`。合并后[Full Regression 39517147484](https://github.com/a3384379/FlowTest/actions/runs/39517147484)已结束为成功，已核对精确head一致；该结果独立于PR门禁及正式环境验收。
 
 数据与Mock [PR #142](https://github.com/a3384379/FlowTest/pull/142)同步该main时仅保留三份包含最新验证回执的整改文档，后端树 `d0096a516e80d991a72c9a0b3305ccef2b525121`、前端树 `f5245a50446913511c1f55c0a4a21301f308ce3c` 均与最终完整本地验证一致。当前37/73项本地完成、36项待完成、35项已合并；Mock的2项尚未合并。
+
+## M09 远端失败定位与测试补修
+
+PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运行39517249183](https://github.com/a3384379/FlowTest/actions/runs/39517249183)最终失败：frontend-full中3个测试超时、1个错误提示唯一性断言失败，1052通过、4失败；backend/full与集成、Compose完整smoke（含S17）、Windows及升级作业通过。旧失败保留，不能将其他作业成功视为正式Required Gate通过。
+
+测试补修提交 `0e771b434c26305cbb0bdcc2709ee527c8e07939` 将查询限制到本次render及相应表单，复用具名控件，在测试中关闭动画，等待保存后启停控件可用；服务目录fixture按实际服务ID隔离。失败保存保留输入与唯一错误提示断言，并新增真实PUT调用恰好一次的断言。未提高超时、跳过测试或弱化失败断言，没有修改产品实现。
+
+3个具名文件30项定向测试通过，相关格式、ESLint和TypeScript通过。随后精确前端树 `eeaa1ebd93e4439fbb139ff219295e97108b2996` 的完整检查通过：159文件1056项、无未处理异常，覆盖率85.94/82.01/85.52/88.41%，格式、lint/类型和生产构建通过。后端树仍为 `d0096a516e80d991a72c9a0b3305ccef2b525121`，与最终1874项完整检查一致，未重复运行不变后端。日志 `remediation-mock-ci-scoped-targeted.log`、`remediation-mock-ci-followup-frontend-full.log`，旧失败完整日志 `remediation-mock-pr142-ci-failed.log`。
+
+本地37项完成、35项已合并的数量不变。下一步仅以推送后最新HEAD的正式Required Gate及审查状态决定合并；不把本地通过或旧HEAD的部分远端通过当作新HEAD门禁。
