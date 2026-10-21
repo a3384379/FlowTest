@@ -184,3 +184,7 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 最终源码81a003a8f8f2ca3a9fac3afe540116adf10b05eb，backend树f9576a75393421612feb7982ba2cc4e1196a05fc：Ruff格式/检查646文件、mypy442、1888项/14跳过/2既有警告通过，覆盖率91.09%。frontend树bc19a031672c1a86be489da12f570ab175510234：格式、lint/类型、172文件1162项、覆盖率86.03/82.16/85.82/88.60%及生产构建通过，无未处理异常。日志remediation-quality-order-final-backend-full.log、remediation-quality-read-state-final-frontend-full.log。
 
 30项前端和5项后端专项、一次真实内部健康检查、22条实际风险快照、页外原v1/推荐v2、两次显式隔离/恢复、跨项目404/trace、150行分页重读唯一性、1440/390px以及明确合成的迟到/503/404注入均通过。149条目录记录为明确合成fixture，不充作真实执行。全部回执与中间失败/未运行范围见[第十七批](batch-17.md)。本地50/73完成、23待完成、39已合并。PR144最新a6f52a4正式门禁仍另行跟踪，未提前合并或声称发布。
+
+## 第十八批总览最终检查
+
+见[第十八批详细回执](batch-18.md)。源码0eab68d，backend340518e、frontend05cf78b、src39a47de；make check最终1890项后端、172文件1172项前端、格式/lint/mypy/类型与构建全部通过，覆盖率后端91.09%、前端86.03/82.19/85.82/88.60%，无前端未处理异常。完整日志remediation-dashboard-mobile-final-check.log。补修前130中断不计通过。具名65项前端与7项后端、实际150条PostgreSQL聚合及隔离浏览器精确记录/原v1/503/迟到响应/390px均通过，业务写入0。累计52/73本地完成；远程门禁、合并与部署分别确认。
