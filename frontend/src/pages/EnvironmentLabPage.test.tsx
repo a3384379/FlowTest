@@ -358,6 +358,45 @@ describe('EnvironmentLabPage', () => {
     expect(writes).toBe(0)
   })
 
+  it('refreshes bound-version status immediately when the displayed template is disabled', async () => {
+    let disabled = false
+    let boundReads = 0
+    installHandlers({ instances: [] })
+    server.use(
+      http.get('/api/v1/environment-templates', () =>
+        HttpResponse.json({
+          items: [{ ...template, status: disabled ? 'disabled' : 'active' }],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/environment-instances/${instance.id}`, () =>
+        HttpResponse.json(instance),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/environment-instances/${instance.id}/template-version`,
+        () => {
+          boundReads += 1
+          return HttpResponse.json({ ...template, status: disabled ? 'disabled' : 'active' })
+        },
+      ),
+      http.post(`/api/v1/environment-templates/${template.template_id}/disable`, () => {
+        disabled = true
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    renderPage(`/projects/${project.id}/environments?instance=${instance.id}`)
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('tab', { name: '签名配置与资源' }))
+    expect(await screen.findByText('此实例绑定的签名模板配置')).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '停用', exact: true }))
+    await browser.click(await screen.findByRole('button', { name: 'OK' }))
+    expect(await screen.findByText('环境模板已停用')).toBeVisible()
+    expect(await screen.findByText(/模板已停用；此处保留实例绑定/)).toBeVisible()
+    expect(boundReads).toBe(2)
+  })
+
   it('finds an off-page provision version through its own search, pagination and exact UUID without writing until submitted', async () => {
     const queries: Array<{ page: string | null; search: string | null; active: string | null }> = []
     let writes = 0
