@@ -40,7 +40,10 @@ export function useTestPlans() {
   const [searchParams, setSearchParams] = useSearchParams()
   const focusedId = searchParams.get('focus')
   const selectedRunId = searchParams.get('run')
-  const context = useMemo(() => ({ projectId, focusedId }), [projectId, focusedId])
+  const context = useMemo(
+    () => ({ projectId, focusedId, selectedRunId }),
+    [projectId, focusedId, selectedRunId],
+  )
   const activeContext = useRef<typeof context | null>(context)
   useLayoutEffect(() => {
     activeContext.current = context
@@ -66,7 +69,7 @@ export function useTestPlans() {
     })
   }
   const focusedPlan = useQuery({
-    queryKey: ['test-plan', projectId, focusedId],
+    queryKey: ['test-plan', projectId, focusedId, selectedRunId],
     queryFn: () => getTestPlan(required(projectId), required(focusedId)),
     enabled: Boolean(projectId && focusedId),
   })
@@ -118,25 +121,25 @@ export function useTestPlans() {
     enabled: Boolean(projectId && canManageTokens),
   })
   const createPlan = useMutation({
-    mutationKey: ['task-createPlan', projectId, focusedId],
+    mutationKey: ['task-createPlan', projectId, focusedId, selectedRunId],
     mutationFn: ({ project, input }: { project: string; input: CreateTestPlanInput }) =>
       createTestPlan(project, input),
   })
   const runPlan = useMutation({
-    mutationKey: ['task-runPlan', projectId, focusedId],
+    mutationKey: ['task-runPlan', projectId, focusedId, selectedRunId],
     mutationFn: ({ project, id }: { project: string; id: string }) => runTestPlan(project, id),
   })
   const cancelRun = useMutation({
-    mutationKey: ['task-cancelRun', projectId, focusedId],
+    mutationKey: ['task-cancelRun', projectId, focusedId, selectedRunId],
     mutationFn: ({ project, id }: { project: string; id: string }) =>
       cancelTestPlanRun(project, id),
   })
   const createToken = useMutation({
-    mutationKey: ['task-createToken', projectId, focusedId],
+    mutationKey: ['task-createToken', projectId, focusedId, selectedRunId],
     mutationFn: (project: string) => createServiceToken(project),
   })
   const updatePlan = useMutation({
-    mutationKey: ['task-updatePlan', projectId, focusedId],
+    mutationKey: ['task-updatePlan', projectId, focusedId, selectedRunId],
     mutationFn: ({
       project,
       id,
@@ -148,7 +151,7 @@ export function useTestPlans() {
     }) => updateTestPlan(project, id, input),
   })
   const revokeToken = useMutation({
-    mutationKey: ['task-revokeToken', projectId, focusedId],
+    mutationKey: ['task-revokeToken', projectId, focusedId, selectedRunId],
     mutationFn: ({ project, id }: { project: string; id: string }) =>
       revokeServiceToken(project, id),
   })

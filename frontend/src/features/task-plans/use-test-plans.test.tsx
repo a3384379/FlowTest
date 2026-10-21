@@ -125,4 +125,28 @@ describe('task completion ownership', () => {
     })
     expect(screen.queryByText('测试计划已进入队列')).not.toBeInTheDocument()
   })
+
+  it('keeps the run selected while an earlier queue command is still pending', async () => {
+    let complete!: (value: TestPlanRun) => void
+    const response = new Promise<TestPlanRun>((resolve) => {
+      complete = resolve
+    })
+    const queued = vi.spyOn(services, 'runTestPlan').mockReturnValue(response)
+    const { result } = workspace()
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.execute('original-plan')
+    })
+    await waitFor(() => expect(queued).toHaveBeenCalledOnce())
+    act(() => result.current.setSelectedRunId('already-selected-run'))
+    expect(result.current.selectedRunId).toBe('already-selected-run')
+    await act(async () => {
+      complete(run)
+      await pending
+    })
+    expect(result.current.selectedRunId).toBe('already-selected-run')
+    expect(result.current.focusedId).toBeNull()
+    expect(screen.queryByText('测试计划已进入队列')).not.toBeInTheDocument()
+  })
 })
