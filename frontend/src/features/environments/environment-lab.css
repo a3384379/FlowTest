@@ -1,0 +1,42 @@
+.environment-field-stack {
+  width: 100%;
+}
+.environment-number {
+  width: 100%;
+}
+.environment-template-dialog .ant-modal-body {
+  max-height: calc(100dvh - 220px);
+  overflow-y: auto;
+}
+.environment-template-dialog .ant-card {
+  margin-bottom: 12px;
+}
+.environment-template-dialog .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.environment-template-dialog .ant-table-cell {
+  overflow-wrap: anywhere;
+}
+.environment-bound-template .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+}
+.environment-provision-form {
+  row-gap: 12px;
+}
+@media (max-width: 980px) {
+  .lab-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .environment-template-dialog {
+    top: 16px;
+  }
+  .environment-template-dialog .ant-modal-body {
+    max-height: calc(100dvh - 160px);
+  }
+  .environment-template-dialog .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}

@@ -9,64 +9,38 @@ import {
   Alert,
   Button,
   Card,
-  Checkbox,
   Col,
   Descriptions,
-  Form,
   Input,
-  InputNumber,
   Empty,
   Spin,
   Tabs,
   Timeline,
-  Modal,
   Popconfirm,
   Row,
-  Select,
   Space,
   Statistic,
   Table,
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
 
 import type {
   EnvironmentInstance,
-  EnvironmentTemplateInput,
-  EnvironmentTemplateManifest,
   EnvironmentTemplateVersion,
 } from '../features/environments/environment-service'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import EnvironmentTemplateDialog from '../features/environments/EnvironmentTemplateDialog'
+import EnvironmentProvisionCard from '../features/environments/EnvironmentProvisionCard'
 import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 import { useEnvironmentLab } from '../features/environments/use-environment-lab'
 
-type TemplateForm = {
-  template_key: string
-  display_name: string
-  description: string
-  image: string
-  internal_port: number
-  health_kind: 'http' | 'tcp'
-  health_path: string
-  seed_enabled: boolean
-  seed_path: string
-  default_ttl_seconds: number
-  maximum_ttl_seconds: number
-  cpu_millicores: number
-  memory_megabytes: number
-  pids_limit: number
-  user_id: number
-  group_id: number
-}
-
-type ProvisionForm = { template_version_id: string; ttl_seconds: number }
-
 export default function EnvironmentLabPage() {
   const state = useEnvironmentLab()
-  const [templateDialog, setTemplateDialog] = useState<
+  const [templateDialog, setTemplateDialog] = useRouteScopedState<
     { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null
-  >(null)
+  >(state.projectId, null, null)
   const templates = state.templates.data?.items ?? []
   const instances = state.instances.data?.items ?? []
   return (
@@ -108,8 +82,10 @@ export default function EnvironmentLabPage() {
         totalTemplates={state.templates.data?.total}
         instances={instanceRows(state.instances.data)}
       />
-      <ProvisionCard
-        templates={templates.filter((item) => item.status === 'active')}
+      <EnvironmentProvisionCard
+        key={state.projectId}
+        projectId={state.projectId}
+        enabled={state.featureEnabled}
         disabled={!state.canEdit}
         submitting={state.provisioning}
         onProvision={state.startProvision}
@@ -122,6 +98,11 @@ export default function EnvironmentLabPage() {
             loading={state.templates.isLoading}
             className="performance-card"
           >
+            <Input.Search
+              aria-label="查找签名模板"
+              placeholder="按名称、标识或说明查找"
+              onSearch={state.setTemplateSearch}
+            />
             <TemplateTable
               templates={templates}
               page={state.templatePage}
@@ -152,29 +133,36 @@ export default function EnvironmentLabPage() {
         </div>
         <EnvironmentInstanceWorkspace state={state} />
       </div>
-      {isVersionDialog(templateDialog) ? (
-        <TemplateVersionDialog
-          key={templateDialog.template.id}
-          template={templateDialog.template}
-          submitting={state.templateMutationPending}
-          onClose={() => setTemplateDialog(null)}
-          onSubmit={async (manifest) => {
-            if (await state.addVersion(templateDialog.template.template_id, manifest))
-              setTemplateDialog(null)
-          }}
-        />
-      ) : (
-        <TemplateDialog
-          state={templateDialog}
-          submitting={state.templateMutationPending}
-          onClose={() => setTemplateDialog(null)}
-          onSubmit={async (input) => {
-            const succeeded = await state.registerTemplate(input)
-            if (succeeded) setTemplateDialog(null)
-          }}
-        />
-      )}
+      <TemplateEditor
+        state={state}
+        dialog={templateDialog}
+        onClose={() => setTemplateDialog(null)}
+      />
     </>
+  )
+}
+
+function TemplateEditor({
+  state,
+  dialog,
+  onClose,
+}: {
+  state: ReturnType<typeof useEnvironmentLab>
+  dialog: { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null
+  onClose: () => void
+}) {
+  if (!dialog) return null
+  const base = dialog.mode === 'version' ? dialog.template : undefined
+  return (
+    <EnvironmentTemplateDialog
+      key={`${state.projectId}:${base?.id ?? 'register'}`}
+      base={base}
+      submitting={state.templateMutationPending}
+      onClose={onClose}
+      onSubmit={(input) =>
+        base ? state.addVersion(base.template_id, input.manifest) : state.registerTemplate(input)
+      }
+    />
   )
 }
 
@@ -217,60 +205,6 @@ function EnvironmentOverview({
   )
 }
 
-function ProvisionCard({
-  templates,
-  disabled,
-  submitting,
-  onProvision,
-}: {
-  templates: EnvironmentTemplateVersion[]
-  disabled: boolean
-  submitting: boolean
-  onProvision: (templateVersionId: string, ttlSeconds: number) => Promise<boolean>
-}) {
-  const [form] = Form.useForm<ProvisionForm>()
-  return (
-    <Card title="Provision 受控环境" className="performance-card">
-      <Form
-        className="environment-provision-form"
-        form={form}
-        layout="inline"
-        initialValues={{ ttl_seconds: 3600 }}
-        onFinish={(value) => void onProvision(value.template_version_id, value.ttl_seconds)}
-      >
-        <Form.Item
-          name="template_version_id"
-          label="模板版本"
-          rules={[{ required: true, message: '请选择模板版本' }]}
-        >
-          <Select
-            aria-label="模板版本"
-            className="environment-template-select"
-            placeholder="选择管理员签名模板"
-            options={templates.map((item) => ({
-              value: item.id,
-              label: `${item.display_name} · v${item.version}`,
-            }))}
-          />
-        </Form.Item>
-        <Form.Item name="ttl_seconds" label="TTL（秒）" rules={[{ required: true }]}>
-          <InputNumber min={60} max={86400} />
-        </Form.Item>
-        <Form.Item>
-          <Button
-            type="primary"
-            htmlType="submit"
-            disabled={disabled || templates.length === 0}
-            loading={submitting}
-          >
-            Provision
-          </Button>
-        </Form.Item>
-      </Form>
-    </Card>
-  )
-}
-
 function TemplateTable({
   page,
   total,
@@ -295,6 +229,7 @@ function TemplateTable({
       rowKey="id"
       size="small"
       pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: onPage }}
+      scroll={{ x: 680 }}
       dataSource={templates}
       locale={{ emptyText: '暂无管理员签名环境模板' }}
       expandable={{ expandedRowRender: (item) => <TemplateEvidence template={item} /> }}
@@ -347,7 +282,9 @@ function TemplateTable({
 function TemplateEvidence({ template }: { template: EnvironmentTemplateVersion }) {
   return (
     <Descriptions size="small" column={2} bordered>
-      <Descriptions.Item label="Manifest SHA-256">{template.manifest_sha256}</Descriptions.Item>
+      <Descriptions.Item label="Manifest SHA-256">
+        <Typography.Text copyable>{template.manifest_sha256}</Typography.Text>
+      </Descriptions.Item>
       <Descriptions.Item label="签名算法">{template.signature_algorithm}</Descriptions.Item>
       <Descriptions.Item label="固定镜像" span={2}>
         {template.manifest.services.map((service) => (
@@ -390,6 +327,7 @@ function InstanceTable({
       rowKey="id"
       size="small"
       pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: onPage }}
+      scroll={{ x: 650 }}
       dataSource={instances}
       locale={{ emptyText: '暂无环境实例' }}
       expandable={{ expandedRowRender: (item) => <InstanceEvidence instance={item} /> }}
@@ -485,230 +423,6 @@ function cleanupStatus(value: EnvironmentInstance['cleanup_status']) {
   return labels[value]
 }
 
-function TemplateDialog({
-  state,
-  submitting,
-  onClose,
-  onSubmit,
-}: {
-  state: { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null
-  submitting: boolean
-  onClose: () => void
-  onSubmit: (input: EnvironmentTemplateInput) => Promise<void>
-}) {
-  const [form] = Form.useForm<TemplateForm>()
-  const base = state?.mode === 'version' ? state.template : undefined
-  const healthKind = Form.useWatch('health_kind', form) ?? 'http'
-  return (
-    <Modal
-      title={base ? `为 ${base.display_name} 创建签名版本` : '注册管理员签名环境模板'}
-      open={state !== null}
-      width={820}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        key={base?.id ?? 'register'}
-        form={form}
-        layout="vertical"
-        initialValues={templateFormValues(base)}
-        onFinish={(value) => void onSubmit(toTemplateInput(value))}
-      >
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item name="template_key" label="模板标识" rules={[{ required: true }]}>
-              <Input disabled={Boolean(base)} placeholder="platform.web" />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="display_name" label="显示名称" rules={[{ required: true }]}>
-              <Input disabled={Boolean(base)} />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="description" label="说明">
-              <Input disabled={Boolean(base)} />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Form.Item name="image" label="白名单镜像（必须固定 Digest）" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Row gutter={16}>
-          <Col span={6}>
-            <Form.Item name="internal_port" label="服务端口">
-              <InputNumber min={1024} max={65535} />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="health_kind" label="健康检查">
-              <Select
-                options={[
-                  { value: 'http', label: 'HTTP' },
-                  { value: 'tcp', label: 'TCP' },
-                ]}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item
-              name="health_path"
-              label="健康路径"
-              rules={healthKind === 'http' ? [{ required: true }] : []}
-            >
-              <Input disabled={healthKind === 'tcp'} />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="seed_enabled" label="预定义 Seed" valuePropName="checked">
-              <Checkbox>HTTP GET v1</Checkbox>
-            </Form.Item>
-          </Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={6}>
-            <Form.Item name="default_ttl_seconds" label="默认 TTL">
-              <InputNumber min={60} max={86400} />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="maximum_ttl_seconds" label="最大 TTL">
-              <InputNumber min={60} max={86400} />
-            </Form.Item>
-          </Col>
-          <Col span={4}>
-            <Form.Item name="cpu_millicores" label="CPU (m)">
-              <InputNumber min={100} max={2000} />
-            </Form.Item>
-          </Col>
-          <Col span={4}>
-            <Form.Item name="memory_megabytes" label="内存 (MiB)">
-              <InputNumber min={64} max={2048} />
-            </Form.Item>
-          </Col>
-          <Col span={4}>
-            <Form.Item name="pids_limit" label="PID 上限">
-              <InputNumber min={16} max={256} />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={6}>
-            <Form.Item name="user_id" label="容器 UID">
-              <InputNumber min={1} max={65535} />
-            </Form.Item>
-          </Col>
-          <Col span={6}>
-            <Form.Item name="group_id" label="容器 GID">
-              <InputNumber min={1} max={65535} />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="seed_path" label="Seed 路径">
-              <Input />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Typography.Text type="secondary">
-          Compose、命令、脚本、Secret 与卷字段不在模板契约中；安全加固标志由平台固定开启。
-        </Typography.Text>
-      </Form>
-    </Modal>
-  )
-}
-
-const fixtureImage =
-  'cgr.dev/chainguard/nginx@sha256:a104d1995e56b7a15e8f152078dfbdb1ecbf9f9d1af311e7906e7b4c0c790cf2'
-
-function templateFormValues(base?: EnvironmentTemplateVersion): TemplateForm {
-  return base ? versionFormValues(base) : defaultTemplateFormValues
-}
-
-const defaultTemplateFormValues: TemplateForm = {
-  template_key: 'platform.web',
-  display_name: '受控 Web 环境',
-  description: '',
-  image: fixtureImage,
-  internal_port: 8080,
-  health_kind: 'http',
-  health_path: '/',
-  seed_enabled: true,
-  seed_path: '/',
-  default_ttl_seconds: 3600,
-  maximum_ttl_seconds: 14400,
-  cpu_millicores: 250,
-  memory_megabytes: 128,
-  pids_limit: 64,
-  user_id: 65532,
-  group_id: 65532,
-}
-
-function versionFormValues(base: EnvironmentTemplateVersion): TemplateForm {
-  const service = base.manifest.services[0]
-  const seed = base.manifest.seeds[0]
-  return {
-    template_key: base.template_key,
-    display_name: base.display_name,
-    description: base.description,
-    image: service.image,
-    internal_port: service.internal_port,
-    health_kind: service.health_check.kind,
-    health_path: service.health_check.path ?? '/',
-    seed_enabled: base.manifest.seeds.length > 0,
-    seed_path: seed?.path ?? '/',
-    default_ttl_seconds: base.manifest.default_ttl_seconds,
-    maximum_ttl_seconds: base.manifest.maximum_ttl_seconds,
-    cpu_millicores: service.cpu_millicores,
-    memory_megabytes: service.memory_megabytes,
-    pids_limit: service.pids_limit,
-    user_id: service.user_id,
-    group_id: service.group_id,
-  }
-}
-
-function toTemplateInput(value: TemplateForm): EnvironmentTemplateInput {
-  const manifest: EnvironmentTemplateManifest = {
-    services: [
-      {
-        name: 'web',
-        image: value.image,
-        internal_port: value.internal_port,
-        environment: [{ name: 'NGINX_PORT', value: String(value.internal_port) }],
-        depends_on: [],
-        health_check: {
-          kind: value.health_kind,
-          path: value.health_kind === 'http' ? value.health_path : null,
-          expected_status: 200,
-          interval_seconds: 1,
-          timeout_seconds: 2,
-          maximum_attempts: 30,
-        },
-        cpu_millicores: value.cpu_millicores,
-        memory_megabytes: value.memory_megabytes,
-        pids_limit: value.pids_limit,
-        user_id: value.user_id,
-        group_id: value.group_id,
-        read_only_root_filesystem: true,
-        drop_all_capabilities: true,
-        no_new_privileges: true,
-      },
-    ],
-    seeds: value.seed_enabled
-      ? [{ profile: 'http_get_v1', service: 'web', path: value.seed_path }]
-      : [],
-    default_ttl_seconds: value.default_ttl_seconds,
-    maximum_ttl_seconds: value.maximum_ttl_seconds,
-  }
-  return {
-    template_key: value.template_key,
-    display_name: value.display_name,
-    description: value.description,
-    manifest,
-  }
-}
-
 function EnvironmentReadErrors({ state }: { state: ReturnType<typeof useEnvironmentLab> }) {
   return (
     <>
@@ -725,7 +439,7 @@ function EnvironmentReadErrors({ state }: { state: ReturnType<typeof useEnvironm
             type="error"
             showIcon
             title={`${read.name}读取失败`}
-            description={apiErrorMessage(read.query.error)}
+            description={apiErrorWithTrace(read.query.error)}
             action={<Button onClick={() => void read.query.refetch()}>重试</Button>}
           />
         ))}
@@ -747,7 +461,7 @@ function EnvironmentInstanceWorkspace({ state }: { state: ReturnType<typeof useE
           showIcon
           type="error"
           title="实例读取失败"
-          description={apiErrorMessage(state.instance.error)}
+          description={apiErrorWithTrace(state.instance.error)}
           action={<Button onClick={() => void state.instance.refetch()}>重试</Button>}
         />
       </Card>
@@ -765,9 +479,6 @@ function EnvironmentInstanceWorkspace({ state }: { state: ReturnType<typeof useE
       </Card>
     )
   const instance = state.instance.data
-  const template = state.templates.data?.items.find(
-    (item) => item.id === instance.template_version_id,
-  )
   return (
     <Card className="lab-detail" title="环境实例 · 生命周期">
       <Space wrap>
@@ -809,17 +520,7 @@ function EnvironmentInstanceWorkspace({ state }: { state: ReturnType<typeof useE
           {
             key: 'resources',
             label: '签名配置与资源',
-            children: template ? (
-              <>
-                <TemplateEvidence template={template} />
-                <ResponseCodeReader value={template.manifest} title="此实例绑定的签名模板配置" />
-              </>
-            ) : (
-              <Alert
-                type="info"
-                title="当前模板页未提供此实例绑定的版本；切换模板目录页查看，实例记录不会替换为其他版本。"
-              />
-            ),
+            children: <BoundTemplate state={state} instance={instance} />,
           },
         ]}
       />
@@ -860,79 +561,44 @@ function InstanceLifecycle({ instance }: { instance: EnvironmentInstance }) {
   )
 }
 
-function TemplateVersionDialog({
-  template,
-  submitting,
-  onClose,
-  onSubmit,
+function BoundTemplate({
+  state,
+  instance,
 }: {
-  template: EnvironmentTemplateVersion
-  submitting: boolean
-  onClose: () => void
-  onSubmit: (manifest: EnvironmentTemplateManifest) => Promise<void>
+  state: ReturnType<typeof useEnvironmentLab>
+  instance: EnvironmentInstance
 }) {
-  const [form] = Form.useForm<{ manifest: string }>()
+  const query = state.boundTemplate
   return (
-    <Modal
-      title={`为 ${template.display_name} 创建签名版本`}
-      open
-      width={900}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{ manifest: JSON.stringify(template.manifest, null, 2) }}
-        onFinish={(value) => void onSubmit(parseEnvironmentManifest(value.manifest))}
-      >
+    <div className="environment-bound-template">
+      <Typography.Paragraph>
+        固定模板版本ID：{instance.template_version_id} · {instance.template_key} · v
+        {instance.template_version}
+      </Typography.Paragraph>
+      {query.isError ? (
         <Alert
-          type="info"
-          title={`完整保留 v${template.version} 的全部服务、依赖、健康检查、资源与 Seed；提交后由服务端校验并签名。`}
+          type="error"
+          showIcon
+          title="绑定模板读取失败"
+          description={apiErrorWithTrace(query.error)}
+          action={<Button onClick={() => void query.refetch()}>重试绑定版本</Button>}
         />
-        <Form.Item
-          name="manifest"
-          label="完整声明式模板"
-          rules={[
-            { required: true },
-            {
-              validator: async (_, value: string) => {
-                parseEnvironmentManifest(value)
-              },
-            },
-          ]}
-          extra="仅接受受控模板字段；镜像必须固定 Digest。"
-        >
-          <Input.TextArea rows={18} className="code-input" />
-        </Form.Item>
-      </Form>
-    </Modal>
+      ) : query.isPending ? (
+        <Spin aria-label="正在读取绑定模板" />
+      ) : (
+        <>
+          {query.data.status === 'disabled' && (
+            <Alert
+              type="warning"
+              title="模板已停用；此处保留实例绑定的原始签名版本，不能再次Provision"
+            />
+          )}
+          <TemplateEvidence template={query.data} />
+          <ResponseCodeReader value={query.data.manifest} title="此实例绑定的签名模板配置" />
+        </>
+      )}
+    </div>
   )
-}
-
-function parseEnvironmentManifest(text: string): EnvironmentTemplateManifest {
-  let value: EnvironmentTemplateManifest
-  try {
-    value = JSON.parse(text) as EnvironmentTemplateManifest
-  } catch {
-    throw new Error('请输入有效的声明式 JSON 模板')
-  }
-  if (
-    !value ||
-    !Array.isArray(value.services) ||
-    !value.services.length ||
-    !Array.isArray(value.seeds)
-  )
-    throw new Error('模板需包含服务和 Seed 列表')
-  return value
-}
-
-function isVersionDialog(
-  state: { mode: 'register' } | { mode: 'version'; template: EnvironmentTemplateVersion } | null,
-): state is { mode: 'version'; template: EnvironmentTemplateVersion } {
-  return state?.mode === 'version'
 }
 
 function instanceRows(

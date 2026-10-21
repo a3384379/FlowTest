@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -179,18 +180,73 @@ class EnvironmentTemplateService:
         await self._session.refresh(template)
         return template
 
-    async def list_versions(self, *, actor: User) -> tuple[EnvironmentTemplateView, ...]:
+    async def list_versions(
+        self, *, actor: User, page: int, page_size: int, search: str = "", active_only: bool = False
+    ) -> tuple[tuple[EnvironmentTemplateView, ...], int]:
         self._require_enabled()
-        include_disabled = actor.is_system_admin
-        rows = await self._repository.list_template_versions(include_disabled=include_disabled)
+        rows, total = await self._repository.list_template_versions(
+            include_disabled=actor.is_system_admin and not active_only,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+            search=search.strip(),
+        )
         views: list[EnvironmentTemplateView] = []
         for version, template in rows:
-            manifest = EnvironmentTemplateManifest.model_validate(version.manifest)
+            try:
+                manifest = EnvironmentTemplateManifest.model_validate(version.manifest)
+            except ValidationError as error:
+                raise AppError(
+                    code="ENVIRONMENT_TEMPLATE_SIGNATURE_INVALID",
+                    message="签名模板配置无效",
+                    status_code=409,
+                ) from error
             self._verify_version(template, version, manifest)
             views.append(
                 EnvironmentTemplateView(template=template, version=version, manifest=manifest)
             )
-        return tuple(views)
+        return tuple(views), total
+
+    async def get_version(self, *, actor: User, version_id: UUID) -> EnvironmentTemplateView:
+        self._require_enabled()
+        return await self._read_version(version_id, include_disabled=actor.is_system_admin)
+
+    async def get_instance_version(
+        self, *, actor: User, project_id: UUID, instance_id: UUID
+    ) -> EnvironmentTemplateView:
+        instance = await EnvironmentInstanceService(self._session).get(
+            actor=actor, project_id=project_id, instance_id=instance_id
+        )
+        view = await self._read_version(instance.template_version_id, include_disabled=True)
+        if (
+            view.template.template_key != instance.template_key
+            or view.version.version != instance.template_version
+        ):
+            raise AppError(
+                code="ENVIRONMENT_TEMPLATE_BINDING_INVALID",
+                message="实例绑定的签名模板信息不一致",
+                status_code=409,
+            )
+        return view
+
+    async def _read_version(
+        self, version_id: UUID, *, include_disabled: bool
+    ) -> EnvironmentTemplateView:
+        version = await self._repository.get_template_version(version_id)
+        if version is None:
+            raise _template_not_found()
+        template = await self._repository.get_template(version.template_id)
+        if template is None or (template.status != "active" and not include_disabled):
+            raise _template_not_found()
+        try:
+            manifest = EnvironmentTemplateManifest.model_validate(version.manifest)
+        except ValidationError as error:
+            raise AppError(
+                code="ENVIRONMENT_TEMPLATE_SIGNATURE_INVALID",
+                message="签名模板配置无效",
+                status_code=409,
+            ) from error
+        self._verify_version(template, version, manifest)
+        return EnvironmentTemplateView(template=template, version=version, manifest=manifest)
 
     def _new_version(
         self,

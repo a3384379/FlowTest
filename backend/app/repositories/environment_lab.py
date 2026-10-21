@@ -9,6 +9,7 @@ from app.models.environment_lab import (
     EnvironmentTemplate,
     EnvironmentTemplateVersion,
 )
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 class EnvironmentLabRepository:
@@ -53,23 +54,60 @@ class EnvironmentLabRepository:
         return await self._session.get(EnvironmentTemplateVersion, version_id)
 
     async def list_template_versions(
-        self, *, include_disabled: bool
-    ) -> list[tuple[EnvironmentTemplateVersion, EnvironmentTemplate]]:
-        statement = (
-            select(EnvironmentTemplateVersion, EnvironmentTemplate)
+        self, *, include_disabled: bool, offset: int, limit: int, search: str = ""
+    ) -> tuple[list[tuple[EnvironmentTemplateVersion, EnvironmentTemplate]], int]:
+        filters = []
+        if not include_disabled:
+            filters.append(EnvironmentTemplate.status == "active")
+        if search:
+            filters.append(
+                or_(
+                    EnvironmentTemplate.template_key.icontains(search, autoescape=True),
+                    EnvironmentTemplate.display_name.icontains(search, autoescape=True),
+                    EnvironmentTemplate.description.icontains(search, autoescape=True),
+                )
+            )
+        ranked = (
+            select(
+                EnvironmentTemplateVersion.id.label("item_id"),
+                func.row_number()
+                .over(
+                    order_by=(
+                        EnvironmentTemplateVersion.created_at.desc(),
+                        EnvironmentTemplate.template_key,
+                        EnvironmentTemplateVersion.version.desc(),
+                        EnvironmentTemplateVersion.id,
+                    )
+                )
+                .label("position"),
+            )
             .join(
                 EnvironmentTemplate,
                 EnvironmentTemplate.id == EnvironmentTemplateVersion.template_id,
             )
-            .order_by(
-                EnvironmentTemplateVersion.created_at.desc(),
-                EnvironmentTemplate.template_key,
-                EnvironmentTemplateVersion.version.desc(),
-            )
+            .where(*filters)
+            .cte()
         )
-        if not include_disabled:
-            statement = statement.where(EnvironmentTemplate.status == "active")
-        return list((await self._session.execute(statement)).tuples().all())
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(EnvironmentTemplateVersion, EnvironmentTemplate, page.c.total)
+                .select_from(page)
+                .outerjoin(
+                    EnvironmentTemplateVersion, EnvironmentTemplateVersion.id == page.c.item_id
+                )
+                .outerjoin(
+                    EnvironmentTemplate,
+                    EnvironmentTemplate.id == EnvironmentTemplateVersion.template_id,
+                )
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [
+            (version, template)
+            for version, template, _ in rows
+            if version is not None and template is not None
+        ], int(rows[0][2])
 
     async def get_instance(self, instance_id: UUID) -> EnvironmentInstance | None:
         return await self._session.get(EnvironmentInstance, instance_id)

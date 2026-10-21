@@ -98,12 +98,47 @@ export type EnvironmentTemplateInput = {
 
 export async function listEnvironmentTemplates(
   page = 1,
+  options: { search?: string; activeOnly?: boolean } = {},
 ): Promise<Page<EnvironmentTemplateVersion>> {
   return (
     await apiClient.get<Page<EnvironmentTemplateVersion>>('/environment-templates', {
-      params: { page, page_size: 20 },
+      params: {
+        page,
+        page_size: 20,
+        search: options.search ?? '',
+        active_only: options.activeOnly ?? false,
+      },
     })
   ).data
+}
+
+export async function getEnvironmentTemplateVersion(
+  versionId: string,
+): Promise<EnvironmentTemplateVersion> {
+  const result = (
+    await apiClient.get<EnvironmentTemplateVersion>(`/environment-templates/versions/${versionId}`)
+  ).data
+  if (result.id !== versionId) throw new Error('返回的模板版本与所选ID不符，请重试')
+  return result
+}
+
+export async function getInstanceTemplateVersion(
+  projectId: string,
+  instance: EnvironmentInstance,
+): Promise<EnvironmentTemplateVersion> {
+  const result = (
+    await apiClient.get<EnvironmentTemplateVersion>(
+      `/projects/${projectId}/environment-instances/${instance.id}/template-version`,
+    )
+  ).data
+  if (
+    instance.project_id !== projectId ||
+    result.id !== instance.template_version_id ||
+    result.template_key !== instance.template_key ||
+    result.version !== instance.template_version
+  )
+    throw new Error('返回的模板与实例固定绑定不符，请重试')
+  return result
 }
 
 export async function registerEnvironmentTemplate(
@@ -140,11 +175,14 @@ export async function listEnvironmentInstances(
 }
 
 export async function getEnvironmentInstance(projectId: string, instanceId: string) {
-  return (
+  const result = (
     await apiClient.get<EnvironmentInstance>(
       `/projects/${projectId}/environment-instances/${instanceId}`,
     )
   ).data
+  if (result.project_id !== projectId || result.id !== instanceId)
+    throw new Error('返回的实例与当前项目或ID不符，请重试')
+  return result
 }
 
 export async function provisionEnvironment(

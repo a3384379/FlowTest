@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -237,7 +237,8 @@ describe('EnvironmentLabPage', () => {
     expect(screen.getByText('CLEANUP_RETRY_REQUIRED')).toBeVisible()
     expect(screen.getByText(/未提供持续服务健康采样/)).toBeVisible()
     await userEvent.setup().click(screen.getByRole('tab', { name: '签名配置与资源' }))
-    expect(await screen.findByText(/当前模板页未提供此实例绑定的版本/)).toBeVisible()
+    expect(await screen.findByText('此实例绑定的签名模板配置')).toBeVisible()
+    expect(screen.getByText(/固定模板版本ID/)).toHaveTextContent(template.id)
   })
 
   it('preserves all services and seed configuration when creating a signed version', async () => {
@@ -290,9 +291,122 @@ describe('EnvironmentLabPage', () => {
     expect(await screen.findByText('instance')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Provision' })).toBeDisabled()
     expect(screen.getByRole('button', { name: /清理/ })).toBeDisabled()
-    await userEvent.setup().click(screen.getAllByTitle('Next Page')[1])
+    await userEvent
+      .setup()
+      .click(
+        within(screen.getByText('环境实例与清理').closest('.ant-card') as HTMLElement).getByTitle(
+          'Next Page',
+        ),
+      )
     await waitFor(() => expect(pages).toEqual([1, 2]))
   })
+  it('reads the original disabled binding independently, keeps failures and retries the same version without writes', async () => {
+    let reads = 0
+    let writes = 0
+    installHandlers({
+      templates: [
+        {
+          ...template,
+          id: 'new-v2',
+          version: 2,
+          manifest: { ...template.manifest, default_ttl_seconds: 900 },
+        },
+      ],
+      instances: [],
+    })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/environment-instances/${instance.id}`, () =>
+        HttpResponse.json(instance),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/environment-instances/${instance.id}/template-version`,
+        () => {
+          reads += 1
+          return reads === 1
+            ? HttpResponse.json(
+                {
+                  error: {
+                    code: 'READ_FAILED',
+                    message: '原版本暂不可读取',
+                    trace_id: 'bound-template-trace',
+                  },
+                },
+                { status: 503 },
+              )
+            : HttpResponse.json({ ...template, status: 'disabled' })
+        },
+      ),
+      http.post('/api/v1/environment-templates', () => {
+        writes += 1
+        return new HttpResponse(null, { status: 500 })
+      }),
+      http.post(`/api/v1/projects/${project.id}/environment-instances`, () => {
+        writes += 1
+        return new HttpResponse(null, { status: 500 })
+      }),
+    )
+    renderPage(`/projects/${project.id}/environments?instance=${instance.id}`)
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('tab', { name: '签名配置与资源' }))
+    expect(await screen.findByText(/bound-template-trace/)).toBeVisible()
+    expect(screen.queryByText('此实例绑定的签名模板配置')).not.toBeInTheDocument()
+    await browser.click(screen.getByRole('button', { name: '重试绑定版本' }))
+    expect(await screen.findByText(/模板已停用；此处保留实例绑定/)).toBeVisible()
+    expect(screen.getByText('此实例绑定的签名模板配置')).toBeVisible()
+    expect(screen.getByText(/固定模板版本ID/)).toHaveTextContent(template.id)
+    expect(reads).toBe(2)
+    expect(writes).toBe(0)
+  })
+
+  it('finds an off-page provision version through its own search, pagination and exact UUID without writing until submitted', async () => {
+    const queries: Array<{ page: string | null; search: string | null; active: string | null }> = []
+    let writes = 0
+    installHandlers()
+    server.use(
+      http.get('/api/v1/environment-templates', ({ request }) => {
+        const params = new URL(request.url).searchParams
+        if (params.get('active_only') === 'true') {
+          queries.push({
+            page: params.get('page'),
+            search: params.get('search'),
+            active: params.get('active_only'),
+          })
+          return HttpResponse.json({
+            items:
+              params.get('page') === '2' || params.get('search') === '完整环境' ? [template] : [],
+            total: 21,
+            page: Number(params.get('page')),
+            page_size: 20,
+          })
+        }
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+      }),
+      http.post(`/api/v1/projects/${project.id}/environment-instances`, () => {
+        writes += 1
+        return HttpResponse.json(instance, { status: 202 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    const picker = within(
+      screen.getByText('Provision 受控环境').closest('.ant-card') as HTMLElement,
+    )
+    await waitFor(() => expect(queries).toHaveLength(1))
+    await browser.click(picker.getByTitle('Next Page'))
+    await waitFor(() => expect(queries.at(-1)?.page).toBe('2'))
+    await browser.type(picker.getByLabelText('查找可用模板'), '完整环境{Enter}')
+    await waitFor(() =>
+      expect(queries.at(-1)).toEqual({ page: '1', search: '完整环境', active: 'true' }),
+    )
+    await browser.type(picker.getByLabelText('模板版本ID'), template.id)
+    await browser.click(picker.getByRole('button', { name: '读取指定版本' }))
+    await waitFor(() => expect(picker.getByRole('button', { name: 'Provision' })).toBeEnabled())
+    expect(picker.getByText(/固定版本/)).toHaveTextContent(template.id)
+    expect(writes).toBe(0)
+    await browser.click(picker.getByRole('button', { name: 'Provision' }))
+    await waitFor(() => expect(writes).toBe(1))
+  })
+
   it('explains disabled capability and avoids unavailable catalog requests', async () => {
     let reads = 0
     installHandlers()
@@ -321,6 +435,13 @@ function installHandlers({
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
     ),
+    http.get('/api/v1/environment-templates/versions/:versionId', () =>
+      HttpResponse.json(template),
+    ),
+    http.get(
+      `/api/v1/projects/${project.id}/environment-instances/${instance.id}/template-version`,
+      () => HttpResponse.json(template),
+    ),
     http.get('/api/v1/environment-templates', () =>
       HttpResponse.json({ items: templates, total: templates.length, page: 1, page_size: 100 }),
     ),
@@ -335,12 +456,14 @@ function renderPage(initialEntry?: string) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="environments" initialEntry={initialEntry}>
-          <EnvironmentLabPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="environments" initialEntry={initialEntry}>
+            <EnvironmentLabPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }
