@@ -2,7 +2,7 @@ import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorMessage, apiErrorTraceId } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { getV3FeatureFlags } from '../capabilities/capability-service'
@@ -105,7 +105,9 @@ export function useContractHub(providerServiceId: string | null) {
       void message.success(successText)
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      const trace = apiErrorTraceId(error)
+      const text = apiErrorMessage(error)
+      void message.error(trace ? `${text} · Trace ID: ${trace}` : text)
       return false
     }
   }

@@ -33,6 +33,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
+import { contractCoverage } from '../features/contracts/contract-coverage'
 import ContractReferencePicker from '../features/contracts/ContractReferencePicker'
 import ContractEvidenceViewer, {
   type ContractEvidenceSelection,
@@ -54,7 +55,7 @@ import type {
 import { getContractService } from '../features/contracts/contract-hub-service'
 import { useContractHub } from '../features/contracts/use-contract-hub'
 import { useProjectContext } from '../features/projects/use-project-context'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorMessage, apiErrorTraceId } from '../lib/api'
 
 type ServiceForm = { service_key: string; display_name: string; description: string }
 type PactForm = { consumer_version: string; consumer: string; provider: string }
@@ -153,7 +154,11 @@ function ContractHubWorkspace() {
           />
           <div className="contract-hub-grid">
             <ServiceGraphPanel graph={state.graph.data} loading={state.graph.isLoading} />
-            <FailedEvidencePanel checks={checks} onEvidence={setEvidence} />
+            <FailedEvidencePanel
+              checks={checks}
+              available={state.checks.isSuccess}
+              onEvidence={setEvidence}
+            />
           </div>
           <div className="catalog-controls">
             <CatalogPagination query={state.services} label="服务目录" />
@@ -241,6 +246,7 @@ function ContractHubStatus({ state }: { state: ReturnType<typeof useContractHub>
         type="error"
         className="page-alert"
         title={apiErrorMessage(failed[0].error)}
+        description={apiErrorTraceId(failed[0].error)}
         action={
           <Button
             aria-label="重试"
@@ -416,7 +422,7 @@ export function CompatibilityPanel({
   ]
   return (
     <Card
-      className="performance-card"
+      className="performance-card contract-compatibility"
       title="部署兼容矩阵"
       loading={loading}
       extra={
@@ -443,7 +449,7 @@ export function CompatibilityPanel({
           scroll={{ x: true }}
         />
       ) : (
-        <Empty description={providerId ? '该提供方暂无 Pact 契约' : '请先选择提供方'} />
+        <Empty description={matrixEmptyDescription(providerId, matrix)} />
       )}
       <Space wrap className="contract-release-check">
         <Input
@@ -519,9 +525,11 @@ export function ServiceGraphPanel({ graph, loading }: { graph?: ServiceGraph; lo
 export function FailedEvidencePanel({
   checks,
   onEvidence,
+  available = true,
 }: {
   checks: DeploymentCheck[]
   onEvidence?: (selection: ContractEvidenceSelection) => void
+  available?: boolean
 }) {
   return (
     <Card title="发布判断证据" className="performance-card">
@@ -533,7 +541,7 @@ export function FailedEvidencePanel({
               type={checkAlertType(item.decision)}
               showIcon
               title={`Provider ${item.provider_version} ${decisionText(item.decision)}`}
-              description={`${evidenceCount(item.evidence, 'blockers')} 项阻断证据 · ${formatDate(item.created_at)}`}
+              description={`${blockerSummary(item.evidence)} · ${formatDate(item.created_at)}`}
               action={
                 <Button
                   disabled={!onEvidence}
@@ -546,7 +554,7 @@ export function FailedEvidencePanel({
           ))}
         </Space>
       ) : (
-        <Empty description="暂无不可安全发布的判断" />
+        <Empty description={available ? '暂无不可安全发布的判断' : '发布判断证据未提供'} />
       )}
     </Card>
   )
@@ -567,8 +575,8 @@ export function UnifiedContractsPanel({
   pacts: PactContract[]
   openapiRuns: ContractRun[]
   loading: boolean
-  openapiTotal?: number
-  pactTotal?: number
+  openapiTotal?: number | null
+  pactTotal?: number | null
   onEvidence?: (selection: ContractEvidenceSelection) => void
 }) {
   return (
@@ -577,12 +585,13 @@ export function UnifiedContractsPanel({
         items={[
           {
             key: 'openapi',
-            label: `OpenAPI（共${openapiTotal ?? openapiRuns.length}项，本页${openapiRuns.length}项）`,
+            label: `OpenAPI（${catalogCountLabel(openapiTotal, openapiRuns.length)}）`,
             children: (
               <Table
                 rowKey="id"
                 size="small"
                 pagination={false}
+                scroll={{ x: 920 }}
                 dataSource={openapiRuns}
                 columns={[
                   { title: '文档', dataIndex: 'source_name' },
@@ -600,16 +609,16 @@ export function UnifiedContractsPanel({
                   },
                   {
                     title: '破坏性变更',
-                    render: (_: unknown, item: ContractRun) => (
-                      <Tag color={item.breaking_changes.length ? 'red' : 'green'}>
-                        {item.breaking_changes.length ? `${item.breaking_changes.length} 项` : '无'}
-                      </Tag>
-                    ),
+                    render: (_: unknown, item: ContractRun) => <BreakingChangeTag run={item} />,
                   },
                   {
                     title: 'Schema 覆盖率',
                     render: (_: unknown, item: ContractRun) =>
-                      `${item.coverage.schema_coverage_percent.toFixed(1)}%`,
+                      contractCoverage(
+                        item.coverage.schema_coverage_percent,
+                        item.coverage.schema_fields_total,
+                        item.status === 'completed',
+                      ).label,
                   },
                   {
                     title: '导入时间',
@@ -632,12 +641,13 @@ export function UnifiedContractsPanel({
           },
           {
             key: 'pact',
-            label: `Pact（共${pactTotal ?? pacts.length}项，本页${pacts.length}项）`,
+            label: `Pact（${catalogCountLabel(pactTotal, pacts.length)}）`,
             children: (
               <Table
                 rowKey="id"
                 size="small"
                 pagination={false}
+                scroll={{ x: 920 }}
                 dataSource={pacts}
                 columns={[
                   {
@@ -758,11 +768,13 @@ function ServiceDialog({
       okButtonProps={{ disabled: readOnly }}
       okText="登记"
       cancelText="取消"
-      onCancel={onClose}
-      onOk={() => void form.validateFields().then(onSubmit)}
+      onCancel={submitting ? undefined : onClose}
+      cancelButtonProps={{ disabled: submitting }}
+      closable={!submitting}
+      onOk={() => form.submit()}
       afterClose={() => form.resetFields()}
     >
-      <Form form={form} layout="vertical" disabled={readOnly}>
+      <Form form={form} layout="vertical" disabled={readOnly || submitting} onFinish={onSubmit}>
         <Form.Item name="service_key" label="服务标识" rules={[{ required: true }]}>
           <Input placeholder="orders-api" />
         </Form.Item>
@@ -792,8 +804,7 @@ function PactDialog({
 }) {
   const [form] = Form.useForm<PactForm>()
   const [file, setFile] = useState<File | null>(null)
-  const submit = async () => {
-    const values = await form.validateFields()
+  const submit = async (values: PactForm) => {
     if (mode === 'broker') {
       await onSubmit({
         kind: 'broker',
@@ -813,14 +824,16 @@ function PactDialog({
       okText="导入"
       cancelText="取消"
       okButtonProps={{ disabled: readOnly || (mode === 'upload' && !file) }}
-      onCancel={onClose}
-      onOk={() => void submit()}
+      onCancel={submitting ? undefined : onClose}
+      cancelButtonProps={{ disabled: submitting }}
+      closable={!submitting}
+      onOk={() => form.submit()}
       afterClose={() => {
         form.resetFields()
         setFile(null)
       }}
     >
-      <Form form={form} layout="vertical" disabled={readOnly}>
+      <Form form={form} layout="vertical" disabled={readOnly || submitting} onFinish={submit}>
         {mode === 'broker' ? (
           <>
             <Form.Item name="consumer" label="Consumer" rules={[{ required: true }]}>
@@ -835,6 +848,7 @@ function PactDialog({
             <Upload
               accept="application/json,.json"
               maxCount={1}
+              fileList={file ? [{ uid: file.name, name: file.name, status: 'done' }] : []}
               beforeUpload={(selected) => {
                 setFile(selected)
                 return false
@@ -883,27 +897,33 @@ function OpenapiDialog({
       okText="导入"
       cancelText="取消"
       okButtonProps={{ disabled: readOnly || !file || !providerReady }}
-      onCancel={onClose}
-      onOk={() =>
-        void form.validateFields().then((values) =>
+      onCancel={submitting ? undefined : onClose}
+      cancelButtonProps={{ disabled: submitting }}
+      closable={!submitting}
+      onOk={() => form.submit()}
+      afterClose={() => {
+        form.resetFields()
+        setFile(null)
+      }}
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        disabled={readOnly || submitting}
+        onFinish={(values) =>
           file
             ? onSubmit({
                 file,
                 providerServiceId: values.provider_service_id,
                 providerVersion: values.provider_version,
               })
-            : undefined,
-        )
-      }
-      afterClose={() => {
-        form.resetFields()
-        setFile(null)
-      }}
-    >
-      <Form form={form} layout="vertical" disabled={readOnly}>
+            : undefined
+        }
+      >
         <Form.Item label="OpenAPI 文档" required>
           <Upload
             maxCount={1}
+            fileList={file ? [{ uid: file.name, name: file.name, status: 'done' }] : []}
             beforeUpload={(selected) => {
               setFile(selected)
               return false
@@ -959,19 +979,24 @@ function VerificationDialog({
       okButtonProps={{ disabled: readOnly || !pactReady }}
       okText="执行验证"
       cancelText="取消"
-      onCancel={onClose}
-      onOk={() =>
-        void form.validateFields().then((values) =>
+      onCancel={submitting ? undefined : onClose}
+      cancelButtonProps={{ disabled: submitting }}
+      closable={!submitting}
+      onOk={() => form.submit()}
+      afterClose={() => form.resetFields()}
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        disabled={readOnly || submitting}
+        onFinish={(values) =>
           onSubmit({
             pactId: values.pact_id,
             providerVersion: values.provider_version,
             targetBaseUrl: values.target_base_url,
-          }),
-        )
-      }
-      afterClose={() => form.resetFields()}
-    >
-      <Form form={form} layout="vertical" disabled={readOnly}>
+          })
+        }
+      >
         <Form.Item name="pact_id" label="Pact 契约" rules={[{ required: true }]}>
           <ContractReferencePicker
             projectId={projectId}
@@ -1026,13 +1051,31 @@ function pageItems<T>(page?: { items: T[] }): T[] {
   return page?.items ?? []
 }
 
-function catalogTotal(query: { data?: { total: number } }): number | undefined {
-  return query.data?.total
+function catalogTotal(query: { data?: { total: number } }): number | null {
+  return query.data?.total ?? null
 }
 
-function evidenceCount(evidence: Record<string, unknown>, key: string): number {
-  const value = evidence[key]
-  return Array.isArray(value) ? value.length : 0
+function catalogCountLabel(total: number | null | undefined, current: number): string {
+  return total === null ? '总数未提供' : `共${total ?? current}项，本页${current}项`
+}
+
+function matrixEmptyDescription(providerId: string | null, matrix?: CompatibilityMatrix): string {
+  if (!providerId) return '请先选择提供方'
+  return matrix ? '该提供方暂无 Pact 契约' : '兼容矩阵尚未提供'
+}
+
+function blockerSummary(evidence: Record<string, unknown>): string {
+  const value = evidence.blockers
+  return Array.isArray(value) ? `${value.length} 项阻断证据` : '阻断证据未提供'
+}
+
+function BreakingChangeTag({ run }: { run: ContractRun }) {
+  if (run.status !== 'completed') return <Tag color="warning">分析未成功</Tag>
+  return (
+    <Tag color={run.breaking_changes.length ? 'red' : 'green'}>
+      {run.breaking_changes.length ? `${run.breaking_changes.length} 项` : '无'}
+    </Tag>
+  )
 }
 
 function compatibilityEvidence(

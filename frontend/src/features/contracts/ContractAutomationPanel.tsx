@@ -44,6 +44,7 @@ import {
   reviewGeneratedContractCase,
 } from './contract-service'
 import ContractReferencePicker from './ContractReferencePicker'
+import { contractCoverage } from './contract-coverage'
 
 export default function ContractAutomationPanel() {
   const { projectId } = useProjectContext()
@@ -288,26 +289,43 @@ export function ContractRunTable({
         size="small"
         loading={loading}
         pagination={false}
+        scroll={{ x: 960 }}
         dataSource={items}
         rowClassName={(item) => (item.id === selectedRunId ? 'selected-row' : '')}
         columns={[
           { title: '文档', dataIndex: 'source_name' },
           {
+            title: '状态',
+            render: (_, item) => (item.status === 'completed' ? '已完成' : '分析失败'),
+          },
+          {
             title: '变更',
-            render: (_, item) =>
-              `+${item.diff_summary.added} / ~${item.diff_summary.changed} / -${item.diff_summary.deleted}`,
+            render: (_, item) => formatDifference(item.diff_summary),
           },
           {
             title: '破坏性',
             render: (_, item) => (
-              <Tag color={item.breaking_changes.length ? 'red' : 'green'}>
-                {item.breaking_changes.length}
+              <Tag
+                color={
+                  item.status !== 'completed'
+                    ? 'warning'
+                    : item.breaking_changes.length
+                      ? 'red'
+                      : 'green'
+                }
+              >
+                {item.status === 'completed' ? item.breaking_changes.length : '未提供'}
               </Tag>
             ),
           },
           {
             title: 'Schema 覆盖率',
-            render: (_, item) => `${item.coverage.schema_coverage_percent}%`,
+            render: (_, item) =>
+              contractCoverage(
+                item.coverage.schema_coverage_percent,
+                item.coverage.schema_fields_total,
+                item.status === 'completed',
+              ).label,
           },
           { title: '生成用例', dataIndex: 'generated_case_count' },
           { title: '时间', render: (_, item) => formatTime(item.created_at) },
@@ -326,22 +344,33 @@ export function ContractRunTable({
 }
 
 export function ContractSummary({ run }: { run: ContractRun }) {
+  const available = run.status === 'completed'
+  const schema = contractCoverage(
+    run.coverage.schema_coverage_percent,
+    run.coverage.schema_fields_total,
+    available,
+  )
+  const operations = contractCoverage(
+    run.coverage.operation_coverage_percent,
+    run.coverage.operations_total,
+    available,
+  )
   return (
     <Card title="契约差异与覆盖率" size="small">
       <Descriptions
         size="small"
         column={4}
         items={[
-          { label: '操作覆盖', children: `${run.coverage.operation_coverage_percent}%` },
-          { label: 'Schema 覆盖', children: `${run.coverage.schema_coverage_percent}%` },
-          { label: 'Schema 字段', children: run.coverage.schema_fields_total },
-          { label: '破坏性变更', children: run.breaking_changes.length },
+          { label: '操作覆盖', children: operations.label },
+          { label: '分析状态', children: run.status },
+          { label: 'Schema 覆盖', children: schema.label },
+          { label: 'Schema 字段', children: run.coverage.schema_fields_total ?? '未提供' },
+          { label: '破坏性变更', children: available ? run.breaking_changes.length : '未提供' },
         ]}
       />
-      <Progress
-        percent={run.coverage.schema_coverage_percent}
-        status={run.coverage.schema_coverage_percent === 100 ? 'success' : 'normal'}
-      />
+      {schema.percent !== null && (
+        <Progress percent={schema.percent} status={schema.percent === 100 ? 'success' : 'normal'} />
+      )}
       {run.breaking_changes.length > 0 && (
         <Alert
           type="error"
@@ -374,6 +403,7 @@ export function GeneratedCaseTable({
         size="small"
         loading={loading}
         pagination={false}
+        scroll={{ x: 960 }}
         dataSource={items}
         columns={[
           { title: '名称', dataIndex: 'name' },
@@ -510,6 +540,11 @@ function parseCaseDefinition(value: string): Record<string, unknown> {
   if (typeof result !== 'object' || result === null || Array.isArray(result))
     throw new Error('生成定义必须为JSON对象')
   return result as Record<string, unknown>
+}
+
+function formatDifference(value: ContractRun['diff_summary']): string {
+  if (![value.added, value.changed, value.deleted].every(Number.isFinite)) return '未提供'
+  return `+${value.added} / ~${value.changed} / -${value.deleted}`
 }
 
 function generationLabel(value: GeneratedContractCase['generation_kind']) {

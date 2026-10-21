@@ -28,6 +28,55 @@ beforeEach(() => {
 })
 
 describe('ContractAutomationPanel views', () => {
+  it('keeps incomplete failed analysis metadata distinct from complete coverage and zero changes', () => {
+    const legacy: ContractRun = {
+      ...contractRun,
+      source_name: 'legacy.json',
+      status: 'failed',
+      breaking_changes: [],
+      diff_summary: {} as ContractRun['diff_summary'],
+      coverage: {} as ContractRun['coverage'],
+    }
+    render(
+      <AntdApp>
+        <ContractRunTable
+          items={[legacy]}
+          loading={false}
+          selectedRunId={legacy.id}
+          onSelect={vi.fn()}
+        />
+        <ContractSummary run={legacy} />
+      </AntdApp>,
+    )
+    const row = screen.getByText('legacy.json').closest('tr')!
+    expect(within(row).getByText('分析失败')).toBeVisible()
+    expect(within(row).getAllByText('未提供')).toHaveLength(3)
+    expect(within(row).queryByText(/undefined|NaN|100%/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  })
+
+  it('keeps a non-object generated definition in the editor and does not submit it', async () => {
+    const submit = vi.fn()
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntdApp>
+          <CaseReviewDialog
+            item={generatedCase}
+            submitting={false}
+            onClose={vi.fn()}
+            onSubmit={submit}
+          />
+        </AntdApp>
+      </ConfigProvider>,
+    )
+    const dialog = screen.getByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('生成定义'), { target: { value: '[]' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '接受草稿' }))
+    expect(await within(dialog).findByText('生成定义必须为JSON对象')).toBeVisible()
+    expect(within(dialog).getByLabelText('生成定义')).toHaveValue('[]')
+    expect(submit).not.toHaveBeenCalled()
+  })
+
   it('reaches the 101st run and candidate, keeps the selected run across pages and filters by review status', async () => {
     const run101 = { ...contractRun, id: 'run-101', source_name: '第101批次.json' }
     const case101 = {

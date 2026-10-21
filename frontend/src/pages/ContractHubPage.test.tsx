@@ -173,6 +173,27 @@ const unsafeCheck: DeploymentCheck = {
 }
 
 describe('ContractHubPage', () => {
+  it('rejects an empty service form without sending writes or leaking validation rejections', async () => {
+    installHandlers()
+    let writes = 0
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/contract-hub/*`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    const open = await screen.findByRole('button', { name: /登记服务/ })
+    await waitFor(() => expect(open).toBeEnabled())
+    fireEvent.click(open)
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^登\s*记$/ }))
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText('服务标识')).toHaveAttribute('aria-invalid', 'true'),
+    )
+    expect(writes).toBe(0)
+  })
+
   it.each(['contractServiceId=', 'focus=contract_service:'])(
     'resolves an off-page service locator %s without selecting another provider',
     async (locator) => {
@@ -254,6 +275,9 @@ describe('ContractHubPage', () => {
     expect(await screen.findByText('契约中心尚未启用')).toBeInTheDocument()
     expect(screen.getAllByText('未提供')).toHaveLength(4)
     expect(screen.getByRole('button', { name: '登记服务' })).toBeDisabled()
+    expect(screen.getByRole('tab', { name: 'OpenAPI（总数未提供）' })).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Pact（总数未提供）' })).toBeVisible()
+    expect(screen.getByText('发布判断证据未提供')).toBeVisible()
     expect(requests).toBe(0)
   })
 
@@ -467,7 +491,7 @@ describe('ContractHubPage', () => {
     renderPage()
 
     expect(await screen.findByText('导入 Pact 后生成服务依赖图')).toBeVisible()
-    expect(screen.getByText('暂无不可安全发布的判断')).toBeVisible()
+    expect(await screen.findByText('暂无不可安全发布的判断')).toBeVisible()
     expect(screen.queryByRole('button', { name: /从 Broker 导入/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /执行提供方验证/ })).toBeDisabled()
     expect(screen.getByText('请先选择提供方')).toBeVisible()
@@ -475,6 +499,43 @@ describe('ContractHubPage', () => {
 })
 
 describe('contract hub presentational branches', () => {
+  it('marks missing or failed evidence explicitly and does not show empty coverage as one hundred percent', () => {
+    render(
+      <AntdApp>
+        <FailedEvidencePanel checks={[{ ...unsafeCheck, evidence: {} }]} />
+        <UnifiedContractsPanel
+          services={[]}
+          pacts={[]}
+          loading={false}
+          openapiRuns={[
+            {
+              ...openapiRun,
+              id: 'failed',
+              source_name: 'failed.json',
+              provider_service_id: null,
+              status: 'failed',
+            },
+            {
+              ...openapiRun,
+              id: 'empty',
+              source_name: 'empty.json',
+              provider_service_id: null,
+              coverage: { ...openapiRun.coverage, schema_fields_total: 0 },
+            },
+          ]}
+        />
+      </AntdApp>,
+    )
+    expect(screen.getByText(/阻断证据未提供/)).toBeVisible()
+    const failed = screen.getByText('failed.json').closest('tr')!
+    expect(within(failed).getByText('分析未成功')).toBeVisible()
+    expect(within(failed).getByText('未提供')).toBeVisible()
+    expect(within(failed).queryByText('无')).not.toBeInTheDocument()
+    const empty = screen.getByText('empty.json').closest('tr')!
+    expect(within(empty).getByText('无可评估项')).toBeVisible()
+    expect(within(empty).queryByText('100%')).not.toBeInTheDocument()
+  })
+
   it('renders statuses, decisions, empty graphs, and both contract kinds', () => {
     render(
       <AntdApp>
