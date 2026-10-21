@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -361,6 +361,26 @@ describe('ContractHubPage', () => {
     expect(screen.getByText('订单服务 · 2.0.0')).toBeVisible()
   })
 
+  it('keeps provider labels associated with the active dialog after a different dialog has been closed', async () => {
+    installHandlers()
+    renderPage()
+    const browser = userEvent.setup()
+    const verify = await screen.findByRole('button', { name: /执行提供方验证/ })
+    await waitFor(() => expect(verify).toBeEnabled())
+    await browser.click(verify)
+    const verification = await modalByTitle('执行提供方验证')
+    await browser.type(within(verification).getByLabelText('提供方版本'), 'original-verification')
+    await browser.click(within(verification).getByRole('button', { name: /取\s*消/ }))
+    await browser.click(screen.getByRole('button', { name: /导入 OpenAPI/ }))
+    const openapi = await modalByTitle('导入并绑定 OpenAPI')
+    const version = within(openapi).getByLabelText('提供方版本')
+    await browser.type(version, '2.4.0')
+    await waitFor(() => {
+      expect(within(openapi).getByLabelText('提供方版本')).toHaveValue('2.4.0')
+      expect(within(openapi).getByLabelText('提供方版本')).toBeVisible()
+    })
+  })
+
   it('submits service, Pact, Broker, OpenAPI, and provider verification dialogs', async () => {
     const payloads: Record<string, unknown> = {}
     installHandlers()
@@ -468,12 +488,9 @@ describe('ContractHubPage', () => {
       within(verificationDialog).getByLabelText('Pact 契约'),
       'Web 前端 web-42 → 订单服务',
     )
+    await browser.type(within(verificationDialog).getByLabelText('提供方版本'), '2.4.0')
     await browser.type(
-      verificationDialog.querySelector('input#provider_version') as HTMLInputElement,
-      '2.4.0',
-    )
-    await browser.type(
-      verificationDialog.querySelector('input#target_base_url') as HTMLInputElement,
+      within(verificationDialog).getByLabelText('Provider Origin'),
       'http://orders-api:8080',
     )
     await browser.click(within(verificationDialog).getByRole('button', { name: /执\s*行验证/ }))
@@ -648,13 +665,15 @@ function renderPage(initialEntry?: string) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="contracts" initialEntry={initialEntry}>
-          <ContractHubPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="contracts" initialEntry={initialEntry}>
+            <ContractHubPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }
 

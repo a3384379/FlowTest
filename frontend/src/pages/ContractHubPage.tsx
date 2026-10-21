@@ -907,6 +907,7 @@ function OpenapiDialog({
       }}
     >
       <Form
+        name="contract-openapi-import"
         form={form}
         layout="vertical"
         disabled={readOnly || submitting}
@@ -986,6 +987,7 @@ function VerificationDialog({
       afterClose={() => form.resetFields()}
     >
       <Form
+        name="contract-provider-verification"
         form={form}
         layout="vertical"
         disabled={readOnly || submitting}
