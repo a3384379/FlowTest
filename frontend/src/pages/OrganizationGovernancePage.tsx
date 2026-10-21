@@ -1101,14 +1101,15 @@ function KeyRotationCard({
       title={
         <Space>
           <KeyOutlined />
-          Organization Data Encryption Key Rotation
+          组织密钥轮换
         </Space>
       }
     >
       <Descriptions column={1} size="small">
         <Descriptions.Item label="当前版本">v{security.active_key_version}</Descriptions.Item>
+        <Descriptions.Item label="能力标识">{security.capability_name}</Descriptions.Item>
         <Descriptions.Item label="密钥材料">外部密钥提供方（只保存引用与指纹）</Descriptions.Item>
-        <Descriptions.Item label="Capability Mode">{security.capability_mode}</Descriptions.Item>
+        <Descriptions.Item label="能力模式">{security.capability_mode}</Descriptions.Item>
       </Descriptions>
       <Alert
         type={capabilityAvailable ? 'info' : 'warning'}

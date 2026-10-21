@@ -12,6 +12,7 @@ import {
   Typography,
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
+import { useRef } from 'react'
 
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import { useAuthStore } from '../features/auth/auth-store'
@@ -43,6 +44,7 @@ export default function PlatformCapabilitiesPage() {
 }
 
 function PlatformWorkspace({ scope }: { scope: string }) {
+  const inspectorRef = useRef<HTMLElement>(null)
   const [params, setParams] = useSearchParams()
   const isAdmin = useAuthStore((state) => Boolean(state.user?.is_system_admin))
   const queryClient = useQueryClient()
@@ -67,6 +69,9 @@ function PlatformWorkspace({ scope }: { scope: string }) {
     next.set('id', value.id)
     if (value.kind === 'capability') next.set('version', value.version)
     setParams(next)
+    if (window.matchMedia('(max-width: 1024px)').matches) {
+      inspectorRef.current?.scrollIntoView({ block: 'start' })
+    }
   }
   const onSearch = (value: string) => {
     const next = new URLSearchParams(params)
@@ -132,6 +137,7 @@ function PlatformWorkspace({ scope }: { scope: string }) {
             )}
           </div>
           <aside
+            ref={inspectorRef}
             className="v3-context-inspector"
             aria-label="平台对象检查器"
             style={{ overflowX: 'auto' }}
