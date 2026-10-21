@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import Select, case, func, or_, select, update
+from sqlalchemy import Select, and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -315,7 +315,14 @@ class RunnerFabricRepository:
     async def event_page(
         self, *, organization_id: UUID | None, page: int, limit: int, task_id: UUID | None
     ) -> tuple[list[RunnerEvent], int]:
-        statement = select(RunnerEvent).join(RunnerPool, RunnerPool.id == RunnerEvent.pool_id)
+        event_task_id = func.coalesce(RunnerEvent.task_id, RunnerLeaseRecord.task_id)
+        statement = (
+            select(RunnerEvent)
+            .join(RunnerPool, RunnerPool.id == RunnerEvent.pool_id)
+            .outerjoin(RunnerLeaseRecord, RunnerLeaseRecord.id == RunnerEvent.lease_id)
+            .outerjoin(RunnerTask, RunnerTask.id == event_task_id)
+            .outerjoin(Project, Project.id == RunnerTask.project_id)
+        )
         if organization_id is not None:
             statement = statement.where(
                 or_(
@@ -323,13 +330,18 @@ class RunnerFabricRepository:
                     RunnerPool.organization_id.is_(None),
                 )
             )
-            # Shared pools can contain other organizations' tasks. Scope task events too.
-            statement = statement.outerjoin(RunnerTask, RunnerTask.id == RunnerEvent.task_id)
-            statement = statement.outerjoin(Project, Project.id == RunnerTask.project_id).where(
-                or_(RunnerEvent.task_id.is_(None), self._inspection_scope(organization_id))
+            statement = statement.where(
+                or_(
+                    and_(RunnerEvent.task_id.is_(None), RunnerEvent.lease_id.is_(None)),
+                    and_(
+                        RunnerTask.id.is_not(None),
+                        Project.id.is_not(None),
+                        self._inspection_scope(organization_id),
+                    ),
+                )
             )
         if task_id is not None:
-            statement = statement.where(RunnerEvent.task_id == task_id)
+            statement = statement.where(event_task_id == task_id)
         return await self._inspection_page(
             statement.order_by(RunnerEvent.created_at.desc(), RunnerEvent.id), page, limit
         )

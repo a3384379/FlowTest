@@ -23,6 +23,16 @@
 - 完整原始日志保留在本工作树 `output/validation/m25-execution-fabric/`（未提交生成物）。
 - 独立只读子审指出的缓存 Lease 刷新失败仍称有效问题已整改；未改变任何重试、超时或覆盖率门槛。
 
+## 独立复审修复（2026-10-22）
+
+复审 `761b87b` 时通过真实 `progress()` 写入复现：共享 Pool 中组织 B 的进度事件只关联 Lease、没有 `task_id`，组织 A 的事件目录错误读到该消息，组织 B 的精确任务事件目录却遗漏它。原隔离测试未生成进度事件，单独检查 `task_id is None` 无法识别该问题。
+
+本次仅修复 repository 查询：使用事件直接任务 ID 或已有 Lease 的任务 ID 解析归属，同时用于组织过滤与精确任务定位；只有任务 ID、Lease ID 均为空的记录才按 Pool 事件处理。带有关联但无法解析任务及项目的记录在组织范围内不再被当作共享事件。列表与 total 继续使用同一查询，稳定分页不变。未修改 progress 写入路径，没有新增事件、日志、采集、数据库字段或迁移。
+
+新增两个行为反例先得到 2 项失败、原有 35 项通过，修复后 `make test-backend-targeted TARGETS='["tests/test_runner_fabric.py"]'` 共 37 项通过。覆盖真实 progress 产生的既有记录格式、其他组织不可见、共享注册事件仍可见、本组织及全部组织按任务定位、共享项目兼容、两页无重复及 total 一致、无法解析 Lease / 任务的失败关闭。受影响文件 Ruff 格式和检查通过，`uv run mypy app` 的 445 个源文件通过，`git diff --check` 通过。
+
+复审修复原始日志位于本工作树 `output/validation/m25-fabric-review/`：`backend-red.log`、`backend-green.log`、`backend-mypy.log`、`backend-static.log`、`receipt-format.log`。本修复未运行前端、全量覆盖率或真实浏览器验收，其余验收边界仍按下节单独记账。
+
 ## 条件环境与验收边界
 
 真实动态 GUI、Runner 心跳/故障转移、完整 `make check`、Compose 端到端、正式最新提交门禁、合并后 CI 和发布验收尚未执行，由整合负责人分别记账。当前 targeted 通过不代表这些验收通过。
