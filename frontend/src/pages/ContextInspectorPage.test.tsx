@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -9,6 +9,7 @@ import type {
   ContextDetail,
   ContextSummary,
 } from '../features/context-inspector/context-inspector-service'
+import { useLocation } from 'react-router-dom'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { project } from '../test/fixtures'
 import { server } from '../test/server'
@@ -186,11 +187,17 @@ describe('ContextInspectorPage', () => {
     renderPage()
 
     expect(await screen.findByRole('heading', { name: '上下文检查器' })).toBeVisible()
+    await userEvent.click(await screen.findByRole('tab', { name: '证据' }))
     expect(await screen.findByText('OrderController.create 提供 POST /orders 路由')).toBeVisible()
+    await userEvent.click(
+      screen.getByRole('button', { name: `查看证据 ${detail.evidence_items[0].id}` }),
+    )
     expect(screen.getByText('flowtest-java-spring 1.0.0')).toBeVisible()
+    expect(screen.getByText('LOMBOK_REVIEW：Lombok 语义需人工确认')).toBeVisible()
+    await userEvent.click(screen.getByRole('tab', { name: '知识关系' }))
     expect(screen.getAllByText('Order.CREATED')).toHaveLength(2)
     expect(screen.getByText('allows_state')).toBeVisible()
-    expect(screen.getByText('LOMBOK_REVIEW：Lombok 语义需人工确认')).toBeVisible()
+    await userEvent.click(screen.getByRole('tab', { name: '关联提案' }))
     expect(screen.getByText('RuoYi 订单 Flow Proposal')).toBeVisible()
     expect(screen.getByRole('link', { name: /打开 Proposal/ })).toHaveAttribute(
       'href',
@@ -268,11 +275,15 @@ describe('ContextInspectorPage', () => {
     )
     renderPage()
 
+    await userEvent.click(await screen.findByRole('tab', { name: '完整性与冲突' }))
     expect(await screen.findByText('缺少 Evidence：数据画像')).toBeVisible()
     expect(screen.getByText('订单状态声明冲突')).toBeVisible()
     expect(screen.getAllByText('java://Order.status')).toHaveLength(1)
+    await userEvent.click(screen.getByRole('tab', { name: '证据' }))
     expect(screen.getByText('当前 Revision 暂无 Finding')).toBeVisible()
+    await userEvent.click(screen.getByRole('tab', { name: '知识关系' }))
     expect(screen.getByText('暂无 State Candidate')).toBeVisible()
+    await userEvent.click(screen.getByRole('tab', { name: '关联提案' }))
     expect(screen.getByText('当前 Revision 暂无关联 Proposal')).toBeVisible()
     expect(screen.getAllByText('有冲突').length).toBeGreaterThan(0)
   })
@@ -300,15 +311,215 @@ describe('ContextInspectorPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
+    await userEvent.click(await screen.findByRole('tab', { name: '证据' }))
     expect(await screen.findByText('OrderController.create 提供 POST /orders 路由')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /已过期支付上下文/ }))
 
     expect((await screen.findAllByText('已过期支付上下文')).length).toBeGreaterThan(0)
     expect(screen.getAllByText('已过期').length).toBeGreaterThan(0)
   })
+  it('links a conflict to its exact frozen finding and reports filtered and total evidence counts without writes', async () => {
+    let writes = 0,
+      reads = 0
+    const other = {
+      ...detail.evidence_items[0],
+      id: 'other-evidence',
+      source_type: 'contract' as const,
+      fingerprint: 'd'.repeat(64),
+      deterministic: false,
+      warnings: [],
+      finding: {
+        ...detail.evidence_items[0].finding,
+        statement: '第二条契约来源',
+        source_path: 'contract#/status',
+        deterministic: false,
+      },
+    }
+    const linked = {
+      ...detail,
+      evidence_count: 2,
+      conflict_count: 1,
+      evidence_items: [detail.evidence_items[0], other],
+      revision: {
+        ...detail.revision,
+        conflict_snapshot: {
+          schema_version: 'flowtest-context-conflicts-v1',
+          conflicts: [
+            {
+              subject_ref: detail.evidence_items[0].subject_ref,
+              finding_fingerprints: [detail.evidence_items[0].fingerprint],
+              summary: '固定冲突来源',
+            },
+          ],
+        },
+      },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
+        HttpResponse.json({ items: [summary], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () => {
+        reads++
+        return HttpResponse.json(linked)
+      }),
+      http.post('/api/v1/*', () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: '完整性与冲突' }))
+    await userEvent.click(screen.getByRole('button', { name: '定位冲突证据 1' }))
+    expect(await screen.findByText('显示 1 / 2 条证据')).toBeVisible()
+    await userEvent.click(
+      screen.getByRole('button', { name: `查看证据 ${detail.evidence_items[0].id}` }),
+    )
+    const finding = screen.getByRole('region', { name: '证据详情' })
+    expect(within(finding).getByText('ruoyi-fixed', { exact: true })).toBeInTheDocument()
+    expect(
+      within(finding).getByText('src/OrderController.java:20', { exact: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('context-route')).toHaveTextContent(
+      `evidence=${detail.evidence_items[0].id}`,
+    )
+    expect(screen.getByTestId('context-route')).toHaveTextContent(`revision=${revisionId}`)
+    await userEvent.click(screen.getByRole('button', { name: '清除证据筛选' }))
+    expect(screen.getByText('显示 2 / 2 条证据')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('combobox', { name: '证据确定性' }))
+    await userEvent.click(
+      screen.getByText('需复核', { selector: '.ant-select-item-option-content' }),
+    )
+    expect(screen.getByText('显示 1 / 2 条证据')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('checkbox', { name: '仅含警告' }))
+    expect(screen.getByText('显示 0 / 2 条证据')).toBeInTheDocument()
+    expect(reads).toBe(1)
+    expect(writes).toBe(0)
+  })
+  it('restores a knowledge node and resolves only evidence references present in the selected revision', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
+        HttpResponse.json({ items: [summary], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () =>
+        HttpResponse.json(detail),
+      ),
+    )
+    renderPage(
+      `/projects/${project.id}/contexts?focus=${contextId}&revision=${revisionId}&panel=knowledge&knowledge=state.order_created`,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: '定位关联证据' }))
+    expect(await screen.findByRole('region', { name: '证据详情' })).toHaveTextContent(
+      'OrderController.create 提供 POST /orders 路由',
+    )
+    expect(screen.getByTestId('context-route')).toHaveTextContent(
+      `evidence=${detail.evidence_items[0].id}`,
+    )
+    expect(screen.getByTestId('context-route')).toHaveTextContent(`focus=${contextId}`)
+  })
+  it('does not substitute a newer current revision for a fixed older revision', async () => {
+    const currentRevision = '00000000-0000-4000-8000-000000005799'
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
+        HttpResponse.json({ items: [summary], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () =>
+        HttpResponse.json({ ...detail, current_revision: 4, revision_id: currentRevision }),
+      ),
+    )
+    renderPage(
+      `/projects/${project.id}/contexts?focus=${contextId}&revision=${revisionId}&panel=evidence&evidence=${detail.evidence_items[0].id}`,
+    )
+    expect(await screen.findByText('所选固定修订不可读取')).toBeVisible()
+    expect(screen.queryByRole('region', { name: '证据详情' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '查看当前修订' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('context-route')).toHaveTextContent(`revision=${currentRevision}`),
+    )
+    expect(screen.queryByText('所选固定修订不可读取')).not.toBeInTheDocument()
+  })
+  it('preserves unknown conflict and knowledge references without inventing source links or making writes', async () => {
+    let writes = 0,
+      reads = 0
+    const unknown = 'javascript:unknown-evidence'
+    const missing = 'e'.repeat(64)
+    const current = {
+      ...detail,
+      revision: {
+        ...detail.revision,
+        knowledge_snapshot: {
+          ...detail.revision.knowledge_snapshot,
+          nodes: [
+            {
+              id: 'unknown-node',
+              kind: 'state_candidate',
+              label: '未知引用节点',
+              facts: [{ name: 'evidence_ref', value: unknown }],
+            },
+          ],
+        },
+        conflict_snapshot: {
+          schema_version: 'flowtest-context-conflicts-v1',
+          conflicts: [
+            {
+              subject_ref: 'unknown://subject',
+              summary: '未载入的冲突引用',
+              finding_fingerprints: [missing],
+            },
+          ],
+        },
+      },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
+        HttpResponse.json({ items: [summary], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () => {
+        reads++
+        return HttpResponse.json(current)
+      }),
+      http.post('/api/v1/*', () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage(
+      `/projects/${project.id}/contexts?focus=${contextId}&revision=${revisionId}&panel=knowledge&knowledge=unknown-node`,
+    )
+    expect(await screen.findByText('当前修订没有可唯一定位的证据引用')).toBeInTheDocument()
+    expect(screen.getAllByText(unknown).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '定位关联证据' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('tab', { name: '完整性与冲突' }))
+    await userEvent.click(screen.getByRole('button', { name: '定位冲突证据 1' }))
+    expect(screen.getByText('显示 0 / 1 条证据')).toBeInTheDocument()
+    expect(screen.getByText(missing, { exact: true })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: `查看证据 ${detail.evidence_items[0].id}` }),
+    ).not.toBeInTheDocument()
+    expect(reads).toBe(1)
+    expect(writes).toBe(0)
+  })
+  it('rejects a foreign-project response and retries without substituting another context', async () => {
+    let valid = false
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/contexts`, () =>
+        HttpResponse.json({ items: [summary], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contexts/${contextId}`, () =>
+        HttpResponse.json({ ...detail, project_id: valid ? project.id : 'foreign' }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/contexts?focus=${contextId}&revision=${revisionId}`)
+    expect(await screen.findByText('上下文响应项目或ID不匹配')).toBeVisible()
+    expect(screen.queryByRole('tab', { name: '证据' })).not.toBeInTheDocument()
+    valid = true
+    await userEvent.click(screen.getByRole('button', { name: '重试详情' }))
+    await userEvent.click(await screen.findByRole('tab', { name: '证据' }))
+    expect(screen.getByText(detail.evidence_items[0].finding.statement)).toBeVisible()
+  })
 })
 
-function renderPage() {
+function renderPage(initialEntry = `/projects/${project.id}/contexts`) {
   server.use(
     http.get('/api/v1/projects', () =>
       HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
@@ -318,12 +529,20 @@ function renderPage() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="contexts" initialEntry={`/projects/${project.id}/contexts`}>
-          <ContextInspectorPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="contexts" initialEntry={initialEntry}>
+            <ContextInspectorPage />
+            <InspectorRouteProbe />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
+}
+
+function InspectorRouteProbe() {
+  const location = useLocation()
+  return <output data-testid="context-route">{location.search}</output>
 }

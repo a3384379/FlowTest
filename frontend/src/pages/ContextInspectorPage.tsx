@@ -7,10 +7,10 @@ import {
   Descriptions,
   Empty,
   Flex,
-  List,
   Row,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
@@ -18,16 +18,17 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import type {
   ContextDetail,
-  ContextEvidenceItem,
   ContextProposal,
   ContextStatus,
-  EvidenceProviderType,
-  KnowledgeNode,
 } from '../features/context-inspector/context-inspector-service'
 import { useContextInspector } from '../features/context-inspector/use-context-inspector'
 import ContextPageControls from '../features/context-inspector/ContextPageControls'
 import { projectPath } from '../features/projects/project-routing'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
+import ContextEvidenceBrowser from '../features/context-inspector/ContextEvidenceBrowser'
+import { providerTypeLabel as providerLabel } from '../features/context-inspector/context-presentation'
+import ContextKnowledgePanel from '../features/context-inspector/ContextKnowledgePanel'
+import type { ContextPanel } from '../features/context-inspector/context-navigation'
 
 export default function ContextInspectorPage() {
   const [searchParams] = useSearchParams()
@@ -49,24 +50,16 @@ export default function ContextInspectorPage() {
         title="只读检查界面：不扩大 MCP 权限，不修改 Evidence，不自动接受或应用 Proposal。"
         style={{ marginBottom: 16 }}
       />
-      {state.contexts.isError ? (
-        <Alert type="error" showIcon title={apiErrorMessage(state.contexts.error)} />
-      ) : (
-        <Row gutter={16}>
-          <Col span={7}>
-            <ContextList state={state} />
-          </Col>
-          <Col span={17}>
-            <Card title="Context Detail" loading={state.detail.isLoading}>
-              {state.detail.isError ? (
-                <Alert type="error" showIcon title={apiErrorMessage(state.detail.error)} />
-              ) : (
-                <ContextDetailView detail={state.detail.data} projectId={state.projectId} />
-              )}
-            </Card>
-          </Col>
-        </Row>
-      )}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={7} style={{ minWidth: 0 }}>
+          <ContextList state={state} />
+        </Col>
+        <Col xs={24} lg={17} style={{ minWidth: 0 }}>
+          <section aria-label="上下文详情">
+            <ContextDetailState state={state} />
+          </section>
+        </Col>
+      </Row>
     </>
   )
 }
@@ -74,16 +67,23 @@ export default function ContextInspectorPage() {
 type InspectorState = ReturnType<typeof useContextInspector>
 
 function ContextList({ state }: { state: InspectorState }) {
-  const items = state.contexts.data?.items ?? []
+  const items = state.contexts.isSuccess ? state.contexts.data.items : []
   return (
     <Card
-      title={`Context List · ${state.contexts.data?.total ?? '未提供'}`}
+      title={`Context List · ${state.contexts.isSuccess ? state.contexts.data.total : '未提供'}`}
       loading={state.contexts.isLoading}
     >
-      {items.length === 0 && !state.contexts.isLoading ? (
+      {state.contexts.isError ? (
+        <Alert
+          type="error"
+          title={apiErrorWithTrace(state.contexts.error)}
+          action={<Button onClick={() => void state.contexts.refetch()}>重试目录</Button>}
+        />
+      ) : null}
+      {items.length === 0 && !state.contexts.isLoading && !state.contexts.isError ? (
         <Empty description="暂无 Test Context" />
       ) : (
-        <Flex vertical gap={8}>
+        <Flex vertical gap={8} style={{ maxHeight: 380, overflowY: 'auto' }}>
           {items.map((item) => (
             <Button
               key={item.id}
@@ -117,41 +117,119 @@ function ContextList({ state }: { state: InspectorState }) {
   )
 }
 
-function ContextDetailView({
-  detail,
-  projectId,
-}: {
-  detail: ContextDetail | undefined
-  projectId: string | null
-}) {
-  if (!detail) return <Empty description="选择 Context 查看当前 Revision" />
+function ContextDetailState({ state }: { state: InspectorState }) {
+  if (state.detail.isError)
+    return (
+      <Alert
+        type="error"
+        showIcon
+        title={apiErrorWithTrace(state.detail.error)}
+        action={<Button onClick={() => void state.detail.refetch()}>重试详情</Button>}
+      />
+    )
+  if (!state.detail.isSuccess) return <Empty description="选择 Context 查看当前 Revision" />
+  if (state.revisionMismatch)
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="所选固定修订不可读取"
+        description={`所选 ${state.expectedRevision}；当前接口返回 ${state.detail.data.revision_id}。该接口仅提供当前修订，不会将新修订冒充旧修订。`}
+        action={<Button onClick={state.showCurrentRevision}>查看当前修订</Button>}
+      />
+    )
+  return (
+    <ContextDetailView
+      key={`${state.detail.data.id}:${state.detail.data.revision_id}`}
+      detail={state.detail.data}
+      state={state}
+    />
+  )
+}
+function ContextDetailView({ detail, state }: { detail: ContextDetail; state: InspectorState }) {
+  const props = { detail, selection: state.selection, onNavigate: state.navigate }
   return (
     <Flex vertical gap={16}>
-      <Descriptions bordered size="small" column={2}>
-        <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
-        <Descriptions.Item label="状态">
-          <StatusTag status={detail.status} />
-        </Descriptions.Item>
-        <Descriptions.Item label="目标" span={2}>
-          {detail.objective}
-        </Descriptions.Item>
-        <Descriptions.Item label="Revision">{detail.current_revision}</Descriptions.Item>
-        <Descriptions.Item label="Fingerprint">
-          <Typography.Text code>{detail.revision_fingerprint.slice(0, 16)}</Typography.Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Evidence">{detail.evidence_count}</Descriptions.Item>
-        <Descriptions.Item label="Provider">{detail.provider_count}</Descriptions.Item>
-        <Descriptions.Item label="关联 Proposal">{detail.proposal_count}</Descriptions.Item>
-        <Descriptions.Item label="过期时间">
-          {new Date(detail.expires_at).toLocaleString()}
-        </Descriptions.Item>
-      </Descriptions>
-      <Completeness detail={detail} />
-      <Conflicts detail={detail} />
-      <ProviderSummary detail={detail} />
-      <EvidenceFindings items={detail.evidence_items} />
-      <Knowledge detail={detail} />
-      <Proposals items={detail.proposals} projectId={projectId} />
+      <Typography.Paragraph>
+        当前 Revision {detail.current_revision} ·{' '}
+        <Typography.Text copyable>{detail.revision_id}</Typography.Text>
+      </Typography.Paragraph>
+      {detail.status === 'expired' ? (
+        <Alert type="warning" title="该上下文已过期，仅用于只读回看。" />
+      ) : null}
+      <Tabs
+        activeKey={state.selection.panel}
+        destroyOnHidden
+        onChange={(key) => state.navigate({ panel: key as ContextPanel })}
+        items={[
+          {
+            key: 'overview',
+            label: '概要',
+            children: (
+              <>
+                {' '}
+                <Descriptions bordered size="small" column={{ xs: 1, md: 2 }}>
+                  <Descriptions.Item label="名称">{detail.name}</Descriptions.Item>
+                  <Descriptions.Item label="状态">
+                    <StatusTag status={detail.status} />
+                  </Descriptions.Item>
+                  <Descriptions.Item label="目标" span={{ xs: 1, md: 2 }}>
+                    {detail.objective}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Revision">{detail.current_revision}</Descriptions.Item>
+                  <Descriptions.Item label="Fingerprint">
+                    <Typography.Text code copyable={{ text: detail.revision_fingerprint }}>
+                      {detail.revision_fingerprint.slice(0, 16)}…
+                    </Typography.Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Evidence">{detail.evidence_count}</Descriptions.Item>
+                  <Descriptions.Item label="Provider">{detail.provider_count}</Descriptions.Item>
+                  <Descriptions.Item label="关联 Proposal">
+                    {detail.proposal_count}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="过期时间">
+                    {new Date(detail.expires_at).toLocaleString()}
+                  </Descriptions.Item>
+                </Descriptions>
+                <ProviderSummary
+                  detail={detail}
+                  onType={(type) => state.navigate({ panel: 'evidence', providerType: type })}
+                />
+              </>
+            ),
+          },
+          {
+            key: 'conflicts',
+            label: '完整性与冲突',
+            children: (
+              <Flex vertical gap={16}>
+                <Completeness detail={detail} />
+                <Conflicts
+                  detail={detail}
+                  onSelect={(index) =>
+                    state.navigate({
+                      panel: 'evidence',
+                      conflict: String(index),
+                      evidence: null,
+                      sourceEvidence: null,
+                      providerType: null,
+                      certainty: null,
+                      warnings: null,
+                    })
+                  }
+                />
+              </Flex>
+            ),
+          },
+          { key: 'evidence', label: '证据', children: <ContextEvidenceBrowser {...props} /> },
+          { key: 'knowledge', label: '知识关系', children: <ContextKnowledgePanel {...props} /> },
+          {
+            key: 'proposals',
+            label: '关联提案',
+            children: <Proposals items={detail.proposals} projectId={state.projectId} />,
+          },
+        ]}
+      />
     </Flex>
   )
 }
@@ -189,27 +267,47 @@ function Completeness({ detail }: { detail: ContextDetail }) {
   )
 }
 
-function Conflicts({ detail }: { detail: ContextDetail }) {
+function Conflicts({
+  detail,
+  onSelect,
+}: {
+  detail: ContextDetail
+  onSelect: (index: number) => void
+}) {
   const conflicts = detail.revision.conflict_snapshot.conflicts
   return (
     <Card size="small" title={`Evidence Conflict · ${conflicts.length}`}>
       {conflicts.length === 0 ? (
         <Typography.Text type="secondary">当前 Revision 无冲突。</Typography.Text>
       ) : (
-        <List
-          dataSource={conflicts}
-          renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta title={item.summary} description={item.subject_ref} />
-            </List.Item>
-          )}
-        />
+        conflicts.map((item, index) => (
+          <Card size="small" key={`${index}:${item.subject_ref}`}>
+            <Typography.Paragraph strong>{item.summary}</Typography.Paragraph>
+            <Typography.Paragraph style={{ overflowWrap: 'anywhere' }} copyable>
+              {item.subject_ref}
+            </Typography.Paragraph>
+            <Typography.Paragraph>
+              固定来源引用 {item.finding_fingerprints.length} 条
+            </Typography.Paragraph>
+            <Button aria-label={`定位冲突证据 ${index + 1}`} onClick={() => onSelect(index)}>
+              定位冲突证据
+            </Button>
+          </Card>
+        ))
       )}
     </Card>
   )
 }
 
-function ProviderSummary({ detail }: { detail: ContextDetail }) {
+function ProviderSummary({
+  detail,
+  onType,
+}: {
+  detail: ContextDetail
+  onType: (
+    type: import('../features/context-inspector/context-inspector-service').EvidenceProviderType,
+  ) => void
+}) {
   return (
     <Card size="small" title="Provider Summary">
       <Table
@@ -217,6 +315,7 @@ function ProviderSummary({ detail }: { detail: ContextDetail }) {
         pagination={false}
         rowKey={(item) => `${item.source_type}:${item.provider_name}:${item.provider_version}`}
         dataSource={detail.providers}
+        scroll={{ x: 580 }}
         columns={[
           {
             title: 'Provider',
@@ -226,115 +325,17 @@ function ProviderSummary({ detail }: { detail: ContextDetail }) {
           { title: 'Finding', dataIndex: 'finding_count' },
           { title: '确定性', dataIndex: 'deterministic_count' },
           { title: '冲突', dataIndex: 'conflict_count' },
-        ]}
-      />
-    </Card>
-  )
-}
-
-function EvidenceFindings({ items }: { items: ContextEvidenceItem[] }) {
-  return (
-    <Card size="small" title={`Provider Finding · ${items.length}`}>
-      {items.length === 0 ? (
-        <Empty description="当前 Revision 暂无 Finding" />
-      ) : (
-        <List
-          dataSource={items}
-          renderItem={(item) => (
-            <List.Item>
-              <List.Item.Meta
-                title={
-                  <Space wrap>
-                    <Typography.Text strong>{item.finding.statement}</Typography.Text>
-                    <Tag>{item.finding.kind}</Tag>
-                    <Tag color={item.deterministic ? 'success' : 'warning'}>
-                      {item.deterministic ? '确定性' : '需复核'}
-                    </Tag>
-                  </Space>
-                }
-                description={
-                  <Flex vertical gap={4}>
-                    <Typography.Text type="secondary">
-                      {item.provider_name} {item.provider_version} · {item.finding.source_path}
-                    </Typography.Text>
-                    <Typography.Text type="secondary">
-                      {item.source_ref}@{item.source_revision} · confidence {item.confidence}
-                    </Typography.Text>
-                    {item.warnings.map((warning) => (
-                      <Alert
-                        key={`${item.id}:${warning.code}`}
-                        type="warning"
-                        showIcon
-                        title={`${warning.code}：${warning.message}`}
-                      />
-                    ))}
-                  </Flex>
-                }
-              />
-            </List.Item>
-          )}
-        />
-      )}
-    </Card>
-  )
-}
-
-function Knowledge({ detail }: { detail: ContextDetail }) {
-  const knowledge = detail.revision.knowledge_snapshot
-  const labels = new Map(knowledge.nodes.map((node) => [node.id, node.label]))
-  const states = knowledge.nodes.filter((node) => node.kind === 'state_candidate')
-  return (
-    <Card
-      size="small"
-      title={`State Knowledge · ${knowledge.nodes.length} Nodes / ${knowledge.edges.length} Edges`}
-    >
-      <Typography.Title level={5}>State Candidate</Typography.Title>
-      <KnowledgeNodes nodes={states} />
-      <Typography.Title level={5}>Knowledge Graph</Typography.Title>
-      <Table
-        size="small"
-        pagination={{ pageSize: 8, hideOnSinglePage: true }}
-        rowKey={(item) => `${item.source}:${item.relation}:${item.target}`}
-        dataSource={knowledge.edges}
-        columns={[
-          { title: '源', dataIndex: 'source', render: (value) => labels.get(value) ?? value },
-          { title: '关系', dataIndex: 'relation', render: (value) => <Tag>{value}</Tag> },
-          { title: '目标', dataIndex: 'target', render: (value) => labels.get(value) ?? value },
-        ]}
-      />
-    </Card>
-  )
-}
-
-function KnowledgeNodes({ nodes }: { nodes: KnowledgeNode[] }) {
-  if (nodes.length === 0) return <Empty description="暂无 State Candidate" />
-  return (
-    <Table
-      size="small"
-      pagination={false}
-      rowKey="id"
-      dataSource={nodes}
-      columns={[
-        { title: '候选状态', dataIndex: 'label' },
-        {
-          title: 'Evidence Ref',
-          render: (_, node) =>
-            node.facts
-              .filter((fact) => fact.name === 'evidence_ref')
-              .map((fact) => fact.value)
-              .join('、') || '-',
-        },
-        {
-          title: '复核',
-          render: (_, node) =>
-            node.facts.some((fact) => fact.name === 'requires_review' && fact.value === 'true') ? (
-              <Tag color="warning">需复核</Tag>
-            ) : (
-              <Tag color="success">已确定</Tag>
+          {
+            title: '定位',
+            render: (_, item) => (
+              <Button type="link" onClick={() => onType(item.source_type)}>
+                筛选此来源类型
+              </Button>
             ),
-        },
-      ]}
-    />
+          },
+        ]}
+      />
+    </Card>
   )
 }
 
@@ -349,6 +350,7 @@ function Proposals({ items, projectId }: { items: ContextProposal[]; projectId: 
           pagination={false}
           rowKey="id"
           dataSource={items}
+          scroll={{ x: 520 }}
           columns={[
             { title: '名称', dataIndex: 'title' },
             { title: '审核', dataIndex: 'review_status', render: proposalReviewLabel },
@@ -393,22 +395,6 @@ function StatusTag({ status }: { status: ContextStatus }) {
     closed: '已关闭',
   }
   return <Tag color={colors[status]}>{labels[status]}</Tag>
-}
-
-function providerLabel(value: EvidenceProviderType): string {
-  const labels: Record<EvidenceProviderType, string> = {
-    repository: '仓库',
-    contract: '契约',
-    data_profile: '数据画像',
-    service_topology: '服务拓扑',
-    existing_test: '已有测试',
-    workflow: '工作流',
-    runtime: '运行时',
-    change: '变更',
-    user_confirmed_rule: '人工规则',
-    database: '数据库',
-  }
-  return labels[value]
 }
 
 function proposalReviewLabel(value: ContextProposal['review_status']) {

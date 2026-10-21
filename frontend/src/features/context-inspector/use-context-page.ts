@@ -3,9 +3,9 @@ import { useState } from 'react'
 
 import { listContexts } from './context-inspector-service'
 
-export function useContextPage(projectId: string | null, enabled = true) {
+export function useContextPage(projectId: string | null, enabled = true, controlledPage?: number) {
   const [selection, setSelection] = useState({ projectId, page: 1 })
-  const page = selection.projectId === projectId ? selection.page : 1
+  const page = controlledPage ?? (selection.projectId === projectId ? selection.page : 1)
   const contexts = useQuery({
     queryKey: ['context-page', projectId, page],
     queryFn: () => {
