@@ -456,6 +456,61 @@ describe('OrganizationGovernancePage', () => {
       expect(screen.queryByText(`同名用户 (${user.email})`)).not.toBeInTheDocument(),
     )
   })
+
+  it.each(['directory', 'advanced'] as const)(
+    'locks the system administrator %s picker until the member update finishes',
+    async (mode) => {
+      let writes = 0
+      let submitted: unknown
+      let release: (() => void) | undefined
+      server.use(
+        http.post('/api/v1/users/search', () =>
+          HttpResponse.json({ items: [user], total: 1, page: 1, page_size: 20 }),
+        ),
+        http.put(
+          `/api/v1/organizations/${organizationId}/members/${user.id}`,
+          async ({ request }) => {
+            writes += 1
+            submitted = await request.json()
+            await new Promise<void>((resolve) => {
+              release = resolve
+            })
+            return HttpResponse.json(member)
+          },
+        ),
+      )
+      renderPage()
+      const browser = userEvent.setup()
+      await screen.findByRole('combobox', { name: '组织用户' })
+      if (mode === 'advanced') {
+        await browser.click(screen.getByRole('button', { name: '按 ID 输入' }))
+        await browser.type(screen.getByRole('textbox', { name: '组织用户 ID' }), user.id)
+      } else {
+        await browser.click(screen.getByRole('combobox', { name: '组织用户' }))
+        await browser.click(await screen.findByText(`${user.display_name} (${user.email})`))
+      }
+      await browser.click(screen.getByRole('button', { name: '添加 / 更新' }))
+      await waitFor(() => expect(writes).toBe(1))
+      const input =
+        mode === 'advanced'
+          ? screen.getByRole('textbox', { name: '组织用户 ID' })
+          : screen.getByRole('combobox', { name: '组织用户' })
+      expect(input).toBeDisabled()
+      expect(screen.getByRole('button', { name: /按 ID 输入|返回名称搜索/ })).toBeDisabled()
+      expect(screen.getByRole('combobox', { name: '成员角色' })).toBeDisabled()
+      await browser.type(input, 'unsubmitted-user', { skipClick: true })
+      expect(input).toHaveValue(mode === 'advanced' ? user.id : '')
+      await browser.click(screen.getByRole('button', { name: '添加 / 更新' }))
+      expect(writes).toBe(1)
+      expect(submitted).toEqual({ user_id: user.id, role: 'member' })
+      await act(async () => release?.())
+      await waitFor(() => expect(screen.getByRole('button', { name: '添加 / 更新' })).toBeEnabled())
+      const cleared = screen.getByRole('combobox', { name: '组织用户' })
+      expect(cleared).toHaveValue('')
+      expect(cleared.closest('.ant-select')).not.toHaveTextContent(user.email)
+      expect(writes).toBe(1)
+    },
+  )
 })
 
 function auditEntry(page: number) {

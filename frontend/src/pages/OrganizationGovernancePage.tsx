@@ -646,7 +646,11 @@ function OverviewTab({
                 name="user_id"
                 rules={[{ required: true, message: '请选择用户或输入完整用户 ID' }]}
               >
-                <OrganizationMemberPicker members={members} canSearchUsers={canSearchUsers} />
+                <OrganizationMemberPicker
+                  members={members}
+                  canSearchUsers={canSearchUsers}
+                  disabled={pending}
+                />
               </Form.Item>
               <Form.Item name="role" initialValue="member">
                 <Select aria-label="成员角色" style={{ width: 120 }} options={roleOptions} />

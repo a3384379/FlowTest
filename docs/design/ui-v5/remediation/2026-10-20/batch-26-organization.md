@@ -28,6 +28,18 @@
 
 原始日志保存在本批工作树 `output/m24-organization-20261022/`，包括 `frontend-red.log`、`backend-red.log`、`extra-red.log`、`frontend-final.log`、`backend-final.log`、`frontend-lint.log`、`frontend-build.log`、`backend-static.log` 和 `format-check.log`。日志只涉及测试合成账号与固定测试 token，没有真实凭据。
 
+## 独立复审：提交期间锁定管理员目录输入
+
+在开发基线 `6922d261aa0efa40936b85d5b2e127d332dc427a` 上补充复审发现：系统管理员使用的共享 `DirectoryPicker` 将未传入的 `disabled` 默认为 `false`，覆盖 Antd Form 的禁用上下文。成员 A 的更新请求挂起时仍可改选成员 B；A 成功后表单重置，会静默清空尚未提交的 B。
+
+本次仅在组织成员表单显式向 `OrganizationMemberPicker` 传入 `disabled={pending}`，不修改共享选择器默认行为、普通 Owner 的目录边界或生产后端。新增两个公开页面反例，分别使用真实目录选择/搜索输入与高级 UUID 输入：延迟 PUT 期间输入、模式切换和角色均禁用；尝试输入不改变值，重复点击只产生一次写入；返回成功后才清空。修复前两项均在输入未禁用的断言失败，原 25 项页面测试通过。
+
+- `make test-frontend-targeted TARGETS='["src/pages/OrganizationGovernancePage.test.tsx","src/features/projects/DirectoryPicker.test.tsx","src/pages/organization-governance-rotation.test.tsx"]'`：3 文件、31 项通过，保留普通 Owner、错误恢复和轮换界面的已有回归。
+- 修改的两个 TSX 文件 ESLint（零警告）与 Prettier 检查通过；`pnpm build`（`tsc -b && vite build`）通过；`git diff --check` 通过。
+- 原始反例和最终日志分别保留在本修复工作树 `output/validation/m24-pending-picker/01-regression-before-fix.log`、`03-targeted-final.log`；静态与构建日志为同目录 `04-eslint.log`、`05-format.log`、`06-types-build.log`。
+
+本次没有运行全量覆盖率、完整后端检查、共享 GUI、Compose 或 QA；整合后的完整门禁和环境验收仍需单独记录。
+
 ## 改动文件
 
 - 前端：`OrganizationGovernancePage.tsx`、`OrganizationGovernancePage.test.tsx`、新增 `OrganizationAuditPanel.tsx` 与 `OrganizationQueryBoundary.tsx`、组织 `organization-service.ts`。
