@@ -100,9 +100,10 @@ export default function DesignEvidenceWorkspace({
 function scenarioCoverage(design: TestDesignDocument, scenario: ScenarioCandidate) {
   const scopes = new Set(
     scenario.mutations.map((value) => {
-      const path = value.path.startsWith(`${value.location}.`)
-        ? value.path
-        : `${value.location}.${value.path}`
+      const path =
+        value.path === value.location || value.path.startsWith(`${value.location}.`)
+          ? value.path
+          : `${value.location}.${value.path}`
       return `${design.intent.key}.${path}`
     }),
   )
