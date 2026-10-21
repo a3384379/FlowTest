@@ -40,9 +40,9 @@ export default function ReleaseGatePage() {
 }
 
 function ReleaseGateWorkspace() {
-  const state = useReleaseGate()
   const [policyOpen, setPolicyOpen] = useState(false)
   const [decisionOpen, setDecisionOpen] = useState(false)
+  const state = useReleaseGate(decisionOpen)
   return (
     <>
       <QueryFailureNotice queries={[state.policies, state.latestDecision]} />
@@ -54,10 +54,6 @@ function ReleaseGateWorkspace() {
       />
       <div className="catalog-controls">
         <CatalogPagination query={state.decisions} label="门禁判断历史" />
-        <CatalogPagination query={state.qualityRuns} label="质量运行证据" />
-        <CatalogPagination query={state.deploymentChecks} label="契约判断证据" />
-        <CatalogPagination query={state.impactRuns} label="影响证据" />
-        <CatalogPagination query={state.releaseRisks} label="风险证据" />
       </div>
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>
         <ReleaseOverview
@@ -467,6 +463,8 @@ function DecisionDetail({
   return (
     <Modal
       title="发布判断证据"
+      style={{ top: 24 }}
+      styles={{ body: { maxHeight: 'calc(100dvh - 136px)', overflowY: 'auto' } }}
       open={open}
       loading={open && loading}
       footer={null}

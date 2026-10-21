@@ -86,6 +86,8 @@ export default function ReleaseDecisionDialog({
   return (
     <Modal
       title="生成发布判断"
+      style={{ top: 24 }}
+      styles={{ body: { maxHeight: 'calc(100dvh - 168px)', overflowY: 'auto' } }}
       open={open}
       width={960}
       confirmLoading={state.evaluating}

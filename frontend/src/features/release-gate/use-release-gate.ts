@@ -24,7 +24,7 @@ import {
   type ReleasePolicyInput,
 } from './release-gate-service'
 
-export function useReleaseGate() {
+export function useReleaseGate(loadEvidence = false) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
@@ -40,6 +40,7 @@ export function useReleaseGate() {
   const [params, setParams] = useSearchParams()
   const decisionId = params.get('decision')
   const enabled = Boolean(projectId)
+  const readEvidence = enabled && loadEvidence
   const featureFlags = useQuery({
     queryKey: ['v3-feature-flags'],
     queryFn: getV3FeatureFlags,
@@ -87,7 +88,7 @@ export function useReleaseGate() {
     'quality-runs',
     projectId,
     (page) => listQualityRuns(required(projectId), page, 20),
-    enabled,
+    readEvidence,
     '',
     {},
   )
@@ -95,7 +96,7 @@ export function useReleaseGate() {
     'deployment-checks',
     projectId,
     (page) => listDeploymentChecks(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags, 'contract_hub'),
+    readEvidence && v3FeatureEnabled(featureFlags, 'contract_hub'),
     '',
     {},
   )
@@ -103,7 +104,7 @@ export function useReleaseGate() {
     'impact-runs',
     projectId,
     (page) => listImpactRuns(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags, 'impact_engine'),
+    readEvidence && v3FeatureEnabled(featureFlags, 'impact_engine'),
     '',
     {},
   )
@@ -111,7 +112,7 @@ export function useReleaseGate() {
     'release-risks',
     projectId,
     (page) => listReleaseRisks(required(projectId), page, 20),
-    enabled && v3FeatureEnabled(featureFlags, 'quality_intelligence'),
+    readEvidence && v3FeatureEnabled(featureFlags, 'quality_intelligence'),
     '',
     {},
   )
@@ -119,7 +120,7 @@ export function useReleaseGate() {
     'release-performance-runs',
     projectId,
     (page) => listPerformanceRuns(required(projectId), page, 20, performanceSearch),
-    enabled && v3FeatureEnabled(featureFlags, 'performance_lab'),
+    readEvidence && v3FeatureEnabled(featureFlags, 'performance_lab'),
     performanceSearch,
     {},
   )
@@ -127,7 +128,7 @@ export function useReleaseGate() {
     'release-runner-tasks',
     projectId,
     (page) => listReleaseRunnerEvidence(required(projectId), page, runnerSearch),
-    enabled && v3FeatureEnabled(featureFlags, 'runner_fabric'),
+    readEvidence && v3FeatureEnabled(featureFlags, 'runner_fabric'),
     runnerSearch,
     {},
   )
