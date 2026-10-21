@@ -98,6 +98,18 @@ describe('EnvironmentTemplateDialog', () => {
     expect(submit.mock.calls[1][0]).toEqual(payload)
   })
 
+  it('preserves supported fractional health intervals when edited', async () => {
+    const { submit } = renderDialog()
+    const browser = userEvent.setup()
+    const interval = screen.getByLabelText('检查间隔（秒）')
+    await browser.clear(interval)
+    await browser.type(interval, '0.15')
+    await browser.tab()
+    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce())
+    expect(submit.mock.calls[0][0].manifest.services[0].health_check.interval_seconds).toBe(0.15)
+  })
+
   it('requires explicit JSON application, rejects untrusted fields and cyclic dependencies, and keeps the form intact', async () => {
     const { submit } = renderDialog()
     const browser = userEvent.setup()

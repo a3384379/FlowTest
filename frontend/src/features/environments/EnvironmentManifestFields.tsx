@@ -183,14 +183,14 @@ function ServiceFields({ index, names }: { index: number; names: string[] }) {
           label="检查间隔（秒）"
           min={0.1}
           max={10}
-          precision={1}
+          integer={false}
         />
         <NumberField
           path={[index, 'health_check', 'timeout_seconds']}
           label="检查超时（秒）"
           min={0.1}
           max={10}
-          precision={1}
+          integer={false}
         />
         <NumberField
           path={[index, 'health_check', 'maximum_attempts']}
@@ -213,18 +213,23 @@ function NumberField({
   label,
   min,
   max,
-  precision = 0,
+  integer = true,
 }: {
   path: Path
   label: string
   min: number
   max: number
-  precision?: number
+  integer?: boolean
 }) {
   return (
     <Col xs={24} sm={12} md={8}>
       <Form.Item name={path} label={label} rules={[{ required: true, message: `请填写${label}` }]}>
-        <InputNumber min={min} max={max} precision={precision} className="environment-number" />
+        <InputNumber
+          min={min}
+          max={max}
+          precision={integer ? 0 : undefined}
+          className="environment-number"
+        />
       </Form.Item>
     </Col>
   )

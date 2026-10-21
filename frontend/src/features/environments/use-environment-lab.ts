@@ -189,7 +189,11 @@ export function useEnvironmentLab() {
   }
 
   async function refreshTemplates(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ['environment-templates'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['environment-templates'] }),
+      queryClient.invalidateQueries({ queryKey: ['environment-template-version'] }),
+      queryClient.invalidateQueries({ queryKey: ['environment-instance-template'] }),
+    ])
   }
 
   async function refreshInstances(targetProject: string): Promise<void> {
