@@ -53,4 +53,20 @@ PR146 已补修任务提交期间导航保护与确认弹窗层级，早期 HEAD
 
 `85da05813a63ddd892d348b1f4ad9b722d24ce25` 的最终前端树 `eb8761edfc9041b28707083b6117de2313887049` 已整合组织、MCP及用例补修，独立完整检查通过：182文件1353项，覆盖率86.36% / 82.52% / 86.21% / 88.88%，格式、lint/类型和生产构建均通过，退出码0。完整日志 `remediation-r4-full-frontend-r4.log` 及 `.exit` 位于主验收工作树 `output/playwright/audit-20261019/`。后续 `9e7162d` 仅同步[S22 E2E与回执](batch-32-compose-s22-review.md)，源代码、单测、配置、依赖及后端未变；没有将85树结果记为新整个前端树的完整重跑，S22 spec仍须由新HEAD正式Compose实际执行。
 
-旧 `85da058` 正式运行39646234746的Compose为66通过、1失败，完整失败日志保留；推送新HEAD后旧运行取消，取消前远端前端检查尚未完成，不能记为全绿。最新正式运行 [39650707276](https://github.com/a3384379/FlowTest/actions/runs/39650707276) 对应精确 `9e7162d5e983ad55f022e4c6735bf537d19b348e`，本次取证时进行中。用例受控GUI和S22逐断言GUI均完成12项检查，具体夹具、零业务写入与未执行spec的边界分别见[用例回执](batch-30-case-run-review.md)和[S22回执](batch-32-compose-s22-review.md)。本地完整检查、最新门禁及审查、合并和合并后回归分别记账；台账维持61＋12、58项已合并。真实外部模型、外部MCP客户端、正式KMS、真实Runner/故障转移与正式部署仍需对应环境验收。
+旧 `85da058` 正式运行39646234746的Compose为66通过、1失败，完整失败日志保留；推送新HEAD后旧运行取消，取消前远端前端检查尚未完成，不能记为全绿。正式运行 [39650707276](https://github.com/a3384379/FlowTest/actions/runs/39650707276) 对应精确 `9e7162d5e983ad55f022e4c6735bf537d19b348e`，已结束失败：前端1352通过、AI Viewer一项超时，其余选中作业成功，Compose实际67项通过并包含修正后S22 spec。该次部分成功不算完整门禁成功。用例受控GUI和S22逐断言GUI均完成12项检查，具体夹具、零业务写入与未执行spec的边界分别见[用例回执](batch-30-case-run-review.md)和[S22回执](batch-32-compose-s22-review.md)。本地完整检查、最新门禁及审查、合并和合并后回归分别记账；台账维持61＋12、58项已合并。真实外部模型、外部MCP客户端、正式KMS、真实Runner/故障转移与正式部署仍需对应环境验收。
+
+## 最终测试语义交叉复核
+
+三页面既有测试查询补修后，AI4文件30项、上下文3文件12项、组织3文件34项分别通过。保持角色/名称/可见性/祖先aria-hidden语义、完整参数、禁写及全局Dialog/旧详情缺席，不改产品、MSW响应、依赖、配置和门槛。最终复核发现AI两处祖先排除遗漏，补两条closest空断言，同4文件30项32.81秒通过；精确 `3fa68ceb0b44c7a5a584f828c717025b51e3afb7` 独立只读复核通过。三个采样回执分别记录失败诊断、无收益试验及采样源码边界。
+
+60f本地完整前端r5主动停止130，旧正式门禁39664876063已取消，不计通过。3fa前端树 `24145966762762f35e79f98922502be9f056f0f3` 的本地完整r6已通过格式、lint/类型、构建、182文件1353项及86.36% / 82.52% / 86.21% / 88.88%覆盖率，1318.27秒、退出0。正式运行 [39665397118](https://github.com/a3384379/FlowTest/actions/runs/39665397118) 已完成success，完整前端182文件1353项（1970.95秒）、后端1948项、其他选定作业及正式Required Gate均成功。Compose非S29集合为66通过、S19一项首次下拉视口裁剪后既有重试通过（1 flaky），不记为无重试全过；其诊断见下节。完整分页审查无未解决线程，使用匹配3fa68ce的命令合并[PR146](https://github.com/a3384379/FlowTest/pull/146)，main为 `e4bd5456c7a9f360643d1fad8f7eb37af959a4db`；前后产品树相同。冻结范围73项已实现并完成本地验证，GitHub累计58＋15＝73项合并。本次收尾文档合并后，最终main Full Regression独立执行并按实际终态另发交付回执，不由PR门禁推定。
+
+## S19 验收稳定性遗留
+
+正式39665397118/Compose作业119449068581中，`s19-quality-scale.spec.ts:70` 首轮Cron选项 `toBeInViewport({ ratio: 1 })` 在原5000ms内持续约0.618334，既有重试通过。完整日志 `remediation-pr146-3fa68ce-compose-full.log` 保留；该运行只有Windows工件，没有可下载的Playwright失败trace/截图，未下载无关大包。S19组件、用例、页面样式、主题和锁文件在本R4未变；85、9e及PR145合并后main完整日志均未记录同项失败或重试。这条属于既有验收稳定性问题，不新增冻结问题编号，也没有因作业success宣称问题已修复。
+
+独立 bundled Chromium151及临时profile使用真实CreatePlanDialog、IceTheme、全局及任务页CSS，空目录为明确合成props，禁止创建计划并阻断全部API。6次原顺序打开，含两次在Modal缩放约0.537时打开下拉，最终Cron均严格ratio1且能自动重新定位；另外3个动画就绪的几何控制组把触发器放在body底部上方2px：1280×720/1280×480/390×844下，body底部576/336/708、触发器底部574/334/706、scrollTop261/501/159，Cron分别位于661–683/421–443/793–815，最终ratio均1，真实点击后Cron表达式可见。API请求和业务写入均为0。
+
+未复现持续裁切，没有可证实的最小产品补修，故未猜改popup container、placement、motion、等待或原E2E，也未降低ratio/增加超时及重试。动画就绪控制组的诊断等待不冒充原E2E执行；本地macOS字体和Linux CI不同，本地合成诊断不代替CI复验。专属浏览器及临时14079服务已清理，原3000/13078、账号及密码未操作。
+
+完整证据保留在整合工作树忽略目录 `output/playwright/s19-popup-diagnostic/`：`diagnostic-summary.md`、`fixture.tsx`、`measure-cycles.js`、`cycles-1280-720.log/.json`、`measure-edges.js`、`edges-final.log/.json`、最终截图与PR145主干历史完整Compose日志。首个误用wrapper默认Chromium155的结果已排除；实际诊断明确使用仓库bundled151。主干最终Full Regression继续观察同一路径；没有把一次重试成功当作已修复。
