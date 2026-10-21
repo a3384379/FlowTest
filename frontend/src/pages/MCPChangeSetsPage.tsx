@@ -370,7 +370,7 @@ function hasConfirmedMaterialization(item: MCPChangeItem): boolean {
 function materializedQueryPrefixes(data: MCPChangeSet, itemId: string): string[] {
   const item = data.items.find((candidate) => candidate.id === itemId)
   if (!item || item.review_status !== 'accepted') return []
-  if (item.materialized_resource_type === 'workflow') return ['workflows']
+  if (item.materialized_resource_type === 'workflow') return ['workflows', 'workflow']
   if (item.materialized_resource_type === 'test_case')
     return ['test-cases', 'test-case-options', 'asset-directory-counts']
   if (item.materialized_resource_type === 'test_plan')
