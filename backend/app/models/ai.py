@@ -130,6 +130,9 @@ class AIChangeSet(UuidPrimaryKeyMixin, TimestampMixin, Base):
         String(24), default="generating", server_default="generating", index=True
     )
     source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON)
+    review_baselines: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, server_default="[]", nullable=False
+    )
     source_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     source_type: Mapped[str] = mapped_column(
         String(24), default="ai", server_default="ai", index=True

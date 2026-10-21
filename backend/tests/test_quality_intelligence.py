@@ -1169,9 +1169,13 @@ async def test_ai_change_set_can_reject_large_persisted_proposal(
 
 
 @pytest.mark.asyncio
-async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
+@pytest.mark.parametrize("mode", ["on", "off"])
+async def test_ai_change_set_honors_target_and_review_baseline_redaction_policy(
     quality_context: QualityContext,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
 ) -> None:
+    monkeypatch.setattr(settings, "redaction_mode", mode)
     headers = await _login(quality_context.client)
     project_id = await _project(quality_context.client, headers, "AI 目标脱敏项目")
     workflow_definition = _workflow_definition()
@@ -1226,19 +1230,30 @@ async def test_ai_change_set_redacts_runtime_values_from_target_snapshot(
         assert len(recommended_tests) == len(allowed_targets) == 1
         assert recommended_tests[0]["target_id"] == workflow_id
         target = allowed_targets[0]
-        assert target["draft_definition"]["variables"] == {
-            "session_id": REDACTED,
-            "region": REDACTED,
-        }
-        assert target["draft_definition"]["nodes"][0]["config"] == {
-            "headers": {"X-Session": REDACTED},
-            "body": {"customer": {"reference": REDACTED}},
-            "attempt": REDACTED,
-        }
-        assert "opaque-session-material" not in str(job.sanitized_input)
-        assert "opaque-node-secret" not in str(job.sanitized_input)
-        assert "opaque-reference" not in str(job.sanitized_input)
-        assert "cn-north-1" not in str(change_set.source_snapshot)
+        baseline = change_set.review_baselines[0]
+        assert baseline["snapshot_sha256"] == target["snapshot_sha256"]
+        assert baseline["redaction_mode"] == mode
+        assert baseline["draft_revision"] == 1
+        if mode == "off":
+            assert target["draft_definition"]["variables"]["region"] == "cn-north-1"
+            assert baseline["content"]["definition"]["variables"]["region"] == "cn-north-1"
+            assert "opaque-node-secret" in str(job.sanitized_input)
+        else:
+            assert target["draft_definition"]["variables"] == {
+                "session_id": REDACTED,
+                "region": REDACTED,
+            }
+            assert target["draft_definition"]["nodes"][0]["config"] == {
+                "headers": {"X-Session": REDACTED},
+                "body": {"customer": {"reference": REDACTED}},
+                "attempt": REDACTED,
+            }
+            assert "opaque-session-material" not in str(job.sanitized_input)
+            assert "opaque-node-secret" not in str(job.sanitized_input)
+            assert "opaque-reference" not in str(job.sanitized_input)
+            assert "cn-north-1" not in str(change_set.source_snapshot)
+            assert "opaque-session-material" not in str(baseline)
+            assert "opaque-node-secret" not in str(baseline)
 
 
 def test_ai_target_snapshot_redacts_test_case_runtime_maps_without_mutating_source() -> None:
@@ -1398,6 +1413,130 @@ async def test_regular_test_case_update_takes_same_row_lock_as_ai_acceptance() -
 
     service._assets.get_case_for_update.assert_awaited_once_with(case_id)
     assert updated.description == "人工更新"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("flag", ["feature_ai_enabled", "feature_quality_intelligence_enabled"])
+async def test_ai_change_set_history_remains_read_only_when_generation_disabled(
+    quality_context: QualityContext, monkeypatch: pytest.MonkeyPatch, flag: str
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "关闭态历史项目")
+    impact_id = await _seed_impact(quality_context.sessions, project_id)
+    risk = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_id, "title": "固定风险", "window_days": 7},
+    )
+    assert risk.status_code == 201
+    change_id, item_id = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=project_id,
+        impact_run_id=impact_id,
+        risk_id=risk.json()["id"],
+        provider=ChangeSetProvider(),
+    )
+    await _grant_viewer(quality_context.sessions, project_id)
+    reader = await _login(quality_context.client, email=VIEWER_EMAIL, password=VIEWER_PASSWORD)
+    foreign_project = await _project(quality_context.client, headers, "无权历史项目")
+    foreign_impact = await _seed_impact(quality_context.sessions, foreign_project)
+    foreign_risk = await quality_context.client.post(
+        f"/api/v1/projects/{foreign_project}/release-risks",
+        headers=headers,
+        json={"impact_run_id": foreign_impact, "title": "其他项目风险", "window_days": 7},
+    )
+    assert foreign_risk.status_code == 201
+    foreign_change, _ = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=foreign_project,
+        impact_run_id=foreign_impact,
+        risk_id=foreign_risk.json()["id"],
+        provider=ChangeSetProvider(),
+    )
+    monkeypatch.setattr(settings, flag, False)
+    detail = await quality_context.client.get(f"/api/v1/ai/change-sets/{change_id}", headers=reader)
+    assert detail.status_code == 200, detail.text
+    listed = await quality_context.client.get(
+        "/api/v1/ai/change-sets", headers=reader, params={"project_id": project_id}
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == 1
+    for path in [
+        f"/api/v1/ai/change-sets/{foreign_change}",
+        f"/api/v1/ai/change-sets?project_id={foreign_project}",
+    ]:
+        forbidden = await quality_context.client.get(path, headers=reader)
+        assert forbidden.status_code == 404, forbidden.text
+        assert forbidden.json()["error"]["code"] == "PROJECT_NOT_FOUND"
+        assert forbidden.json()["error"]["trace_id"]
+        assert foreign_change not in forbidden.text
+    for decision in ["accept", "reject"]:
+        denied = await quality_context.client.post(
+            f"/api/v1/ai/change-sets/{change_id}/items/{item_id}/{decision}",
+            headers=headers,
+            json={"note": "关闭时不写入"},
+        )
+        assert denied.status_code == 503
+        assert denied.json()["error"]["trace_id"]
+    async with quality_context.sessions() as session:
+        item = await session.get(AIChangeItem, item_id)
+        assert item is not None and item.review_status == "pending"
+        assert (
+            await session.scalar(select(Workflow).where(Workflow.project_id == UUID(project_id)))
+            is None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["accept", "reject"])
+async def test_change_set_suggestions_require_dedicated_review_entry(
+    quality_context: QualityContext, decision: str
+) -> None:
+    headers = await _login(quality_context.client)
+    project_id = await _project(quality_context.client, headers, "专用审核边界")
+    impact_id = await _seed_impact(quality_context.sessions, project_id)
+    risk = await quality_context.client.post(
+        f"/api/v1/projects/{project_id}/release-risks",
+        headers=headers,
+        json={"impact_run_id": impact_id, "title": "边界风险", "window_days": 7},
+    )
+    assert risk.status_code == 201
+    change_id, item_id = await _generate_change_set(
+        quality_context,
+        headers=headers,
+        project_id=project_id,
+        impact_run_id=impact_id,
+        risk_id=risk.json()["id"],
+        provider=ChangeSetProvider(),
+    )
+    async with quality_context.sessions() as session:
+        item = await session.get(AIChangeItem, item_id)
+        assert item is not None
+        suggestion_id = item.suggestion_id
+    payload = {"note": "不能绕过变更集守卫"}
+    if decision == "accept":
+        payload["content"] = {
+            "name": "不应生成的草稿",
+            "description": "隔离反例",
+            "definition": _workflow_definition(),
+        }
+    response = await quality_context.client.post(
+        f"/api/v1/ai/suggestions/{suggestion_id}/{decision}", headers=headers, json=payload
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "AI_CHANGE_SET_REVIEW_REQUIRED"
+    assert response.json()["error"]["trace_id"]
+    detail = await quality_context.client.get(
+        f"/api/v1/ai/change-sets/{change_id}", headers=headers
+    )
+    assert detail.json()["items"][0]["review_status"] == "pending"
+    async with quality_context.sessions() as session:
+        assert (
+            await session.scalar(select(Workflow).where(Workflow.project_id == UUID(project_id)))
+            is None
+        )
 
 
 @pytest.mark.asyncio
@@ -1670,6 +1809,16 @@ async def test_ai_change_set_preserves_target_snapshot_captured_before_generatio
             select(AIChangeItem).where(AIChangeItem.change_set_id == UUID(created.json()["id"]))
         )
         assert item is not None
+
+    detail = await quality_context.client.get(
+        f"/api/v1/ai/change-sets/{created.json()['id']}", headers=headers
+    )
+    assert detail.status_code == 200, detail.text
+    baseline = detail.json()["review_baselines"][0]
+    assert baseline["target_id"] == workflow_id
+    assert baseline["draft_revision"] == 1
+    assert baseline["content"]["name"] == "生成期人工维护流程"
+    assert baseline["snapshot_sha256"] == detail.json()["items"][0]["target_snapshot_sha256"]
 
     conflicted = await quality_context.client.post(
         f"/api/v1/ai/change-sets/{created.json()['id']}/items/{item.id}/accept",

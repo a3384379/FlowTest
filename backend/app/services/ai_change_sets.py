@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.redaction import get_redaction_policy
+from app.core.redaction import RedactionMode, get_redaction_policy, redaction_enabled
 from app.domain.ai import REDACTED, AIInputError, sanitize_ai_input
 from app.domain.governance import QuotaDimension
 from app.engine.contracts import AssertNodeConfig, NodeType, WorkflowDefinition
@@ -26,6 +27,8 @@ from app.repositories.ai_change_sets import AIChangeSetRepository
 from app.repositories.impact import ImpactRepository
 from app.schemas.ai_change_sets import (
     AIChangeSetCreate,
+    AIReviewBaseline,
+    AIReviewBaselineContent,
     AITestCaseDraftCreate,
     AITestCaseDraftUpdate,
     AIWorkflowDraftCreate,
@@ -93,6 +96,7 @@ class AIChangeSetService:
                 code="RELEASE_RISK_NOT_FOUND", message="发布风险快照不存在", status_code=404
             )
         metadata = await self._source_metadata(risk, impact.run.changes)
+        baselines = await self._capture_review_baselines(metadata, payload.project_id)
         try:
             sanitized = sanitize_ai_input(schema_document=None, metadata=metadata, sample=None)
         except AIInputError as error:
@@ -122,6 +126,7 @@ class AIChangeSetService:
             title=payload.title.strip(),
             status="generating",
             source_snapshot=sanitized.payload,
+            review_baselines=[item.model_dump(mode="json") for item in baselines],
             source_fingerprint=sanitized.sha256,
             source_type="ai",
             source_ref=f"ai-job://{job.id}",
@@ -165,7 +170,6 @@ class AIChangeSetService:
     async def list_change_sets(
         self, *, actor: User, project_id: UUID, page: int, page_size: int
     ) -> tuple[list[AIChangeSet], int]:
-        _require_enabled()
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._repository.list_change_sets(
             project_id=project_id, offset=(page - 1) * page_size, limit=page_size
@@ -174,7 +178,6 @@ class AIChangeSetService:
     async def get(
         self, *, actor: User, change_set_id: UUID
     ) -> tuple[AIChangeSet, list[AIChangeItem]]:
-        _require_enabled()
         change_set = await self._get_change_set(change_set_id)
         await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=False)
         return change_set, await self._repository.list_items(change_set.id)
@@ -368,6 +371,33 @@ class AIChangeSetService:
             "snapshot_sha256": _target_hash(workflow),
         }
 
+    async def _capture_review_baselines(
+        self, metadata: dict[str, JsonValue], project_id: UUID
+    ) -> list[AIReviewBaseline]:
+        raw_targets = metadata.get("allowed_targets")
+        if not isinstance(raw_targets, list):
+            return []
+        baselines: list[AIReviewBaseline] = []
+        for raw in raw_targets:
+            if not isinstance(raw, dict):
+                continue
+            target_id = _change_target_id(raw.get("target_id"))
+            target_type = raw.get("target_type")
+            if target_id is None or target_type not in {"workflow", "test_case"}:
+                continue
+            target = await self._review_baseline_target(str(target_type), target_id)
+            expected_hash = raw.get("snapshot_sha256")
+            _ensure_target(target, project_id, str(expected_hash))
+            baselines.append(_review_baseline(cast(TestCase | Workflow, target)))
+        return baselines
+
+    async def _review_baseline_target(
+        self, target_type: str, target_id: UUID
+    ) -> TestCase | Workflow | None:
+        if target_type == "test_case":
+            return await self._repository.get_test_case(target_id)
+        return await self._repository.get_workflow(target_id)
+
     async def _materialize(
         self,
         *,
@@ -542,6 +572,8 @@ def _target_hash(target: TestCase | Workflow) -> str:
 def _target_definition_for_ai(
     target_type: Literal["test_case", "workflow"], definition: dict[str, Any]
 ) -> dict[str, JsonValue]:
+    if not redaction_enabled():
+        return cast(dict[str, JsonValue], deepcopy(definition))
     safe_definition = cast(dict[str, JsonValue], dict(definition))
     if target_type == "test_case":
         for field in ("runtime_variables", "runtime_headers"):
@@ -1050,3 +1082,33 @@ def _review_status(items: list[AIChangeItem]) -> str:
     if pending:
         return "partially_reviewed" if accepted or rejected else "draft"
     return "accepted" if accepted else "rejected"
+
+
+def _review_baseline(target: TestCase | Workflow) -> AIReviewBaseline:
+    policy = get_redaction_policy()
+    target_type: Literal["test_case", "workflow"] = (
+        "test_case" if isinstance(target, TestCase) else "workflow"
+    )
+    definition = deepcopy(target.draft_definition)
+    if policy.mode is RedactionMode.ON:
+        definition = _target_definition_for_ai(target_type, definition)
+    content = AIReviewBaselineContent(
+        name=target.name,
+        description=target.description,
+        definition=definition,
+        tags=target.tags if isinstance(target, TestCase) else None,
+    )
+    sanitized = sanitize_ai_input(
+        schema_document=None, metadata=content.model_dump(mode="json"), sample=None
+    )
+    return AIReviewBaseline(
+        target_type=target_type,
+        target_id=target.id,
+        snapshot_sha256=_target_hash(target),
+        content=AIReviewBaselineContent.model_validate(sanitized.payload["metadata"]),
+        current_version=target.current_version,
+        draft_revision=target.draft_revision if isinstance(target, Workflow) else None,
+        updated_at=target.updated_at,
+        redaction_mode=policy.mode.value,
+        redaction_policy_version=policy.policy_version,
+    )

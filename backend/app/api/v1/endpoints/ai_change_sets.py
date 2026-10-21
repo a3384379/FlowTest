@@ -94,5 +94,6 @@ def _detail(change_set: AIChangeSet, items: list[AIChangeItem]) -> AIChangeSetDe
     return AIChangeSetDetailResponse(
         **summary.model_dump(),
         source_snapshot=change_set.source_snapshot,
+        review_baselines=change_set.review_baselines,
         items=[AIChangeItemResponse.model_validate(item) for item in items],
     )
