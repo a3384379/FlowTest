@@ -302,3 +302,7 @@ PR #142 在HEAD `cf4f92dbc02c9e4f9631a4d08fcd6d99f11d0fdb` 的[正式Required Ga
 先新增反例复现5失败/18通过；修复后4个具名文件37项通过，表单证明保存、预览与转回键值行均拒绝重复输入且原文保留。格式、ESLint和生产构建通过。日志 `remediation-mock-duplicate-keys-before.log`、`remediation-mock-duplicate-keys-targeted.log`、`remediation-mock-duplicate-keys-build.log`。
 
 最新前端树 `41c0371ab5964a9542a8d8e0de71656bcbc5e506` 完整检查正在运行，后端树d0096a5未改；更新提交后重新确认最新HEAD正式门禁及审查，不沿用cf4旧HEAD成功来合并。
+
+### 原始重复键补修的完整检查终态
+
+精确frontend树 `41c0371ab5964a9542a8d8e0de71656bcbc5e506` 完整检查通过：160文件1063项，无未处理异常，覆盖率85.96/82.05/85.52/88.43%，格式、lint/类型和生产构建通过。后端树d0096a5未变，沿用同树1874项完整后端结果。日志 `remediation-mock-raw-keys-frontend-full.log`。已据修复和反例验证解决原始重复键审查线程；本次文档提交不改变源码树，仍等待最新HEAD正式门禁才能合并。
