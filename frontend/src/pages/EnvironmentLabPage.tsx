@@ -281,17 +281,19 @@ function TemplateTable({
 
 function TemplateEvidence({ template }: { template: EnvironmentTemplateVersion }) {
   return (
-    <Descriptions size="small" column={2} bordered>
+    <Descriptions size="small" column={{ xs: 1, sm: 2 }} bordered>
       <Descriptions.Item label="Manifest SHA-256">
         <Typography.Text copyable>{template.manifest_sha256}</Typography.Text>
       </Descriptions.Item>
       <Descriptions.Item label="签名算法">{template.signature_algorithm}</Descriptions.Item>
       <Descriptions.Item label="固定镜像" span={2}>
-        {template.manifest.services.map((service) => (
-          <Typography.Text code key={service.name}>
-            {service.image}
-          </Typography.Text>
-        ))}
+        <Space orientation="vertical">
+          {template.manifest.services.map((service) => (
+            <Typography.Text code key={service.name}>
+              {service.name}: {service.image}
+            </Typography.Text>
+          ))}
+        </Space>
       </Descriptions.Item>
       <Descriptions.Item label="TTL">
         {template.manifest.default_ttl_seconds} / {template.manifest.maximum_ttl_seconds} 秒
@@ -370,7 +372,7 @@ function InstanceTable({
 
 function InstanceEvidence({ instance }: { instance: EnvironmentInstance }) {
   return (
-    <Descriptions size="small" column={2} bordered>
+    <Descriptions size="small" column={{ xs: 1, sm: 2 }} bordered>
       <Descriptions.Item label="Runtime">{instance.runtime_name}</Descriptions.Item>
       <Descriptions.Item label="Fencing Token">{instance.fencing_token}</Descriptions.Item>
       <Descriptions.Item label="到期时间">
