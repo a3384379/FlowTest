@@ -5,6 +5,9 @@
 .quality-center-page .quality-selected-evidence > td {
   background: var(--color-primary-bg, #e6f4ff);
 }
+.quality-center-page .quality-grid {
+  align-items: start;
+}
 .quality-center-page .quality-asset-name,
 .quality-center-page .quality-risk-name {
   height: auto;

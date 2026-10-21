@@ -20,53 +20,71 @@ import { qualityRunPath } from './quality-navigation'
 import { listWorkflowVersions } from '../workflows/workflow-service'
 import { listTestCaseVersions, listTestSuiteVersions } from '../test-assets/test-asset-service'
 import type { useQualityCenter } from './use-quality-center'
+import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { projectPath } from '../projects/project-routing'
 import ContractEvidenceViewer from '../contracts/ContractEvidenceDrawer'
 
 type QualityState = ReturnType<typeof useQualityCenter>
 
 export function QualityRiskHistory({ state }: { state: QualityState }) {
+  const [expanded, setExpanded] = useRouteScopedState(state.projectId, null, false)
   if (!state.riskEnabled) return null
   return (
-    <Card title="风险快照历史" className="quality-runs-card">
-      <CatalogPagination query={state.risks} label="风险记录" />
-      <Table
-        rowKey="id"
-        size="small"
-        pagination={false}
-        scroll={{ x: 700 }}
-        loading={state.risks.isLoading}
-        dataSource={state.risks.data?.items ?? []}
-        locale={{ emptyText: '暂无风险快照' }}
-        rowClassName={(row) => (row.id === state.linkedRiskId ? 'quality-selected-evidence' : '')}
-        columns={[
-          {
-            title: '候选版本',
-            render: (_, row) => (
-              <Button
-                type="link"
-                className="quality-risk-name"
-                aria-label={`打开风险 ${row.id}`}
-                onClick={() => state.selectEvidence('risk', row.id)}
-              >
-                {row.title}
-              </Button>
-            ),
-          },
-          { title: '风险分', dataIndex: 'score' },
-          { title: '证据窗口', render: (_, row) => `${row.window_days} 天` },
-          { title: '生成时间', dataIndex: 'created_at' },
-          {
-            title: '选择',
-            render: (_, row) =>
-              row.id === state.linkedRiskId ? (
-                <Tag color="blue">当前快照</Tag>
-              ) : (
-                <Button onClick={() => state.selectEvidence('risk', row.id)}>查看</Button>
-              ),
-          },
-        ]}
-      />
+    <Card
+      title="风险快照历史"
+      className="quality-runs-card"
+      extra={
+        <Button aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+          {expanded ? '收起历史' : '切换风险快照'}
+        </Button>
+      }
+    >
+      {!expanded ? (
+        <Typography.Text type="secondary">展开选择已保存快照，翻页保持当前证据。</Typography.Text>
+      ) : (
+        <>
+          <CatalogPagination query={state.risks} label="风险记录" />
+          <Table
+            rowKey="id"
+            size="small"
+            pagination={false}
+            scroll={{ x: 700, y: 300 }}
+            loading={state.risks.isLoading}
+            dataSource={state.risks.data?.items ?? []}
+            locale={{ emptyText: '暂无风险快照' }}
+            rowClassName={(row) =>
+              row.id === state.linkedRiskId ? 'quality-selected-evidence' : ''
+            }
+            columns={[
+              {
+                title: '候选版本',
+                render: (_, row) => (
+                  <Button
+                    type="link"
+                    className="quality-risk-name"
+                    aria-label={`打开风险 ${row.id}`}
+                    onClick={() => state.selectEvidence('risk', row.id)}
+                  >
+                    {row.title}
+                  </Button>
+                ),
+              },
+              { title: '风险分', dataIndex: 'score' },
+              { title: '证据窗口', render: (_, row) => `${row.window_days} 天` },
+              { title: '生成时间', dataIndex: 'created_at' },
+              {
+                title: '选择',
+                render: (_, row) =>
+                  row.id === state.linkedRiskId ? (
+                    <Tag color="blue">当前快照</Tag>
+                  ) : (
+                    <Button onClick={() => state.selectEvidence('risk', row.id)}>查看</Button>
+                  ),
+              },
+            ]}
+          />
+        </>
+      )}
     </Card>
   )
 }

@@ -440,6 +440,9 @@ describe('QualityCenterPage', () => {
     )
     const view = renderPage()
     const browser = userEvent.setup()
+    const historyToggle = await screen.findByRole('button', { name: '切换风险快照' })
+    expect(screen.queryByRole('button', { name: `打开风险 ${second.id}` })).not.toBeInTheDocument()
+    await browser.click(historyToggle)
     await browser.click(await screen.findByRole('button', { name: `打开风险 ${second.id}` }))
     await screen.findByText(second.algorithm_version)
     const history = screen.getByText('风险快照历史').closest('.ant-card')! as HTMLElement
@@ -456,6 +459,7 @@ describe('QualityCenterPage', () => {
     view.unmount()
     renderPage(destination)
     expect(await screen.findByText(second.algorithm_version)).toBeVisible()
+    await browser.click(screen.getByRole('button', { name: '切换风险快照' }))
     expect(await screen.findByRole('button', { name: `打开风险 ${third.id}` })).toBeVisible()
   })
 

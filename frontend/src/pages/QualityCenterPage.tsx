@@ -124,7 +124,7 @@ export default function QualityCenterPage() {
             rowKey="id"
             size="small"
             pagination={false}
-            scroll={{ x: 720 }}
+            scroll={{ x: 720, y: 360 }}
             rowClassName={(row) =>
               row.id === state.linkedRecordId ? 'quality-selected-evidence' : ''
             }
