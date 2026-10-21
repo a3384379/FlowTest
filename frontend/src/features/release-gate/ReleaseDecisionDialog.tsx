@@ -18,7 +18,7 @@ type Requirement = {
   label: string
   feature: keyof V3FeatureFlags | null
 }
-const requirements: Requirement[] = [
+const requirements: readonly Requirement[] = [
   {
     kind: 'quality_gate',
     field: 'test_plan_run_id',
