@@ -61,7 +61,9 @@ test('S19 质量门禁与 Cron 计划配置主路径', async ({ page }) => {
   await navigateMenu(page, '任务执行')
   await page.getByRole('button', { name: /新建计划/ }).click()
   const planDialog = page.getByRole('dialog', { name: '新建测试计划' })
-  await expect(planDialog.getByRole('button', { name: /确\s*定/ })).toBeInViewport({ ratio: 1 })
+  await expect(planDialog.getByRole('button', { name: '创建计划', exact: true })).toBeInViewport({
+    ratio: 1,
+  })
   const scheduleMode = planDialog.getByLabel('调度方式')
   await scheduleMode.click()
   const cronOption = page.locator('.ant-select-dropdown:visible').getByText('Cron', { exact: true })

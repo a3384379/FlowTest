@@ -22,6 +22,7 @@ import { useSearchParams } from 'react-router-dom'
 
 import CreatePlanDialog from '../features/task-plans/CreatePlanDialog'
 import FocusedTestPlan from '../features/task-plans/FocusedTestPlan'
+import '../features/task-plans/task-plans.css'
 import EditTestPlanDialog from '../features/task-plans/EditTestPlanDialog'
 import TestPlanRunDetails from '../features/task-plans/TestPlanRunDetails'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
@@ -38,14 +39,14 @@ function TaskPlanWorkspace() {
   const state = useTestPlans()
 
   return (
-    <>
+    <div className="task-plan-workspace">
       <TaskHeading state={state} />
       <TaskErrorAlert state={state} />
       {state.focusedId && <FocusedTestPlan state={state} />}
       <TaskWorkspace state={state} focusedId={searchParams.get('focus') ?? undefined} />
       <TokenCard state={state} />
       <TaskDialogs state={state} />
-    </>
+    </div>
   )
 }
 
@@ -166,6 +167,7 @@ function TokenCard({ state }: { state: TaskState }) {
         rowKey="id"
         size="small"
         pagination={false}
+        scroll={{ x: 650 }}
         dataSource={state.tokens.data ?? []}
         locale={{ emptyText: '暂无 CI Token' }}
         columns={[
@@ -265,6 +267,7 @@ function PlanTable({
     <Table
       rowKey="id"
       size="small"
+      scroll={{ x: 720 }}
       pagination={{
         current: page,
         pageSize: 20,
@@ -368,6 +371,7 @@ function RunTable({
     <Table
       rowKey="id"
       size="small"
+      scroll={{ x: 680 }}
       pagination={{
         current: page,
         pageSize: 20,
