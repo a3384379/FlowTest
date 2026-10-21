@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
+import { useLayoutEffect, useMemo, useRef } from 'react'
 
 import { apiErrorMessage, type ApiDefinition } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
@@ -20,16 +21,24 @@ import {
 export function useTestEngineering(initialProposalId: string | null = null) {
   const { message } = App.useApp()
   const { projectId } = useProjectContext()
-  const { canEdit } = useProjectCapabilities()
+  const context = useMemo(() => ({ projectId, initialProposalId }), [projectId, initialProposalId])
+  const activeContext = useRef(context)
+  useLayoutEffect(() => {
+    activeContext.current = context
+  }, [context])
+  const isCurrent = () => activeContext.current === context
+  const { canEdit: editPermission, permissions } = useProjectCapabilities()
+  const canEdit = editPermission && permissions.isSuccess
+  const queryClient = useQueryClient()
   const [generation, setGeneration] = useRouteScopedState<TestEngineeringGeneration | null>(
     projectId,
-    initialProposalId,
+    null,
     null,
   )
-  const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null>(
+  const [proposal, setProposal] = useRouteScopedState<TestEngineeringProposal | null | undefined>(
     projectId,
     initialProposalId,
-    null,
+    undefined,
   )
   const [selectedApi, setSelectedApi] = useRouteScopedState<ApiDefinition | null>(
     projectId,
@@ -53,10 +62,12 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     enabled: Boolean(projectId && initialProposalId),
   })
   const generate = useMutation({
+    mutationKey: ['test-design-generate', projectId, initialProposalId],
     mutationFn: ({ project, apiDefinitionId }: { project: string; apiDefinitionId: string }) =>
       generateTestDesign(project, apiDefinitionId),
   })
   const propose = useMutation({
+    mutationKey: ['test-design-propose', projectId, initialProposalId],
     mutationFn: (input: {
       title: string
       api_definition_id: string
@@ -66,19 +77,32 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     }) => proposeTestDesign(required(projectId), input),
   })
   const review = useMutation({
+    mutationKey: ['test-design-review', projectId, initialProposalId],
     mutationFn: (input: { changeSetId: string; accept: boolean }) =>
       reviewTestDesignProposal(required(projectId), input.changeSetId, input.accept),
   })
   const apply = useMutation({
+    mutationKey: ['test-design-apply', projectId, initialProposalId],
     mutationFn: (changeSetId: string) => applyTestDesignProposal(required(projectId), changeSetId),
   })
+  const currentProposal = proposal === undefined ? linkedProposal.data : proposal
+  const error = [generate.error, propose.error, review.error, apply.error].find(Boolean) ?? null
 
   async function generateDesign(apiDefinitionId: string): Promise<boolean> {
+    propose.reset()
+    review.reset()
+    apply.reset()
     try {
-      setGeneration(await generate.mutateAsync({ project: required(projectId), apiDefinitionId }))
+      const generated = await generate.mutateAsync({
+        project: required(projectId),
+        apiDefinitionId,
+      })
+      if (!isCurrent()) return false
+      setGeneration(generated)
       setProposal(null)
       return true
     } catch (error) {
+      if (!isCurrent()) return false
       void message.error(apiErrorMessage(error))
       return false
     }
@@ -93,39 +117,74 @@ export function useTestEngineering(initialProposalId: string | null = null) {
   }): Promise<boolean> {
     if (!canEdit || !projectId) return false
     try {
-      setProposal(await propose.mutateAsync(input))
-      void message.success('Test Design Draft 已创建，等待人工审核')
+      const created = await propose.mutateAsync(input)
+      if (!isCurrent()) return false
+      queryClient.setQueryData(
+        ['test-engineering-proposal', projectId, created.change_set_id],
+        created,
+      )
+      setProposal(created)
+      void message.success('测试设计草稿已创建，等待人工审核')
       return true
     } catch (error) {
+      if (!isCurrent()) return false
       void message.error(apiErrorMessage(error))
       return false
     }
   }
 
   async function reviewProposal(accept: boolean): Promise<boolean> {
-    const currentProposal = proposal ?? linkedProposal.data
     if (!canEdit || !currentProposal) return false
     try {
-      setProposal(await review.mutateAsync({ changeSetId: currentProposal.change_set_id, accept }))
-      void message.success(accept ? 'Proposal 已接受' : 'Proposal 已拒绝')
+      const reviewed = await review.mutateAsync({
+        changeSetId: currentProposal.change_set_id,
+        accept,
+      })
+      await queryClient.cancelQueries({
+        queryKey: ['test-engineering-proposal', projectId, currentProposal.change_set_id],
+      })
+      if (!isCurrent()) return false
+      queryClient.setQueryData(
+        ['test-engineering-proposal', projectId, reviewed.change_set_id],
+        reviewed,
+      )
+      setProposal(reviewed)
+      void message.success(accept ? '测试设计已接受' : '测试设计已拒绝')
       return true
     } catch (error) {
+      if (!isCurrent()) return false
       void message.error(apiErrorMessage(error))
       return false
     }
   }
 
   async function applyProposal(): Promise<boolean> {
-    const currentProposal = proposal ?? linkedProposal.data
     if (!canEdit || !currentProposal) return false
     try {
       const result = await apply.mutateAsync(currentProposal.change_set_id)
-      setProposal({ ...currentProposal, applied: true })
+      await queryClient.cancelQueries({
+        queryKey: ['test-engineering-proposal', projectId, currentProposal.change_set_id],
+      })
+      if (!isCurrent()) return false
+      const materialized = { ...currentProposal, applied: true, materialization: result }
+      queryClient.setQueryData(
+        ['test-engineering-proposal', projectId, currentProposal.change_set_id],
+        materialized,
+      )
+      setProposal(materialized)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workflows', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['test-cases', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['test-case-options', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['asset-directory-counts', projectId] }),
+      ])
+      if (!isCurrent()) return false
       void message.success(
-        `已进入现有执行体系：${result.workflow_ids.length} 个 Workflow / ${result.test_case_ids.length} 个 TestCase`,
+        `已生成草稿：${result.workflow_ids.length} 个工作流 / ${result.test_case_ids.length} 个测试用例`,
       )
       return true
     } catch (error) {
+      if (!isCurrent()) return false
       void message.error(apiErrorMessage(error))
       return false
     }
@@ -139,8 +198,10 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     canEdit,
     apis,
     environments,
-    generation,
-    proposal: proposal ?? linkedProposal.data ?? null,
+    generation: visibleGeneration(initialProposalId, proposal, generation),
+    proposal: currentProposal ?? null,
+    permissions,
+    error,
     generateDesign,
     createProposal,
     reviewProposal,
@@ -148,6 +209,14 @@ export function useTestEngineering(initialProposalId: string | null = null) {
     generating: generate.isPending,
     acting: propose.isPending || review.isPending || apply.isPending,
   }
+}
+
+function visibleGeneration(
+  linkedId: string | null,
+  localProposal: TestEngineeringProposal | null | undefined,
+  generation: TestEngineeringGeneration | null,
+): TestEngineeringGeneration | null {
+  return linkedId && localProposal === undefined ? null : generation
 }
 
 function required(value: string | null): string {

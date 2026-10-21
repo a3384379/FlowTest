@@ -1,4 +1,6 @@
-import { Table, Tag } from 'antd'
+import { scenarioReason, scenarioKind } from './design-review-rules'
+import { confidenceLabel } from './design-confidence'
+import { Button, Table, Tag } from 'antd'
 
 import type { CoverageEntry, OracleSpec, ScenarioCandidate } from './test-engineering-service'
 
@@ -7,99 +9,112 @@ export function ScenarioTable({
   selected,
   disabled,
   onChange,
+  oracles = [],
+  inspectedId,
+  onInspect,
 }: {
   items: ScenarioCandidate[]
   selected: string[]
   disabled: boolean
   onChange: (ids: string[]) => void
+  oracles?: OracleSpec[]
+  inspectedId?: string
+  onInspect?: (id: string) => void
 }) {
   return (
     <Table
       rowKey="id"
       size="small"
-      pagination={false}
+      pagination={{ pageSize: 10, showSizeChanger: false }}
+      scroll={{ x: 880 }}
       dataSource={items}
+      rowClassName={(item) => (item.id === inspectedId ? 'selected-row' : '')}
       rowSelection={{
         selectedRowKeys: selected,
         onChange: (keys) => onChange(keys.map(String)),
         getCheckboxProps: (scenario) => ({
-          disabled: disabled || !materializableScenario(scenario),
-          name: materializableScenario(scenario)
-            ? scenario.title
-            : '仅设计：需要补全前置条件或可执行 Oracle',
+          disabled: disabled || scenarioReason(scenario, oracles) !== null,
+          name: scenarioReason(scenario, oracles)
+            ? '仅设计：需要补全前置条件或可执行预期'
+            : scenario.title,
         }),
       }}
       columns={[
-        { title: 'Kind', dataIndex: 'kind' },
-        { title: '标题', dataIndex: 'title' },
         {
-          title: 'Location',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            scenario.mutations.map((mutation) => mutation.location).join(', ') || 'request',
+          title: '场景',
+          render: (_, item) => (
+            <Button
+              type="link"
+              onClick={() => onInspect?.(item.id)}
+              aria-label={`查看场景：${item.title}`}
+            >
+              {item.title}
+            </Button>
+          ),
         },
-        {
-          title: 'Parameter Path',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            scenario.mutations.map((mutation) => mutation.path).join(', ') || '-',
-        },
-        {
-          title: 'Mutation',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            scenario.mutations.map((mutation) => mutation.operation).join(', ') || '-',
-        },
-        {
-          title: '预期分类',
-          dataIndex: 'expected_category',
-          render: (value: string) => <Tag>{value}</Tag>,
-        },
+        { title: '类型', dataIndex: 'kind', render: scenarioKind },
+        { title: '预期分类', dataIndex: 'expected_category', render: categoryLabel },
+        { title: '置信度', render: (_, item) => confidenceLabel(item.confidence) },
         {
           title: '可执行性',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            materializableScenario(scenario) ? (
-              <Tag color="green">可物化</Tag>
-            ) : (
-              <Tag color="orange">仅设计</Tag>
-            ),
+          render: (_, item) => (
+            <Tag color={scenarioReason(item, oracles) ? 'orange' : 'green'}>
+              {scenarioReason(item, oracles) ? '仅设计' : '可生成草稿'}
+            </Tag>
+          ),
         },
-        {
-          title: 'Auth Mode',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            scenario.request.auth_disabled ? 'disabled' : 'inherit',
-        },
-        {
-          title: 'Suppression',
-          render: (_: unknown, scenario: ScenarioCandidate) => suppressionSummary(scenario) || '无',
-        },
-        {
-          title: 'Design-only 原因',
-          render: (_: unknown, scenario: ScenarioCandidate) =>
-            materializableReason(scenario) ?? '-',
-        },
-        {
-          title: 'Evidence',
-          render: (_: unknown, scenario: ScenarioCandidate) => scenario.evidence_refs.length,
-        },
+        { title: '来源', render: (_, item) => `${item.evidence_refs.length} 条引用` },
       ]}
     />
   )
 }
 
-export function OracleTable({ items }: { items: OracleSpec[] }) {
+export function OracleTable({
+  items,
+  onEvidence,
+}: {
+  items: OracleSpec[]
+  onEvidence?: (id: string) => void
+}) {
   return (
     <Table
       rowKey="id"
       size="small"
-      pagination={false}
+      pagination={{ pageSize: 8, showSizeChanger: false }}
+      scroll={{ x: 760 }}
       dataSource={items}
       columns={[
-        { title: 'Kind', dataIndex: 'kind' },
-        { title: 'Operator', dataIndex: 'operator' },
-        { title: 'Expected', dataIndex: 'expected', render: (value) => JSON.stringify(value) },
-        { title: 'Evidence', render: (_, item) => item.evidence_refs.length },
+        { title: '预期类型', dataIndex: 'kind', render: oracleKind },
+        { title: '表达式', dataIndex: 'expression' },
+        { title: '判断方式', dataIndex: 'operator', render: operatorLabel },
         {
-          title: 'Review',
+          title: '预期值',
+          render: (_, item) => (
+            <pre className="test-design-json">{JSON.stringify(item.expected, null, 2)}</pre>
+          ),
+        },
+        {
+          title: '审核要求',
           render: (_, item) =>
-            item.requires_review ? <Tag color="orange">需要</Tag> : <Tag color="green">确定性</Tag>,
+            item.requires_review || !item.deterministic || item.confidence !== 1 ? (
+              <Tag color="orange">需要复核</Tag>
+            ) : (
+              <Tag color="green">确定性</Tag>
+            ),
+        },
+        {
+          title: '来源证据',
+          render: (_, item) =>
+            item.evidence_refs.map((id, index) => (
+              <Button
+                key={id}
+                size="small"
+                onClick={() => onEvidence?.(id)}
+                aria-label={`查看预期${item.id}的来源${index + 1}`}
+              >
+                来源 {index + 1}
+              </Button>
+            )),
         },
       ]}
     />
@@ -111,53 +126,58 @@ export function CoverageTable({ items }: { items: CoverageEntry[] }) {
     <Table
       rowKey={(item) => `${item.dimension}:${item.target_ref}:${item.requirement}`}
       size="small"
-      pagination={{ pageSize: 8 }}
+      pagination={{ pageSize: 8, showSizeChanger: false }}
+      scroll={{ x: 760 }}
       dataSource={items}
       columns={[
-        { title: 'Dimension', dataIndex: 'dimension' },
-        { title: 'Requirement', dataIndex: 'requirement', ellipsis: true },
-        { title: 'Scope / Target', dataIndex: 'target_ref', ellipsis: true },
+        { title: '维度', dataIndex: 'dimension' },
+        { title: '评估要求', dataIndex: 'requirement' },
+        { title: '目标路径', dataIndex: 'target_ref' },
         {
           title: '状态',
-          dataIndex: 'covered',
-          render: (value: boolean) =>
-            value ? <Tag color="green">已覆盖</Tag> : <Tag color="red">Gap</Tag>,
+          render: (_, item) =>
+            typeof item.covered !== 'boolean' ? (
+              <Tag>未提供</Tag>
+            ) : (
+              <Tag color={item.covered ? 'green' : 'red'}>{item.covered ? '已覆盖' : '待补齐'}</Tag>
+            ),
         },
+        { title: '原因', dataIndex: 'reason' },
       ]}
     />
   )
 }
 
-function materializableScenario(scenario: ScenarioCandidate): boolean {
-  return (
-    !scenario.requires_review &&
-    scenario.deterministic &&
-    !scenario.mutations.some(
-      (mutation) => mutation.location === 'path' && mutation.operation === 'omit',
-    )
-  )
-}
-
-function materializableReason(scenario: ScenarioCandidate): string | null {
-  if (scenario.requires_review) return '证据冲突、敏感测试数据或前置条件待审核'
-  if (!scenario.deterministic) return '缺少确定性输入或 Oracle'
-  if (
-    scenario.mutations.some(
-      (mutation) => mutation.location === 'path' && mutation.operation === 'omit',
-    )
-  ) {
-    return '必填 Path omission 无法表示为真实 HTTP 请求'
+function categoryLabel(value: string): string {
+  const labels: Record<string, string> = {
+    success: '成功响应',
+    client_error: '客户端错误',
+    unauthorized: '未认证',
+    forbidden: '无权限',
+    not_found: '不存在',
+    server_error: '服务端错误',
   }
-  return null
+  return labels[value] ?? value
 }
 
-function suppressionSummary(scenario: ScenarioCandidate): string {
-  const omitted = scenario.mutations
-    .filter(
-      (mutation) =>
-        mutation.operation === 'omit' && ['header', 'query', 'cookie'].includes(mutation.location),
-    )
-    .map((mutation) => `${mutation.location}:${mutation.path.replace(/^[^.]+\./, '')}`)
-  if (scenario.request.auth_disabled) omitted.unshift('auth:disabled')
-  return omitted.join('、')
+function oracleKind(value: string): string {
+  const labels: Record<string, string> = {
+    status: '状态码',
+    schema: '响应结构',
+    json_path: '字段值',
+    expression: '表达式',
+  }
+  return labels[value] ?? value
+}
+
+function operatorLabel(value: string): string {
+  const labels: Record<string, string> = {
+    equals: '等于',
+    not_equals: '不等于',
+    contains: '包含',
+    exists: '存在',
+    matches: '匹配',
+    validates: '符合结构',
+  }
+  return labels[value] ?? value
 }

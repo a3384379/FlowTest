@@ -103,6 +103,7 @@ export type TestEngineeringGeneration = {
   contract_completeness: string
   contract_fingerprint: string
   contract?: OperationContract
+  evidence_details?: EvidenceDetail[]
 }
 
 export type TestEngineeringProposal = {
@@ -116,6 +117,18 @@ export type TestEngineeringProposal = {
   contract_completeness: string
   contract_fingerprint: string
   contract?: OperationContract
+  materialization?: TestEngineeringApplyResult | null
+  evidence_details?: EvidenceDetail[]
+}
+
+export type EvidenceDetail = {
+  id: string
+  source_type: string
+  source_ref: string
+  revision: string
+  path: string
+  confidence: number
+  deterministic: boolean
 }
 
 export type TestEngineeringApplyResult = {
@@ -123,6 +136,8 @@ export type TestEngineeringApplyResult = {
   test_design_id: string
   workflow_ids: string[]
   test_case_ids: string[]
+  assets?: Array<{ scenario_id: string; workflow_id: string; test_case_id: string }>
+  references_complete?: boolean
 }
 
 export async function listTestEngineeringApis(projectId: string): Promise<Page<ApiDefinition>> {
