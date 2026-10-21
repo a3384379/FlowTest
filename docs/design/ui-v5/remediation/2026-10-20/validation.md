@@ -178,3 +178,9 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 ## PR144 Viewer查询补修后的完整复验
 
 旧39564951442已因后续提交取消，其Compose失败单独保留；读取已取消的前端日志，又发现任务执行Viewer测试超时62.283秒。2e4dfb696a9234377097dc6ac6db63c9e8504c8c仅收窄四个禁用控件的查询范围，保留点击、禁止请求计数0及原超时。8项专项、格式、lint/TypeScript通过。frontend树26273ccbcd3be8f81f30e21ce442a5a0a9fa308c完整171文件1138项、无未处理异常、覆盖率85.99/82.04/85.81/88.56%及构建通过，日志remediation-r2-viewer-final-frontend-full.log。后端b10fd未变，仍对应1886项完整验证。详见[第十六批](batch-16.md)。下一次推送后仅认可最新HEAD正式Required Gate与审查，不将6869730旧门禁替代新提交。
+
+## M18质量中心最终整合验证
+
+最终源码81a003a8f8f2ca3a9fac3afe540116adf10b05eb，backend树f9576a75393421612feb7982ba2cc4e1196a05fc：Ruff格式/检查646文件、mypy442、1888项/14跳过/2既有警告通过，覆盖率91.09%。frontend树bc19a031672c1a86be489da12f570ab175510234：格式、lint/类型、172文件1162项、覆盖率86.03/82.16/85.82/88.60%及生产构建通过，无未处理异常。日志remediation-quality-order-final-backend-full.log、remediation-quality-read-state-final-frontend-full.log。
+
+30项前端和5项后端专项、一次真实内部健康检查、22条实际风险快照、页外原v1/推荐v2、两次显式隔离/恢复、跨项目404/trace、150行分页重读唯一性、1440/390px以及明确合成的迟到/503/404注入均通过。149条目录记录为明确合成fixture，不充作真实执行。全部回执与中间失败/未运行范围见[第十七批](batch-17.md)。本地50/73完成、23待完成、39已合并。PR144最新a6f52a4正式门禁仍另行跟踪，未提前合并或声称发布。
