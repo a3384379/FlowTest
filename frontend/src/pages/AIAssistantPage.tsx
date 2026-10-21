@@ -2,81 +2,107 @@ import CatalogPagination from '../components/CatalogPagination'
 import { CheckOutlined, CloseOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
 import {
   Alert,
-  App,
   Button,
   Card,
   Col,
-  Form,
-  Input,
-  Modal,
+  Descriptions,
   Row,
-  Select,
   Space,
   Switch,
   Table,
   Tag,
   Typography,
 } from 'antd'
-import type { AIJobInput, AISuggestion } from '../features/ai/ai-service'
+import { useState } from 'react'
+import type { AIJob, AIJobInput, AISuggestion } from '../features/ai/ai-service'
 import { useAIReview } from '../features/ai/use-ai-review'
+import CreateAIJobDialog from '../features/ai/CreateAIJobDialog'
+import AISuggestionReviewDialog from '../features/ai/AISuggestionReviewDialog'
 import { useProjectContext } from '../features/projects/use-project-context'
-import { apiErrorMessage } from '../lib/api'
-import { useRouteScopedState } from '../lib/use-route-scoped-state'
-
-type JobForm = {
-  job_type: AIJobInput['job_type']
-  schema: string
-  metadata: string
-  sample: string
-}
-
-type ReviewDraft = {
-  suggestion: AISuggestion
-  decision: 'accept' | 'reject'
-}
+import { apiErrorWithTrace } from '../lib/api'
 
 export default function AIAssistantPage() {
   const { projectId } = useProjectContext()
   return <AIReviewWorkspace key={projectId ?? 'none'} />
 }
-
+type AIReviewState = ReturnType<typeof useAIReview>
 function AIReviewWorkspace() {
   const state = useAIReview()
-  const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
-  const review = useSuggestionReview(state)
-  const aiStatus = state.status.data
+  const [createOpen, setCreateOpen] = useState(false)
+  const suggestion = state.suggestions.isSuccess
+    ? state.suggestions.data.find((item) => item.id === state.suggestionId)
+    : undefined
   return (
     <>
       <AIPageHeader
-        canCreate={Boolean(state.canEdit && aiStatus?.enabled)}
+        canCreate={Boolean(state.canEdit && state.status.isSuccess && state.status.data.enabled)}
         onCreate={() => setCreateOpen(true)}
       />
       <AIErrorAlert state={state} />
-      {!state.status.isError ? (
-        <AIDisabledAlert loading={state.status.isLoading} enabled={aiStatus?.enabled ?? false} />
+      {state.status.isSuccess && !state.status.data.enabled ? (
+        <Alert
+          showIcon
+          type="info"
+          title="AI 助手当前关闭"
+          description="未配置 OpenAI-compatible 网关时不会影响接口、Workflow 或计划运行。历史任务和审核结果仍可只读查看。"
+          className="page-alert"
+        />
       ) : null}
       <AIPolicyCard state={state} />
       <div className="catalog-controls">
         <CatalogPagination query={state.jobs} label="AI 任务" />
       </div>
-      <AIWorkspace state={state} onReview={review.open} />
-      <CreateAIJobDialog
-        open={createOpen}
-        submitting={state.creating}
-        sampleEnabled={Boolean(aiStatus?.sample_sharing_enabled && state.canManageSecurity)}
-        onClose={() => setCreateOpen(false)}
-        onCreate={async (input) => {
-          await state.createJob(input)
-          setCreateOpen(false)
-        }}
-      />
-      <ReviewDialog state={state} review={review} />
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={10} style={{ minWidth: 0 }}>
+          <AIJobsCard state={state} />
+        </Col>
+        <Col xs={24} lg={14} style={{ minWidth: 0 }}>
+          <AIJobDetails job={state.selectedJob.isSuccess ? state.selectedJob.data : undefined} />
+          <AISuggestionsCard state={state} />
+        </Col>
+      </Row>
+      <AICreateDialog state={state} open={createOpen} onClose={() => setCreateOpen(false)} />
+      {missingSuggestion(state, Boolean(suggestion)) ? (
+        <Alert
+          type="warning"
+          title="所选建议不存在或不属于当前任务"
+          action={<Button onClick={() => state.selectSuggestion(null)}>返回当前任务</Button>}
+        />
+      ) : null}
+      {suggestion && state.projectId ? (
+        <AISuggestionReviewDialog
+          key={`${state.projectId}:${suggestion.job_id}:${suggestion.id}:${suggestion.review_status}`}
+          projectId={state.projectId}
+          suggestion={suggestion}
+          decision={state.reviewDecision}
+          canEdit={state.canEdit}
+          submitting={state.reviewing}
+          onClose={() => state.selectSuggestion(null)}
+          onSubmit={state.review}
+          onReload={async () => {
+            const result = await state.suggestions.refetch()
+            if (result.isError) throw result.error
+          }}
+        />
+      ) : null}
     </>
   )
 }
-
-type AIReviewState = ReturnType<typeof useAIReview>
-
+function AIPageHeader({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
+  return (
+    <div className="page-heading">
+      <div>
+        <Typography.Title level={2}>AI 助手</Typography.Title>
+        <Typography.Text type="secondary">
+          选择公开契约或失败摘要生成建议，人工审核后继续处理。任务不会自动发布或执行。
+        </Typography.Text>
+      </div>
+      <Button type="primary" icon={<PlusOutlined />} disabled={!canCreate} onClick={onCreate}>
+        新建 AI 任务
+      </Button>
+    </div>
+  )
+}
 function AIErrorAlert({ state }: { state: AIReviewState }) {
   const queries = [
     state.status,
@@ -92,12 +118,12 @@ function AIErrorAlert({ state }: { state: AIReviewState }) {
       type="error"
       showIcon
       title="AI 工作区加载失败"
-      description={apiErrorMessage(error)}
+      description={apiErrorWithTrace(error)}
       action={
         <Button
-          onClick={() => {
+          onClick={() =>
             queries.filter((query) => query.isError).forEach((query) => void query.refetch())
-          }}
+          }
         >
           重试
         </Button>
@@ -105,89 +131,47 @@ function AIErrorAlert({ state }: { state: AIReviewState }) {
     />
   )
 }
-
-function AIPageHeader({ canCreate, onCreate }: { canCreate: boolean; onCreate: () => void }) {
-  return (
-    <div className="page-heading">
-      <div>
-        <Typography.Title level={2}>AI 助手</Typography.Title>
-        <Typography.Text type="secondary">
-          基于 Schema 和项目元数据生成可审核建议。AI 不会读取 Secret、自动发布或自动执行。
-        </Typography.Text>
-      </div>
-      <Button type="primary" icon={<PlusOutlined />} disabled={!canCreate} onClick={onCreate}>
-        新建 AI 任务
-      </Button>
-    </div>
-  )
-}
-
-function AIDisabledAlert({ loading, enabled }: { loading: boolean; enabled: boolean }) {
-  if (loading || enabled) return null
-  return (
-    <Alert
-      showIcon
-      type="info"
-      message="AI 助手当前关闭"
-      description="未配置 OpenAI-compatible 网关时不会影响接口、Workflow 或计划运行。"
-      className="page-alert"
-    />
-  )
-}
-
 function AIPolicyCard({ state }: { state: AIReviewState }) {
-  const aiStatus = state.status.data
-  const enabled = aiStatus?.enabled ?? false
+  const status = state.status.data,
+    enabled = state.status.isSuccess && state.status.data.enabled
   return (
     <Card className="ai-policy-card">
-      <Space size="large">
+      <Space wrap size="large">
         <Tag icon={<RobotOutlined />} color={enabled ? 'processing' : 'default'}>
-          {enabled ? `模型：${aiStatus?.model}` : '未启用'}
+          {enabled ? `模型：${state.status.data?.model}` : '未启用'}
         </Tag>
-        <Typography.Text>允许 Owner 提交脱敏样本</Typography.Text>
+        <Typography.Text>允许 Owner 显式提交样本</Typography.Text>
         <Switch
-          aria-label="允许提交脱敏样本"
-          checked={aiStatus?.sample_sharing_enabled ?? false}
+          aria-label="允许 Owner 提交样本"
+          checked={status?.sample_sharing_enabled ?? false}
           loading={state.updatingSettings}
           disabled={!enabled || !state.canManageSecurity}
-          onChange={(checked) => state.updateSampleSharing(checked)}
+          onChange={(checked) => void state.updateSampleSharing(checked)}
         />
       </Space>
     </Card>
   )
 }
-
-function AIWorkspace({
-  state,
-  onReview,
-}: {
-  state: AIReviewState
-  onReview: (suggestion: AISuggestion, decision: 'accept' | 'reject') => void
-}) {
-  return (
-    <Row gutter={16}>
-      <Col span={10}>
-        <AIJobsCard state={state} />
-      </Col>
-      <Col span={14}>
-        <AISuggestionsCard state={state} onReview={onReview} />
-      </Col>
-    </Row>
-  )
-}
-
 function AIJobsCard({ state }: { state: AIReviewState }) {
   return (
     <Card title="AI 任务" loading={state.jobs.isLoading}>
-      <Table
+      <Table<AIJob>
         rowKey="id"
         size="small"
         pagination={false}
-        dataSource={state.jobs.data?.items ?? []}
+        scroll={{ x: 460 }}
+        dataSource={state.jobs.isSuccess ? state.jobs.data.items : []}
         rowClassName={(job) => (job.id === state.selectedJobId ? 'selected-row' : '')}
-        onRow={(job) => ({ onClick: () => state.selectJob(job.id) })}
         columns={[
-          { title: '类型', dataIndex: 'job_type', render: jobTypeLabel },
+          {
+            title: '任务',
+            dataIndex: 'job_type',
+            render: (value: string, job) => (
+              <Button type="link" onClick={() => state.selectJob(job.id)}>
+                {jobTypeLabel(value)}
+              </Button>
+            ),
+          },
           {
             title: '状态',
             dataIndex: 'status',
@@ -197,47 +181,103 @@ function AIJobsCard({ state }: { state: AIReviewState }) {
           {
             title: '输入摘要',
             dataIndex: 'input_sha256',
-            render: (value: string) => value.slice(0, 10),
+            render: (value: string) => value?.slice(0, 10) ?? '未提供',
           },
         ]}
       />
     </Card>
   )
 }
-
-function AISuggestionsCard({
-  state,
-  onReview,
-}: {
-  state: AIReviewState
-  onReview: (suggestion: AISuggestion, decision: 'accept' | 'reject') => void
-}) {
+function AIJobDetails({ job }: { job?: AIJob }) {
+  if (!job) return null
   return (
-    <Card title="人工审核" loading={state.suggestions.isLoading}>
-      <Table
+    <Card size="small" title="任务详情" style={{ marginBottom: 16 }}>
+      {job.status === 'failed' ? (
+        <Alert
+          type="error"
+          showIcon
+          title={job.error_code ?? '任务失败，未提供错误代码'}
+          description={job.error_message ?? '未提供失败原因，可核对队列与网关可用性后新建任务。'}
+        />
+      ) : null}
+      <Descriptions
+        size="small"
+        column={1}
+        items={[
+          { key: 'id', label: '任务ID', children: job.id },
+          { key: 'status', label: '当前状态', children: `当前状态：${job.status}` },
+          { key: 'created', label: '创建时间', children: job.created_at },
+          { key: 'completed', label: '完成时间', children: job.completed_at ?? '尚未提供完成时间' },
+          { key: 'trace', label: 'Trace 引用', children: '未提供 Trace ID' },
+          {
+            key: 'policy',
+            label: '任务处理策略',
+            children: job.redaction_mode
+              ? `${job.redaction_mode.toUpperCase()}，版本 ${job.redaction_policy_version ?? '未提供'}`
+              : '历史任务未提供策略信息',
+          },
+        ]}
+      />
+      <Typography.Paragraph type="secondary">{nextStep(job.status)}</Typography.Paragraph>
+    </Card>
+  )
+}
+function AISuggestionsCard({ state }: { state: AIReviewState }) {
+  return (
+    <Card title="人工审核" loading={state.suggestions.isFetching}>
+      <Table<AISuggestion>
         rowKey="id"
         size="small"
         pagination={false}
-        dataSource={state.suggestions.data ?? []}
-        locale={{ emptyText: '任务完成后在此审核建议' }}
+        scroll={{ x: 530 }}
+        dataSource={
+          state.suggestions.isSuccess &&
+          state.selectedJob.isSuccess &&
+          state.selectedJob.data.status === 'completed'
+            ? state.suggestions.data
+            : []
+        }
+        locale={{ emptyText: nextStep(state.selectedJob.data?.status) }}
         columns={[
           { title: '建议', dataIndex: 'title', ellipsis: true },
-          { title: '类型', dataIndex: 'suggestion_type', width: 120 },
+          { title: '类型', dataIndex: 'suggestion_type' },
           {
             title: '状态',
             dataIndex: 'review_status',
-            width: 100,
             render: (value: string) => <Tag>{value}</Tag>,
           },
           {
             title: '操作',
-            width: 150,
-            render: (_, suggestion: AISuggestion) => (
-              <ReviewActions
-                suggestion={suggestion}
-                readOnly={!state.canEdit}
-                onReview={onReview}
-              />
+            width: 240,
+            render: (_, suggestion) => (
+              <Space>
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => state.selectSuggestion(suggestion.id)}
+                >
+                  查看
+                </Button>
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<CheckOutlined />}
+                  disabled={!state.canEdit || suggestion.review_status !== 'pending'}
+                  onClick={() => state.selectSuggestion(suggestion.id, 'accept')}
+                >
+                  接受
+                </Button>
+                <Button
+                  size="small"
+                  type="link"
+                  danger
+                  icon={<CloseOutlined />}
+                  disabled={!state.canEdit || suggestion.review_status !== 'pending'}
+                  onClick={() => state.selectSuggestion(suggestion.id, 'reject')}
+                >
+                  拒绝
+                </Button>
+              </Space>
             ),
           },
         ]}
@@ -245,245 +285,54 @@ function AISuggestionsCard({
     </Card>
   )
 }
-
-function ReviewActions({
-  suggestion,
-  readOnly,
-  onReview,
-}: {
-  suggestion: AISuggestion
-  readOnly: boolean
-  onReview: (suggestion: AISuggestion, decision: 'accept' | 'reject') => void
-}) {
-  const disabled = readOnly || suggestion.review_status !== 'pending'
-  return (
-    <Space>
-      <Button
-        size="small"
-        type="link"
-        icon={<CheckOutlined />}
-        disabled={disabled}
-        onClick={() => onReview(suggestion, 'accept')}
-      >
-        接受
-      </Button>
-      <Button
-        size="small"
-        type="link"
-        danger
-        icon={<CloseOutlined />}
-        disabled={disabled}
-        onClick={() => onReview(suggestion, 'reject')}
-      >
-        拒绝
-      </Button>
-    </Space>
-  )
-}
-
-function ReviewDialog({
-  state,
-  review,
-}: {
-  state: AIReviewState
-  review: ReturnType<typeof useSuggestionReview>
-}) {
-  return (
-    <Modal
-      title={review.draft?.decision === 'accept' ? '接受并生成草稿' : '拒绝建议'}
-      open={Boolean(review.draft)}
-      confirmLoading={state.reviewing}
-      okButtonProps={{ disabled: !state.canEdit }}
-      onCancel={review.close}
-      onOk={() => void review.submit()}
-    >
-      {review.draft?.decision === 'accept' ? (
-        <Input.TextArea
-          aria-label="建议内容"
-          rows={12}
-          value={review.editedContent}
-          onChange={(event) => review.setEditedContent(event.target.value)}
-        />
-      ) : null}
-      <Input.TextArea
-        aria-label="审核备注"
-        rows={3}
-        maxLength={2000}
-        placeholder="审核备注"
-        value={review.note}
-        onChange={(event) => review.setNote(event.target.value)}
-      />
-    </Modal>
-  )
-}
-
-function useSuggestionReview(state: AIReviewState) {
-  const { message } = App.useApp()
-  const [draft, setDraft] = useRouteScopedState<ReviewDraft | null>(
-    state.projectId,
-    state.selectedJobId,
-    null,
-  )
-  const [editedContent, setEditedContent] = useRouteScopedState(
-    state.projectId,
-    state.selectedJobId,
-    '',
-  )
-  const [note, setNote] = useRouteScopedState(state.projectId, state.selectedJobId, '')
-
-  function open(suggestion: AISuggestion, decision: 'accept' | 'reject') {
-    setDraft({ suggestion, decision })
-    setEditedContent(JSON.stringify(suggestion.content, null, 2))
-    setNote('')
-  }
-
-  function close() {
-    setDraft(null)
-  }
-
-  async function submit() {
-    if (!draft) return
-    const content = acceptedContent(draft, editedContent, message.error)
-    if (draft.decision === 'accept' && !content) return
-    await state.review({
-      id: draft.suggestion.id,
-      decision: draft.decision,
-      content,
-      note,
-    })
-    close()
-  }
-
-  return { draft, editedContent, note, setEditedContent, setNote, open, close, submit }
-}
-
-function acceptedContent(
-  draft: ReviewDraft,
-  editedContent: string,
-  showError: (message: string) => void,
-) {
-  if (draft.decision !== 'accept') return undefined
-  try {
-    return parseObject(editedContent, '建议内容必须是 JSON 对象')
-  } catch {
-    showError('建议内容必须是 JSON 对象')
-    return undefined
-  }
-}
-
-function CreateAIJobDialog({
-  open,
-  submitting,
-  sampleEnabled,
-  onClose,
-  onCreate,
-}: {
-  open: boolean
-  submitting: boolean
-  sampleEnabled: boolean
-  onClose: () => void
-  onCreate: (input: Omit<AIJobInput, 'project_id'>) => Promise<void>
-}) {
-  const [form] = Form.useForm<JobForm>()
-  return (
-    <Modal
-      title="新建 AI 建议任务"
-      open={open}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          job_type: 'schema_cases',
-          schema: '{\n  "openapi": "3.1.0",\n  "paths": {}\n}',
-          metadata: '{}',
-          sample: '',
-        }}
-        onFinish={(value) =>
-          void onCreate({
-            job_type: value.job_type,
-            schema_document: parseObject(value.schema, 'Schema 必须是 JSON 对象'),
-            metadata: parseObject(value.metadata, '元数据必须是 JSON 对象'),
-            sample: sampleEnabled && value.sample.trim() ? JSON.parse(value.sample) : undefined,
-          })
-        }
-      >
-        <Form.Item name="job_type" label="任务类型" rules={[{ required: true }]}>
-          <Select
-            options={[
-              { value: 'schema_cases', label: 'Schema 用例建议' },
-              { value: 'assertion_suggestions', label: '断言建议' },
-              { value: 'workflow_draft', label: 'Workflow 草稿' },
-              { value: 'failure_analysis', label: '失败归因' },
-            ]}
-          />
-        </Form.Item>
-        <Form.Item
-          name="schema"
-          label="OpenAPI Schema"
-          rules={[{ required: true }, { validator: validateJSONObject }]}
-        >
-          <Input.TextArea rows={8} />
-        </Form.Item>
-        <Form.Item
-          name="metadata"
-          label="脱敏元数据"
-          rules={[{ required: true }, { validator: validateJSONObject }]}
-        >
-          <Input.TextArea rows={4} />
-        </Form.Item>
-        {sampleEnabled ? (
-          <Form.Item
-            name="sample"
-            label="脱敏样本（Owner 显式开启）"
-            rules={[{ validator: validateOptionalJSON }]}
-          >
-            <Input.TextArea rows={4} />
-          </Form.Item>
-        ) : null}
-      </Form>
-    </Modal>
-  )
-}
-
-function parseObject(value: string, message: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(value)
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw new Error(message)
-  return parsed as Record<string, unknown>
-}
-
-async function validateJSONObject(_: unknown, value: string) {
-  try {
-    parseObject(value, '请输入 JSON 对象')
-  } catch {
-    throw new Error('请输入有效的 JSON 对象')
-  }
-}
-
-async function validateOptionalJSON(_: unknown, value: string) {
-  if (!value?.trim()) return
-  try {
-    JSON.parse(value)
-  } catch {
-    throw new Error('请输入有效 JSON')
-  }
-}
-
-function jobTypeLabel(value: AIJobInput['job_type']) {
-  return {
+function jobTypeLabel(value: AIJobInput['job_type'] | string): string {
+  const names: Record<string, string> = {
     schema_cases: 'Schema 用例',
     assertion_suggestions: '断言建议',
     workflow_draft: 'Workflow',
     failure_analysis: '失败归因',
-  }[value]
+    change_set: 'AI 变更集',
+  }
+  return names[value] ?? value
 }
-
-function statusColor(value: string) {
+function statusColor(value: string): string {
   if (value === 'completed') return 'success'
   if (value === 'failed') return 'error'
   return 'processing'
+}
+function nextStep(status?: string): string {
+  if (status === 'failed') return '任务失败。检查错误后可重新填写新任务，当前不会自动重试。'
+  if (status === 'pending' || status === 'running') return '任务仍在处理中，完成后可人工审核建议。'
+  if (status === 'completed') return '任务已完成；如没有建议，可补充明确的公开材料后新建任务。'
+  return '请选择任务，完成后在此审核建议。'
+}
+
+function AICreateDialog({
+  state,
+  open,
+  onClose,
+}: {
+  state: AIReviewState
+  open: boolean
+  onClose: () => void
+}) {
+  if (!state.projectId) return null
+  return (
+    <CreateAIJobDialog
+      projectId={state.projectId}
+      open={open}
+      submitting={state.creating}
+      sampleEnabled={Boolean(
+        state.status.isSuccess &&
+        state.status.data.sample_sharing_enabled &&
+        state.canManageSecurity,
+      )}
+      onClose={onClose}
+      onCreate={state.createJob}
+    />
+  )
+}
+
+function missingSuggestion(state: AIReviewState, present: boolean): boolean {
+  return Boolean(state.suggestionId && state.suggestions.isSuccess && !present)
 }

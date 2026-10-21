@@ -58,7 +58,7 @@ it.each(['create', 'select'] as const)(
         if (params.id === fresh.id) suggestionsReads += 1
         return HttpResponse.json(
           params.id === fresh.id && completed
-            ? [{ id: 'fresh-suggestion', title: 'Finished suggestion' }]
+            ? [{ id: 'fresh-suggestion', job_id: fresh.id, title: 'Finished suggestion' }]
             : [],
         )
       }),
@@ -77,10 +77,74 @@ it.each(['create', 'select'] as const)(
         result.current.createJob({ job_type: 'assertion_suggestions', metadata: {} }),
       )
     await waitFor(() => expect(result.current.selectedJobId).toBe('fresh-job'))
-    await waitFor(() => expect(suggestionsReads).toBeGreaterThan(0))
+    expect(suggestionsReads).toBe(0)
     completed = true
     await waitFor(() => expect(result.current.suggestions.data?.[0]?.id).toBe('fresh-suggestion'), {
       timeout: 3000,
     })
+    expect(suggestionsReads).toBeGreaterThan(0)
+  },
+)
+
+it.each(['create', 'review'] as const)(
+  'ignores late %s completion after selecting another job',
+  async (command) => {
+    let started = false
+    let respond!: (response: Response) => void
+    const response = new Promise<Response>((resolve) => {
+      respond = resolve
+    })
+    const first = { id: 'first', project_id: project.id, status: 'completed' }
+    const suggestion = { id: 'pending-suggestion', job_id: first.id, review_status: 'pending' }
+    server.use(
+      http.get('/api/v1/ai/status', () => HttpResponse.json({ enabled: true })),
+      http.get('/api/v1/ai/jobs', () =>
+        HttpResponse.json({ items: [first], total: 1, page: 1, page_size: 20 }),
+      ),
+      http.get('/api/v1/ai/jobs/:id', ({ params }) =>
+        HttpResponse.json({ ...first, id: params.id }),
+      ),
+      http.get('/api/v1/ai/jobs/:id/suggestions', ({ params }) =>
+        HttpResponse.json(params.id === first.id ? [suggestion] : []),
+      ),
+      http.post('/api/v1/ai/jobs', () => {
+        started = true
+        return response
+      }),
+      http.post('/api/v1/ai/suggestions/:id/accept', () => {
+        started = true
+        return response
+      }),
+    )
+    const { wrapper } = harness('ai')
+    const { result } = renderHook(() => useAIReview(), { wrapper })
+    await waitFor(() => expect(result.current.suggestions.isSuccess).toBe(true))
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    let completion!: Promise<unknown>
+    act(() => {
+      completion =
+        command === 'create'
+          ? result.current.createJob({
+              job_type: 'failure_analysis',
+              metadata: { failure_summary: 'failed' },
+            })
+          : result.current.review({ id: suggestion.id, decision: 'accept', note: '' })
+    })
+    await waitFor(() => expect(started).toBe(true))
+    act(() => result.current.selectJob('other'))
+    await waitFor(() => expect(result.current.selectedJob.data?.id).toBe('other'))
+    let outcome: unknown
+    await act(async () => {
+      respond(
+        HttpResponse.json(
+          command === 'create'
+            ? { ...first, id: 'new-job' }
+            : { ...suggestion, content: {}, review_status: 'accepted', review_note: '' },
+        ),
+      )
+      outcome = await completion
+    })
+    expect(outcome).toBe(command === 'create' ? false : null)
+    expect(result.current.selectedJobId).toBe('other')
   },
 )

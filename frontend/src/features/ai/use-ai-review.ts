@@ -1,9 +1,9 @@
 import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-
-import { apiErrorMessage } from '../../lib/api'
-import { useRouteScopedState } from '../../lib/use-route-scoped-state'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
+import { apiErrorWithTrace } from '../../lib/api'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
 import {
@@ -15,6 +15,7 @@ import {
   reviewAISuggestion,
   updateAISettings,
   type AIJobInput,
+  type AISuggestion,
 } from './ai-service'
 
 type SuggestionReviewInput = {
@@ -23,17 +24,15 @@ type SuggestionReviewInput = {
   content?: Record<string, unknown>
   note: string
 }
-
 export function useAIReview() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const { canEdit, canManageSecurity, permissions } = useProjectCapabilities()
-  const [selectedJobId, setSelectedJobId] = useRouteScopedState<string | null>(
-    projectId,
-    null,
-    null,
-  )
+  const access = useProjectCapabilities()
+  const canEdit = access.canEdit && access.permissions.isSuccess
+  const canManageSecurity = access.canManageSecurity && access.permissions.isSuccess
+  const [params, setParams] = useSearchParams()
+  const commandCurrent = useAICommandContext(projectId)
   const status = useQuery({
     queryKey: ['ai-status', projectId],
     queryFn: () => getAIStatus(projectId!),
@@ -52,68 +51,131 @@ export function useAIReview() {
           : false,
     },
   )
-  const activeJobId = selectedJobId ?? jobs.data?.items[0]?.id ?? null
+  const activeJobId = selectedJobIdentity(params, jobs.data?.items)
   const selectedJob = useQuery({
     queryKey: ['ai-job', projectId, activeJobId],
-    queryFn: () => getAIJob(activeJobId!),
+    queryFn: () => getAIJob(projectId!, activeJobId!),
     enabled: Boolean(projectId && activeJobId),
     refetchInterval: (query) =>
       query.state.data && ['pending', 'running'].includes(query.state.data.status) ? 2000 : false,
   })
-  const activeJobStatus = selectedJob.data?.status ?? null
   const suggestions = useQuery({
-    queryKey: ['ai-suggestions', projectId, activeJobId, activeJobStatus],
+    queryKey: ['ai-suggestions', projectId, activeJobId, selectedJob.data?.status],
     queryFn: () => listAISuggestions(activeJobId!),
-    enabled: Boolean(projectId && activeJobId),
+    enabled: readyForSuggestions(
+      projectId,
+      activeJobId,
+      selectedJob.isSuccess,
+      selectedJob.data?.status,
+    ),
   })
-  const createMutation = useMutation({
-    mutationFn: (input: AIJobInput) => createAIJob(input),
-    onError: (error) => message.error(apiErrorMessage(error)),
-  })
+  const createMutation = useMutation({ mutationFn: createAIJob })
   const reviewMutation = useMutation({
-    mutationFn: ({ id, decision, content, note }: SuggestionReviewInput) =>
-      reviewAISuggestion(id, decision, { content, note }),
-    onError: (error) => message.error(apiErrorMessage(error)),
+    mutationFn: ({ input, job }: { input: SuggestionReviewInput; job: string }) =>
+      reviewAISuggestion(
+        input.id,
+        input.decision,
+        { content: input.content, note: input.note },
+        job,
+      ),
   })
   const settingsMutation = useMutation({
     mutationFn: ({ project, enabled }: { project: string; enabled: boolean }) =>
       updateAISettings(project, enabled),
-    onSuccess: async (_, input) => {
-      await queryClient.invalidateQueries({ queryKey: ['ai-status', input.project] })
-      message.success('AI 样本策略已更新')
-    },
-    onError: (error) => message.error(apiErrorMessage(error)),
   })
-
-  async function createJob(input: Omit<AIJobInput, 'project_id'>) {
-    if (!projectId || !canEdit) throw new Error('当前项目只读')
-    const job = await createMutation.mutateAsync({ ...input, project_id: projectId })
-    setSelectedJobId(job.id)
-    await queryClient.invalidateQueries({ queryKey: ['ai-jobs', projectId] })
-    message.success('AI 任务已进入独立队列')
+  function selectJob(id: string) {
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('job', id)
+      next.delete('suggestion')
+      next.delete('decision')
+      return next
+    })
   }
-
-  async function review(input: SuggestionReviewInput) {
-    if (!projectId || !canEdit) throw new Error('当前项目只读')
-    await reviewMutation.mutateAsync(input)
-    await queryClient.invalidateQueries({ queryKey: ['ai-suggestions', projectId, activeJobId] })
-    message.success('审核结果已保存')
+  function selectSuggestion(id: string | null, decision: 'accept' | 'reject' = 'accept') {
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (activeJobId) next.set('job', activeJobId)
+      if (id) {
+        next.set('suggestion', id)
+        next.set('decision', decision)
+      } else {
+        next.delete('suggestion')
+        next.delete('decision')
+      }
+      return next
+    })
   }
-
-  function updateSampleSharing(enabled: boolean) {
-    if (projectId && canManageSecurity) settingsMutation.mutate({ project: projectId, enabled })
+  async function createJob(input: Omit<AIJobInput, 'project_id'>): Promise<boolean> {
+    if (!projectId || !canEdit || !status.isSuccess || !status.data.enabled || !commandCurrent())
+      return false
+    const project = projectId
+    try {
+      const job = await createMutation.mutateAsync({ ...input, project_id: project })
+      void queryClient.invalidateQueries({ queryKey: ['ai-jobs', project] })
+      if (!commandCurrent()) return false
+      selectJob(job.id)
+      void message.success('AI 任务已进入独立队列')
+      return true
+    } catch (error) {
+      void queryClient.invalidateQueries({ queryKey: ['ai-jobs', project] })
+      if (commandCurrent()) void message.error(apiErrorWithTrace(error))
+      return false
+    }
   }
-
+  async function review(input: SuggestionReviewInput): Promise<AISuggestion | null> {
+    if (
+      !projectId ||
+      !activeJobId ||
+      !canEdit ||
+      !commandCurrent() ||
+      !suggestions.data?.some((item) => item.id === input.id && item.review_status === 'pending')
+    )
+      return null
+    const project = projectId,
+      job = activeJobId
+    try {
+      const result = await reviewMutation.mutateAsync({ input, job })
+      queryClient.setQueryData<AISuggestion[]>(
+        ['ai-suggestions', project, job, 'completed'],
+        (current) => current?.map((item) => (item.id === result.id ? result : item)),
+      )
+      if (!commandCurrent()) return null
+      void message.success('审核结果已保存')
+      return result
+    } catch (error) {
+      if (commandCurrent()) void message.error(apiErrorWithTrace(error))
+      return null
+    }
+  }
+  async function updateSampleSharing(enabled: boolean) {
+    if (
+      !projectId ||
+      !canManageSecurity ||
+      !status.isSuccess ||
+      !status.data.enabled ||
+      !commandCurrent()
+    )
+      return
+    const project = projectId
+    try {
+      await settingsMutation.mutateAsync({ project, enabled })
+      await queryClient.invalidateQueries({ queryKey: ['ai-status', project] })
+      if (commandCurrent()) void message.success('AI 样本策略已更新')
+    } catch (error) {
+      if (commandCurrent()) void message.error(apiErrorWithTrace(error))
+    }
+  }
   return {
     projectId,
     canEdit,
     canManageSecurity,
-    permissions,
+    permissions: access.permissions,
     status,
     jobs,
     selectedJob,
     selectedJobId: activeJobId,
-    selectJob: setSelectedJobId,
+    selectJob,
     suggestions,
     createJob,
     creating: createMutation.isPending,
@@ -121,5 +183,35 @@ export function useAIReview() {
     reviewing: reviewMutation.isPending,
     updateSampleSharing,
     updatingSettings: settingsMutation.isPending,
+    suggestionId: params.get('suggestion'),
+    reviewDecision: params.get('decision') === 'reject' ? ('reject' as const) : ('accept' as const),
+    selectSuggestion,
   }
+}
+function useAICommandContext(projectId: string | null) {
+  const location = useLocation(),
+    router = useContext(UNSAFE_DataRouterContext)
+  const context = useMemo(() => ({ projectId, key: location.key }), [projectId, location.key])
+  const active = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    active.current = context
+    return () => {
+      active.current = null
+    }
+  }, [context])
+  return () =>
+    active.current === context && (!router || router.router.state.location.key === location.key)
+}
+
+function readyForSuggestions(
+  projectId: string | null,
+  jobId: string | null,
+  success: boolean,
+  status?: string,
+): boolean {
+  return Boolean(projectId && jobId && success && status === 'completed')
+}
+
+function selectedJobIdentity(params: URLSearchParams, jobs?: { id: string }[]): string | null {
+  return params.get('job') ?? jobs?.[0]?.id ?? null
 }

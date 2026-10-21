@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 
 import { authenticate } from './support/auth'
 
-test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
+test('S21 AI 明确提交与人工接受主路径', async ({ page }) => {
   test.setTimeout(60_000)
   const acceptedWorkflowName = `S21 AI 人工审核工作流 ${Date.now()}`
 
@@ -12,7 +12,7 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
   await navigateMenu(page, 'AI 助手')
   await expect(page).toHaveURL(/\/ai$/)
   await expect(page.getByRole('heading', { name: 'AI 助手' })).toBeVisible()
-  await expect(page.getByText(/AI 不会读取 Secret、自动发布或自动执行/)).toBeVisible()
+  await expect(page.getByText(/任务不会自动发布或执行/)).toBeVisible()
   await expect(page.getByText('模型：flowtest-compose-model')).toBeVisible()
 
   await page.getByRole('button', { name: /新建 AI 任务/ }).click()
@@ -23,17 +23,23 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
   const options = page.locator('.ant-select-dropdown:visible')
   await expect(options).not.toHaveClass(/ant-slide.*-(appear|enter|leave)/)
   await options.getByText('Workflow 草稿', { exact: true }).click()
+  await createDialog.getByLabel('流程目标').fill('生成开始和结束节点的可审核流程草稿')
+  await createDialog.getByRole('button', { name: '预览提交材料' }).click()
+  await expect(createDialog.getByLabel('最终提交负载')).toContainText(
+    '生成开始和结束节点的可审核流程草稿',
+  )
   const created = page.waitForResponse(
     (response) =>
       response.url().endsWith('/api/v1/ai/jobs') && response.request().method() === 'POST',
   )
-  await createDialog.getByRole('button', { name: '确 定' }).click()
+  await createDialog.getByRole('button', { name: '确认提交任务' }).click()
   expect((await created).status()).toBe(202)
 
   const suggestionRow = page.getByRole('row').filter({ hasText: 'S21 AI 人工审核工作流' })
   await expect(suggestionRow).toContainText('pending', { timeout: 30_000 })
   await suggestionRow.getByRole('button', { name: /接受/ }).click()
-  const reviewDialog = page.getByRole('dialog', { name: '接受并生成草稿' })
+  const reviewDialog = page.getByRole('dialog', { name: '接受建议' })
+  await reviewDialog.getByRole('tab', { name: '高级 JSON' }).click()
   const contentEditor = reviewDialog.getByLabel('建议内容')
   const content = JSON.parse(await contentEditor.inputValue()) as Record<string, unknown>
   content.name = acceptedWorkflowName
@@ -42,8 +48,12 @@ test('S21 AI 脱敏任务与人工接受主路径', async ({ page }) => {
   const accepted = page.waitForResponse(
     (response) => response.url().endsWith('/accept') && response.request().method() === 'POST',
   )
-  await reviewDialog.getByRole('button', { name: '确 定' }).click()
+  await reviewDialog.getByRole('button', { name: '确认接受' }).click()
   expect((await accepted).ok()).toBeTruthy()
+  const reviewed = page.getByRole('dialog', { name: '已审核建议' })
+  await expect(reviewed.getByRole('link', { name: '打开流程草稿' })).toBeVisible()
+  await reviewed.getByRole('button', { name: /关\s*闭/ }).click()
+  await expect(reviewed).toBeHidden()
   await expect(suggestionRow).toContainText('accepted')
   await expect(suggestionRow.getByRole('button', { name: /接受/ })).toBeDisabled()
 })
