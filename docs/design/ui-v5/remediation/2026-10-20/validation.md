@@ -139,3 +139,9 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 专用项目 `11582acc-199f-4961-8ca9-3ecd678762b9` 真实Pact导入及本地Provider验证201后，继续OpenAPI绑定、兼容矩阵通过、发布判断safe和两类资产切换，页面异常0。另按先验证弹窗再OpenAPI的顺序做只读检查，两个输入ID不同、点击标签聚焦正确，命令0、异常0；日志 `remediation-contract-s27-browser-followup-resume.log`、`remediation-contract-label-focus-browser.log`。补验分阶段继续同一专用样本，没有重复提交失败阶段的已完成命令，也没有访问外部Provider/Broker。
 
 本分支当前42项本地完成、31项待完成、37项已合并；本批新HEAD正式门禁、合并及合并后回归另行确认。Mock合并后Full Regression39541655090已结束成功，精确head为df1d481330b8d063ea0b18f5397d089fa6de4964；不会将该main结果替代本PR的新门禁。
+
+## 契约中心标签补修后的整合复验
+
+整合M10的正式门禁补修194e376后，源码 `4dcfc223e1aa963ebf0facd0a93d75f3588a8d41` 的前端树 `1e918ff43a52ff76338fd8b35c7da53edebdad66` 已重新完成7文件48项受影响专项及完整前端检查：164文件1092项通过，无未处理异常，覆盖率85.97/81.95/85.61/88.45%，格式、lint/类型与构建通过。日志 `remediation-engineering-contract-label-integrated-targeted.log`、`remediation-engineering-contract-label-frontend-full.log`。后台树仍为24f0584db804775d4b88af8853cbab0af63dff46，与1882项/91.07%完整通过一致。
+
+同步只在进度/验证文档保留测试工程42项/31项待完成的最新状态，并补入M10失败及补修回执，没有改写冻结审计或物化快照。当前42项本地完成、37项已合并，任务执行2项仍在验收，未计入完成。M10的最新194e376正式门禁39546205418仍在运行；本批GitHub PR与正式验收另行确认。
