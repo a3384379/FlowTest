@@ -2,7 +2,7 @@
 
 依据：[完整审计 M10](../../audits/2026-10-19/complete-audit.md#m10)、[修改方案 M10](../../audits/2026-10-19/remediation-plan.md#m10)。对应 `F-CT-01/02`。
 
-**两项已实现，专项、完整本地检查及真实浏览器验收通过，计入39项本地完成。整合前一批Mock与手机摘要补修后的最终完整复验正在运行；GitHub交付和正式环境验收独立确认。**
+**两项已实现，专项、完整本地检查及真实浏览器验收通过，计入39项本地完成。整合前一批Mock与手机摘要补修后的完整复验已通过；GitHub交付和正式环境验收独立确认。**
 
 ## 完整目录与审核上下文
 
@@ -44,7 +44,7 @@
 
 源码 `3dbdca6cf7fcc0e204c17c755ca591fca7473ec3` 的backend树 `af4ff5a9d2e24be561c2bb9b017da59c603bfaeb`、frontend树 `012f4ab43bde0ad785733dd3437cd39f10f62aba` 完整检查通过：后端1846项、14跳过、2项既有警告、91.03%，Ruff格式/检查、mypy440文件通过；前端159文件1041项，无未处理异常，覆盖率85.88/82.14/85.42/88.31%，格式、lint/类型及构建通过。该树尚未包含Mock，不能冒充整合后用例数。
 
-整合Mock及手机补修后源码 `cc93e93695a145fcaa9c4a2676109148217e1882`：backend树 `f222dd90d1277f84a0f60dbb9227058794319b1a`，frontend树 `9843d80a4f372915dde61f2d0f538ee8c0617590`。8项受影响测试、格式/ESLint和构建通过；一次校验提示刚进入DOM尚不可见的测试失败，已等待同一提示实际可见，保留断言，未提高超时或跳过。整合后的两侧完整检查正在运行，期间应用与测试源码冻结。
+整合Mock及手机补修后源码 `cc93e93695a145fcaa9c4a2676109148217e1882`：backend树 `f222dd90d1277f84a0f60dbb9227058794319b1a`，frontend树 `9843d80a4f372915dde61f2d0f538ee8c0617590`。8项受影响测试、格式/ESLint和构建通过；一次校验提示刚进入DOM尚不可见的测试失败，已等待同一提示实际可见，保留断言，未提高超时或跳过。该精确整合树完整检查已结束通过：后端1877项、14跳过、2项既有警告、覆盖率91.06%，Ruff格式/检查与mypy442文件通过；前端161文件1063项、无未处理异常，覆盖率85.92/82.01/85.50/88.38%，格式、lint/类型和构建通过。完整检查期间应用与测试源码冻结。日志 `remediation-contract-cc93e93-backend-full.log`、`remediation-contract-cc93e93-frontend-full.log`。
 
 ## 真实 PostgreSQL 与浏览器验收
 
@@ -63,5 +63,5 @@
 
 - 后端：[批次仓储](../../../../../backend/app/repositories/contracts.py)、[Pact仓储](../../../../../backend/app/repositories/contract_hub.py)、[服务及授权](../../../../../backend/app/services/contract_hub.py)、[只读端点](../../../../../backend/app/api/v1/endpoints/contract_hub.py)、[回归](../../../../../backend/tests/test_contract_catalog_evidence.py)。
 - 前端：[批次审核](../../../../../frontend/src/features/contracts/ContractAutomationPanel.tsx)、[独立选择](../../../../../frontend/src/features/contracts/ContractReferencePicker.tsx)、[冻结证据](../../../../../frontend/src/features/contracts/ContractEvidenceDrawer.tsx)、[契约中心](../../../../../frontend/src/pages/ContractHubPage.tsx)、[样式](../../../../../frontend/src/styles.css)，及相关SDK和具名测试。
-- 尚需整合后精确树完整检查终态、本批最新HEAD正式Required Gate与审查、GitHub合并及合并后回归。S18/S27正向流程保留，未凭猜测改定位/超时/跳过；完整Compose验收由本批PR独立确认。
+- 尚需本批最新HEAD正式Required Gate与审查、GitHub合并及合并后回归。S18/S27正向流程保留，未凭猜测改定位/超时/跳过；完整Compose验收由本批PR独立确认。
 - 未访问真实外部Broker/Provider，未做正式部署及真实Windows终端运行；本批不代表全站设计签收。
