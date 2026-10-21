@@ -157,6 +157,26 @@ describe('MockRouteForm structured configuration and preview', () => {
     expect(screen.queryByRole('region', { name: 'Mock 预览结果' })).not.toBeInTheDocument()
   })
 
+  it('retains duplicate advanced Query keys and blocks save, preview and conversion to rows', async () => {
+    const preview = vi.spyOn(dataSources, 'previewMockRoute')
+    const { saved } = renderForm()
+    const invalid = '{"mode":"full","mode":"short"}'
+    fireEvent.click(screen.getByRole('button', { name: 'Query 条件：高级 JSON' }))
+    const input = screen.getByLabelText('Query 条件 JSON')
+    fireEvent.change(input, { target: { value: invalid } })
+    fireEvent.click(screen.getByRole('button', { name: '保存路由' }))
+    await screen.findByText('键名不能重复；Header 名称不区分大小写')
+    expect(saved).not.toHaveBeenCalled()
+    await openPreview()
+    const previewButton = screen.getByRole('button', { name: '预览匹配与响应' })
+    fireEvent.click(previewButton)
+    await waitFor(() => expect(previewButton).not.toHaveClass(/ant-btn-loading/))
+    expect(preview).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Query 条件：返回键值行' }))
+    expect(input).toHaveValue(invalid)
+    expect(screen.queryByLabelText('Query 条件 键 1')).not.toBeInTheDocument()
+  })
+
   it('shows template field, escaped pointer and trace while retaining the draft', async () => {
     server.use(
       http.post(endpoint, () =>

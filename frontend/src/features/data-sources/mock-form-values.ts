@@ -53,10 +53,29 @@ function jsonEntries(text: string): StringMapDraft['rows'] {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('必须是 JSON 对象，不能是数组、数字或 null')
   }
-  return Object.entries(value).map(([name, entry]) => {
-    if (typeof entry !== 'string') throw new Error(`键“${name}”的值必须是字符串`)
-    return { name, value: entry }
-  })
+  return Object.keys(value).length ? jsonStringEntries(text) : []
+}
+
+function jsonStringEntries(text: string): StringMapDraft['rows'] {
+  // The document is already valid JSON. Read its flat entries before duplicate
+  // properties can be collapsed, including names encoded with JSON escapes.
+  const key = /\s*("(?:\\.|[^"\\])*")\s*:\s*/y
+  const entry = /("(?:\\.|[^"\\])*")\s*([,}])/y
+  const rows: StringMapDraft['rows'] = []
+  let cursor = text.indexOf('{') + 1
+  while (cursor < text.length) {
+    key.lastIndex = cursor
+    const nameToken = key.exec(text)
+    if (!nameToken) throw new Error('请输入有效 JSON 对象')
+    const name: string = JSON.parse(nameToken[1])
+    entry.lastIndex = key.lastIndex
+    const valueToken = entry.exec(text)
+    if (!valueToken) throw new Error(`键“${name}”的值必须是字符串`)
+    rows.push({ name, value: JSON.parse(valueToken[1]) as string })
+    cursor = entry.lastIndex
+    if (valueToken[2] === '}') return rows
+  }
+  throw new Error('请输入有效 JSON 对象')
 }
 
 export function mockRouteFields(route: MockRoute | null): MockRouteFields {
