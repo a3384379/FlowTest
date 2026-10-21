@@ -150,6 +150,7 @@ export default function ReleaseDecisionDialog({
                   options={options[item.kind]}
                   availability={availability(state, item)}
                   onSearch={searchHandler(state, item.kind)}
+                  searchValue={evidenceSearchValue(state, item.kind)}
                 />
               </Form.Item>
               <CollectionLink projectId={state.projectId!} kind={item.kind} />
@@ -290,4 +291,10 @@ function CollectionLink({ projectId, kind }: { projectId: string; kind: ReleaseE
       </Link>
     </Typography.Paragraph>
   )
+}
+
+function evidenceSearchValue(state: State, kind: ReleaseEvidenceKind): string {
+  if (kind === 'performance') return state.performanceSearch
+  if (kind === 'runner') return state.runnerSearch
+  return ''
 }

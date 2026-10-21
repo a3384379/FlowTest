@@ -351,6 +351,10 @@ describe('ImpactAnalysisPage', () => {
     const matrix = within(
       screen.getByText('Test Mapping / Coverage Matrix').closest('.ant-card')! as HTMLElement,
     )
+    expect(matrix.getByRole('progressbar', { name: '整份冻结分析覆盖率' })).toHaveAttribute(
+      'aria-valuenow',
+      String(linked.coverage.coverage_percent),
+    )
     expect(matrix.getAllByRole('row')).toHaveLength(2)
     expect(matrix.getByText('Query.order')).toBeVisible()
     expect(matrix.queryByText('backend/app/api/orders.py')).not.toBeInTheDocument()
