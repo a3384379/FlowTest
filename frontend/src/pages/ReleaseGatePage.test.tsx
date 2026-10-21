@@ -95,6 +95,25 @@ const decision: ReleaseDecision = {
 }
 
 describe('ReleaseGatePage', () => {
+  it.each(['性能运行', 'Runner 任务'])(
+    'shows the retained %s search after closing and reopening the decision dialog',
+    async (label) => {
+      handlers()
+      renderPage()
+      const browser = userEvent.setup()
+      await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+      let dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+      const input = within(dialog).getByRole('searchbox', { name: `${label}跨页搜索` })
+      await browser.type(input, 'cancelled{Enter}')
+      await browser.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await browser.click(screen.getByRole('button', { name: '生成发布判断' }))
+      dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+      expect(within(dialog).getByRole('searchbox', { name: `${label}跨页搜索` })).toHaveValue(
+        'cancelled',
+      )
+    },
+  )
   it('renders an immutable historical decision and its explainable evidence', async () => {
     handlers()
     renderPage()

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 
 import { apiErrorWithTrace, type Page } from '../../lib/api'
@@ -29,6 +29,7 @@ export function useQualityCenter() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const isCurrent = useQualityCommandContext(projectId)
+  const activity = useQualityCommandActivity(projectId)
   const { canEdit: editAllowed, permissions } = useProjectCapabilities()
   const canEdit = editAllowed && permissions.isSuccess
   const [params, setParams] = useSearchParams()
@@ -80,7 +81,7 @@ export function useQualityCenter() {
     (page) => listImpactRuns(required(projectId), page, 20),
     Boolean(projectId && featureFlags.data?.impact_engine),
   )
-  const { linkedRiskId, activeRiskId } = usePinnedRisk(riskEnabled, risks.data)
+  const { linkedRiskId, activeRiskId } = usePinnedRisk(riskEnabled && !activity.busy, risks.data)
   const risk = useQuery({
     queryKey: ['release-risk', projectId, activeRiskId],
     queryFn: () => getReleaseRisk(required(projectId), required(activeRiskId ?? null)),
@@ -138,6 +139,7 @@ export function useQualityCenter() {
 
   async function addRisk(input: ReleaseRiskInput) {
     if (!canEdit || !riskEnabled) return false
+    activity.begin()
     try {
       const created = await analyzeRisk.mutateAsync({
         projectId: required(projectId),
@@ -151,11 +153,14 @@ export function useQualityCenter() {
     } catch (error) {
       if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
+    } finally {
+      activity.end()
     }
   }
 
   async function addGate(input: QualityGateInput) {
     if (!canEdit) return false
+    activity.begin()
     try {
       await createGate.mutateAsync({ projectId: required(projectId), payload: input })
       await queryClient.invalidateQueries({ queryKey: ['quality-gates', projectId] })
@@ -165,11 +170,14 @@ export function useQualityCenter() {
     } catch (error) {
       if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
+    } finally {
+      activity.end()
     }
   }
 
   async function toggleQuarantine(recordId: string, value: boolean) {
     if (!canEdit) return
+    activity.begin()
     try {
       await quarantine.mutateAsync({ projectId: required(projectId), recordId, value })
       await queryClient.invalidateQueries({ queryKey: ['flaky-tests', projectId] })
@@ -178,10 +186,13 @@ export function useQualityCenter() {
       void message.success(value ? '已隔离 Flaky 资产' : '已恢复 Flaky 资产')
     } catch (error) {
       if (isCurrent()) void message.error(apiErrorWithTrace(error))
+    } finally {
+      activity.end()
     }
   }
 
   async function exportJunit(runId: string) {
+    activity.begin()
     try {
       const blob = await downloadJunit(required(projectId), runId)
       if (!isCurrent()) return
@@ -193,6 +204,8 @@ export function useQualityCenter() {
       URL.revokeObjectURL(url)
     } catch (error) {
       if (isCurrent()) void message.error(apiErrorWithTrace(error))
+    } finally {
+      activity.end()
     }
   }
 
@@ -225,11 +238,14 @@ export function useQualityCenter() {
 }
 
 function usePinnedRisk(riskEnabled: boolean, risks: Page<ReleaseRiskSummary> | undefined) {
+  const location = useLocation()
+  const router = useContext(UNSAFE_DataRouterContext)
   const [params, setParams] = useSearchParams()
   const linkedRiskId = params.get('risk')
   const firstRiskId = risks?.items.at(0)?.id
   useEffect(() => {
     if (!riskEnabled || linkedRiskId || !firstRiskId) return
+    if (router && router.router.state.location.key !== location.key) return
     setParams(
       (current) => {
         if (current.has('risk')) return current
@@ -239,7 +255,7 @@ function usePinnedRisk(riskEnabled: boolean, risks: Page<ReleaseRiskSummary> | u
       },
       { replace: true },
     )
-  }, [riskEnabled, linkedRiskId, firstRiskId, setParams])
+  }, [riskEnabled, linkedRiskId, firstRiskId, setParams, router, location.key])
   const activeRiskId = linkedRiskId ?? firstRiskId
   return { linkedRiskId, activeRiskId }
 }
@@ -289,4 +305,22 @@ function useQualityCommandContext(projectId: string | null) {
   return () =>
     active.current === context &&
     (!dataRouter || dataRouter.router.state.location.key === location.key)
+}
+
+function useQualityCommandActivity(projectId: string | null) {
+  const [activity, setActivity] = useState({ projectId, count: 0 })
+  return {
+    busy: activity.projectId === projectId && activity.count > 0,
+    begin: () =>
+      setActivity((current) => ({
+        projectId,
+        count: current.projectId === projectId ? current.count + 1 : 1,
+      })),
+    end: () =>
+      setActivity((current) =>
+        current.projectId === projectId
+          ? { projectId, count: Math.max(0, current.count - 1) }
+          : current,
+      ),
+  }
 }

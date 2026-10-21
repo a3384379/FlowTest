@@ -33,6 +33,7 @@ export default function ReleaseEvidencePicker({
   value,
   onChange,
   onSearch,
+  searchValue = '',
 }: {
   projectId: string
   kind: ReleaseEvidenceKind
@@ -43,9 +44,11 @@ export default function ReleaseEvidencePicker({
   value?: string
   onChange?: (value: string | undefined) => void
   onSearch?: (term: string) => void
+  searchValue?: string
 }) {
   const [selected, setSelected] = useState<EvidenceOption | null>(null)
   const [lookupId, setLookupId] = useState('')
+  const [searchDraft, setSearchDraft] = useState(searchValue)
   const lookup = useQuery({
     queryKey: ['release-evidence-reference', projectId, kind, lookupId],
     queryFn: () => readEvidenceReference(projectId, kind, lookupId),
@@ -94,7 +97,12 @@ export default function ReleaseEvidencePicker({
           placeholder="按运行/任务ID、关联ID或状态跨页搜索"
           allowClear
           disabled={Boolean(availability)}
-          onSearch={(term) => onSearch(term.trim())}
+          value={searchDraft}
+          onChange={(event) => setSearchDraft(event.target.value)}
+          onSearch={(term) => {
+            setSearchDraft(term.trim())
+            onSearch(term.trim())
+          }}
           maxLength={200}
         />
       )}
