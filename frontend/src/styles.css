@@ -2695,3 +2695,22 @@ body {
 .event-protocol-toolbar .ant-typography {
   overflow-wrap: anywhere;
 }
+
+.impact-evidence-metadata {
+  overflow-wrap: anywhere;
+}
+.impact-evidence-select.ant-btn {
+  height: auto;
+  white-space: normal;
+  text-align: start;
+  padding-inline: 0;
+}
+.impact-item-selected {
+  outline: 2px solid var(--ft-brand);
+  background: var(--ft-brand-soft);
+}
+@media (max-width: 1000px) {
+  .impact-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
