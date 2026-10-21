@@ -390,7 +390,7 @@ describe('EnvironmentLabPage', () => {
     const browser = userEvent.setup()
     await browser.click(await screen.findByRole('tab', { name: '签名配置与资源' }))
     expect(await screen.findByText('此实例绑定的签名模板配置')).toBeVisible()
-    await browser.click(screen.getByRole('button', { name: '停用', exact: true }))
+    await browser.click(screen.getByRole('button', { name: '停用' }))
     await browser.click(await screen.findByRole('button', { name: 'OK' }))
     expect(await screen.findByText('环境模板已停用')).toBeVisible()
     expect(await screen.findByText(/模板已停用；此处保留实例绑定/)).toBeVisible()
