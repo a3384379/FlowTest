@@ -1,4 +1,17 @@
+import RegressionSourceSnapshot from '../features/change-regression/RegressionSourceSnapshot'
+import {
+  RegressionChainLinks,
+  RegressionMaterializedAssets,
+  RegressionTriageReferences,
+} from '../features/change-regression/RegressionEvidence'
+import RegressionSourcesEditor from '../features/change-regression/RegressionSourcesEditor'
+import {
+  buildRegressionSources,
+  clearRegressionSourceErrors,
+  type RegressionFormValues,
+} from '../features/change-regression/regression-sources'
 import CatalogPagination from '../components/CatalogPagination'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 import {
   Alert,
   Button,
@@ -31,10 +44,8 @@ import type {
 } from '../features/change-regression/change-regression-service'
 import { useChangeRegression } from '../features/change-regression/use-change-regression'
 import { useProjectContext } from '../features/projects/use-project-context'
-import { apiErrorMessage, apiErrorWithTrace } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
 import RegressionMaintenancePanel from '../features/change-regression/RegressionMaintenancePanel'
-
-const { TextArea } = Input
 
 export default function ChangeRegressionPage() {
   const { projectId } = useProjectContext()
@@ -43,31 +54,35 @@ export default function ChangeRegressionPage() {
 
 function ChangeRegressionWorkspace() {
   const [searchParams] = useSearchParams()
-  const state = useChangeRegression(searchParams.get('run') ?? undefined)
-  const [form] = Form.useForm()
-  const detail = state.detail.data
-  const plans = state.plans.data?.items ?? []
-  const policies = state.policies.data ?? []
-  const runItems = state.runs.data?.items ?? []
-  const sourceDiff = Form.useWatch('git_diff', form)
+  const [createOpen, setCreateOpen] = useState(false)
+  const state = useChangeRegression(searchParams.get('run') ?? undefined, createOpen)
+  const [form] = Form.useForm<RegressionFormValues>()
+  const { detail, plans, policies, runItems } = regressionReadData(state)
 
   const planOptions = plans.map((plan) => ({
     value: plan.id,
     label: plan.name + ' · ' + plan.items.length + ' 项',
   }))
 
-  async function submit(values: Record<string, unknown>) {
-    await state.createRun({
-      title: String(values.title ?? ''),
-      source_ref: String(values.source_ref ?? ''),
-      candidate_ref: String(values.candidate_ref ?? ''),
-      git_diff: sourceDiff ? String(sourceDiff) : undefined,
-      openapi_diffs: [],
-      schema_diffs: [],
-      test_plan_id: String(values.test_plan_id ?? ''),
-      release_policy_id: String(values.release_policy_id ?? ''),
-      generate_missing_tests: Boolean(values.generate_missing_tests),
+  async function submit(values: RegressionFormValues) {
+    const sources = buildRegressionSources(
+      values,
+      state.sourceCatalog.isSuccess ? state.sourceCatalog.data : undefined,
+    )
+    if (!sources.ok) {
+      form.setFields(sources.issues)
+      return
+    }
+    const created = await state.createRun({
+      title: values.title.trim(),
+      source_ref: values.source_ref?.trim() ?? '',
+      candidate_ref: values.candidate_ref.trim(),
+      ...sources.input,
+      test_plan_id: values.test_plan_id,
+      release_policy_id: values.release_policy_id,
+      generate_missing_tests: values.generate_missing_tests,
     })
+    if (created) setCreateOpen(false)
   }
 
   return (
@@ -81,81 +96,100 @@ function ChangeRegressionWorkspace() {
               串成一条可追溯链路。
             </Typography.Paragraph>
           </div>
-          <Tag color="blue">S45 · S59D</Tag>
+          <Space>
+            <Tag color="blue">S45 · S59D</Tag>
+            <Button type="primary" disabled={!state.canEdit} onClick={() => setCreateOpen(true)}>
+              新建回归链路
+            </Button>
+          </Space>
         </div>
         <Alert
           type="info"
           showIcon
           message="低置信度缺失测试只生成 Draft；必须完成逐项 Review 和人工批准后才能执行。"
         />
+        <RegressionCapabilityNotice state={state} />
         <div className="catalog-controls">
           <CatalogPagination query={state.plans} label="可选测试计划" />
           <CatalogPagination query={state.runs} label="回归历史" />
         </div>
-        <Card title="创建变更回归链路">
-          <RegressionQueryStatus state={state} />
-          <Form
-            disabled={!state.canEdit}
-            form={form}
-            layout="vertical"
-            onFinish={submit}
-            initialValues={{ generate_missing_tests: true }}
+        {createOpen && (
+          <Card
+            title="创建变更回归链路"
+            extra={
+              <Button disabled={state.creating} onClick={() => setCreateOpen(false)}>
+                收起创建表单（保留输入）
+              </Button>
+            }
           >
-            <Row gutter={16}>
-              <Col xs={24} md={8}>
-                <Form.Item name="title" label="链路名称" rules={[{ required: true }]}>
-                  <Input placeholder="订单服务变更回归" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={8}>
-                <Form.Item name="candidate_ref" label="候选版本" rules={[{ required: true }]}>
-                  <Input placeholder="commit:abc123" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={8}>
-                <Form.Item name="source_ref" label="变更来源">
-                  <Input placeholder="github://org/repo/commit/abc123" />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Form.Item name="test_plan_id" label="回归测试计划" rules={[{ required: true }]}>
-                  <Select options={planOptions} placeholder="选择已有测试计划" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name="release_policy_id"
-                  label="Release Policy"
-                  rules={[{ required: true }]}
-                >
-                  <Select
-                    options={policies.map((policy) => ({
-                      value: policy.id,
-                      label: policy.name,
-                    }))}
-                    placeholder="选择发布门禁策略"
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Form.Item name="git_diff" label="Git Diff" rules={[{ required: true }]}>
-              <TextArea rows={7} placeholder="粘贴受限的标准 diff --git 内容" />
-            </Form.Item>
-            <Form.Item
-              name="generate_missing_tests"
-              label="生成缺失测试 Draft"
-              valuePropName="checked"
-              extra="仅控制 Test Design 草案创建；语义覆盖分析与 Approve/Execute/Release 门禁始终执行。"
+            <RegressionQueryStatus state={state} />
+            <Form
+              disabled={!state.canEdit}
+              form={form}
+              layout="vertical"
+              onFinish={submit}
+              onValuesChange={() => clearRegressionSourceErrors(form)}
+              initialValues={{ generate_missing_tests: true }}
             >
-              <Switch />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" loading={state.creating}>
-              分析并创建链路
-            </Button>
-          </Form>
-        </Card>
+              <Row gutter={16}>
+                <Col xs={24} md={8}>
+                  <Form.Item name="title" label="链路名称" rules={[{ required: true }]}>
+                    <Input placeholder="订单服务变更回归" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name="candidate_ref" label="候选版本" rules={[{ required: true }]}>
+                    <Input placeholder="commit:abc123" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name="source_ref" label="变更来源">
+                    <Input placeholder="github://org/repo/commit/abc123" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={16}>
+                <Col xs={24} md={12}>
+                  <Form.Item name="test_plan_id" label="回归测试计划" rules={[{ required: true }]}>
+                    <Select options={planOptions} placeholder="选择已有测试计划" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={12}>
+                  <Form.Item
+                    name="release_policy_id"
+                    label="Release Policy"
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      options={policies.map((policy) => ({
+                        value: policy.id,
+                        label: policy.name,
+                      }))}
+                      placeholder="选择发布门禁策略"
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <RegressionSourcesEditor
+                disabled={!state.canEdit}
+                form={form}
+                catalog={state.sourceCatalog.isSuccess ? state.sourceCatalog.data : undefined}
+              />
+              <Form.Item
+                name="generate_missing_tests"
+                label="生成缺失测试 Draft"
+                valuePropName="checked"
+                extra="仅控制 Test Design 草案创建；语义覆盖分析与 Approve/Execute/Release 门禁始终执行。"
+              >
+                <Switch />
+              </Form.Item>
+              <Button type="primary" htmlType="submit" loading={state.creating}>
+                分析并创建链路
+              </Button>
+            </Form>
+          </Card>
+        )}
+        {!createOpen && <RegressionQueryStatus state={state} />}
         <Row gutter={16}>
           <Col xs={24} lg={9}>
             <Card title="链路记录" loading={state.runs.isLoading}>
@@ -197,16 +231,36 @@ function ChangeRegressionWorkspace() {
   )
 }
 
+function regressionReadData(state: ReturnType<typeof useChangeRegression>) {
+  return {
+    detail: state.detail.data,
+    plans: state.plans.data?.items ?? [],
+    policies: state.policies.data ?? [],
+    runItems: state.runs.data?.items ?? [],
+  }
+}
+
+function RegressionCapabilityNotice({ state }: { state: ReturnType<typeof useChangeRegression> }) {
+  if (!state.flags.isSuccess || state.flags.data?.impact_engine !== false) return null
+  return <Alert type="info" showIcon title="影响分析尚未启用，现有回归链路可只读查看" />
+}
+
 function RegressionQueryStatus({ state }: { state: ReturnType<typeof useChangeRegression> }) {
-  const failed = [state.permissions, state.runs, state.plans, state.policies, state.detail].filter(
-    (query) => query.isError,
-  )
+  const failed = [
+    state.permissions,
+    state.flags,
+    state.sourceCatalog,
+    state.runs,
+    state.plans,
+    state.policies,
+    state.detail,
+  ].filter((query) => query.isError)
   if (!failed.length) return null
   return (
     <Alert
       showIcon
       type="error"
-      message={apiErrorMessage(failed[0].error)}
+      message={apiErrorWithTrace(failed[0].error)}
       action={
         <Button onClick={() => void Promise.all(failed.map((query) => query.refetch()))}>
           重试
@@ -229,20 +283,13 @@ function RunDetail({
   }))
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={16}>
-      <Descriptions size="small" column={2} bordered>
-        <Descriptions.Item label="链路">{run.title}</Descriptions.Item>
-        <Descriptions.Item label="状态">
-          <StatusTag status={run.status} />
-        </Descriptions.Item>
-        <Descriptions.Item label="来源">{run.source_ref || '未填写'}</Descriptions.Item>
-        <Descriptions.Item label="Impact Run">{run.impact_run_id}</Descriptions.Item>
-        <Descriptions.Item label="Test Plan Run">
-          {run.test_plan_run_id ?? '尚未执行'}
-        </Descriptions.Item>
-        <Descriptions.Item label="Release Decision">
-          {run.release_decision_id ?? '尚未评估'}
-        </Descriptions.Item>
-      </Descriptions>
+      <RegressionChainLinks run={run} status={<StatusTag status={run.status} />} />
+      <RegressionSourceSnapshot
+        key={run.id}
+        run={run}
+        enabled={state.flags.isSuccess && state.flags.data?.impact_engine === true}
+      />
+      <RegressionMaterializedAssets run={run} />
       <RegressionMaintenancePanel key={run.id} run={run} readOnly={!state.canEdit} />
       <CoverageDimensionsPanel run={run} state={state} />
       <SemanticPlanGatePanel run={run} state={state} />
@@ -250,7 +297,7 @@ function RunDetail({
       <MissingTestReview key={run.id} run={run} state={state} />
       <RunActions run={run} state={state} />
       {Object.keys(run.failure_triage).length > 0 && (
-        <FailureTriagePanel value={run.failure_triage} />
+        <FailureTriagePanel run={run} value={run.failure_triage} />
       )}
     </Space>
   )
@@ -1106,15 +1153,24 @@ function CoverageStatus({ value }: { value: string }) {
   return <Tag color={color}>{value}</Tag>
 }
 
-function FailureTriagePanel({ value }: { value: ChangeRegressionRun['failure_triage'] }) {
+function FailureTriagePanel({
+  run,
+  value,
+}: {
+  run: ChangeRegressionRun
+  value: ChangeRegressionRun['failure_triage']
+}) {
   if (!isFailureTriageV2(value)) {
     return (
-      <Alert
-        type="warning"
-        showIcon
-        title="历史 Failure Triage 证据不含 S47 结构化分类"
-        description="请重新执行回归以生成 classification、confidence、evidence refs 和建议动作。"
-      />
+      <Space orientation="vertical" style={{ width: '100%' }}>
+        <Alert
+          type="warning"
+          showIcon
+          title="历史 Failure Triage 证据不含 S47 结构化分类"
+          description="该历史记录未提供完整分类或引用；保留已有链路，不会自动执行来补齐历史证据。"
+        />
+        <ResponseCodeReader key={run.id} value={value} title="历史失败分类原始证据" />
+      </Space>
     )
   }
   return (
@@ -1151,6 +1207,7 @@ function FailureTriagePanel({ value }: { value: ChangeRegressionRun['failure_tri
           title="执行失败已生成 Failure Triage 证据"
           description={value.recommended_action}
         />
+        <RegressionTriageReferences run={run} value={value} />
         <Space wrap>
           {value.reason_codes.map((reason) => (
             <Tag key={reason}>{reason}</Tag>
@@ -1170,7 +1227,31 @@ function isFailureTriageV2(
   return (
     value.algorithm_version === 's47-failure-triage-v2' &&
     typeof value.primary_classification === 'string' &&
-    Array.isArray(value.evidence_refs)
+    validTriageDetails(value) &&
+    [
+      value.evidence_refs,
+      value.secondary_candidates,
+      value.reason_codes,
+      value.recommended_regression,
+    ].every(isStringArray)
+  )
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function validTriageDetails(value: ChangeRegressionRun['failure_triage']): boolean {
+  return (
+    typeof value.confidence === 'number' &&
+    Number.isFinite(value.confidence) &&
+    value.confidence >= 0 &&
+    value.confidence <= 1 &&
+    typeof value.retry_signal === 'boolean' &&
+    typeof value.recommended_action === 'string' &&
+    [value.affected_service, value.affected_operation, value.endpoint_variant].every(
+      (field) => field == null || typeof field === 'string',
+    )
   )
 }
 

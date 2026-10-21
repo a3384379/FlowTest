@@ -217,11 +217,7 @@ describe('TestPlansPage', () => {
     await browser.click(heading.getByRole('button', { name: /生成 CI Token/ }))
     expect(await screen.findByText(serviceToken.token)).toBeInTheDocument()
     expect(tokenRequests).toBe(1)
-    const secret = within(
-      screen.getByText(serviceToken.token).closest('.ant-modal')! as HTMLElement,
-    )
-    await browser.click(secret.getByRole('button', { name: 'Close' }))
-    await waitFor(() => expect(screen.queryByText(serviceToken.token)).not.toBeVisible())
+    await closeRevealedSecret(browser, serviceToken.token)
   })
 
   it.each(['固定间隔', 'Cron'] as const)(
@@ -292,8 +288,7 @@ describe('TestPlansPage', () => {
       await browser.click(dialog.getByRole('button', { name: '创建计划' }))
       expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
       expect(created).toBe(1)
-      await browser.keyboard('{Escape}')
-      await waitFor(() => expect(screen.queryByText(plan.webhook_secret)).not.toBeVisible())
+      await closeRevealedSecret(browser, plan.webhook_secret)
     },
   )
 
@@ -329,7 +324,10 @@ describe('TestPlansPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('task-route')).toHaveTextContent(`run=${queuedRun.id}`),
     )
-    await browser.keyboard('{Escape}')
+    const details = screen.getByText('计划运行详情').closest('.ant-modal')! as HTMLElement
+    await waitFor(() => expect(details).toBeVisible())
+    await browser.click(within(details).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.getByTestId('task-route')).not.toHaveTextContent('run='))
     const queue = within(workspace.getByText('运行队列').closest('.ant-card')! as HTMLElement)
     await browser.click(queue.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))
@@ -427,6 +425,51 @@ describe('TestPlansPage', () => {
     )
     expect(dialog.getByText('尚无执行报告')).toBeInTheDocument()
     expect(dialog.getAllByText('2 次尝试 · 最多 1 次重试')).toHaveLength(2)
+  })
+
+  it('opens and highlights an off-page frozen run item from the evidence locator without writes', async () => {
+    installMaintenanceHandlers(
+      () => plan,
+      () => false,
+    )
+    const selectedItem = '00000000-0000-4000-8000-000000007026'
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs/${queuedRun.id}`, () =>
+        HttpResponse.json({
+          run: { ...queuedRun, status: 'failed' },
+          items: Array.from({ length: 26 }, (_, index) => ({
+            id: index === 25 ? selectedItem : `item-${index}`,
+            target_type: 'workflow',
+            target_id: index === 25 ? 'page-outside-fixed-target' : workflow.id,
+            target_version: 1,
+            workflow_id: workflow.id,
+            workflow_version: 1,
+            environment_id: environment.id,
+            position: index,
+            max_retries: 1,
+            attempts: 2,
+            status: 'failed',
+            workflow_execution_id: index === 25 ? 'exact-item-execution' : null,
+            error_message: '固定运行项失败',
+          })),
+        }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/*`, () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage('viewer', `/projects/${project.id}/tasks?run=${queuedRun.id}&item=${selectedItem}`)
+    const row = await screen.findByRole('row', { name: /page-outside-fixed-target/ })
+    expect(row).toHaveClass('task-run-item-selected')
+    await waitFor(() => expect(within(row).getByText('2 次尝试 · 最多 1 次重试')).toBeVisible())
+    expect(within(row).getByRole('link', { name: '查看报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=exact-item-execution`,
+    )
+    expect(screen.getByText(`已定位运行项：${selectedItem}`)).toBeVisible()
+    expect(writes).toBe(0)
   })
 
   it('keeps three ordered and version-pinned targets intact through a failed creation and retry', async () => {
@@ -712,4 +755,16 @@ function installMaintenanceHandlers(planValue: () => CreatedTestPlan, revoked: (
       ]),
     ),
   )
+}
+
+async function closeRevealedSecret(browser: ReturnType<typeof userEvent.setup>, value: string) {
+  const content = await screen.findByText(value)
+  await waitFor(() => expect(content).toBeVisible())
+  const dialog = within(content.closest('.ant-modal')! as HTMLElement)
+  await browser.click(dialog.getByRole('button', { name: 'Close' }))
+  await waitFor(() => {
+    const remaining = screen.queryByText(value)
+    if (remaining) expect(remaining).not.toBeVisible()
+    else expect(remaining).toBeNull()
+  })
 }

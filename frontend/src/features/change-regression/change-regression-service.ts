@@ -297,11 +297,13 @@ export async function getChangeRegression(
   projectId: string,
   runId: string,
 ): Promise<ChangeRegressionRun> {
-  return (
-    await apiClient.get<ChangeRegressionRun>(
-      '/projects/' + projectId + '/change-regressions/' + runId,
-    )
-  ).data
+  const response = await apiClient.get<ChangeRegressionRun>(
+    '/projects/' + projectId + '/change-regressions/' + runId,
+  )
+  if (response.data.project_id !== projectId || response.data.id !== runId) {
+    throw new Error('回归链路响应与当前项目或记录不一致')
+  }
+  return response.data
 }
 
 export async function createChangeRegression(
