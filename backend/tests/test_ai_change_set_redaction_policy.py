@@ -14,8 +14,9 @@ from test_quality_intelligence import (
 )
 from test_quality_intelligence import quality_context as quality_context
 
-from app.models.access import User
-from app.models.ai import AIChangeItem, AIChangeSet
+from app.core.redaction import project_redaction_policy
+from app.models.access import Project, User
+from app.models.ai import AIChangeItem, AIChangeSet, AIJob, AISuggestion
 from app.models.test_assets import TestCase as CaseModel
 from app.models.workflows import Workflow
 from app.services.ai_change_sets import _target_hash
@@ -93,25 +94,56 @@ async def _review_item(
             Workflow if asset_type == "workflow" else CaseModel, UUID(target.resource_id)
         )
         assert resource is not None
+        project = await session.get(Project, UUID(target.project_id))
+        assert project is not None
+        policy = project_redaction_policy(project)
+        job = AIJob(
+            project_id=project.id,
+            redaction_mode=policy.mode.value,
+            redaction_policy_version=policy.policy_version,
+            job_type="change_set",
+            status="completed",
+            sanitized_input={},
+            input_sha256="a" * 64,
+            prompt_template_version="test-review-policy-v1",
+            model_name="synthetic-review-provider",
+            created_by_id=actor_id,
+        )
+        session.add(job)
+        await session.flush()
+        proposal = {"name": f"审核后 {action} 草稿", "definition": definition}
+        suggestion = AISuggestion(
+            job_id=job.id,
+            position=0,
+            suggestion_type=asset_type,
+            title="审核后草稿",
+            content={
+                "action": action,
+                "target_id": str(resource.id) if action == "update" else None,
+                **proposal,
+            },
+        )
         change_set = AIChangeSet(
             project_id=UUID(target.project_id),
+            ai_job_id=job.id,
             title="人工审核草稿",
             status="draft",
             source_snapshot={},
             source_fingerprint="a" * 64,
             created_by_id=actor_id,
         )
-        session.add(change_set)
+        session.add_all([change_set, suggestion])
         await session.flush()
         item = AIChangeItem(
             change_set_id=change_set.id,
+            suggestion_id=suggestion.id,
             position=0,
             item_type=asset_type,
             action=action,
             title="审核后草稿",
             target_resource_id=resource.id if action == "update" else None,
             target_snapshot_sha256=_target_hash(resource) if action == "update" else None,
-            proposed_content={"name": f"审核后 {action} 草稿", "definition": definition},
+            proposed_content=proposal,
         )
         session.add(item)
         await session.commit()

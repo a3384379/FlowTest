@@ -23,7 +23,9 @@
 - `uv run mypy app`：445 文件通过。
 - `git diff --check`：通过。
 
-完整日志保留在本工作树忽略目录 `output/validation/m22-off-policy/`，最终测试日志为 `08-targeted-final.log`，静态检查为 `09-ruff-final.log`、`10-format-final.log`、`06-mypy.log`。针对性运行有 16 项 SQLAlchemy 警告，来源为合成提案没有 suggestion_id 时既有审核逻辑读取空主键；本次未更改该历史兼容逻辑。
+完整日志保留在本工作树忽略目录 `output/validation/m22-off-policy/`。实现提交 `a88a8464a2eb7c2e4fa48e90b11769ae64edef59` 的原测试结果为 `08-targeted-final.log`（68 项通过、16 项 SQLAlchemy 警告），静态检查为 `09-ruff-final.log`、`10-format-final.log`、`06-mypy.log`。
+
+后续独立测试修正将全部合成变更项绑定实际 AI Job 与 AISuggestion，并将项目策略固定到 Job，符合正常生成提案的关联结构；没有修改生产兼容逻辑、过滤警告或放宽断言。相同三个具名文件重新运行 68 项通过、0 警告（11.58 秒），完整日志为 `11-linked-suggestion-targeted.log`；新测试文件 Ruff 规则和格式检查通过，日志为 `12-linked-suggestion-ruff.log`、`13-linked-suggestion-format.log`。生产代码未变化，原 `mypy app` 结果继续对应相同生产源码；未把旧完整运行结果改称为新测试树的完整验证。
 
 ## 完成边界
 
