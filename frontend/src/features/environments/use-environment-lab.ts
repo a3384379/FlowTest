@@ -1,8 +1,8 @@
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
 
 import { apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
@@ -37,6 +37,8 @@ export function useEnvironmentLab() {
   const isSystemAdmin = useAuthStore((state) => Boolean(state.user?.is_system_admin))
   const userId = useAuthStore((state) => state.user?.id)
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
   const instanceId = params.get('instance')
   const context = useMemo(() => ({ projectId, instanceId }), [projectId, instanceId])
   const activeContext = useRef<typeof context | null>(context)
@@ -46,7 +48,9 @@ export function useEnvironmentLab() {
       activeContext.current = null
     }
   }, [context])
-  const isCurrent = () => activeContext.current === context
+  const isCurrent = () =>
+    activeContext.current === context &&
+    (!dataRouter || dataRouter.router.state.location.key === location.key)
   const [templateSearch, setTemplateSearchValue] = useRouteScopedState(projectId, null, '')
   const [templatePage, setTemplatePage] = useRouteScopedState(projectId, null, 1)
   const [instancePage, setInstancePage] = useRouteScopedState(projectId, null, 1)
