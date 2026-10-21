@@ -178,3 +178,7 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 ## PR144 Viewer查询补修后的完整复验
 
 旧39564951442已因后续提交取消，其Compose失败单独保留；读取已取消的前端日志，又发现任务执行Viewer测试超时62.283秒。2e4dfb696a9234377097dc6ac6db63c9e8504c8c仅收窄四个禁用控件的查询范围，保留点击、禁止请求计数0及原超时。8项专项、格式、lint/TypeScript通过。frontend树26273ccbcd3be8f81f30e21ce442a5a0a9fa308c完整171文件1138项、无未处理异常、覆盖率85.99/82.04/85.81/88.56%及构建通过，日志remediation-r2-viewer-final-frontend-full.log。后端b10fd未变，仍对应1886项完整验证。详见[第十六批](batch-16.md)。下一次推送后仅认可最新HEAD正式Required Gate与审查，不将6869730旧门禁替代新提交。
+
+## PR144 a6 长场景补修复验
+
+[第十六批回执](batch-16.md#pr144-a6f52a4-长场景门禁补修)记录远程a6仅一项任务计划长测试61.931秒超时。提交5d3d5ab保留全部原业务断言，将独立凭据、间隔、Cron、排队取消分成4项，原8项增为11项；未增加超时、重试或跳过。源码frontend7d7f9a3、src216f40d以CI=true单worker格式/lint/类型/171文件1141项/构建完整通过，覆盖率85.99/82.04/85.81/88.56%，无未处理异常，日志remediation-r2-plan-split-frontend-full.log。后端b10fd948原1886项完整结果继续有效；当前HEAD远程门禁与合并单独核对。
