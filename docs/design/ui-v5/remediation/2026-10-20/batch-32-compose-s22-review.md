@@ -25,3 +25,11 @@
 本地没有执行修改后的 S22 文件，没有运行全量、Compose 或浏览器，也未操作共享 QA、重置账号密码或导出会话。检查发现标准 `auth.setup.ts` 可能修改密码并保存认证状态，不能直接在共享 QA 上重复标准 setup。本次不创建临时配置或启动额外浏览器，由整合负责人通过已管理的隔离 bundled Chromium CLI 会话逐断言真实 GUI；该人工路径核验不能等同于实际执行本文件。正式新 head 的 Compose 独立测试数据库仍按既有 setup 与浏览器门禁实际验证本文件。
 
 旧 head 的其他作业通过不能替代修复后新 head 的完整正式门禁。本地静态结果也不能证明此 S22 文件已通过真实浏览器验收。
+
+## 整合后的GUI逐断言复核
+
+整合负责人使用既有隔离 bundled Chromium CLI 会话逐断言复核，12项检查通过、实际业务写入0。真实目录分页后显式选择 `http.request@2.0.0`，精确GET返回完整Schema哈希 `783d919fe97bc9327de6b8d2f70479a10ba13114b081803339ed2b813ed33863`；URL固定ID和版本，刷新后恢复同一URL、身份和完整哈希。Manifest的Schema固定策略和加密凭据材料字段与检查器一致，页面保留声明策略与实际请求级策略的区别；安装继续禁用，插件和Runner类别切换后旧能力检查器清空。
+
+日志位于主验收工作树 `output/playwright/audit-20261019/remediation-s22-gui-replay.log`，明确标记为GUI逐断言复核，**不是执行本S22 spec文件**。没有运行共享QA的标准setup或修改账号密码；本文件是否通过须以正式新HEAD Compose在独立测试数据库中实际执行的结果确认。精确 `9e7162d5e983ad55f022e4c6735bf537d19b348e` 的正式运行 [39650707276](https://github.com/a3384379/FlowTest/actions/runs/39650707276) 已结束。其Compose作业119398878639实际运行非S29浏览器集合67项，7.2分钟全部通过，包含本S22 spec；完整日志 `remediation-pr146-9e7162d-compose-full.log` 保留于主验收工作树。该次整体门禁因另一AI前端单测超时失败，不能用Compose成功记为完整门禁成功，也不能用本段实际spec结果改写上述GUI证据的性质。后续测试查询补修未改本S22文件，最新3fa完整正式运行39665397118另行独立确认，结果见下一段。
+
+后续3fa运行39665397118的Compose作业119449068581也实际完成本S22 spec，S22未失败。其非S29集合总67项中66通过，另S19 Cron下拉视口检查首次失败后由既有重试通过，最终作业success；该次不是无重试67通过，完整日志 `remediation-pr146-3fa68ce-compose-full.log` 保留。独立零API诊断未复现S19持续裁切，未猜改产品，作为已有验收稳定性遗留单列，见[整合回执](batch-29-integration.md#s19-验收稳定性遗留)。随后整体正式前端182文件1353项及Required Gate均已success，完整分页审查通过，精确3fa68ce通过匹配HEAD命令合并PR146为main `e4bd5456c7a9f360643d1fad8f7eb37af959a4db`。合并后最终main回归另行执行，PR门禁不替代它。
