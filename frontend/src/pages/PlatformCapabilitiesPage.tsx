@@ -1,222 +1,278 @@
-import {
-  ApiOutlined,
-  CloudServerOutlined,
-  LockOutlined,
-  SafetyCertificateOutlined,
-} from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   Button,
   Card,
-  Col,
-  Descriptions,
   Empty,
-  Row,
+  Input,
+  Pagination,
   Segmented,
   Space,
-  Statistic,
   Table,
-  Tag,
   Typography,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useAuthStore } from '../features/auth/auth-store'
 import {
+  getPlatformObject,
   getV3FeatureFlags,
   listCapabilities,
   listPlugins,
   listRunnerPools,
   type Capability,
+  type PlatformSelection,
   type Plugin,
   type RunnerPool,
 } from '../features/capabilities/capability-service'
-import { useAuthStore } from '../features/auth/auth-store'
-import QueryFailureNotice from '../components/QueryFailureNotice'
+import PlatformInspector from '../features/capabilities/PlatformInspector'
 
-type ViewMode = '能力' | '插件' | 'Runner'
+type ViewMode = PlatformSelection['kind']
+const modes: { label: string; value: ViewMode }[] = [
+  { label: '能力', value: 'capability' },
+  { label: '插件', value: 'plugin' },
+  { label: 'Runner', value: 'runnerPool' },
+]
 
 export default function PlatformCapabilitiesPage() {
-  const isSystemAdmin = useSystemAdminStatus()
-  const [mode, setMode] = useState<ViewMode>('能力')
-  const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const inventory = usePlatformInventory(isSystemAdmin)
-  const selected = useSelectedCapability(inventory.capabilities, selectedKey)
+  const scope = useAuthStore(
+    (state) => `${state.user?.id}:${state.organizationId}:${state.user?.is_system_admin}`,
+  )
+  return <PlatformWorkspace key={scope} scope={scope} />
+}
 
+function PlatformWorkspace({ scope }: { scope: string }) {
+  const [params, setParams] = useSearchParams()
+  const isAdmin = useAuthStore((state) => Boolean(state.user?.is_system_admin))
+  const queryClient = useQueryClient()
+  const mode = viewMode(params.get('mode'))
+  const selection = readSelection(params, mode)
+  const page = pageNumber(params.get('page'))
+  const search = params.get('search') ?? ''
+  const inventory = usePlatformInventory(scope, mode, page, search, isAdmin)
+  const permitted = mode === 'capability' || isAdmin
+  const detail = useQuery({
+    queryKey: ['platform', scope, 'detail', selection],
+    queryFn: () => getPlatformObject(selection!),
+    enabled: permitted && selection !== null,
+  })
+  const updatePage = (next: number) => {
+    const nextParams = new URLSearchParams(params)
+    nextParams.set('page', String(next))
+    setParams(nextParams)
+  }
+  const select = (value: PlatformSelection) => {
+    const next = new URLSearchParams(params)
+    next.set('id', value.id)
+    if (value.kind === 'capability') next.set('version', value.version)
+    setParams(next)
+  }
+  const onSearch = (value: string) => {
+    const next = new URLSearchParams(params)
+    next.set('search', value)
+    next.delete('page')
+    setParams(next)
+  }
   return (
     <div className="v3-platform-page">
-      <PlatformPageHeading />
-      <QueryFailureNotice queries={inventory.queries} />
-      <FeatureBoundaryAlert flags={inventory.flags} />
-      <CapabilityStatistics
-        available={inventory.capabilitiesAvailable}
-        capabilities={inventory.capabilities}
-        pluginCount={inventory.pluginCount}
-        runnerCount={inventory.runnerCount}
-      />
-      <PlatformWorkspace
-        mode={mode}
-        onModeChange={setMode}
-        isSystemAdmin={isSystemAdmin}
-        capabilities={inventory.capabilities}
-        capabilitiesLoading={inventory.capabilitiesLoading}
-        plugins={inventory.plugins}
-        pluginsLoading={inventory.pluginsLoading}
-        runnerPools={inventory.runnerPools}
-        runnerPoolsLoading={inventory.runnerPoolsLoading}
-        selected={selected}
-        onSelect={(item) => setSelectedKey(capabilityKey(item))}
-      />
-    </div>
-  )
-}
-
-function useSystemAdminStatus(): boolean {
-  return useAuthStore((state) => Boolean(state.user?.is_system_admin))
-}
-
-function usePlatformInventory(isSystemAdmin: boolean) {
-  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
-  const capabilities = useQuery({ queryKey: ['capabilities'], queryFn: listCapabilities })
-  const plugins = useQuery({
-    queryKey: ['plugins'],
-    queryFn: listPlugins,
-    enabled: isSystemAdmin,
-  })
-  const runnerPools = useQuery({
-    queryKey: ['runner-pools'],
-    queryFn: listRunnerPools,
-    enabled: isSystemAdmin,
-  })
-  const capabilityItems = pageItems(capabilities.data)
-  const pluginItems = pageItems(plugins.data)
-  const poolItems = pageItems(runnerPools.data)
-  return {
-    queries: [flags, capabilities, plugins, runnerPools],
-    capabilitiesAvailable: capabilities.isSuccess,
-    flags: flags.data,
-    capabilities: capabilityItems,
-    capabilitiesLoading: capabilities.isLoading,
-    plugins: pluginItems,
-    pluginCount: plugins.isSuccess ? pluginItems.length : '未提供',
-    pluginsLoading: plugins.isLoading,
-    runnerPools: poolItems,
-    runnerCount: runnerPools.isSuccess
-      ? poolItems.flatMap((pool) => pool.runners).length
-      : '未提供',
-    runnerPoolsLoading: runnerPools.isLoading,
-  }
-}
-
-function pageItems<T>(page: { items: T[] } | undefined): T[] {
-  return page ? page.items : []
-}
-
-function PlatformPageHeading() {
-  return (
-    <div className="page-heading">
-      <div>
-        <Space align="center">
+      <div className="page-heading">
+        <div>
           <Typography.Title level={2}>能力与插件中心</Typography.Title>
-          <Tag color="purple">V3 · S22</Tag>
+          <Typography.Text type="secondary">
+            按版本核对能力、插件和 Runner 库存及已有安全策略。
+          </Typography.Text>
+        </div>
+        <Space>
+          <Button
+            onClick={() => void queryClient.invalidateQueries({ queryKey: ['platform', scope] })}
+          >
+            刷新库存
+          </Button>
+          <Button disabled title="签名验证与隔离安装尚未开放">
+            安装签名插件
+          </Button>
         </Space>
-        <Typography.Text type="secondary">
-          以版本化 Capability 扩展执行能力，同时固定 Snapshot、Schema 哈希和 Runner 安全边界。
-        </Typography.Text>
       </div>
-      <Button disabled title="签名验证与隔离安装将在后续迭代开放">
-        安装签名插件
-      </Button>
+      <QueryFailureNotice queries={inventory.queries} />
+      <InventoryStaleNotice query={inventory.active} />
+      <FeatureNotice mode={mode} flags={inventory.flags.data} />
+      <InventorySummary page={permitted ? inventory.active.data : undefined} />
+      <Card className="v3-platform-workspace">
+        <Segmented<ViewMode>
+          value={mode}
+          options={modes}
+          onChange={(value) => setParams({ mode: value })}
+        />
+        <Input.Search
+          key={`${mode}:${search}`}
+          aria-label="搜索平台库存"
+          defaultValue={search}
+          maxLength={200}
+          placeholder="搜索标识、名称或版本"
+          allowClear
+          onSearch={onSearch}
+        />
+        <div className="v3-platform-content">
+          <div className="v3-platform-table">
+            <InventoryTable
+              mode={mode}
+              permitted={permitted}
+              inventory={inventory}
+              onSelect={select}
+            />
+            {permitted && (
+              <Pagination
+                current={page}
+                total={inventoryTotal(inventory.active.data)}
+                pageSize={20}
+                showSizeChanger={false}
+                onChange={updatePage}
+              />
+            )}
+          </div>
+          <aside
+            className="v3-context-inspector"
+            aria-label="平台对象检查器"
+            style={{ overflowX: 'auto' }}
+          >
+            {!permitted ? (
+              <Empty description="当前角色不能读取此类库存详情" />
+            ) : (
+              <SelectedInspector
+                selection={selection}
+                detail={detail}
+                runnerEnabled={inventory.flags.data?.runner_fabric === true}
+              />
+            )}
+          </aside>
+        </div>
+      </Card>
     </div>
   )
 }
 
-function PlatformWorkspace({
-  mode,
-  onModeChange,
-  selected,
-  onSelect,
-  ...inventory
-}: {
-  mode: ViewMode
-  onModeChange: (mode: ViewMode) => void
-  selected: Capability | null
-  onSelect: (item: Capability) => void
-  isSystemAdmin: boolean
-  capabilities: Capability[]
-  capabilitiesLoading: boolean
-  plugins: Plugin[]
-  pluginsLoading: boolean
-  runnerPools: RunnerPool[]
-  runnerPoolsLoading: boolean
-}) {
-  return (
-    <Card className="v3-platform-workspace">
-      <Segmented<ViewMode>
-        value={mode}
-        options={['能力', '插件', 'Runner']}
-        onChange={onModeChange}
-      />
-      <div className="v3-platform-content">
-        <div className="v3-platform-table">
-          <InventoryTable mode={mode} selected={selected} onSelect={onSelect} {...inventory} />
-        </div>
-        <CapabilityInspector capability={selected} />
-      </div>
-    </Card>
-  )
+function usePlatformInventory(
+  scope: string,
+  mode: ViewMode,
+  page: number,
+  search: string,
+  admin: boolean,
+) {
+  const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
+  const capabilities = useQuery({
+    queryKey: ['platform', scope, 'capabilities', page, search],
+    queryFn: () => listCapabilities(page, search),
+    enabled: mode === 'capability',
+  })
+  const plugins = useQuery({
+    queryKey: ['platform', scope, 'plugins', page, search],
+    queryFn: () => listPlugins(page, search),
+    enabled: admin && mode === 'plugin',
+  })
+  const pools = useQuery({
+    queryKey: ['platform', scope, 'pools', page, search],
+    queryFn: () => listRunnerPools(page, search),
+    enabled: admin && mode === 'runnerPool',
+  })
+  const active = mode === 'capability' ? capabilities : mode === 'plugin' ? plugins : pools
+  return {
+    flags,
+    capabilities,
+    plugins,
+    pools,
+    active,
+    queries: mode === 'capability' || admin ? [flags, active] : [flags],
+  }
 }
 
 function InventoryTable({
   mode,
-  isSystemAdmin,
-  capabilities,
-  capabilitiesLoading,
-  plugins,
-  pluginsLoading,
-  runnerPools,
-  runnerPoolsLoading,
-  selected,
+  permitted,
+  inventory,
   onSelect,
 }: {
   mode: ViewMode
-  isSystemAdmin: boolean
-  capabilities: Capability[]
-  capabilitiesLoading: boolean
-  plugins: Plugin[]
-  pluginsLoading: boolean
-  runnerPools: RunnerPool[]
-  runnerPoolsLoading: boolean
-  selected: Capability | null
-  onSelect: (item: Capability) => void
+  permitted: boolean
+  inventory: ReturnType<typeof usePlatformInventory>
+  onSelect: (value: PlatformSelection) => void
 }) {
-  if (mode === '能力') {
+  if (!permitted)
     return (
-      <CapabilityTable
-        loading={capabilitiesLoading}
-        items={capabilities}
-        selected={selected}
-        onSelect={onSelect}
+      <Empty
+        description={mode === 'plugin' ? '仅系统管理员可查看插件清单' : '仅系统管理员可查看执行面'}
       />
     )
-  }
-  if (!isSystemAdmin) {
-    const message = mode === '插件' ? '仅系统管理员可查看插件清单' : '仅系统管理员可查看执行面'
-    return <Empty description={message} />
-  }
-  if (mode === '插件') return <PluginTable items={plugins} loading={pluginsLoading} />
-  return <RunnerPoolTable items={runnerPools} loading={runnerPoolsLoading} />
+  if (mode === 'capability')
+    return <CapabilityInventory query={inventory.capabilities} onSelect={onSelect} />
+  if (mode === 'plugin') return <PluginInventory query={inventory.plugins} onSelect={onSelect} />
+  return <PoolInventory query={inventory.pools} onSelect={onSelect} />
 }
 
-function PluginTable({ items, loading }: { items: Plugin[]; loading: boolean }) {
+function CapabilityInventory({
+  query,
+  onSelect,
+}: {
+  query: ReturnType<typeof usePlatformInventory>['capabilities']
+  onSelect: (value: PlatformSelection) => void
+}) {
   return (
-    <Table
-      rowKey="id"
-      loading={loading}
-      dataSource={items}
-      locale={{ emptyText: '尚未安装管理员签名插件' }}
+    <Table<Capability>
+      rowKey={(item) => `${item.id}@${item.version}`}
+      loading={query.isPending}
+      dataSource={query.data?.items ?? []}
+      pagination={false}
+      locale={{
+        emptyText: query.isError ? '能力目录读取失败，请重试' : '没有匹配的能力',
+      }}
       columns={[
-        { title: '插件', dataIndex: 'display_name' },
+        {
+          title: '能力',
+          render: (_, item) => (
+            <Button
+              type="link"
+              onClick={() => onSelect({ kind: 'capability', id: item.id, version: item.version })}
+            >
+              {item.display_name}
+            </Button>
+          ),
+        },
+        { title: '标识', dataIndex: 'id' },
+        { title: '版本', dataIndex: 'version' },
+        { title: 'Runner', dataIndex: 'runner_type' },
+        { title: '状态', render: (_, item) => (item.enabled ? '启用' : '预览') },
+      ]}
+    />
+  )
+}
+
+function PluginInventory({
+  query,
+  onSelect,
+}: {
+  query: ReturnType<typeof usePlatformInventory>['plugins']
+  onSelect: (value: PlatformSelection) => void
+}) {
+  return (
+    <Table<Plugin>
+      rowKey="id"
+      loading={query.isPending}
+      dataSource={query.data?.items ?? []}
+      pagination={false}
+      locale={{
+        emptyText: query.isError
+          ? '插件目录读取失败，请重试'
+          : '尚未安装管理员签名插件或没有匹配结果',
+      }}
+      columns={[
+        {
+          title: '插件',
+          render: (_, item) => (
+            <Button type="link" onClick={() => onSelect({ kind: 'plugin', id: item.id })}>
+              {item.display_name}
+            </Button>
+          ),
+        },
         { title: '标识', dataIndex: 'plugin_key' },
         { title: '版本', dataIndex: 'version' },
         { title: 'OCI Digest', dataIndex: 'oci_digest', ellipsis: true },
@@ -226,202 +282,120 @@ function PluginTable({ items, loading }: { items: Plugin[]; loading: boolean }) 
   )
 }
 
-function RunnerPoolTable({ items, loading }: { items: RunnerPool[]; loading: boolean }) {
-  return (
-    <Table
-      rowKey="id"
-      loading={loading}
-      dataSource={items}
-      locale={{ emptyText: 'Runner Fabric 尚未启用' }}
-      columns={[
-        { title: '池名称', dataIndex: 'name' },
-        { title: 'Runner 类型', dataIndex: 'runner_type' },
-        { title: '网络区', dataIndex: 'network_zone' },
-        { title: '并发', dataIndex: 'max_concurrency' },
-        { title: 'Runner', render: (_, pool) => `${pool.runners.length} 个` },
-      ]}
-    />
-  )
-}
-
-function FeatureBoundaryAlert({
-  flags,
-}: {
-  flags?: Awaited<ReturnType<typeof getV3FeatureFlags>>
-}) {
-  if (flags?.capability_sdk !== false) return null
-  return (
-    <Alert
-      showIcon
-      type="info"
-      className="page-alert"
-      title="Capability SDK 当前处于兼容预览模式"
-      description="V2 Workflow 继续按原行为运行；只有启用 Feature Flag 后才能发布显式 Capability 节点。"
-    />
-  )
-}
-
-function CapabilityStatistics({
-  available,
-  capabilities,
-  pluginCount,
-  runnerCount,
-}: {
-  available: boolean
-  capabilities: Capability[]
-  pluginCount: number | string
-  runnerCount: number | string
-}) {
-  const enabled = capabilities.filter((item) => item.enabled).length
-  const runnerTypes = new Set(capabilities.map((item) => item.runner_type)).size
-  return (
-    <Row gutter={16} className="v3-capability-statistics">
-      <Col xs={12} lg={6}>
-        <Card>
-          <Statistic
-            title="已载入能力"
-            value={available ? capabilities.length : '未提供'}
-            prefix={<ApiOutlined />}
-          />
-        </Card>
-      </Col>
-      <Col xs={12} lg={6}>
-        <Card>
-          <Statistic
-            title="已载入且启用"
-            value={available ? enabled : '未提供'}
-            prefix={<SafetyCertificateOutlined />}
-          />
-        </Card>
-      </Col>
-      <Col xs={12} lg={6}>
-        <Card>
-          <Statistic title="签名插件" value={pluginCount} prefix={<LockOutlined />} />
-        </Card>
-      </Col>
-      <Col xs={12} lg={6}>
-        <Card>
-          <Statistic
-            title="Runner 类型 / 已载入"
-            value={`${available ? runnerTypes : '未提供'} / ${runnerCount}`}
-            prefix={<CloudServerOutlined />}
-          />
-        </Card>
-      </Col>
-    </Row>
-  )
-}
-
-function CapabilityTable({
-  items,
-  loading,
-  selected,
+function PoolInventory({
+  query,
   onSelect,
 }: {
-  items: Capability[]
-  loading: boolean
-  selected: Capability | null
-  onSelect: (item: Capability) => void
+  query: ReturnType<typeof usePlatformInventory>['pools']
+  onSelect: (value: PlatformSelection) => void
 }) {
   return (
-    <Table
-      rowKey={capabilityKey}
-      loading={loading}
-      dataSource={items}
-      pagination={{ pageSize: 12, hideOnSinglePage: true }}
-      rowClassName={(item) =>
-        capabilityKey(item) === capabilityKey(selected) ? 'selected-row' : ''
-      }
-      onRow={(item) => ({ onClick: () => onSelect(item) })}
+    <Table<RunnerPool>
+      rowKey="id"
+      loading={query.isPending}
+      dataSource={query.data?.items ?? []}
+      pagination={false}
+      locale={{
+        emptyText: query.isError ? 'Runner 目录读取失败，请重试' : '没有匹配的 Runner Pool',
+      }}
       columns={[
         {
-          title: '能力',
+          title: '池名称',
           render: (_, item) => (
-            <Space orientation="vertical" size={0}>
-              <Typography.Text strong>{item.id}</Typography.Text>
-              <Typography.Text type="secondary">{item.display_name}</Typography.Text>
-            </Space>
+            <Button type="link" onClick={() => onSelect({ kind: 'runnerPool', id: item.id })}>
+              {item.name}
+            </Button>
           ),
         },
-        {
-          title: '类型',
-          dataIndex: 'source',
-          render: (value) => (value === 'builtin' ? '内置' : '插件'),
-        },
-        { title: '版本', dataIndex: 'version' },
-        { title: 'Runner', dataIndex: 'runner_type' },
-        { title: '网络策略', dataIndex: 'network_access', render: networkLabel },
-        {
-          title: '状态',
-          dataIndex: 'enabled',
-          render: (value) => (
-            <Tag color={value ? 'success' : 'default'}>{value ? '启用' : '预览'}</Tag>
-          ),
-        },
+        { title: '类型', dataIndex: 'runner_type' },
+        { title: '网络区', dataIndex: 'network_zone' },
+        { title: '并发上限', dataIndex: 'max_concurrency' },
+        { title: 'Runner', render: (_, item) => `${item.runners.length} 个` },
       ]}
     />
   )
 }
 
-function CapabilityInspector({ capability }: { capability: Capability | null }) {
-  if (!capability)
-    return (
-      <aside className="v3-context-inspector">
-        <Empty description="选择能力查看契约" />
-      </aside>
-    )
-  const manifest = capability.manifest
+function SelectedInspector({
+  selection,
+  detail,
+  runnerEnabled,
+}: {
+  selection: PlatformSelection | null
+  detail: ReturnType<typeof useQuery<Awaited<ReturnType<typeof getPlatformObject>>>>
+  runnerEnabled: boolean
+}) {
+  if (!selection) return <Empty description="选择当前库存对象查看详情" />
   return (
-    <aside className="v3-context-inspector">
-      <Typography.Title level={4}>Context Inspector</Typography.Title>
-      <Typography.Text code>
-        {capability.id}@{capability.version}
-      </Typography.Text>
-      <Descriptions column={1} size="small" className="v3-capability-details">
-        <Descriptions.Item label="Schema 哈希">
-          {capability.schema_hash.slice(0, 16)}…
-        </Descriptions.Item>
-        <Descriptions.Item label="Runner">{capability.runner_type}</Descriptions.Item>
-        <Descriptions.Item label="网络">
-          {networkLabel(capability.network_access)}
-        </Descriptions.Item>
-        <Descriptions.Item label="默认超时">
-          {manifest.timeout_policy.default_seconds} 秒
-        </Descriptions.Item>
-        <Descriptions.Item label="Credential">
-          {manifest.credential_types.join('、') || '无'}
-        </Descriptions.Item>
-        <Descriptions.Item label="Snapshot">
-          {manifest.snapshot_policy.include_schema_hash ? '固定 Schema 哈希' : '不固定'}
-        </Descriptions.Item>
-      </Descriptions>
+    <>
+      <QueryFailureNotice queries={[detail]} />
+      {detail.isError && detail.data && (
+        <Alert type="warning" title="详情刷新失败，以下为上次成功读取的数据" />
+      )}
+      {detail.isPending && <Typography.Text>正在读取所选对象</Typography.Text>}
+      {detail.data && (
+        <PlatformInspector
+          key={`${selection.kind}:${selection.id}:${selection.kind === 'capability' ? selection.version : ''}`}
+          value={detail.data}
+          runnerEnabled={runnerEnabled}
+        />
+      )}
+    </>
+  )
+}
+
+function FeatureNotice({
+  mode,
+  flags,
+}: {
+  mode: ViewMode
+  flags: Awaited<ReturnType<typeof getV3FeatureFlags>> | undefined
+}) {
+  if (!flags) return <Alert type="info" title="功能状态尚未读取，库存不代表当前可执行能力" />
+  if (mode === 'capability' && !flags.capability_sdk)
+    return (
       <Alert
         showIcon
-        type="success"
-        title="安全边界"
-        description="Credential 仅保存加密材料；插件不会获得 Secret 明文，历史 Snapshot 始终固定版本与 Digest。"
+        type="info"
+        title="Capability SDK 当前处于兼容预览模式"
+        description="原工作流继续按既有行为运行；能力启用状态以目录实际返回字段为准。"
       />
-    </aside>
-  )
+    )
+  if (mode === 'plugin' && !flags.plugin_registry)
+    return <Alert type="info" title="插件注册未启用，当前仅展示已有只读库存" />
+  if (mode === 'runnerPool' && !flags.runner_fabric)
+    return <Alert type="info" title="Runner Fabric 未启用，当前仅展示已有只读库存" />
+  return null
 }
 
-function useSelectedCapability(items: Capability[], selectedKey: string | null) {
-  return useMemo(
-    () => items.find((item) => capabilityKey(item) === selectedKey) ?? items[0] ?? null,
-    [items, selectedKey],
-  )
+function viewMode(value: string | null): ViewMode {
+  return value === 'plugin' || value === 'runnerPool' ? value : 'capability'
+}
+function pageNumber(value: string | null): number {
+  const page = Number(value)
+  return Number.isSafeInteger(page) && page > 0 ? page : 1
+}
+function readSelection(params: URLSearchParams, mode: ViewMode): PlatformSelection | null {
+  const id = params.get('id')
+  if (!id) return null
+  if (mode !== 'capability') return { kind: mode, id }
+  const version = params.get('version')
+  return version ? { kind: mode, id, version } : null
 }
 
-function capabilityKey(item: Capability | null): string {
-  return item ? `${item.id}@${item.version}` : ''
-}
-
-function networkLabel(value: string): string {
+function InventorySummary({ page }: { page: { total: number; items: unknown[] } | undefined }) {
   return (
-    {
-      denied: '禁止网络',
-      project_allowlist: '项目白名单',
-      broker_only: '仅 Broker',
-    }[value] ?? value
+    <Typography.Paragraph type="secondary">
+      当前目录共 {page?.total ?? '未提供'} 项，已载入 {page?.items.length ?? '未提供'}{' '}
+      项。搜索覆盖当前模式全部库存；选中详情独立于目录页。
+    </Typography.Paragraph>
   )
+}
+function inventoryTotal(page: { total: number } | undefined): number {
+  return page?.total ?? 0
+}
+
+function InventoryStaleNotice({ query }: { query: { isError: boolean; data: unknown } }) {
+  if (!query.isError || query.data === undefined) return null
+  return <Alert type="warning" title="目录刷新失败，当前列表为上次成功读取的数据" />
 }

@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -7,6 +8,7 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -35,6 +37,7 @@ from app.engine.scheduler import ExecutionContext, WorkflowScheduler
 from app.main import app
 from app.models import Base
 from app.models.access import User
+from app.models.capabilities import Plugin, RunnerPool
 from app.runner.contracts import (
     RunnerIdentity,
     RunnerLease,
@@ -440,6 +443,121 @@ async def test_capability_api_auth_flags_admin_and_manifest_validation(
         json={"manifest": {"id": "bad"}},
     )
     assert invalid.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_inventory_search_pagination_exact_read_and_admin_boundary(
+    capability_client: AsyncClient,
+) -> None:
+    async with asynccontextmanager(app.dependency_overrides[get_session])() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        plugins = [
+            Plugin(
+                plugin_key=f"inventory.plugin-{index:03}",
+                version="1.0.0",
+                display_name=f"插件 {index}",
+                oci_repository="registry.example/audit",
+                oci_digest=f"sha256:{index:064x}",
+                signature_identity="audit@example.com",
+                status="disabled",
+                manifest={},
+                created_by_id=actor.id,
+            )
+            for index in range(101)
+        ]
+        pools = [
+            RunnerPool(
+                name=f"inventory.pool-{index:03}",
+                runner_type="general",
+                network_zone="audit",
+                max_concurrency=1,
+                enabled=False,
+                created_by_id=actor.id,
+            )
+            for index in range(101)
+        ]
+        session.add_all([*plugins, *pools])
+        await session.commit()
+        plugin_id, pool_id = plugins[-1].id, pools[-1].id
+    admin = await _login_headers(capability_client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    regular = await _login_headers(capability_client, USER_EMAIL, USER_PASSWORD)
+    for root, identifier, field in (
+        ("plugins", plugin_id, "plugin_key"),
+        ("runner-pools", pool_id, "name"),
+    ):
+        page = await capability_client.get(f"/api/v1/{root}?page=6&page_size=20", headers=admin)
+        assert page.status_code == 200 and page.json()["total"] == 101
+        assert len(page.json()["items"]) == 1
+        searched = await capability_client.get(f"/api/v1/{root}?search=100", headers=admin)
+        assert searched.json()["total"] == 1
+        detail = await capability_client.get(f"/api/v1/{root}/{identifier}", headers=admin)
+        assert detail.status_code == 200 and detail.json()[field].endswith("100")
+        denied = await capability_client.get(f"/api/v1/{root}/{identifier}", headers=regular)
+        assert denied.status_code == 403 and denied.json()["error"]["trace_id"]
+        missing = await capability_client.get(f"/api/v1/{root}/{uuid4()}", headers=admin)
+        assert missing.status_code == 404
+    filtered = await capability_client.get(
+        "/api/v1/capabilities?search=http.request", headers=regular
+    )
+    assert filtered.status_code == 200
+    assert all("http.request" in item["id"] for item in filtered.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_platform_pool_inventory_uses_organization_and_shared_boundary(
+    capability_client: AsyncClient,
+) -> None:
+    from app.core.context import reset_tenant_context, set_tenant_context
+    from app.core.errors import AppError
+    from app.domain.tenant import TenantContext
+    from app.services.capabilities import CapabilityService
+
+    async with asynccontextmanager(app.dependency_overrides[get_session])() as session:
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        organization_id = uuid4()
+        pools = [
+            RunnerPool(
+                name=f"scope-pool-{index}",
+                runner_type="general",
+                network_zone="audit",
+                max_concurrency=1,
+                enabled=True,
+                created_by_id=actor.id,
+                organization_id=scope,
+            )
+            for index, scope in enumerate((organization_id, None, uuid4()))
+        ]
+        session.add_all(pools)
+        await session.commit()
+        token = set_tenant_context(
+            TenantContext(
+                organization_id=organization_id,
+                actor_id=actor.id,
+                role=None,
+                is_system_admin=True,
+            )
+        )
+        try:
+            service = CapabilityService(session)
+            views = await service.list_runner_pools(actor=actor)
+            assert {view.pool.id for view in views} == {pools[0].id, pools[1].id}
+            from app.api.v1.endpoints.capabilities import list_runner_pools
+
+            page = await list_runner_pools(
+                session=session, current_user=actor, page=1, page_size=1, search=""
+            )
+            assert page.total == 2 and len(page.items) == 1
+
+            assert (
+                await service.get_runner_pool(actor=actor, pool_id=pools[1].id)
+            ).pool.id == pools[1].id
+            with pytest.raises(AppError) as error:
+                await service.get_runner_pool(actor=actor, pool_id=pools[2].id)
+            assert error.value.status_code == 404
+        finally:
+            reset_tenant_context(token)
 
 
 def _manifest(**updates: object) -> CapabilityManifest:

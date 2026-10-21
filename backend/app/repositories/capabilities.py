@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.capabilities import Capability, Plugin, Runner, RunnerPool
@@ -30,8 +30,16 @@ class CapabilityRepository:
             ).all()
         )
 
-    async def list_runner_pools(self) -> list[RunnerPool]:
-        rows = await self._session.scalars(select(RunnerPool).order_by(RunnerPool.name))
+    async def list_runner_pools(self, *, organization_id: UUID | None = None) -> list[RunnerPool]:
+        statement = select(RunnerPool)
+        if organization_id is not None:
+            statement = statement.where(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
+                )
+            )
+        rows = await self._session.scalars(statement.order_by(RunnerPool.name))
         return list(rows.all())
 
     async def list_runners(self, pool_id: UUID) -> list[Runner]:
