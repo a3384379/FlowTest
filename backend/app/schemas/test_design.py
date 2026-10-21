@@ -1,5 +1,6 @@
 """API contracts for S42 test design proposals and controlled writes."""
 
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -55,3 +56,15 @@ class MCPControlledWriteEnvelope(BaseModel):
     redactions: list[str] = Field(default_factory=list, max_length=100)
     trace_id: str = Field(min_length=1, max_length=128)
     warnings: list[str] = Field(default_factory=list, max_length=100)
+
+
+class MCPMaterializedDesignResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    name: str
+    status: str
+    fingerprint: str
+    source_change_set_id: UUID
+    reviewed_by_id: UUID | None
+    reviewed_at: datetime | None
+    design: TestDesignDocument
