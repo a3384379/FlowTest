@@ -88,6 +88,7 @@ import {
   type Environment,
   type Folder,
   type TestCase,
+  type TestCaseDefinition,
   type TestCaseRun,
   type TestCaseVersion,
   type TestPlan,
@@ -437,12 +438,8 @@ function WorkspaceCaseDialogs({
           item={runCase}
           initialVersion={runVersion}
           projectId={state.projectId}
-          workflow={pageItems(state.workflows.data).find(
-            (workflow) => workflow.id === runCase.draft_definition.workflow_id,
-          )}
-          environment={state.environments.data?.find(
-            (environment) => environment.id === runCase.draft_definition.environment_id,
-          )}
+          workflows={pageItems(state.workflows.data)}
+          environments={state.environments.data ?? []}
           submitting={state.runningCase}
           onClose={() => setRunCase(null)}
           onRun={async (input) => {
@@ -1713,8 +1710,8 @@ export function RunCaseDialog({
   item,
   initialVersion,
   projectId,
-  workflow,
-  environment,
+  workflows,
+  environments,
   submitting,
   onClose,
   onRun,
@@ -1722,8 +1719,8 @@ export function RunCaseDialog({
   item: TestCase
   initialVersion?: number
   projectId: string
-  workflow?: Workflow
-  environment?: Environment
+  workflows: Workflow[]
+  environments: Environment[]
   submitting: boolean
   onClose: () => void
   onRun: (input: RunCaseInput) => Promise<void>
@@ -1734,32 +1731,49 @@ export function RunCaseDialog({
   )
   const [version, setVersion] = useState(initialVersion ?? item.current_version ?? undefined)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const submittingRef = useRef(false)
+  const busy = submitting || confirming
   const error = loadError ?? submitError
-  const canRun = canRunCase(source, version, versions, item.draft_fingerprint, loading, error)
+  const canRun = canRunCase(source, version, versions, item.draft_fingerprint, loading, loadError)
   const confirm = async () => {
-    if (!source) return
+    if (!source || !canRun || busy || submittingRef.current) return
+    submittingRef.current = true
+    setConfirming(true)
     try {
       setSubmitError(null)
       await onRun(caseRunInput(source, version, item.draft_fingerprint))
     } catch (reason) {
       setSubmitError(apiErrorMessage(reason))
+    } finally {
+      submittingRef.current = false
+      setConfirming(false)
     }
   }
   return (
     <Modal
       title={`运行测试用例：${item.name}`}
       open
-      onCancel={onClose}
+      onCancel={() => {
+        if (!busy && !submittingRef.current) onClose()
+      }}
+      closable={!busy}
+      mask={{ closable: !busy }}
+      keyboard={!busy}
+      cancelText="取消"
+      cancelButtonProps={{ disabled: busy }}
       onOk={() => void confirm()}
-      confirmLoading={submitting}
-      okButtonProps={{ disabled: !canRun }}
+      confirmLoading={busy}
+      okButtonProps={{ disabled: !canRun || busy }}
       okText={source === 'draft' ? '发布并运行' : '运行已发布版本'}
     >
       <RunCaseDetails
         item={item}
-        workflow={workflow}
-        environment={environment}
+        workflows={workflows}
+        environments={environments}
         versions={versions}
+        loading={loading}
+        disabled={busy}
         source={source}
         version={version}
         error={error}
@@ -1823,9 +1837,11 @@ function caseRunInput(
 
 function RunCaseDetails({
   item,
-  workflow,
-  environment,
+  workflows,
+  environments,
   versions,
+  loading,
+  disabled,
   source,
   version,
   error,
@@ -1833,9 +1849,11 @@ function RunCaseDetails({
   onVersion,
 }: {
   item: TestCase
-  workflow?: Workflow
-  environment?: Environment
+  workflows: Workflow[]
+  environments: Environment[]
   versions: TestCaseVersion[]
+  loading: boolean
+  disabled: boolean
   source: RunCaseSource | undefined
   version: number | undefined
   error: string | null
@@ -1846,11 +1864,18 @@ function RunCaseDetails({
     <Space direction="vertical" style={{ width: '100%' }}>
       <RunCaseContext
         item={item}
-        workflow={workflow}
-        environment={environment}
+        workflows={workflows}
+        environments={environments}
         versions={versions}
+        source={source}
+        version={version}
+        loading={loading}
       />
-      <Radio.Group value={source} onChange={(event) => onSource(event.target.value)}>
+      <Radio.Group
+        value={source}
+        onChange={(event) => onSource(event.target.value)}
+        disabled={disabled}
+      >
         {item.current_version && <Radio value="published">运行已发布用例版本</Radio>}
         <Radio value="draft">发布已保存草稿并运行</Radio>
       </Radio.Group>
@@ -1858,6 +1883,7 @@ function RunCaseDetails({
         <Select
           aria-label="运行用例版本"
           value={version}
+          disabled={disabled}
           options={versions.map((candidate) => ({
             value: candidate.version,
             label: `用例 v${candidate.version} · 流程 v${candidate.definition.workflow_version}`,
@@ -1877,30 +1903,89 @@ function RunCaseDetails({
 
 function RunCaseContext({
   item,
-  workflow,
-  environment,
+  workflows,
+  environments,
   versions,
+  source,
+  version,
+  loading,
 }: {
   item: TestCase
-  workflow?: Workflow
-  environment?: Environment
+  workflows: Workflow[]
+  environments: Environment[]
   versions: TestCaseVersion[]
+  source: RunCaseSource | undefined
+  version: number | undefined
+  loading: boolean
 }) {
   const current = versions.find((candidate) => candidate.version === item.current_version)
-  const draftChanged = current ? hasDraftChanges(item, current, workflow) : true
+  const draftWorkflow = workflows.find(
+    (candidate) => candidate.id === item.draft_definition.workflow_id,
+  )
+  const draftChanged = current ? hasDraftChanges(item, current, draftWorkflow) : null
+  const definition = selectedCaseRunDefinition(item, versions, source, version)
   return (
     <>
-      <Typography.Text>
-        流程：{workflow?.name ?? '流程不可用'} · 环境：{environment?.name ?? '环境不可用'}
-      </Typography.Text>
+      <CaseRunTarget
+        definition={definition}
+        workflows={workflows}
+        environments={environments}
+        loading={source === 'published' && loading}
+      />
       {item.current_version && (
         <Typography.Text>
           当前已发布用例 v{item.current_version}；
-          {draftChanged ? '草稿的执行定义有未发布修改' : '草稿执行定义与当前版本相同'}
+          {draftChanged === null
+            ? '草稿与当前版本的差异尚未确认'
+            : draftChanged
+              ? '草稿的执行定义有未发布修改'
+              : '草稿执行定义与当前版本相同'}
         </Typography.Text>
       )}
     </>
   )
+}
+
+function selectedCaseRunDefinition(
+  item: TestCase,
+  versions: TestCaseVersion[],
+  source: RunCaseSource | undefined,
+  version: number | undefined,
+): TestCaseDefinition | undefined {
+  if (source === 'draft') return item.draft_definition
+  if (source === 'published')
+    return versions.find((candidate) => candidate.version === version)?.definition
+  return undefined
+}
+
+function CaseRunTarget({
+  definition,
+  workflows,
+  environments,
+  loading,
+}: {
+  definition: TestCaseDefinition | undefined
+  workflows: Workflow[]
+  environments: Environment[]
+  loading: boolean
+}) {
+  if (loading) return <Typography.Text>正在读取已发布版本的运行目标</Typography.Text>
+  if (!definition)
+    return <Typography.Text>请选择有效的运行来源和版本以确认运行目标。</Typography.Text>
+  const workflow = workflows.find((candidate) => candidate.id === definition.workflow_id)
+  const environment = environments.find((candidate) => candidate.id === definition.environment_id)
+  const workflowVersion = definition.workflow_version ?? workflow?.current_version
+  return (
+    <Typography.Text>
+      流程：{caseRunResourceLabel(definition.workflow_id, workflow)} · 流程版本：
+      {workflowVersion ? `v${workflowVersion}` : '发布时由服务端固定'} · 环境：
+      {caseRunResourceLabel(definition.environment_id, environment)}
+    </Typography.Text>
+  )
+}
+
+function caseRunResourceLabel(id: string, resource: { name: string } | undefined): string {
+  return resource ? `${resource.name}（${id}）` : `${id}（名称未加载，以绑定 ID 为准）`
 }
 
 function hasDraftChanges(item: TestCase, current: TestCaseVersion, workflow?: Workflow): boolean {
