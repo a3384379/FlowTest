@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { server } from '../../test/server'
@@ -42,7 +42,7 @@ const queued: services.PerformanceRun = {
   updated_at: '2026-10-21T00:00:00Z',
   gate_evaluations: [],
 }
-function workspace() {
+function workspace(dataRouter = false) {
   scope.projectId = 'first-project'
   server.use(
     http.get('/api/v1/v3/features', () => HttpResponse.json({ performance_lab: true })),
@@ -62,18 +62,20 @@ function workspace() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  const hook = renderHook(() => usePerformanceLab(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
+  let router: ReturnType<typeof createMemoryRouter>
+  function Wrapper({ children }: { children: ReactNode }) {
+    const content = (
       <App>
-        <QueryClientProvider client={client}>
-          <MemoryRouter initialEntries={['/projects/first-project/performance?run=old-run']}>
-            {children}
-          </MemoryRouter>
-        </QueryClientProvider>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
       </App>
-    ),
-  })
-  return { ...hook, client }
+    )
+    const initialEntries = ['/projects/first-project/performance?run=old-run']
+    if (!dataRouter) return <MemoryRouter initialEntries={initialEntries}>{content}</MemoryRouter>
+    router ??= createMemoryRouter([{ path: '*', element: content }], { initialEntries })
+    return <RouterProvider router={router} />
+  }
+  const hook = renderHook(() => usePerformanceLab(), { wrapper: Wrapper })
+  return { ...hook, client, router: router! }
 }
 describe('performance command ownership', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -163,6 +165,36 @@ describe('performance command ownership', () => {
       if (mode !== 'unmount')
         expect(result.current.runId).toBe(mode === 'selection' ? 'later-run' : 'old-run')
       expect(screen.queryByText('obsolete-performance-error')).not.toBeInTheDocument()
+      expect(screen.queryByText('性能任务已进入独立队列')).not.toBeInTheDocument()
+    },
+  )
+
+  it.each([
+    '/projects/second-project/performance',
+    '/projects/first-project/performance?run=later-run',
+  ])(
+    'ignores a queued response after router navigation but before React commits: %s',
+    async (destination) => {
+      let resolve!: (value: services.PerformanceRun) => void
+      const command = vi.spyOn(services, 'runPerformanceScenario').mockReturnValue(
+        new Promise((done) => {
+          resolve = done
+        }),
+      )
+      const { result, client, router } = workspace(true)
+      await waitFor(() => expect(result.current.canEdit).toBe(true))
+      let pending!: Promise<void>
+      act(() => {
+        pending = result.current.startRun('scenario')
+      })
+      await waitFor(() => expect(command).toHaveBeenCalledOnce())
+      await act(async () => {
+        await router.navigate(destination)
+        resolve(queued)
+        await pending
+      })
+      expect(router.state.location.pathname + router.state.location.search).toBe(destination)
+      expect(client.getQueryData(['performance-run', 'first-project', 'new-run'])).toBeUndefined()
       expect(screen.queryByText('性能任务已进入独立队列')).not.toBeInTheDocument()
     },
   )

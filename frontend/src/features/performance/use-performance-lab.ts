@@ -1,8 +1,8 @@
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
 
 import { apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
@@ -34,6 +34,8 @@ export function usePerformanceLab() {
   const featureEnabled = featureFlags.data?.performance_lab === true
   const catalogsEnabled = Boolean(projectId) && featureEnabled
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
   const scenarioId = params.get('scenario')
   const runId = params.get('run')
   const context = useMemo(() => ({ projectId, scenarioId, runId }), [projectId, scenarioId, runId])
@@ -44,7 +46,9 @@ export function usePerformanceLab() {
       activeContext.current = null
     }
   }, [context])
-  const isCurrent = () => activeContext.current === context
+  const isCurrent = () =>
+    activeContext.current === context &&
+    (!dataRouter || dataRouter.router.state.location.key === location.key)
   const [scenarioPage, setScenarioPage] = useRouteScopedState(projectId, null, 1)
   const [runPage, setRunPage] = useRouteScopedState(projectId, null, 1)
   const latestRun = useQuery({
