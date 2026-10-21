@@ -145,3 +145,7 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 整合M10的正式门禁补修194e376后，源码 `4dcfc223e1aa963ebf0facd0a93d75f3588a8d41` 的前端树 `1e918ff43a52ff76338fd8b35c7da53edebdad66` 已重新完成7文件48项受影响专项及完整前端检查：164文件1092项通过，无未处理异常，覆盖率85.97/81.95/85.61/88.45%，格式、lint/类型与构建通过。日志 `remediation-engineering-contract-label-integrated-targeted.log`、`remediation-engineering-contract-label-frontend-full.log`。后台树仍为24f0584db804775d4b88af8853cbab0af63dff46，与1882项/91.07%完整通过一致。
 
 同步只在进度/验证文档保留测试工程42项/31项待完成的最新状态，并补入M10失败及补修回执，没有改写冻结审计或物化快照。当前42项本地完成、37项已合并，任务执行2项仍在验收，未计入完成。M10的最新194e376正式门禁39546205418仍在运行；本批GitHub PR与正式验收另行确认。
+
+## 任务执行最终完整验证
+
+源码68c088ae6217ec79af34e769e987b58c8eb9a74d、frontend树2e540bd619585c531edb26cbcfd8f0c8e55abc5a：166文件1103项完整通过，无未处理异常，覆盖率85.88/81.88/85.59/88.42%，格式/lint/类型/构建通过。4文件16项专项，原后端tasking27项及真实三类型三环境运行、21条目录页外读取、101/未发布/跨项目拒绝和迟到响应补验通过。backend树24f0584db804775d4b88af8853cbab0af63dff46与1882项/91.07%的完整通过一致，无后端改动。完整日志remediation-task-final-frontend-full.log，细节和未运行范围见[第十四批](batch-14.md)。当前44本地完成、29待完成、37已合并，新HEAD正式门禁、合并和合并后回归另行确认。
