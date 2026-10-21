@@ -19,8 +19,8 @@ test('S25 声明式性能场景经过发布、独立队列、阈值与产物闭�
   await dialog.getByLabel('目标 URL').fill('http://mock-target:8080/health')
   await dialog.getByRole('spinbutton', { name: 'VU' }).fill('1')
   await dialog.getByRole('spinbutton', { name: '持续时间（秒）' }).fill('1')
-  await dialog.getByRole('spinbutton', { name: 'P95 上限（ms）' }).fill('5000')
-  await dialog.getByRole('spinbutton', { name: '失败率上限（0~1）' }).fill('0')
+  await dialog.getByRole('spinbutton', { name: '阈值（毫秒）' }).fill('5000')
+  await dialog.getByRole('spinbutton', { name: '阈值（比例（1=100%））' }).fill('0')
   const created = page.waitForResponse(
     (item) =>
       item.url().endsWith(`/projects/${project.id}/performance-scenarios`) &&
@@ -39,11 +39,18 @@ test('S25 声明式性能场景经过发布、独立队列、阈值与产物闭�
     (item) => item.url().endsWith('/runs') && item.request().method() === 'POST',
   )
   await page.getByRole('button', { name: /运行/ }).click()
-  expect((await queued).status()).toBe(202)
+  const queuedResponse = await queued
+  expect(queuedResponse.status()).toBe(202)
+  const queuedRun = (await queuedResponse.json()) as Identified
+  await expect(page).toHaveURL(new RegExp(`run=${queuedRun.id}`))
+  await expect(page.getByText(queuedRun.id, { exact: true })).toBeVisible()
   await expect(page.getByText('通过', { exact: true }).first()).toBeVisible({ timeout: 120_000 })
-  await page.getByRole('button', { name: /展开行|Expand row/ }).click()
-  await expect(page.getByText('http_req_duration p(95)<5000')).toBeVisible()
-  await expect(page.getByText('原始指标已保存至 MinIO')).toBeVisible()
+  const runCatalog = page
+    .locator('.ant-card')
+    .filter({ has: page.getByText('运行与基线', { exact: true }) })
+  await runCatalog.getByRole('button', { name: /展开行|Expand row/ }).click()
+  await expect(runCatalog.getByText('http_req_duration p(95)<5000')).toBeVisible()
+  await expect(runCatalog.getByText('原始指标已保存至 MinIO')).toBeVisible()
 })
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {

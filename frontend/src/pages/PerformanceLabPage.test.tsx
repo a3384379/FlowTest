@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -120,8 +120,9 @@ describe('PerformanceLabPage', () => {
     await browser.click(screen.getByRole('button', { name: /运行/ }))
     await waitFor(() => expect(started).toBe(1))
     await browser.click(screen.getByRole('button', { name: 'Expand row' }))
-    expect(await screen.findByText('http_req_duration p(95)<500')).toBeVisible()
-    expect(screen.getByText('原始指标已保存至 MinIO')).toBeVisible()
+    const tableEvidence = within(screen.getByText('运行与基线').closest('.ant-card') as HTMLElement)
+    expect(await tableEvidence.findByText('http_req_duration p(95)<500')).toBeVisible()
+    expect(tableEvidence.getByText('原始指标已保存至 MinIO')).toBeVisible()
   })
 
   it('creates a ramping scenario from structured fields without source code', async () => {
@@ -375,6 +376,9 @@ function installHandlers({
     http.get(`/api/v1/projects/${project.id}/performance-scenarios`, () =>
       HttpResponse.json({ items: scenarios, total: scenarios.length, page: 1, page_size: 100 }),
     ),
+    http.get(`/api/v1/projects/${project.id}/performance-runs/${run.id}`, () =>
+      HttpResponse.json(run),
+    ),
     http.get(`/api/v1/projects/${project.id}/performance-runs`, () =>
       HttpResponse.json({ items: runs, total: runs.length, page: 1, page_size: 50 }),
     ),
@@ -386,12 +390,14 @@ function renderPage(initialEntry?: string) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="performance" initialEntry={initialEntry}>
-          <PerformanceLabPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="performance" initialEntry={initialEntry}>
+            <PerformanceLabPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }

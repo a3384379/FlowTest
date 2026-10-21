@@ -110,11 +110,14 @@ export async function listPerformanceScenarios(
 }
 
 export async function getPerformanceScenario(projectId: string, scenarioId: string) {
-  return (
+  const result = (
     await apiClient.get<PerformanceScenario>(
       `/projects/${projectId}/performance-scenarios/${scenarioId}`,
     )
   ).data
+  if (result.project_id !== projectId || result.id !== scenarioId)
+    throw new Error('返回的性能场景与当前项目或ID不符')
+  return result
 }
 
 export async function createPerformanceScenarioVersion(

@@ -14,13 +14,7 @@ import {
   Tabs,
   Card,
   Col,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Radio,
   Row,
-  Select,
   Space,
   Statistic,
   Table,
@@ -28,40 +22,27 @@ import {
   Typography,
 } from 'antd'
 import { useState } from 'react'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import PerformanceScenarioDialog from '../features/performance/PerformanceScenarioDialog'
 
 import type {
-  LoadExecutor,
   PerformanceRun,
-  PerformanceScenarioInput,
-  PerformanceScenario,
   PerformanceDefinition,
+  PerformanceScenario,
 } from '../features/performance/performance-service'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
 import { downloadPerformanceMetrics } from '../features/performance/performance-service'
 import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
 import { usePerformanceLab } from '../features/performance/use-performance-lab'
 
-type ScenarioForm = {
-  name: string
-  description?: string
-  step_name: string
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  url: string
-  expected_status: number
-  executor: LoadExecutor
-  vus: number
-  duration_seconds: number
-  start_vus: number
-  ramp_target_vus: number
-  ramp_duration_seconds: number
-  p95_limit_ms: number
-  failed_rate_limit: number
-}
-
 export default function PerformanceLabPage() {
   const state = usePerformanceLab()
-  const [createOpen, setCreateOpen] = useState(false)
-  const [versionBase, setVersionBase] = useState<PerformanceScenario | null>(null)
+  const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
+  const [versionBase, setVersionBase] = useRouteScopedState<PerformanceScenario | null>(
+    state.projectId,
+    null,
+    null,
+  )
   const scenarios = state.scenarios.data?.items ?? []
   const runs = state.runs.data?.items ?? []
   const latest = latestPerformanceRun(state.latestRun.data)
@@ -107,6 +88,7 @@ export default function PerformanceLabPage() {
                 showSizeChanger: false,
                 onChange: state.setScenarioPage,
               }}
+              scroll={{ x: 700 }}
               dataSource={scenarios}
               locale={{ emptyText: '暂无性能场景' }}
               columns={[
@@ -186,6 +168,7 @@ export default function PerformanceLabPage() {
                 showSizeChanger: false,
                 onChange: state.setRunPage,
               }}
+              scroll={{ x: 650 }}
               dataSource={runs}
               locale={{ emptyText: '暂无性能运行' }}
               expandable={{ expandedRowRender: (run) => <RunEvidence run={run} /> }}
@@ -225,25 +208,43 @@ export default function PerformanceLabPage() {
         </div>
         <PerformanceDetail state={state} />
       </div>
-      <VersionScenarioDialog
-        key={versionBase ? versionBase.id : 'none'}
-        base={versionBase}
-        submitting={state.versioning}
-        onClose={() => setVersionBase(null)}
-        onCreate={async (description, definition) => {
-          if (versionBase && (await state.addVersion(versionBase.id, description, definition)))
-            setVersionBase(null)
-        }}
-      />
-      <CreateScenarioDialog
+      <ScenarioEditor
+        state={state}
         open={createOpen}
-        submitting={state.creating}
-        onClose={() => setCreateOpen(false)}
-        onCreate={async (input) => {
-          if (await state.addScenario(input)) setCreateOpen(false)
+        base={versionBase}
+        onClose={() => {
+          setCreateOpen(false)
+          setVersionBase(null)
         }}
       />
     </>
+  )
+}
+
+function ScenarioEditor({
+  state,
+  open,
+  base,
+  onClose,
+}: {
+  state: ReturnType<typeof usePerformanceLab>
+  open: boolean
+  base: PerformanceScenario | null
+  onClose: () => void
+}) {
+  if (!open && !base) return null
+  return (
+    <PerformanceScenarioDialog
+      key={`${state.projectId}:${base?.id ?? 'new'}`}
+      base={base ?? undefined}
+      submitting={state.creating || state.versioning}
+      onClose={onClose}
+      onSubmit={(input) =>
+        base
+          ? state.addVersion(base.id, input.description, input.definition)
+          : state.addScenario(input)
+      }
+    />
   )
 }
 
@@ -292,215 +293,6 @@ function PerformanceOverview({
       </Col>
     </Row>
   )
-}
-
-function CreateScenarioDialog({
-  open,
-  submitting,
-  onClose,
-  onCreate,
-}: {
-  open: boolean
-  submitting: boolean
-  onClose: () => void
-  onCreate: (input: PerformanceScenarioInput) => Promise<void>
-}) {
-  const [form] = Form.useForm<ScenarioForm>()
-  const executor = Form.useWatch('executor', form) ?? 'constant_vus'
-  return (
-    <Modal
-      title="新建声明式性能场景"
-      open={open}
-      width={760}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={defaultFormValues}
-        onFinish={(value) => void onCreate(toScenarioInput(value))}
-      >
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item name="name" label="场景名称" rules={[{ required: true }]}>
-              <Input maxLength={160} />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item name="description" label="说明">
-              <Input maxLength={500} />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Typography.Title level={5}>HTTP 步骤</Typography.Title>
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item name="step_name" label="步骤名称" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-          </Col>
-          <Col span={5}>
-            <Form.Item name="method" label="方法">
-              <Select
-                options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((value) => ({ value }))}
-              />
-            </Form.Item>
-          </Col>
-          <Col span={11}>
-            <Form.Item
-              name="url"
-              label="目标 URL"
-              rules={[{ required: true }, { validator: validateHttpTarget }]}
-            >
-              <Input placeholder="https://api.example.com/orders" />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item name="expected_status" label="期望状态码">
-              <InputNumber min={100} max={599} />
-            </Form.Item>
-          </Col>
-          <Col span={16}>
-            <Form.Item name="executor" label="负载模型">
-              <Radio.Group
-                options={[
-                  { label: '固定 VU', value: 'constant_vus' },
-                  { label: '阶梯升压', value: 'ramping_vus' },
-                ]}
-              />
-            </Form.Item>
-          </Col>
-        </Row>
-        {executor === 'constant_vus' ? (
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="vus" label="VU">
-                <InputNumber min={1} max={1000} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="duration_seconds" label="持续时间（秒）">
-                <InputNumber min={1} max={3600} />
-              </Form.Item>
-            </Col>
-          </Row>
-        ) : (
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="start_vus" label="起始 VU">
-                <InputNumber min={0} max={1000} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="ramp_target_vus" label="目标 VU">
-                <InputNumber min={1} max={1000} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="ramp_duration_seconds" label="升压时间（秒）">
-                <InputNumber min={1} max={3600} />
-              </Form.Item>
-            </Col>
-          </Row>
-        )}
-        <Typography.Title level={5}>质量阈值</Typography.Title>
-        <Row gutter={16}>
-          <Col span={8}>
-            <Form.Item name="p95_limit_ms" label="P95 上限（ms）">
-              <InputNumber min={1} />
-            </Form.Item>
-          </Col>
-          <Col span={8}>
-            <Form.Item name="failed_rate_limit" label="失败率上限（0~1）">
-              <InputNumber min={0} max={1} step={0.001} />
-            </Form.Item>
-          </Col>
-        </Row>
-        <Typography.Text type="secondary">
-          平台仅接受结构化配置，不允许上传 JavaScript；运行时固定禁止重定向并丢弃响应体。
-        </Typography.Text>
-      </Form>
-    </Modal>
-  )
-}
-
-const defaultFormValues: ScenarioForm = {
-  name: '',
-  description: '',
-  step_name: '接口请求',
-  method: 'GET',
-  url: '',
-  expected_status: 200,
-  executor: 'constant_vus',
-  vus: 5,
-  duration_seconds: 30,
-  start_vus: 0,
-  ramp_target_vus: 20,
-  ramp_duration_seconds: 60,
-  p95_limit_ms: 500,
-  failed_rate_limit: 0.01,
-}
-
-async function validateHttpTarget(_: unknown, value?: string): Promise<void> {
-  if (!value) return
-  try {
-    const target = new URL(value)
-    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol')
-  } catch {
-    throw new Error('请输入有效的 HTTP 或 HTTPS URL')
-  }
-}
-
-function toScenarioInput(value: ScenarioForm): PerformanceScenarioInput {
-  const constant = value.executor === 'constant_vus'
-  return {
-    name: value.name,
-    description: value.description ?? '',
-    definition: {
-      executor: value.executor,
-      steps: [
-        {
-          name: value.step_name,
-          method: value.method,
-          url: value.url,
-          headers: {},
-          body: null,
-          expected_statuses: [value.expected_status],
-          pause_seconds: 0,
-        },
-      ],
-      thresholds: [
-        {
-          metric: 'http_req_duration',
-          aggregation: 'p(95)',
-          operator: '<',
-          value: value.p95_limit_ms,
-          abort_on_fail: false,
-          delay_abort_seconds: 0,
-        },
-        {
-          metric: 'http_req_failed',
-          aggregation: 'rate',
-          operator: '<=',
-          value: value.failed_rate_limit,
-          abort_on_fail: false,
-          delay_abort_seconds: 0,
-        },
-      ],
-      vus: constant ? value.vus : null,
-      duration_seconds: constant ? value.duration_seconds : null,
-      start_vus: constant ? null : value.start_vus,
-      stages: constant
-        ? []
-        : [{ duration_seconds: value.ramp_duration_seconds, target_vus: value.ramp_target_vus }],
-      graceful_stop_seconds: 30,
-    },
-  }
 }
 
 function loadDescription(definition: PerformanceRun['definition_snapshot']): string {
@@ -599,7 +391,7 @@ function LabReadErrors({ state }: { state: ReturnType<typeof usePerformanceLab> 
             type="error"
             showIcon
             title={`${read.name}读取失败`}
-            description={apiErrorMessage(read.query.error)}
+            description={apiErrorWithTrace(read.query.error)}
             action={<Button onClick={() => void read.query.refetch()}>重试</Button>}
           />
         ))}
@@ -622,7 +414,7 @@ function PerformanceDetail({ state }: { state: ReturnType<typeof usePerformanceL
           showIcon
           type="error"
           title="所选对象读取失败"
-          description={apiErrorMessage(query.error)}
+          description={apiErrorWithTrace(query.error)}
           action={<Button onClick={() => void query.refetch()}>重试</Button>}
         />
       </Card>
@@ -691,7 +483,7 @@ function PerformanceRunWorkspace({ run }: { run: PerformanceRun }) {
     try {
       await downloadPerformanceMetrics(run.project_id, run)
     } catch (error) {
-      setDownloadError(apiErrorMessage(error))
+      setDownloadError(apiErrorWithTrace(error))
     } finally {
       setDownloading(false)
     }
@@ -817,82 +609,6 @@ function PerformanceConfiguration({
       <ResponseCodeReader value={definition} title={title} />
     </>
   )
-}
-
-function VersionScenarioDialog({
-  base,
-  submitting,
-  onClose,
-  onCreate,
-}: {
-  base: PerformanceScenario | null
-  submitting: boolean
-  onClose: () => void
-  onCreate: (description: string, definition: PerformanceDefinition) => Promise<void>
-}) {
-  const [form] = Form.useForm<{ description: string; definition: string }>()
-  return (
-    <Modal
-      title={base ? `${base.name} · 从 v${base.version} 创建新版本` : '创建新版本'}
-      open={Boolean(base)}
-      width={900}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          description: base?.description ?? '',
-          definition: JSON.stringify(base?.definition ?? {}, null, 2),
-        }}
-        onFinish={(value) =>
-          void onCreate(value.description, parsePerformanceDefinition(value.definition))
-        }
-      >
-        <Alert type="info" title="创建独立草稿版本，原版本和历史运行不变；审阅发布后才能运行。" />
-        <Form.Item label="版本说明" name="description">
-          <Input />
-        </Form.Item>
-        <Form.Item
-          label="完整声明式配置"
-          name="definition"
-          rules={[
-            { required: true },
-            {
-              validator: async (_, value: string) => {
-                parsePerformanceDefinition(value)
-              },
-            },
-          ]}
-          extra="支持完整 HTTP 步骤、阶梯负载、请求头与请求体和阈值；服务端验证全部配置。"
-        >
-          <Input.TextArea rows={18} className="code-input" />
-        </Form.Item>
-      </Form>
-    </Modal>
-  )
-}
-
-function parsePerformanceDefinition(text: string): PerformanceDefinition {
-  let value: PerformanceDefinition
-  try {
-    value = JSON.parse(text) as PerformanceDefinition
-  } catch {
-    throw new Error('请输入有效的声明式 JSON 配置')
-  }
-  if (
-    !value ||
-    !['constant_vus', 'ramping_vus'].includes(value.executor) ||
-    !Array.isArray(value.steps) ||
-    !value.steps.length ||
-    !Array.isArray(value.thresholds) ||
-    !Array.isArray(value.stages)
-  )
-    throw new Error('配置需包含负载模型、HTTP 步骤、阈值和阶段')
-  return value
 }
 
 function PerformanceRunIdentity({ run }: { run: PerformanceRun }) {
