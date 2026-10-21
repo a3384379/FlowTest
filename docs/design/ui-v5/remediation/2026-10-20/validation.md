@@ -104,3 +104,13 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 3个具名文件30项定向测试通过，相关格式、ESLint和TypeScript通过。随后精确前端树 `eeaa1ebd93e4439fbb139ff219295e97108b2996` 的完整检查通过：159文件1056项、无未处理异常，覆盖率85.94/82.01/85.52/88.41%，格式、lint/类型和生产构建通过。后端树仍为 `d0096a516e80d991a72c9a0b3305ccef2b525121`，与最终1874项完整检查一致，未重复运行不变后端。日志 `remediation-mock-ci-scoped-targeted.log`、`remediation-mock-ci-followup-frontend-full.log`，旧失败完整日志 `remediation-mock-pr142-ci-failed.log`。
 
 本地37项完成、35项已合并的数量不变。下一步仅以推送后最新HEAD的正式Required Gate及审查状态决定合并；不把本地通过或旧HEAD的部分远端通过当作新HEAD门禁。
+
+## M09 审查补修：高级JSON原始重复键
+
+PR #142 在HEAD `cf4f92dbc02c9e4f9631a4d08fcd6d99f11d0fdb` 的[正式Required Gate 39524674004](https://github.com/a3384379/FlowTest/actions/runs/39524674004)成功；合并前核对仍有一项有效审查未解决：JSON.parse先折叠同名键，使高级JSON模式绕过重复键校验。因此尚未合并，没有把门禁成功视为审查完成。
+
+补修 `d13b9fb67e870e31a2e9dd0ed467e2330fac2ec7` 在确认合法JSON对象后直接读取原始字符串键值，再交给既有重复键检查；保留转义解码后的键身份、Header不区分大小写和字符串类型约束。无需新依赖，不改变响应体JSON的既有合同。即使非法值随后被同名键覆盖，也明确拒绝；引号、反斜杠、Unicode、空字符串、constructor和__proto__作为普通自有属性保持。
+
+先新增反例复现5失败/18通过；修复后4个具名文件37项通过，表单证明保存、预览与转回键值行均拒绝重复输入且原文保留。格式、ESLint和生产构建通过。日志 `remediation-mock-duplicate-keys-before.log`、`remediation-mock-duplicate-keys-targeted.log`、`remediation-mock-duplicate-keys-build.log`。
+
+最新前端树 `41c0371ab5964a9542a8d8e0de71656bcbc5e506` 完整检查正在运行，后端树d0096a5未改；更新提交后重新确认最新HEAD正式门禁及审查，不沿用cf4旧HEAD成功来合并。
