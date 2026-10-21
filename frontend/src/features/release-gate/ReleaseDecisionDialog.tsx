@@ -8,6 +8,7 @@ import type { ReleaseDecisionInput, ReleasePolicy } from './release-gate-service
 import ReleaseEvidencePicker, { type EvidenceOption } from './ReleaseEvidencePicker'
 import { releaseEvidenceLabels, type ReleaseEvidenceKind } from './release-evidence-types'
 import type { useReleaseGate } from './use-release-gate'
+import { useReleaseRiskAssociation } from './use-release-risk-association'
 
 type State = ReturnType<typeof useReleaseGate>
 type Requirement = {
@@ -73,6 +74,7 @@ export default function ReleaseDecisionDialog({
 }) {
   const [form] = Form.useForm<ReleaseDecisionInput>()
   const values = Form.useWatch([], form) as ReleaseDecisionInput | undefined
+  const association = useReleaseRiskAssociation(state.projectId, canReadRisk(state, open), values)
   const policy = state.policies.data?.find((item) => item.id === values?.release_policy_id)
   const directories = {
     quality_gate: state.qualityRuns,
@@ -91,6 +93,7 @@ export default function ReleaseDecisionDialog({
       open={open}
       width={960}
       confirmLoading={state.evaluating}
+      okButtonProps={{ disabled: association.mismatch || association.unresolved }}
       onCancel={onClose}
       onOk={() => form.submit()}
       destroyOnHidden
@@ -105,6 +108,7 @@ export default function ReleaseDecisionDialog({
         form={form}
         layout="vertical"
         onFinish={async (input) => {
+          if (association.mismatch || association.unresolved) return
           if (await state.evaluate(compact(input))) onClose()
         }}
       >
@@ -153,6 +157,8 @@ export default function ReleaseDecisionDialog({
           ))}
         </div>
         <section aria-label="提交前冻结对象摘要">
+          <QueryFailureNotice queries={[association.query]} />
+          <RiskAssociationStatus association={association} />
           <Typography.Title level={5}>提交前核对</Typography.Title>
           <Descriptions
             size="small"
@@ -174,6 +180,37 @@ export default function ReleaseDecisionDialog({
         </section>
       </Form>
     </Modal>
+  )
+}
+
+function canReadRisk(state: State, open: boolean): boolean {
+  return open && state.featureFlags.isSuccess && state.featureFlags.data.quality_intelligence
+}
+
+function RiskAssociationStatus({
+  association,
+}: {
+  association: ReturnType<typeof useReleaseRiskAssociation>
+}) {
+  if (association.mismatch)
+    return (
+      <Alert
+        type="warning"
+        title="所选发布风险与影响分析不匹配"
+        description="请选择同一影响分析生成的风险，输入已保留。"
+      />
+    )
+  if (association.unresolved)
+    return (
+      <Typography.Paragraph type="secondary">
+        正在核对所选风险的影响归属；读取失败时可重试，或清空风险引用后按缺失证据评估。
+      </Typography.Paragraph>
+    )
+  if (!association.query.isSuccess) return null
+  return (
+    <Typography.Paragraph type="secondary">
+      风险来源影响 ID：{association.query.data.impact_run_id}
+    </Typography.Paragraph>
   )
 }
 

@@ -209,6 +209,7 @@ describe('ReleaseGatePage', () => {
     await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
     await chooseEvidence(browser, dialog, '性能运行', 'v3 · passed')
     await chooseEvidence(browser, dialog, 'Runner 任务', '00000000 · succeeded · fence 7')
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'OK' })).toBeEnabled())
     await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
 
     await waitFor(() =>
@@ -383,6 +384,8 @@ describe('ReleaseGatePage', () => {
     const browser = userEvent.setup()
     await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
     const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    await browser.type(within(dialog).getByLabelText('候选版本'), 'lookup-must-not-evaluate')
     const input = within(dialog).getByRole('searchbox', { name: '性能运行精确ID' })
     await browser.type(input, exactId)
     await browser.keyboard('{Enter}')
@@ -431,6 +434,82 @@ describe('ReleaseGatePage', () => {
       screen.queryByRole('region', { name: '项目 Runner 任务原始摘要' }),
     ).not.toBeInTheDocument()
     expect(screen.getAllByText('隔离令牌编号').length).toBeGreaterThan(0)
+  })
+
+  it('waits for risk ownership and keeps it retryable after a read error', async () => {
+    handlers()
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    let reads = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, async () => {
+        reads++
+        if (reads === 1) {
+          await pending
+          return HttpResponse.json(
+            { error: { message: 'Risk ownership unavailable', trace_id: 'risk-ownership' } },
+            { status: 503 },
+          )
+        }
+        return HttpResponse.json({
+          id: releaseRiskId,
+          project_id: project.id,
+          impact_run_id: impactRunId,
+        })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseEvidence(browser, dialog, 'Impact Run', '结算影响 · completed')
+    await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
+    await waitFor(() => expect(reads).toBe(1))
+    const submit = within(dialog).getByRole('button', { name: 'OK' })
+    expect(submit).toBeDisabled()
+    await act(async () => {
+      finish()
+    })
+    expect(await within(dialog).findByText('Trace ID: risk-ownership')).toBeVisible()
+    expect(submit).toBeDisabled()
+    await browser.click(within(dialog).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(submit).toBeEnabled())
+  })
+
+  it('blocks a known risk and impact mismatch before submission and keeps the selected input', async () => {
+    handlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, () =>
+        HttpResponse.json({
+          id: releaseRiskId,
+          project_id: project.id,
+          impact_run_id: 'foreign-impact',
+        }),
+      ),
+    )
+    let writes = 0
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/release-decisions`, () => {
+        writes++
+        return HttpResponse.json(decision, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    await browser.type(within(dialog).getByLabelText('候选版本'), 'mismatch-is-not-ready')
+    await chooseEvidence(browser, dialog, 'Impact Run', '结算影响 · completed')
+    await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
+    expect(await within(dialog).findByText('所选发布风险与影响分析不匹配')).toBeVisible()
+    const submit = within(dialog).getByRole('button', { name: 'OK' })
+    expect(submit).toBeDisabled()
+    await browser.click(submit)
+    expect(within(dialog).getByLabelText('候选版本')).toHaveValue('mismatch-is-not-ready')
+    expect(writes).toBe(0)
   })
 
   it('selects performance evidence after the first page and preserves that exact ID when paging back', async () => {
@@ -752,6 +831,13 @@ function handlers(overrides: Partial<V3FeatureFlags> = {}) {
     ),
     http.get(`/api/v1/projects/${project.id}/impact/runs`, () =>
       HttpResponse.json(page([{ id: impactRunId, title: '结算影响', status: 'completed' }])),
+    ),
+    http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, () =>
+      HttpResponse.json({
+        id: releaseRiskId,
+        project_id: project.id,
+        impact_run_id: impactRunId,
+      }),
     ),
     http.get(`/api/v1/projects/${project.id}/release-risks`, () =>
       HttpResponse.json(page([{ id: releaseRiskId, title: '候选风险', score: 25 }])),
