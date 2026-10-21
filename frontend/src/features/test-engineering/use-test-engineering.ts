@@ -22,9 +22,12 @@ export function useTestEngineering(initialProposalId: string | null = null) {
   const { message } = App.useApp()
   const { projectId } = useProjectContext()
   const context = useMemo(() => ({ projectId, initialProposalId }), [projectId, initialProposalId])
-  const activeContext = useRef(context)
+  const activeContext = useRef<typeof context | null>(context)
   useLayoutEffect(() => {
     activeContext.current = context
+    return () => {
+      activeContext.current = null
+    }
   }, [context])
   const isCurrent = () => activeContext.current === context
   const { canEdit: editPermission, permissions } = useProjectCapabilities()

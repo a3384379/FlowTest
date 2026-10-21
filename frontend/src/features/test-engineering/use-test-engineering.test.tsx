@@ -256,4 +256,27 @@ describe('test design materialization ownership', () => {
     expect(result.current.proposal).toBeNull()
     expect(result.current.generation?.fingerprint).toBe('new-preview')
   })
+
+  it('ignores completion after the workspace unmounts and keeps the saved proposal cache unchanged', async () => {
+    let complete!: (value: typeof receipt) => void
+    const response = new Promise<typeof receipt>((resolve) => {
+      complete = resolve
+    })
+    const applied = vi.spyOn(services, 'applyTestDesignProposal').mockReturnValue(response)
+    const { result, client, unmount } = designHarness()
+    await waitFor(() => expect(result.current.canEdit && result.current.proposal).toBeTruthy())
+    let pending!: Promise<boolean>
+    act(() => {
+      pending = result.current.applyProposal()
+    })
+    await waitFor(() => expect(applied).toHaveBeenCalledOnce())
+    unmount()
+    await act(async () => {
+      complete(receipt)
+      expect(await pending).toBe(false)
+    })
+    expect(
+      client.getQueryData(['test-engineering-proposal', 'first-project', proposal.change_set_id]),
+    ).toMatchObject({ applied: false })
+  })
 })
