@@ -53,7 +53,11 @@ class QualityRepository:
                 await self._session.scalars(
                     select(FlakyRecord)
                     .where(condition)
-                    .order_by(FlakyRecord.flaky_score.desc(), FlakyRecord.updated_at.desc())
+                    .order_by(
+                        FlakyRecord.flaky_score.desc(),
+                        FlakyRecord.updated_at.desc(),
+                        FlakyRecord.id.asc(),
+                    )
                     .offset(offset)
                     .limit(limit)
                 )

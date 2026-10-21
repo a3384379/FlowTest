@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -101,3 +102,43 @@ async def test_exact_flaky_read_keeps_off_page_version_and_project_authorization
     async with context.session_maker() as session:
         # Resource reads must add no audit events.
         assert await session.scalar(select(func.count()).select_from(AuditLog)) == audit_count
+
+
+@pytest.mark.asyncio
+async def test_flaky_catalog_uses_a_stable_order_for_equal_scores_and_timestamps(
+    tasking_context: TaskingTestContext,
+) -> None:
+    context = tasking_context
+    headers = await _login_headers(context.client)
+    created = await context.client.post(
+        "/api/v1/projects", headers=headers, json={"name": "Equal score pagination fixture"}
+    )
+    assert created.status_code == 201
+    project_id = UUID(created.json()["id"])
+    indices = [*range(0, 46, 2), *range(1, 46, 2)]
+    async with context.session_maker() as session:
+        for index in indices:
+            session.add(
+                FlakyRecord(
+                    id=UUID(int=1000 + index),
+                    project_id=project_id,
+                    target_type="workflow",
+                    target_id=UUID(int=2000 + index),
+                    target_version=1,
+                    flaky_score=25,
+                    updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+                )
+            )
+        await session.commit()
+    ids: list[str] = []
+    for page in [1, 2, 3]:
+        response = await context.client.get(
+            f"/api/v1/projects/{project_id}/flaky-tests",
+            headers=headers,
+            params={"page": page, "page_size": 20},
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 46
+        ids.extend(item["id"] for item in response.json()["items"])
+    assert ids == [str(UUID(int=1000 + index)) for index in range(46)]
+    assert len(ids) == len(set(ids)) == 46
