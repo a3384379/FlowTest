@@ -1950,7 +1950,7 @@ body {
 
 .v3-platform-content {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   min-height: 560px;
   margin-top: 16px;
   border-top: 1px solid #eef0f7;
@@ -1958,6 +1958,7 @@ body {
 
 .v3-platform-table {
   min-width: 0;
+  overflow-x: auto;
   padding: 20px;
 }
 

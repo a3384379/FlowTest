@@ -331,7 +331,7 @@ class AIJobRunner:
         except (SchemaError, ValidationError, AIInputError, ValueError, TypeError):
             logger.info("AI response validation failed", extra={"ai_job_id": str(job.id)})
             return await self._fail(
-                job, code="AI_RESPONSE_INVALID", message="AI 建议未通过结构或脱敏校验"
+                job, code="AI_RESPONSE_INVALID", message="AI 建议未通过结构或当前处理策略校验"
             )
         if job.job_type != "change_set":
             self._repository.add_suggestions(suggestions)
@@ -391,13 +391,13 @@ def _authorize_sample(
     if not sample_sharing_enabled:
         raise AppError(
             code="AI_SAMPLE_SHARING_DISABLED",
-            message="项目未开启脱敏样本共享",
+            message="项目未允许向 AI 提交样本",
             status_code=403,
         )
     if role not in {None, ProjectRole.OWNER}:
         raise AppError(
             code="AI_SAMPLE_OWNER_REQUIRED",
-            message="仅项目 Owner 可以提交脱敏样本",
+            message="仅项目 Owner 可以提交样本",
             status_code=403,
         )
 

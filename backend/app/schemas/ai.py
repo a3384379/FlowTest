@@ -40,7 +40,7 @@ class AIJobCreateRequest(BaseModel):
     @model_validator(mode="after")
     def require_context(self) -> "AIJobCreateRequest":
         if self.schema_document is None and not self.metadata:
-            raise ValueError("AI 任务必须提供 Schema 或脱敏元数据")
+            raise ValueError("AI 任务必须提供 Schema 或明确提交的元数据")
         return self
 
 

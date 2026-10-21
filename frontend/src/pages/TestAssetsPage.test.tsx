@@ -631,8 +631,8 @@ describe('TestAssetsPage', () => {
         <RunCaseDialog
           item={{ ...testCase, draft_fingerprint: 'a'.repeat(64) }}
           projectId="project-1"
-          workflow={workflow}
-          environment={environment}
+          workflows={[workflow]}
+          environments={[environment]}
           submitting={false}
           onClose={vi.fn()}
           onRun={onRun}

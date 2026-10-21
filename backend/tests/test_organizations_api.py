@@ -1,7 +1,8 @@
 from base64 import urlsafe_b64encode
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from hashlib import sha256
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -729,6 +730,155 @@ async def test_organization_user_quota_only_blocks_new_members(
     )
     assert members_after_rejection.status_code == 200
     assert users[2]["id"] not in {member["user_id"] for member in members_after_rejection.json()}
+
+
+@pytest.mark.asyncio
+async def test_organization_audit_filters_page_beyond_fifty_and_keep_tenant_scope(
+    client: AsyncClient,
+) -> None:
+    headers = _authorization(await _login(client))
+    organizations = (await client.get("/api/v1/organizations", headers=headers)).json()
+    organization_id = organizations[0]["id"]
+    resource_id = uuid4()
+    other_actor = uuid4()
+    async for session in app.dependency_overrides[get_session]():
+        actor = await session.scalar(select(User).where(User.email == ADMIN_EMAIL))
+        assert actor is not None
+        actor_id = actor.id
+        session.add_all(
+            [
+                AuditLog(
+                    id=UUID(int=index + 1),
+                    actor_user_id=actor_id,
+                    organization_id=UUID(organization_id),
+                    action="organization.audit_fixture",
+                    resource_type="organization",
+                    resource_id=resource_id,
+                    details={"trace_id": f"existing-trace-{index}"},
+                    created_at=datetime(2026, 10, 20, tzinfo=UTC),
+                )
+                for index in range(61)
+            ]
+        )
+        session.add(
+            AuditLog(
+                actor_user_id=other_actor,
+                organization_id=UUID(organization_id),
+                action="organization.audit_fixture",
+                resource_type="organization",
+                resource_id=resource_id,
+                details={},
+                created_at=datetime(2026, 10, 20, tzinfo=UTC),
+            )
+        )
+        session.add(
+            AuditLog(
+                actor_user_id=actor_id,
+                organization_id=UUID(organization_id),
+                action="organization.audit_fixture",
+                resource_type="organization",
+                resource_id=uuid4(),
+                details={},
+                created_at=datetime(2026, 10, 20, tzinfo=UTC),
+            )
+        )
+        session.add(
+            AuditLog(
+                actor_user_id=actor_id,
+                organization_id=uuid4(),
+                action="organization.audit_fixture",
+                resource_type="organization",
+                resource_id=resource_id,
+                details={},
+                created_at=datetime(2026, 10, 20, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+    response = await client.get(
+        f"/api/v1/organizations/{organization_id}/audit-logs",
+        headers=headers,
+        params={
+            "action": "organization.audit_fixture",
+            "actor_user_id": str(actor_id),
+            "resource_type": "organization",
+            "resource_id": str(resource_id),
+            "created_from": "2026-10-20T00:00:00Z",
+            "created_to": "2026-10-21T00:00:00Z",
+            "page": 6,
+            "page_size": 10,
+        },
+    )
+    assert response.status_code == 200, response.text
+    page = response.json()
+    assert page["total"] == 61
+    assert len(page["items"]) == 10
+    assert page["items"][0]["id"] == str(UUID(int=11))
+    assert {entry["actor_user_id"] for entry in page["items"]} == {str(actor_id)}
+    assert {entry["resource_id"] for entry in page["items"]} == {str(resource_id)}
+    assert page["items"][0]["details"] == {"trace_id": "existing-trace-10"}
+    empty = await client.get(
+        f"/api/v1/organizations/{organization_id}/audit-logs",
+        headers=headers,
+        params={"resource_id": str(uuid4())},
+    )
+    assert empty.status_code == 200
+    assert empty.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_organization_member_summaries_remain_scoped_and_directory_is_not_granted(
+    client: AsyncClient,
+) -> None:
+    headers = _authorization(await _login(client))
+    organizations = (await client.get("/api/v1/organizations", headers=headers)).json()
+    organization_id = organizations[0]["id"]
+    created = await client.post(
+        "/api/v1/users",
+        headers=headers,
+        json={
+            "email": "scoped-owner@example.com",
+            "display_name": "同名成员",
+            "password": ADMIN_PASSWORD,
+            "is_system_admin": False,
+        },
+    )
+    assert created.status_code == 201
+    member_id = created.json()["id"]
+    async for session in app.dependency_overrides[get_session]():
+        created_user = await session.get(User, UUID(member_id))
+        assert created_user is not None
+        created_user.requires_password_change = False
+        await session.commit()
+    await client.put(
+        f"/api/v1/organizations/{organization_id}/members/{member_id}",
+        headers=headers,
+        json={"user_id": member_id, "role": "owner"},
+    )
+    owner_headers = {
+        **_authorization(await _login(client, "scoped-owner@example.com")),
+        "X-Organization-Id": organization_id,
+    }
+    members = await client.get(
+        f"/api/v1/organizations/{organization_id}/members", headers=owner_headers
+    )
+    assert members.status_code == 200, members.text
+    summary = next(item for item in members.json() if item["user_id"] == member_id)
+    assert summary["display_name"] == "同名成员"
+    assert summary["email"] == "scoped-owner@example.com"
+    assert "password_hash" not in summary
+    directory = await client.post(
+        "/api/v1/users/search",
+        headers=owner_headers,
+        json={"query": "", "page": 1, "page_size": 20},
+    )
+    assert directory.status_code == 403
+    other = await client.post(
+        "/api/v1/organizations", headers=headers, json={"name": "Other", "slug": "other-scoped"}
+    )
+    outsider = await client.get(
+        f"/api/v1/organizations/{other.json()['id']}/members", headers=owner_headers
+    )
+    assert outsider.status_code in {403, 404}
 
 
 async def _login(

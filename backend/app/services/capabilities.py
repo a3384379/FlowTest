@@ -1,9 +1,11 @@
 from dataclasses import dataclass
+from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.context import get_tenant_context
 from app.core.errors import AppError
 from app.domain.capabilities import CapabilityManifest, PluginManifest
 from app.engine.capabilities import builtin_capability_registry
@@ -29,7 +31,9 @@ class CapabilityService:
     def __init__(self, session: AsyncSession) -> None:
         self._repository = CapabilityRepository(session)
 
-    async def list_capabilities(self, *, actor: User) -> tuple[CapabilityView, ...]:
+    async def list_capabilities(
+        self, *, actor: User, search: str = ""
+    ) -> tuple[CapabilityView, ...]:
         del actor
         builtins = tuple(
             CapabilityView(
@@ -57,7 +61,13 @@ class CapabilityService:
                     enabled=record.enabled and settings.feature_plugin_registry_enabled,
                 )
             )
-        return tuple((*builtins, *plugins))
+        return tuple(
+            item
+            for item in (*builtins, *plugins)
+            if _matches_inventory(
+                search, item.manifest.id, item.manifest.display_name, item.manifest.version
+            )
+        )
 
     async def get_capability(
         self,
@@ -72,15 +82,26 @@ class CapabilityService:
                 return capability
         raise AppError(code="CAPABILITY_NOT_FOUND", message="能力版本不存在", status_code=404)
 
-    async def list_plugins(self, *, actor: User) -> list[Plugin]:
+    async def list_plugins(self, *, actor: User, search: str = "") -> list[Plugin]:
         self._require_system_admin(actor)
-        return await self._repository.list_plugins()
+        return [
+            item
+            for item in await self._repository.list_plugins()
+            if _matches_inventory(search, item.plugin_key, item.display_name, item.version)
+        ]
 
-    async def list_runner_pools(self, *, actor: User) -> tuple[RunnerPoolView, ...]:
+    async def list_runner_pools(
+        self, *, actor: User, search: str = ""
+    ) -> tuple[RunnerPoolView, ...]:
         self._require_system_admin(actor)
-        pools = await self._repository.list_runner_pools()
+        context = get_tenant_context()
+        pools = await self._repository.list_runner_pools(
+            organization_id=context.organization_id if context else None
+        )
         views: list[RunnerPoolView] = []
         for pool in pools:
+            if not _matches_inventory(search, pool.name, pool.runner_type, pool.network_zone):
+                continue
             views.append(
                 RunnerPoolView(
                     pool=pool,
@@ -88,6 +109,20 @@ class CapabilityService:
                 )
             )
         return tuple(views)
+
+    async def get_plugin(self, *, actor: User, plugin_id: UUID) -> Plugin:
+        plugins = await self.list_plugins(actor=actor)
+        for plugin in plugins:
+            if plugin.id == plugin_id:
+                return plugin
+        raise AppError(code="PLUGIN_NOT_FOUND", message="插件不存在", status_code=404)
+
+    async def get_runner_pool(self, *, actor: User, pool_id: UUID) -> RunnerPoolView:
+        pools = await self.list_runner_pools(actor=actor)
+        for pool in pools:
+            if pool.pool.id == pool_id:
+                return pool
+        raise AppError(code="RUNNER_POOL_NOT_FOUND", message="Runner Pool 不存在", status_code=404)
 
     @staticmethod
     def validate_plugin_manifest(*, actor: User, payload: object) -> PluginManifest:
@@ -130,3 +165,8 @@ def _builtin_enabled(manifest: CapabilityManifest) -> bool:
     if manifest.version == "3.0.0" and manifest.id in {"graphql.request", "grpc.call"}:
         return settings.feature_capability_sdk_enabled and settings.feature_multi_protocol_enabled
     return settings.feature_capability_sdk_enabled
+
+
+def _matches_inventory(search: str, *values: str) -> bool:
+    needle = search.strip().casefold()
+    return not needle or any(needle in value.casefold() for value in values)

@@ -4,6 +4,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.access import User
 from app.models.organizations import Organization, OrganizationMember, ServiceAccount
 
 
@@ -66,6 +67,17 @@ class OrganizationRepository:
                 )
             ).all()
         )
+
+    async def list_member_identities(
+        self, organization_id: UUID
+    ) -> list[tuple[OrganizationMember, User]]:
+        rows = await self._session.execute(
+            select(OrganizationMember, User)
+            .join(User, User.id == OrganizationMember.user_id)
+            .where(OrganizationMember.organization_id == organization_id)
+            .order_by(OrganizationMember.created_at, OrganizationMember.id)
+        )
+        return list(rows.tuples())
 
     async def count_members(self, organization_id: UUID) -> int:
         value = await self._session.scalar(

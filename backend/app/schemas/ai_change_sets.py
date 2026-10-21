@@ -96,8 +96,32 @@ class AIChangeSetSummaryResponse(BaseModel):
     updated_at: datetime
 
 
+class AIReviewBaselineContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+    definition: dict[str, JsonValue]
+    tags: list[str] | None = None
+
+
+class AIReviewBaseline(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: Literal["test_case", "workflow"]
+    target_id: UUID
+    snapshot_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    content: AIReviewBaselineContent
+    current_version: int | None
+    draft_revision: int | None
+    updated_at: datetime
+    redaction_mode: Literal["off", "on"]
+    redaction_policy_version: int
+
+
 class AIChangeSetDetailResponse(AIChangeSetSummaryResponse):
     source_snapshot: dict[str, JsonValue]
+    review_baselines: list[AIReviewBaseline] = Field(default_factory=list)
     items: list[AIChangeItemResponse]
 
 

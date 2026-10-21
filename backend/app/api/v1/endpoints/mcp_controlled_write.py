@@ -15,6 +15,7 @@ from app.schemas.test_design import (
     MCPControlledWriteEnvelope,
     MCPControlledWriteReview,
     MCPManualApprovalCreate,
+    MCPMaterializedDesignResponse,
 )
 from app.services.mcp_controlled_write import MCPControlledWriteService
 
@@ -51,6 +52,21 @@ async def get_change_set(
 ) -> MCPControlledWriteEnvelope:
     return await MCPControlledWriteService(session).get_for_user(
         actor=current_user, change_set_id=change_set_id
+    )
+
+
+@router.get(
+    "/change-sets/{change_set_id}/items/{item_id}/materialized-design",
+    response_model=MCPMaterializedDesignResponse,
+)
+async def get_materialized_design(
+    change_set_id: UUID,
+    item_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> MCPMaterializedDesignResponse:
+    return await MCPControlledWriteService(session).materialized_design(
+        actor=current_user, change_set_id=change_set_id, item_id=item_id
     )
 
 

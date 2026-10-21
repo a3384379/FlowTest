@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Query
 
 from app.api.dependencies import CurrentUser, SessionDependency
@@ -12,7 +14,7 @@ from app.schemas.capabilities import (
     V3FeatureFlagsResponse,
 )
 from app.schemas.common import Page
-from app.services.capabilities import CapabilityService, CapabilityView
+from app.services.capabilities import CapabilityService, CapabilityView, RunnerPoolView
 
 router = APIRouter()
 
@@ -42,8 +44,11 @@ async def list_capabilities(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[CapabilityResponse]:
-    capabilities = await CapabilityService(session).list_capabilities(actor=current_user)
+    capabilities = await CapabilityService(session).list_capabilities(
+        actor=current_user, search=search
+    )
     start = (page - 1) * page_size
     selected = capabilities[start : start + page_size]
     return Page(
@@ -78,8 +83,9 @@ async def list_plugins(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[PluginResponse]:
-    plugins = await CapabilityService(session).list_plugins(actor=current_user)
+    plugins = await CapabilityService(session).list_plugins(actor=current_user, search=search)
     start = (page - 1) * page_size
     selected = plugins[start : start + page_size]
     return Page(
@@ -109,27 +115,46 @@ async def list_runner_pools(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[RunnerPoolResponse]:
-    pools = await CapabilityService(session).list_runner_pools(actor=current_user)
+    pools = await CapabilityService(session).list_runner_pools(actor=current_user, search=search)
     start = (page - 1) * page_size
     selected = pools[start : start + page_size]
     return Page(
-        items=[
-            RunnerPoolResponse(
-                id=view.pool.id,
-                name=view.pool.name,
-                runner_type=view.pool.runner_type,
-                network_zone=view.pool.network_zone,
-                labels=view.pool.labels,
-                max_concurrency=view.pool.max_concurrency,
-                enabled=view.pool.enabled,
-                runners=[RunnerResponse.model_validate(item) for item in view.runners],
-            )
-            for view in selected
-        ],
+        items=[_runner_pool_response(view) for view in selected],
         total=len(pools),
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/plugins/{plugin_id}", response_model=PluginResponse)
+async def get_plugin(
+    plugin_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> PluginResponse:
+    return PluginResponse.model_validate(
+        await CapabilityService(session).get_plugin(actor=current_user, plugin_id=plugin_id)
+    )
+
+
+@router.get("/runner-pools/{pool_id}", response_model=RunnerPoolResponse)
+async def get_runner_pool(
+    pool_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> RunnerPoolResponse:
+    view = await CapabilityService(session).get_runner_pool(actor=current_user, pool_id=pool_id)
+    return _runner_pool_response(view)
+
+
+def _runner_pool_response(view: RunnerPoolView) -> RunnerPoolResponse:
+    return RunnerPoolResponse(
+        id=view.pool.id,
+        name=view.pool.name,
+        runner_type=view.pool.runner_type,
+        network_zone=view.pool.network_zone,
+        labels=view.pool.labels,
+        max_concurrency=view.pool.max_concurrency,
+        enabled=view.pool.enabled,
+        runners=[RunnerResponse.model_validate(item) for item in view.runners],
     )
 
 

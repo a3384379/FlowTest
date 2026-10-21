@@ -1,7 +1,8 @@
 import userEvent from '@testing-library/user-event'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate, type NavigateFunction } from 'react-router-dom'
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -154,7 +155,7 @@ function mockWorkspace(viewer = false, otherCaseCount: number = 98) {
   return { pages, writes }
 }
 
-function renderWorkspace(initialEntry?: string) {
+function renderWorkspace(initialEntry?: string, onNavigate?: (navigate: NavigateFunction) => void) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <ConfigProvider theme={createIceTheme(true)}>
@@ -162,7 +163,7 @@ function renderWorkspace(initialEntry?: string) {
         <QueryClientProvider client={queryClient}>
           <ProjectTestProvider section="assets" initialEntry={initialEntry}>
             <TestAssetsPage />
-            <AssetLocation />
+            <AssetLocation onNavigate={onNavigate} />
           </ProjectTestProvider>
         </QueryClientProvider>
       </AntdApp>
@@ -341,6 +342,138 @@ it('runs the selected older case version directly without creating a plan', asyn
   expect(writes).not.toHaveBeenCalled()
 })
 
+it('keeps the new project run dialog intact when the previous project receipt arrives late', async () => {
+  mockWorkspace(false, 0)
+  const nextProject = { ...project, id: '00000000-0000-4000-8000-000000000019', name: '新项目' }
+  const nextWorkflow = { ...workflow, project_id: nextProject.id, id: 'next-workflow' }
+  const nextEnvironment = { ...environment, project_id: nextProject.id, id: 'next-environment' }
+  const nextCase = {
+    ...baseCase,
+    id: 'next-case',
+    project_id: nextProject.id,
+    name: '新项目用例',
+    folder_id: null,
+    draft_definition: {
+      ...baseCase.draft_definition,
+      workflow_id: nextWorkflow.id,
+      environment_id: nextEnvironment.id,
+    },
+  }
+  const nextRoot = `/api/v1/projects/${nextProject.id}`
+  let release!: () => void
+  server.use(
+    http.get('/api/v1/projects', () =>
+      HttpResponse.json({
+        items: [project, nextProject],
+        total: 2,
+        page: 1,
+        page_size: 100,
+      }),
+    ),
+    http.get(nextRoot, () => HttpResponse.json(nextProject)),
+    http.get(`${nextRoot}/*`, ({ request }) => {
+      const resource = new URL(request.url).pathname.slice(nextRoot.length)
+      if (resource === '/permissions')
+        return HttpResponse.json({
+          effective_role: 'owner',
+          capabilities: ['read', 'edit', 'execute'],
+          matrix: {},
+        })
+      if (resource === '/environments') return HttpResponse.json([nextEnvironment])
+      if (resource === '/workflows')
+        return HttpResponse.json({ items: [nextWorkflow], total: 1, page: 1, page_size: 100 })
+      if (resource === '/test-cases')
+        return HttpResponse.json({ items: [nextCase], total: 1, page: 1, page_size: 20 })
+      if (resource === '/test-suites')
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 20 })
+      if (resource.endsWith('/versions'))
+        return HttpResponse.json([
+          {
+            id: 'next-version',
+            test_case_id: nextCase.id,
+            version: 2,
+            definition: nextCase.draft_definition,
+            fingerprint: 'b'.repeat(64),
+            change_note: '',
+            created_by_id: user.id,
+            created_at: workflow.created_at,
+          },
+        ])
+      if (resource === '/test-assets/directory-counts')
+        return HttpResponse.json({
+          case_total: 1,
+          suite_total: 0,
+          published_case_total: 1,
+          unfiled_cases: 1,
+          unfiled_suites: 0,
+          folders: [],
+        })
+      return HttpResponse.json([])
+    }),
+    http.post(`${root}/test-cases/${baseCase.id}/runs`, async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return HttpResponse.json(
+        {
+          case_id: baseCase.id,
+          case_version: 2,
+          workflow_id: workflow.id,
+          workflow_version: 2,
+          execution_id: 'old-project-execution',
+          source: 'direct',
+          status: 'queued',
+          environment_id: environment.id,
+          started_at: workflow.created_at,
+          created_new_version: false,
+        },
+        { status: 202 },
+      )
+    }),
+  )
+  let navigate: NavigateFunction | undefined
+  const client = renderWorkspace(undefined, (value) => {
+    navigate = value
+  })
+  const firstRow = (await screen.findByText(baseCase.name)).closest('tr')!
+  const firstRun = within(firstRow).getByText('运行').closest('button')!
+  expect(firstRun).toHaveRole('button')
+  await waitFor(() => expect(firstRun).toBeEnabled())
+  fireEvent.click(firstRun)
+  const firstDialog = (
+    await screen.findByText(`运行测试用例：${baseCase.name}`)
+  ).closest<HTMLElement>('[role=dialog]')!
+  fireEvent.click(within(firstDialog).getByLabelText('运行已发布用例版本'))
+  const submit = within(firstDialog).getByRole('button', { name: '运行已发布版本' })
+  await waitFor(() => expect(submit).toBeEnabled())
+  fireEvent.click(submit)
+  await waitFor(() => expect(release).toBeDefined())
+  try {
+    expect(navigate).toBeDefined()
+    await act(async () => {
+      await navigate!(`/projects/${nextProject.id}/assets`)
+    })
+    const nextRow = (await screen.findByText(nextCase.name)).closest('tr')!
+    const nextRun = within(nextRow).getByText('运行').closest('button')!
+    expect(nextRun).toHaveRole('button')
+    await waitFor(() => expect(nextRun).toBeEnabled())
+    fireEvent.click(nextRun)
+    const nextDialog = (
+      await screen.findByText(`运行测试用例：${nextCase.name}`)
+    ).closest<HTMLElement>('[role=dialog]')!
+    await act(async () => release())
+    await waitFor(() => expect(client.isMutating()).toBe(0))
+    expect(nextDialog).toBeInTheDocument()
+    expect(screen.queryByText('运行已提交')).not.toBeInTheDocument()
+    expect(screen.getByTestId('asset-location')).toHaveAttribute(
+      'data-pathname',
+      `/projects/${nextProject.id}/assets`,
+    )
+  } finally {
+    await act(async () => release())
+  }
+})
+
 it('adds the selected fixed case version to an existing plan without executing it', async () => {
   const { writes } = mockWorkspace()
   const submitted = vi.fn()
@@ -385,10 +518,15 @@ it('adds the selected fixed case version to an existing plan without executing i
   expect(writes).not.toHaveBeenCalled()
 })
 
-function AssetLocation() {
+function AssetLocation({ onNavigate }: { onNavigate?: (navigate: NavigateFunction) => void }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    onNavigate?.(navigate)
+  }, [navigate, onNavigate])
   return (
-    <span hidden data-testid="asset-location">
-      {useLocation().search}
+    <span hidden data-testid="asset-location" data-pathname={location.pathname}>
+      {location.search}
     </span>
   )
 }

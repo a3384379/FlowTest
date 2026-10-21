@@ -95,7 +95,9 @@ test('S57 Context Inspector 展示当前证据并深链到既有 Flow Proposal',
   await expect(
     page.getByRole('cell', { name: 'flowtest-java-spring 1.0.0', exact: true }),
   ).toBeVisible()
-  await expect(page.getByRole('cell', { name: /^OrderStatus\// }).first()).toBeVisible()
+  await page.getByRole('tab', { name: '知识关系', exact: true }).click()
+  await expect(page.getByText(/^OrderStatus\//).first()).toBeVisible()
+  await page.getByRole('tab', { name: '关联提案', exact: true }).click()
   await expect(page.getByRole('cell', { name: 'S57 订单流程提案', exact: true })).toBeVisible()
 
   await page.getByRole('link', { name: /打开 Proposal/ }).click()

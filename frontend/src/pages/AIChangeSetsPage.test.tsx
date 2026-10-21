@@ -51,6 +51,248 @@ const detail: AIChangeSetDetail = {
 }
 
 describe('AIChangeSetsPage', () => {
+  it('paginates risk choices inside the dialog while keeping the selected risk binding', async () => {
+    handlers(detail)
+    let submitted: Record<string, unknown> | null = null
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        return HttpResponse.json({
+          items: [
+            {
+              id: page === 1 ? riskId : '00000000-0000-4000-8000-000000000277',
+              impact_run_id: impactId,
+              title: page === 1 ? '首屏风险证据' : '第二页风险证据',
+              score: 42,
+            },
+          ],
+          total: 21,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.post('/api/v1/ai/change-sets', async ({ request }) => {
+        submitted = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(detail)
+      }),
+    )
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '生成 Draft Change Set' })).toBeEnabled(),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '生成 Draft Change Set' }))
+    const title = await screen.findByText('生成 Draft Change Set', { selector: '.ant-modal-title' })
+    const dialog = title.closest('.ant-modal') as HTMLElement
+    fireEvent.change(within(dialog).getByLabelText('变更集名称'), {
+      target: { value: '跨页绑定验证' },
+    })
+    await userEvent.click(within(dialog).getByLabelText('发布风险证据'))
+    await userEvent.click(
+      await screen.findByText('首屏风险证据 · 风险 42', {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    await userEvent.click(within(dialog).getByTitle('2'))
+    await waitFor(() => expect(within(dialog).getByText('2')).toBeInTheDocument())
+    expect(within(dialog).getByText('首屏风险证据 · 风险 42')).toBeVisible()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }))
+    await waitFor(() =>
+      expect(submitted).toEqual({
+        project_id: project.id,
+        title: '跨页绑定验证',
+        release_risk_id: riskId,
+        impact_run_id: impactId,
+      }),
+    )
+  })
+
+  it('keeps failed review input visible with its trace and never retries a write', async () => {
+    handlers(detail)
+    let writes = 0
+    server.use(
+      http.post(`/api/v1/ai/change-sets/${changeSetId}/items/${item.id}/accept`, () => {
+        writes++
+        return HttpResponse.json(
+          {
+            error: {
+              code: 'AI_CHANGE_TARGET_CONFLICT',
+              message: '目标已变化',
+              trace_id: 'm22-trace',
+            },
+          },
+          { status: 409 },
+        )
+      }),
+    )
+    renderPage()
+    await screen.findByText('新增异常流程')
+    await userEvent.click(screen.getByRole('button', { name: '审核并接受' }))
+    const title = await screen.findByText('编辑并接受变更项', { selector: '.ant-modal-title' })
+    const dialog = title.closest('.ant-modal') as HTMLElement
+    fireEvent.change(within(dialog).getByLabelText('审核备注'), {
+      target: { value: '保留失败输入' },
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'OK' }))
+    expect(await within(dialog).findByText('目标已变化（Trace ID: m22-trace）')).toBeVisible()
+    expect(within(dialog).getByLabelText('审核备注')).toHaveValue('保留失败输入')
+    expect(writes).toBe(1)
+  })
+
+  it('shows the canonical draft result and review metadata without inventing unknown links', async () => {
+    handlers({
+      ...detail,
+      items: [
+        {
+          ...item,
+          review_status: 'accepted',
+          review_note: '已核验冻结证据',
+          reviewed_by_id: user.id,
+          reviewed_at: item.created_at,
+          materialized_resource_type: 'workflow',
+          materialized_resource_id: 'actual-draft',
+        },
+      ],
+    })
+    renderPage()
+    expect(await screen.findByRole('link', { name: '打开流程草稿' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/workflows?focus=actual-draft`,
+    )
+    expect(screen.getByText('已核验冻结证据')).toBeVisible()
+    expect(screen.queryByRole('button', { name: '审核并接受' })).not.toBeInTheDocument()
+  })
+
+  it('blocks creation and review when quality intelligence is disabled while showing history', async () => {
+    handlers(detail)
+    server.use(
+      http.get('/api/v1/v3/features', () =>
+        HttpResponse.json({ impact_engine: true, quality_intelligence: false }),
+      ),
+    )
+    renderPage()
+    await screen.findByText('新增异常流程')
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '生成 Draft Change Set' })).toBeDisabled(),
+    )
+    expect(screen.getByRole('button', { name: '审核并接受' })).toBeDisabled()
+    expect(screen.getByText('质量智能尚未启用，历史记录只读。')).toBeVisible()
+  })
+
+  it('shows frozen sources and target baseline without fetching the current asset', async () => {
+    const targetId = '00000000-0000-4000-8000-000000000270'
+    handlers({
+      ...detail,
+      source_snapshot: {
+        metadata: { release_risk: { id: riskId, score: 42, frozen: '原始固定风险' } },
+      },
+      review_baselines: [
+        {
+          target_type: 'workflow',
+          target_id: targetId,
+          snapshot_sha256: 'd'.repeat(64),
+          content: { name: '冻结基线流程', description: '原说明', definition: { nodes: [] } },
+          current_version: 1,
+          draft_revision: 3,
+          updated_at: item.created_at,
+          redaction_mode: 'off',
+          redaction_policy_version: 1,
+        },
+      ],
+      items: [
+        {
+          ...item,
+          action: 'update',
+          target_resource_id: targetId,
+          target_snapshot_sha256: 'd'.repeat(64),
+          proposed_content: { name: '拟修改流程', description: null },
+        },
+      ],
+    } as AIChangeSetDetail)
+    let currentReads = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows/${targetId}`, () => {
+        currentReads++
+        return HttpResponse.json({ name: '当前已漂移的流程' })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('固定来源证据')).toBeVisible()
+    expect(await screen.findByText('冻结目标基线')).toBeVisible()
+    expect(screen.getByText('冻结基线流程', { exact: true })).toBeVisible()
+    expect(screen.getByText('$.name', { exact: true })).toBeVisible()
+    expect(screen.queryByText('当前已漂移的流程')).not.toBeInTheDocument()
+    expect(currentReads).toBe(0)
+  })
+
+  it('protects a dirty review and preserves its note when cancelling discard', async () => {
+    handlers(detail)
+    renderPage()
+    await screen.findByText('新增异常流程')
+    await userEvent.click(screen.getByRole('button', { name: '审核并接受' }))
+    const title = await screen.findByText('编辑并接受变更项', { selector: '.ant-modal-title' })
+    const dialog = title.closest('.ant-modal') as HTMLElement
+    fireEvent.change(within(dialog).getByLabelText('审核备注'), {
+      target: { value: '不可静默丢弃' },
+    })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    const guardTitle = await screen.findByText('审核修改尚未保存', { selector: '.ant-modal-title' })
+    const guard = guardTitle.closest('.ant-modal') as HTMLElement
+    await userEvent.click(within(guard).getByRole('button', { name: '继续编辑' }))
+    expect(within(dialog).getByLabelText('审核备注')).toHaveValue('不可静默丢弃')
+  })
+
+  it('previews preserved test-case runtime values rather than reporting omitted fields as removed', async () => {
+    const targetId = '00000000-0000-4000-8000-000000000271'
+    const definition = {
+      workflow_id: 'workflow-original',
+      environment_id: 'environment-original',
+      runtime_variables: { region: 'frozen-case-region' },
+      runtime_headers: { 'X-Region': 'frozen-case-header' },
+    }
+    handlers({
+      ...detail,
+      review_baselines: [
+        {
+          target_type: 'test_case',
+          target_id: targetId,
+          snapshot_sha256: 'e'.repeat(64),
+          content: { name: '固定用例', description: '', definition, tags: [] },
+          current_version: 1,
+          draft_revision: null,
+          updated_at: item.created_at,
+          redaction_mode: 'off',
+          redaction_policy_version: 1,
+        },
+      ],
+      items: [
+        {
+          ...item,
+          item_type: 'test_case',
+          action: 'update',
+          target_resource_id: targetId,
+          target_snapshot_sha256: 'e'.repeat(64),
+          proposed_content: {
+            definition: { workflow_id: definition.workflow_id, environment_id: 'environment-next' },
+          },
+        },
+      ],
+    })
+    renderPage()
+    expect(await screen.findByText('$.definition.environment_id', { exact: true })).toBeVisible()
+    expect(
+      screen.queryByText('$.definition.runtime_variables', { exact: true }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('$.definition.runtime_headers', { exact: true }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('按更新规则合并的草稿预览'))
+    const preview = await screen.findByRole('region', { name: '按更新规则合并的草稿预览' })
+    expect(preview).toHaveTextContent('frozen-case-region')
+    expect(preview).toHaveTextContent('frozen-case-header')
+    expect(preview).toHaveTextContent('environment-next')
+    expect(screen.getByText(/接受时仍由服务端校验并规范化定义/)).toBeVisible()
+  })
+
   it('shows suggestions to viewers without allowing generation or item review', async () => {
     handlers(detail)
     let writes = 0
@@ -105,7 +347,7 @@ describe('AIChangeSetsPage', () => {
     expect(await screen.findByText('AI 生成功能尚未启用，可查看已有审核记录。')).toBeInTheDocument()
     expect(await screen.findByText('新增异常流程')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '生成 Draft Change Set' })).toBeDisabled()
-    await waitFor(() => expect(screen.getByRole('button', { name: '审核并接受' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '审核并接受' })).toBeDisabled())
     expect(evidenceRequests).toBe(0)
   })
 

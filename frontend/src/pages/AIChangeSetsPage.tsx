@@ -15,7 +15,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import type {
@@ -25,7 +25,20 @@ import type {
 } from '../features/ai/ai-change-set-service'
 import { useAIChangeSets } from '../features/ai/use-ai-change-sets'
 import { useProjectContext } from '../features/projects/use-project-context'
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace } from '../lib/api'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import AIDraftProtection from '../features/ai/AIDraftProtection'
+import {
+  AIChangeSource,
+  AIChangeBaseline,
+  AIChangeReviewReceipt,
+} from '../features/ai/AIChangeReviewEvidence'
+
+type ReviewSelection = {
+  changeSetId: string
+  item: AIChangeItem
+  decision: 'accept' | 'reject'
+}
 
 export default function AIChangeSetsPage() {
   const { projectId } = useProjectContext()
@@ -36,10 +49,11 @@ function AIChangeSetWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useAIChangeSets(searchParams.get('focus'))
   const [createOpen, setCreateOpen] = useState(false)
-  const [review, setReview] = useState<{
-    item: AIChangeItem
-    decision: 'accept' | 'reject'
-  } | null>(null)
+  const [review, setReview] = useRouteScopedState<ReviewSelection | null>(
+    state.projectId,
+    state.activeId,
+    null,
+  )
   const detail = state.detail.data
   return (
     <>
@@ -110,7 +124,14 @@ function AIChangeSetWorkspace() {
             extra={<Tag icon={<AuditOutlined />}>接受后只更新草稿</Tag>}
             loading={state.detail.isLoading}
           >
-            <ChangeSetDetail detail={detail} readOnly={!state.canEdit} onReview={setReview} />
+            <ChangeSetDetail
+              detail={detail}
+              readOnly={!state.canReview || state.reviewing}
+              onReview={(value) => {
+                state.clearReviewError()
+                if (detail) setReview({ ...value, changeSetId: detail.id })
+              }}
+            />
           </Card>
         </Col>
       </Row>
@@ -119,6 +140,7 @@ function AIChangeSetWorkspace() {
         open={createOpen}
         submitting={state.creating}
         risks={state.risks.data?.items ?? []}
+        riskQuery={state.risks}
         impacts={state.impacts.data?.items ?? []}
         onClose={() => setCreateOpen(false)}
         onCreate={async (input) => {
@@ -126,7 +148,9 @@ function AIChangeSetWorkspace() {
         }}
       />
       <ReviewChangeItemDialog
-        readOnly={!state.canEdit}
+        readOnly={!state.canReview}
+        detail={detail}
+        apiError={state.reviewError}
         value={review}
         submitting={state.reviewing}
         onClose={() => setReview(null)}
@@ -139,15 +163,7 @@ function AIChangeSetWorkspace() {
 }
 
 function AIChangeSetStatus({ state }: { state: ReturnType<typeof useAIChangeSets> }) {
-  const queries = [
-    state.status,
-    state.flags,
-    state.permissions,
-    state.changeSets,
-    state.detail,
-    state.impacts,
-    state.risks,
-  ]
+  const queries = [state.status, state.flags, state.permissions, state.detail]
   const failed = queries.filter((query) => query.isError)
   if (failed.length)
     return (
@@ -155,7 +171,7 @@ function AIChangeSetStatus({ state }: { state: ReturnType<typeof useAIChangeSets
         className="page-alert"
         showIcon
         type="error"
-        title={apiErrorMessage(failed[0].error)}
+        title={apiErrorWithTrace(failed[0].error)}
         action={
           <Button onClick={() => void Promise.all(failed.map((query) => query.refetch()))}>
             重试
@@ -170,6 +186,19 @@ function AIChangeSetStatus({ state }: { state: ReturnType<typeof useAIChangeSets
         showIcon
         type="info"
         title="AI 生成功能尚未启用，可查看已有审核记录。"
+      />
+    )
+  if (state.flags.data?.quality_intelligence === false)
+    return (
+      <Alert className="page-alert" showIcon type="info" title="质量智能尚未启用，历史记录只读。" />
+    )
+  if (state.flags.data?.impact_engine === false)
+    return (
+      <Alert
+        className="page-alert"
+        showIcon
+        type="info"
+        title="影响分析尚未启用，无法选择新的生成来源。"
       />
     )
   return null
@@ -187,13 +216,27 @@ function ChangeSetDetail({
   if (!detail) {
     return <Typography.Text type="secondary">请选择或生成一个 Draft Change Set。</Typography.Text>
   }
-  if (detail.status === 'generating') {
+  return (
+    <Flex vertical gap={16}>
+      <AIChangeSource detail={detail} projectId={detail.project_id} />
+      <ChangeSetContent detail={detail} readOnly={readOnly} onReview={onReview} />
+    </Flex>
+  )
+}
+function ChangeSetContent({
+  detail,
+  readOnly,
+  onReview,
+}: {
+  detail: AIChangeSetDetail
+  readOnly: boolean
+  onReview: (value: { item: AIChangeItem; decision: 'accept' | 'reject' }) => void
+}) {
+  if (detail.status === 'generating')
     return <Alert showIcon type="info" title="AI 正在生成结构化变更项，请稍候…" />
-  }
-  if (detail.status === 'failed') {
+  if (detail.status === 'failed')
     return <Alert showIcon type="error" title="AI Change Set 生成失败，请查看 AI 任务审计。" />
-  }
-  return <ChangeItems items={detail.items} readOnly={readOnly} onReview={onReview} />
+  return <ChangeItems detail={detail} readOnly={readOnly} onReview={onReview} />
 }
 
 function CreateChangeSetDialog({
@@ -201,6 +244,7 @@ function CreateChangeSetDialog({
   open,
   submitting,
   risks,
+  riskQuery,
   impacts,
   onClose,
   onCreate,
@@ -209,13 +253,17 @@ function CreateChangeSetDialog({
   open: boolean
   submitting: boolean
   risks: Array<{ id: string; impact_run_id: string; title: string; score: number }>
+  riskQuery: ReturnType<typeof useAIChangeSets>['risks']
   impacts: Array<{ id: string; title: string }>
   onClose: () => void
   onCreate: (input: Omit<AIChangeSetInput, 'project_id'>) => Promise<void>
 }) {
   const [form] = Form.useForm<Omit<AIChangeSetInput, 'project_id'>>()
   const riskId = Form.useWatch('release_risk_id', form)
-  const risk = risks.find((item) => item.id === riskId)
+  const [selectedRisk, setSelectedRisk] = useState<(typeof risks)[number] | null>(null)
+  const risk =
+    risks.find((item) => item.id === riskId) ?? (selectedRisk?.id === riskId ? selectedRisk : null)
+  const options = risk && !risks.some((item) => item.id === risk.id) ? [risk, ...risks] : risks
   return (
     <Modal
       title="生成 Draft Change Set"
@@ -234,6 +282,7 @@ function CreateChangeSetDialog({
         onValuesChange={(changed) => {
           if ('release_risk_id' in changed) {
             const selected = risks.find((item) => item.id === changed.release_risk_id)
+            setSelectedRisk(selected ?? null)
             form.setFieldValue('impact_run_id', selected?.impact_run_id)
           }
         }}
@@ -243,12 +292,16 @@ function CreateChangeSetDialog({
         </Form.Item>
         <Form.Item name="release_risk_id" label="发布风险证据" rules={[{ required: true }]}>
           <Select
-            options={risks.map((item) => ({
+            showSearch
+            optionFilterProp="label"
+            virtual={false}
+            options={options.map((item) => ({
               value: item.id,
               label: `${item.title} · 风险 ${item.score}`,
             }))}
           />
         </Form.Item>
+        <CatalogPagination query={riskQuery} label="可选风险" />
         <Form.Item name="impact_run_id" label="绑定影响分析" rules={[{ required: true }]}>
           <Select
             disabled
@@ -262,14 +315,15 @@ function CreateChangeSetDialog({
 }
 
 function ChangeItems({
-  items,
+  detail,
   readOnly,
   onReview,
 }: {
-  items: AIChangeItem[]
+  detail: AIChangeSetDetail
   readOnly: boolean
   onReview: (value: { item: AIChangeItem; decision: 'accept' | 'reject' }) => void
 }) {
+  const items = detail.items
   if (items.length === 0) {
     return <Typography.Text type="secondary">AI 没有给出可审核的变更项</Typography.Text>
   }
@@ -313,7 +367,10 @@ function ChangeItems({
             )
           }
         >
-          <pre className="code-preview">{JSON.stringify(item.proposed_content, null, 2)}</pre>
+          <Flex vertical gap={12}>
+            <AIChangeBaseline detail={detail} item={item} />
+            <AIChangeReviewReceipt item={item} projectId={detail.project_id} />
+          </Flex>
         </Card>
       ))}
     </Flex>
@@ -321,14 +378,18 @@ function ChangeItems({
 }
 
 function ReviewChangeItemDialog({
+  detail,
+  apiError,
   readOnly,
   value,
   submitting,
   onClose,
   onSubmit,
 }: {
+  detail: AIChangeSetDetail | undefined
+  apiError: string
   readOnly: boolean
-  value: { item: AIChangeItem; decision: 'accept' | 'reject' } | null
+  value: ReviewSelection | null
   submitting: boolean
   onClose: () => void
   onSubmit: (
@@ -338,11 +399,13 @@ function ReviewChangeItemDialog({
     note: string,
   ) => Promise<void>
 }) {
-  if (!value) return null
+  if (!value || detail?.id !== value.changeSetId) return null
   return (
     <ReviewChangeItemDialogContent
+      detail={detail}
+      apiError={apiError}
       readOnly={readOnly}
-      key={`${value.item.id}:${value.decision}`}
+      key={`${value.changeSetId}:${value.item.id}:${value.decision}`}
       value={value}
       submitting={submitting}
       onClose={onClose}
@@ -352,14 +415,18 @@ function ReviewChangeItemDialog({
 }
 
 function ReviewChangeItemDialogContent({
+  detail,
+  apiError,
   readOnly,
   value,
   submitting,
   onClose,
   onSubmit,
 }: {
+  detail: AIChangeSetDetail | undefined
+  apiError: string
   readOnly: boolean
-  value: { item: AIChangeItem; decision: 'accept' | 'reject' }
+  value: ReviewSelection
   submitting: boolean
   onClose: () => void
   onSubmit: (
@@ -371,60 +438,112 @@ function ReviewChangeItemDialogContent({
 }) {
   const originalContent = JSON.stringify(value.item.proposed_content)
   const [content, setContent] = useState(() => JSON.stringify(value.item.proposed_content, null, 2))
-  const [note, setNote] = useState('')
+  const [note, setNote] = useState(value.item.review_note)
   const [error, setError] = useState('')
+  const [discardOpen, setDiscardOpen] = useState(false)
+  const allowLeaveRef = useRef(false)
+  const dirty =
+    content !== JSON.stringify(value.item.proposed_content, null, 2) ||
+    note !== value.item.review_note
+  function requestClose() {
+    if (submitting) return
+    if (dirty) setDiscardOpen(true)
+    else onClose()
+  }
   return (
-    <Modal
-      title={value.decision === 'accept' ? '编辑并接受变更项' : '拒绝变更项'}
-      open
-      confirmLoading={submitting}
-      okButtonProps={{ disabled: readOnly }}
-      onCancel={onClose}
-      onOk={() => {
-        let parsed: Record<string, unknown> | undefined
-        if (value.decision === 'accept') {
-          try {
-            const candidate: unknown = JSON.parse(content)
-            if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-              throw new Error('内容必须是 JSON 对象')
-            }
-            parsed =
-              JSON.stringify(candidate) === originalContent
-                ? undefined
-                : (candidate as Record<string, unknown>)
-          } catch (parseError) {
-            setError(parseError instanceof Error ? parseError.message : 'JSON 格式无效')
-            return
-          }
-        }
-        void onSubmit(value.item, value.decision, parsed, note)
-      }}
-    >
-      {value.decision === 'accept' ? (
-        <>
-          <Typography.Paragraph type="secondary">
-            接受后只创建或更新草稿；不会发布或执行。
-          </Typography.Paragraph>
-          <Input.TextArea
-            aria-label="变更内容 JSON"
-            rows={14}
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-          />
-          {error ? <Typography.Text type="danger">{error}</Typography.Text> : null}
-        </>
-      ) : null}
-      <Input.TextArea
-        aria-label="审核备注"
-        rows={3}
-        maxLength={2000}
-        value={note}
-        placeholder="审核备注（可选）"
-        onChange={(event) => setNote(event.target.value)}
-        style={{ marginTop: 12 }}
+    <>
+      <AIDraftProtection
+        dirty={dirty || submitting}
+        allowLeaveRef={allowLeaveRef}
+        title="审核修改尚未保存"
+        description="离开会丢弃变更内容和备注；不会自动接受或拒绝。"
       />
-    </Modal>
+      <Modal
+        title="审核修改尚未保存"
+        open={discardOpen}
+        okText="放弃修改"
+        cancelText="继续编辑"
+        onOk={onClose}
+        onCancel={() => setDiscardOpen(false)}
+      >
+        关闭会丢弃本次修改，不会写入审核决定。
+      </Modal>
+      <Modal
+        title={value.decision === 'accept' ? '编辑并接受变更项' : '拒绝变更项'}
+        open
+        confirmLoading={submitting}
+        okButtonProps={{ disabled: readOnly }}
+        closable={!submitting}
+        maskClosable={false}
+        keyboard={!submitting}
+        onCancel={requestClose}
+        onOk={() => {
+          let parsed: Record<string, unknown> | undefined
+          if (value.decision === 'accept') {
+            try {
+              const candidate: unknown = JSON.parse(content)
+              if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+                throw new Error('内容必须是 JSON 对象')
+              }
+              parsed =
+                JSON.stringify(candidate) === originalContent
+                  ? undefined
+                  : (candidate as Record<string, unknown>)
+            } catch (parseError) {
+              setError(parseError instanceof Error ? parseError.message : 'JSON 格式无效')
+              return
+            }
+          }
+          void onSubmit(value.item, value.decision, parsed, note)
+        }}
+      >
+        {detail ? (
+          <Flex vertical gap={12} style={{ marginBottom: 16 }}>
+            <AIChangeSource detail={detail} projectId={detail.project_id} />
+            <AIChangeBaseline
+              detail={detail}
+              item={value.item}
+              proposed={readDraft(content, value.item.proposed_content)}
+            />
+          </Flex>
+        ) : null}
+        {apiError ? <Alert type="error" showIcon title={apiError} /> : null}
+        {value.decision === 'accept' ? (
+          <>
+            <Typography.Paragraph type="secondary">
+              接受后只创建或更新草稿；不会发布或执行。
+            </Typography.Paragraph>
+            <Input.TextArea
+              aria-label="变更内容 JSON"
+              rows={14}
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+            />
+            {error ? <Typography.Text type="danger">{error}</Typography.Text> : null}
+          </>
+        ) : null}
+        <Input.TextArea
+          aria-label="审核备注"
+          rows={3}
+          maxLength={2000}
+          value={note}
+          placeholder="审核备注（可选）"
+          onChange={(event) => setNote(event.target.value)}
+          style={{ marginTop: 12 }}
+        />
+      </Modal>
+    </>
   )
+}
+function readDraft(content: string, original: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(content)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : original
+  } catch {
+    return original
+  }
 }
 
 function statusLabel(value: string): string {

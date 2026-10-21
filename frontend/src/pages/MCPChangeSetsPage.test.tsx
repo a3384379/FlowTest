@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, Button } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { useNavigate } from 'react-router-dom'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { MCPChangeSet } from '../features/mcp/mcp-change-set-service'
 import ProjectTestProvider from '../test/ProjectTestProvider'
@@ -154,6 +155,7 @@ describe('MCPChangeSetsPage', () => {
               ...current.items[0],
               review_status: 'accepted',
               materialized_resource_id: '00000000-0000-4000-8000-000000009011',
+              materialized_resource_type: 'workflow',
             },
           ],
         }
@@ -260,7 +262,14 @@ describe('MCPChangeSetsPage', () => {
         current = {
           ...current,
           status: 'accepted',
-          items: [{ ...current.items[0], review_status: 'accepted' }],
+          items: [
+            {
+              ...current.items[0],
+              review_status: 'accepted',
+              materialized_resource_type: 'workflow',
+              materialized_resource_id: workflowId,
+            },
+          ],
         }
         return HttpResponse.json(envelope(current))
       }),
@@ -297,7 +306,14 @@ describe('MCPChangeSetsPage', () => {
         current = {
           ...current,
           status: 'accepted',
-          items: [{ ...current.items[0], review_status: 'accepted' }],
+          items: [
+            {
+              ...current.items[0],
+              review_status: 'accepted',
+              materialized_resource_type: 'test_plan',
+              materialized_resource_id: 'plan-1',
+            },
+          ],
         }
         return HttpResponse.json(envelope(current))
       }),
@@ -310,6 +326,469 @@ describe('MCPChangeSetsPage', () => {
     await browser.click(screen.getByRole('button', { name: '接受并物化' }))
     await waitFor(() => expect(reviewed).toBe(true))
     expect(await screen.findByText('已接受')).toBeVisible()
+  })
+
+  it('shows envelope warnings, copyable trace, confidence and approval evidence', async () => {
+    const current = {
+      ...changeSet,
+      approval: {
+        id: 'approval-1',
+        decision: 'approved',
+        approved_by_id: user.id,
+        approved_at: '2026-10-22T01:02:03Z',
+      },
+      governance: {
+        ...changeSet.governance,
+        reason_codes: ['low_confidence_assertion_review', 'future_reason'],
+      },
+    }
+    server.use(
+      http.get(`/api/v1/mcp/write/change-sets/${changeSetId}`, () =>
+        HttpResponse.json({
+          ...envelope(current),
+          warnings: ['已有警告必须在审核前可见'],
+          trace_id: 'mcp-trace-exact',
+        }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByText('已有警告必须在审核前可见')).toBeVisible()
+    expect(screen.getByText('mcp-trace-exact')).toBeVisible()
+    expect(screen.getByText('90%')).toBeVisible()
+    expect(screen.getByText(/future_reason/)).toBeVisible()
+    expect(screen.getByText('approval-1')).toBeVisible()
+    expect(screen.getByText('2026-10-22T01:02:03Z')).toBeVisible()
+    const browser = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    await browser.click(screen.getByRole('button', { name: '复制 Trace ID' }))
+    expect(copy).toHaveBeenCalledWith('mcp-trace-exact')
+  })
+
+  it('shows fixed plan actions and explicitly identifies missing before environment and retry', async () => {
+    handlers(() => ({
+      ...changeSet,
+      items: [
+        {
+          ...changeSet.items[0],
+          proposed_content: {
+            test_plan_id: 'plan-precise',
+            rationale: '补充支付回归',
+            targets: [
+              {
+                target_type: 'workflow',
+                target_id: 'workflow-precise',
+                target_version: 5,
+                workflow_version: 5,
+                environment_id: 'environment-new',
+                max_retries: 2,
+                runtime_variables: { tenant: 'blue' },
+                runtime_headers: {},
+              },
+            ],
+            target_actions: [
+              {
+                target_type: 'workflow',
+                target_id: 'workflow-precise',
+                action: 'update',
+                current_version: 4,
+                requested_version: 5,
+                current_fingerprint: 'old-fingerprint',
+                requested_fingerprint: 'new-fingerprint',
+                reason: '目标版本变化',
+              },
+            ],
+            unpublished_dependencies: ['待发布依赖'],
+          },
+        },
+      ],
+    }))
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByText('测试计划更新预览')).toBeVisible()
+    expect(screen.getByText('environment-new')).toBeVisible()
+    expect(screen.getByText('4 → 5')).toBeVisible()
+    expect(screen.getByText('old-fingerprint')).toBeVisible()
+    expect(screen.getByText('new-fingerprint')).toBeVisible()
+    expect(screen.getByText(/未保存原环境、重试及运行参数/)).toBeVisible()
+    expect(screen.getByText('待发布依赖')).toBeVisible()
+    expect(screen.getByText('补充支付回归')).toBeVisible()
+  })
+
+  it('previews a test case as its fixed workflow and environment without invented assertions', async () => {
+    handlers(() => ({
+      ...changeSet,
+      items: [
+        {
+          ...changeSet.items[0],
+          item_type: 'test_case',
+          action: 'create',
+          proposed_content: {
+            name: '支付测试用例',
+            description: '真实提案说明',
+            tags: ['smoke'],
+            definition: {
+              workflow_id: 'workflow-fixed',
+              workflow_version: null,
+              environment_id: 'environment-fixed',
+              runtime_variables: { customer: 'authorized@example.com' },
+              runtime_headers: {},
+            },
+          },
+        },
+      ],
+    }))
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByText('测试用例预览')).toBeVisible()
+    expect(screen.getByText('未固定，发布时需确认')).toBeVisible()
+    expect(screen.getByText('environment-fixed')).toBeVisible()
+    expect(screen.getByText(/断言沿用所引用工作流/)).toBeVisible()
+  })
+
+  it('keeps high-risk materialization disabled when a stored approval is rejected', async () => {
+    handlers(() => ({
+      ...changeSet,
+      governance: { ...changeSet.governance, manual_approval_required: true },
+      approval: {
+        id: 'rejected-approval',
+        decision: 'rejected',
+        approved_by_id: user.id,
+        approved_at: '2026-10-22T01:00:00Z',
+      },
+    }))
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByRole('button', { name: '接受并物化' })).toBeDisabled()
+    expect(screen.getByText(/审批尚未通过/)).toBeVisible()
+  })
+
+  it('opens real materialized case and plan objects using their returned result types', async () => {
+    const accepted = {
+      ...changeSet,
+      status: 'accepted' as const,
+      items: [
+        {
+          ...changeSet.items[0],
+          id: 'case-result-item',
+          item_type: 'test_case' as const,
+          review_status: 'accepted' as const,
+          materialized_resource_type: 'test_case',
+          materialized_resource_id: 'case-result',
+          proposed_content: {},
+        },
+        {
+          ...changeSet.items[0],
+          id: 'plan-result-item',
+          review_status: 'accepted' as const,
+          materialized_resource_type: 'test_plan',
+          materialized_resource_id: 'plan-result',
+        },
+      ],
+    }
+    handlers(() => accepted)
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    expect(await screen.findByRole('link', { name: '查看物化测试用例' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/assets?type=case&focus=case-result&version=draft`,
+    )
+    expect(screen.getByRole('link', { name: '查看更新后的计划' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/tasks?focus=plan-result`,
+    )
+  })
+
+  it('opens the saved design through an exact read instead of inventing a TestEngineering URL', async () => {
+    const savedId = 'saved-design-id'
+    const designItem = {
+      ...changeSet.items[0],
+      item_type: 'test_design' as const,
+      action: 'create' as const,
+      review_status: 'accepted' as const,
+      materialized_resource_type: 'test_design',
+      materialized_resource_id: savedId,
+      proposed_content: {
+        intent: { key: 'proposal', objective: '原始提案内容', acceptance_criteria: [] },
+        oracles: [],
+        scenarios: [],
+        coverage: { entries: [] },
+        evidence_refs: [],
+        warnings: [],
+        review_requirements: [],
+      },
+    }
+    handlers(() => ({ ...changeSet, items: [designItem] }))
+    let reads = 0
+    server.use(
+      http.get(
+        `/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/materialized-design`,
+        () => {
+          reads += 1
+          return HttpResponse.json({
+            id: savedId,
+            project_id: project.id,
+            source_change_set_id: changeSetId,
+            name: '已保存设计',
+            status: 'approved',
+            fingerprint: 'stored-fingerprint',
+            reviewed_by_id: user.id,
+            reviewed_at: '2026-10-22T01:00:00Z',
+            design: {
+              ...designItem.proposed_content,
+              intent: {
+                key: 'saved',
+                objective: '数据库中实际保存的设计',
+                acceptance_criteria: ['保存后的验收要求'],
+              },
+            },
+          })
+        },
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    await userEvent.click(await screen.findByRole('button', { name: '查看已物化测试设计' }))
+    const drawer = screen.getByRole('dialog', { name: '已物化测试设计（只读）' })
+    expect(await within(drawer).findByText('数据库中实际保存的设计')).toBeVisible()
+    expect(within(drawer).queryByText('原始提案内容')).not.toBeInTheDocument()
+    expect(within(drawer).getByText(savedId)).toBeVisible()
+    expect(screen.queryByRole('link', { name: /测试设计/ })).not.toBeInTheDocument()
+    expect(reads).toBe(1)
+  })
+
+  it('disables review after cached evidence or permissions fail to refresh', async () => {
+    handlers(() => changeSet)
+    const view = renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    const accept = await screen.findByRole('button', { name: '接受并物化' })
+    expect(accept).toBeEnabled()
+    server.use(
+      http.get(`/api/v1/mcp/write/change-sets/${changeSetId}`, () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '证据暂不可用', trace_id: 'mcp-read-stale' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: ['mcp-change-set'] })
+    })
+    expect(await screen.findByText(/保留的审核证据可能过期/)).toBeVisible()
+    expect(accept).toBeDisabled()
+  })
+
+  it('keeps a revision conflict visible without marking any item accepted', async () => {
+    handlers(() => changeSet)
+    server.use(
+      http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/accept`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'TEST_PLAN_SUGGESTION_STALE',
+              message: '计划目标已变化，整个动作已拒绝',
+              trace_id: 'mcp-conflict-trace',
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    await userEvent.click(await screen.findByRole('button', { name: '接受并物化' }))
+    expect(await screen.findByText('审核结果未确认')).toBeVisible()
+    expect(screen.getByText('Trace ID: mcp-conflict-trace')).toBeVisible()
+    expect(screen.queryByText('已接受')).not.toBeInTheDocument()
+  })
+
+  it('does not apply an old review receipt or success notice to another project', async () => {
+    handlers(() => changeSet)
+    let finish: (response: Response) => void = () => undefined
+    let called = false
+    const sibling = { ...project, id: '00000000-0000-4000-8000-000000009099', name: '另一个项目' }
+    const otherChange = '00000000-0000-4000-8000-000000009088'
+    server.use(
+      http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/accept`, () => {
+        called = true
+        return new Promise<Response>((resolve) => {
+          finish = resolve
+        })
+      }),
+      http.get(`/api/v1/mcp/write/change-sets/${otherChange}`, () =>
+        HttpResponse.json(
+          envelope({
+            ...changeSet,
+            id: otherChange,
+            project_id: sibling.id,
+            title: '另一个项目的审核',
+            items: [{ ...changeSet.items[0], id: 'other-item' }],
+          }),
+        ),
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`, [project, sibling])
+    await userEvent.click(await screen.findByRole('button', { name: '接受并物化' }))
+    await waitFor(() => expect(called).toBe(true))
+    await userEvent.click(screen.getByRole('button', { name: '打开另一个项目提案' }))
+    expect(await screen.findByText('另一个项目的审核')).toBeVisible()
+    await act(async () => {
+      finish(
+        HttpResponse.json(
+          envelope({
+            ...changeSet,
+            status: 'accepted',
+            items: [
+              {
+                ...changeSet.items[0],
+                review_status: 'accepted',
+                materialized_resource_type: 'test_plan',
+                materialized_resource_id: 'old-plan',
+              },
+            ],
+          }),
+        ),
+      )
+    })
+    expect(screen.queryByText('变更项已接受并物化')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看更新后的计划' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '接受并物化' })).toBeEnabled()
+  })
+
+  it('blocks review if a previously loaded project permission fails to refresh', async () => {
+    handlers(() => changeSet)
+    const view = renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    const accept = await screen.findByRole('button', { name: '接受并物化' })
+    expect(accept).toBeEnabled()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'UNAVAILABLE',
+              message: '权限暂不可用',
+              trace_id: 'mcp-permission-stale',
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: ['project-permissions'] })
+    })
+    expect(await screen.findByText('权限暂不可用')).toBeVisible()
+    expect(accept).toBeDisabled()
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+  })
+
+  it('blocks other review actions while manual approval is in progress', async () => {
+    handlers(() => ({
+      ...changeSet,
+      governance: { ...changeSet.governance, manual_approval_required: true },
+    }))
+    let finish: (response: Response) => void = () => undefined
+    server.use(
+      http.post(
+        `/api/v1/mcp/write/change-sets/${changeSetId}/approve`,
+        () =>
+          new Promise<Response>((resolve) => {
+            finish = resolve
+          }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    await userEvent.click(await screen.findByRole('button', { name: '批准变更集' }))
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '接受并物化' })).toBeDisabled()
+    await act(async () => {
+      finish(
+        HttpResponse.json(
+          envelope({
+            ...changeSet,
+            approval: {
+              id: 'approval-late',
+              decision: 'approved',
+              approved_by_id: user.id,
+              approved_at: '2026-10-22T02:00:00Z',
+            },
+          }),
+        ),
+      )
+    })
+  })
+
+  it.each([
+    { status: 'pending' as const, resourceType: 'workflow' },
+    { status: 'accepted' as const, resourceType: 'test_case' },
+  ])(
+    'does not link a workflow result with $status review and $resourceType type',
+    async ({ status, resourceType }) => {
+      handlers(() => ({
+        ...changeSet,
+        items: [
+          {
+            ...changeSet.items[0],
+            item_type: 'workflow',
+            action: 'create',
+            review_status: status,
+            proposed_content: { name: '结果绑定反例', definition: workflowDefinition },
+            materialized_resource_id: 'wrong-or-pending-id',
+            materialized_resource_type: resourceType,
+          },
+        ],
+      }))
+      renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+      await screen.findByText('结果绑定反例')
+      expect(screen.queryByRole('link', { name: '查看已创建草稿' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: '查看物化工作流' })).not.toBeInTheDocument()
+      if (status === 'accepted')
+        expect(screen.getByText('物化结果类型与变更项不匹配，无法提供安全定位')).toBeVisible()
+    },
+  )
+
+  it.each(['missing-item', 'pending-item', 'wrong-result-type'])(
+    'does not claim materialization for an inconsistent %s receipt',
+    async (kind) => {
+      handlers(() => changeSet)
+      server.use(
+        http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/items/${itemId}/accept`, () =>
+          HttpResponse.json(
+            envelope({
+              ...changeSet,
+              items:
+                kind === 'missing-item'
+                  ? []
+                  : [
+                      {
+                        ...changeSet.items[0],
+                        review_status: kind === 'pending-item' ? 'pending' : 'accepted',
+                        materialized_resource_type: 'test_case',
+                        materialized_resource_id: 'wrong-result',
+                      },
+                    ],
+            }),
+          ),
+        ),
+      )
+      renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+      await userEvent.click(await screen.findByRole('button', { name: '接受并物化' }))
+      expect(await screen.findByText('审核结果未确认')).toBeVisible()
+      expect(screen.queryByText('变更项已接受并物化')).not.toBeInTheDocument()
+      expect(screen.queryByText('已接受')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '重新读取变更集' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: '接受并物化' })).toBeDisabled()
+    },
+  )
+
+  it('does not claim approval when the receipt has no approved decision', async () => {
+    const current = {
+      ...changeSet,
+      governance: { ...changeSet.governance, manual_approval_required: true },
+    }
+    handlers(() => current)
+    server.use(
+      http.post(`/api/v1/mcp/write/change-sets/${changeSetId}/approve`, () =>
+        HttpResponse.json(envelope(current)),
+      ),
+    )
+    renderPage(`/projects/${project.id}/mcp-changes?focus=${changeSetId}`)
+    await userEvent.click(await screen.findByRole('button', { name: '批准变更集' }))
+    expect(await screen.findByText('审核结果未确认')).toBeVisible()
+    expect(screen.queryByText('MCP 变更集已完成人工批准')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '接受并物化' })).toBeDisabled()
   })
 
   it('requires explicit approval before accepting a high-risk proposal', async () => {
@@ -364,22 +843,39 @@ function envelope(data: MCPChangeSet) {
   return { data, warnings: [], trace_id: 'test-trace' }
 }
 
-function renderPage(initialEntry: string) {
+function renderPage(initialEntry: string, projects = [project]) {
   server.use(
     http.get('/api/v1/projects', () =>
-      HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      HttpResponse.json({ items: projects, total: projects.length, page: 1, page_size: 100 }),
     ),
   )
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <ProjectTestProvider section="mcp-changes" initialEntry={initialEntry}>
           <MCPChangeSetsPage />
+          <NavigationProbe />
         </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
+  )
+  return { ...view, queryClient }
+}
+
+function NavigationProbe() {
+  const navigate = useNavigate()
+  return (
+    <Button
+      onClick={() =>
+        navigate(
+          '/projects/00000000-0000-4000-8000-000000009099/mcp-changes?focus=00000000-0000-4000-8000-000000009088',
+        )
+      }
+    >
+      打开另一个项目提案
+    </Button>
   )
 }

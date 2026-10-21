@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -67,17 +67,32 @@ describe('AIAssistantPage', () => {
         return HttpResponse.json({})
       }),
     )
-    renderPage('viewer')
-    expect(await screen.findByText(suggestion.title)).toBeVisible()
-    expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
-    expect(screen.getByRole('switch', { name: '允许提交脱敏样本' })).toBeDisabled()
+    const page = renderPage('viewer')
+    const browser = userEvent.setup()
+    const title = await screen.findByText(suggestion.title)
+    expect(title).toBeVisible()
+    const actions = within(title.closest('tr')!)
+    const header = within(page.container.querySelector<HTMLElement>('.page-heading')!)
+    expect(header.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
+    const sharing = screen.getByLabelText('允许 Owner 提交样本')
+    expect(sharing).toHaveRole('switch')
+    expect(sharing).toBeVisible()
+    expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    expect(sharing.closest('[aria-hidden="true"]')).toBeNull()
+    expect(sharing).toBeDisabled()
     for (const name of [/接受/, /拒绝/]) {
-      const button = screen.getByRole('button', { name })
+      const button = actions.getByRole('button', { name })
       expect(button).toBeDisabled()
-      await userEvent.click(button)
+      await browser.click(button)
     }
     expect(writes).toBe(0)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await browser.click(actions.getByRole('button', { name: '查看' }))
+    const dialog = await screen.findByRole('dialog', { name: '只读建议' })
+    await waitFor(() => expect(dialog).toBeVisible())
+    expect(within(dialog).getByLabelText('审核备注')).toHaveAttribute('readonly')
+    expect(within(dialog).queryByRole('button', { name: '确认接受' })).not.toBeInTheDocument()
+    expect(writes).toBe(0)
   })
 
   it('reports selected-job status errors and refreshes suggestions after retry', async () => {
@@ -148,7 +163,7 @@ describe('AIAssistantPage', () => {
     expect(await screen.findByText('AI 助手当前关闭')).toBeVisible()
     expect(screen.getByText(/不会影响接口、Workflow 或计划运行/)).toBeVisible()
     expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
-    expect(screen.getByRole('switch', { name: '允许提交脱敏样本' })).toBeDisabled()
+    expect(screen.getByRole('switch', { name: '允许 Owner 提交样本' })).toBeDisabled()
   })
 
   it('requires explicit human review and sends edited content only after acceptance', async () => {
@@ -187,21 +202,31 @@ describe('AIAssistantPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
-    expect(await screen.findByText('校验成功状态码')).toBeVisible()
+    const title = await screen.findByText('校验成功状态码')
+    expect(title).toBeVisible()
+    const actions = within(title.closest('tr')!)
     expect(screen.getByText('模型：flowtest-eval-model')).toBeVisible()
-    await browser.click(screen.getByRole('switch', { name: '允许提交脱敏样本' }))
+    const sharing = screen.getByLabelText('允许 Owner 提交样本')
+    expect(sharing).toHaveRole('switch')
+    expect(sharing).toBeVisible()
+    expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    expect(sharing.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(sharing)
     await waitFor(() => expect(sharingEnabled).toBe(true))
 
-    await browser.click(screen.getByRole('button', { name: /接受/ }))
-    expect(screen.getByRole('dialog', { name: '接受并生成草稿' })).toBeInTheDocument()
-    const content = screen.getByLabelText('建议内容')
+    await browser.click(actions.getByRole('button', { name: /接受/ }))
+    const dialog = screen.getByRole('dialog', { name: '接受建议' })
+    expect(dialog).toBeInTheDocument()
+    await browser.click(within(dialog).getByRole('tab', { name: '高级 JSON' }))
+    const content = within(dialog).getByLabelText('建议内容')
     fireEvent.change(content, {
       target: {
         value: JSON.stringify({ expression: 'status_code', operator: 'equals', expected: 201 }),
       },
     })
-    await browser.type(screen.getByLabelText('审核备注'), '人工确认')
-    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await browser.click(within(dialog).getByLabelText('审核备注'))
+    await browser.paste('人工确认')
+    await browser.click(within(dialog).getByRole('button', { name: '确认接受' }))
     await waitFor(() =>
       expect(reviewed).toEqual({
         content: { expression: 'status_code', operator: 'equals', expected: 201 },
@@ -213,7 +238,7 @@ describe('AIAssistantPage', () => {
   it('supports explicit rejection and blocks malformed acceptance edits', async () => {
     let rejected: unknown
     let acceptRequests = 0
-    const failedJob = { ...job, id: `${job.id.slice(0, -1)}3`, status: 'failed' as const }
+    const second = { ...suggestion, id: 'second-suggestion', title: '另一条状态码建议' }
     server.use(
       http.get('/api/v1/ai/status', () =>
         HttpResponse.json({
@@ -223,16 +248,16 @@ describe('AIAssistantPage', () => {
         }),
       ),
       http.get('/api/v1/ai/jobs', () =>
-        HttpResponse.json({ items: [failedJob], total: 1, page: 1, page_size: 50 }),
+        HttpResponse.json({ items: [job], total: 1, page: 1, page_size: 50 }),
       ),
-      http.get(`/api/v1/ai/jobs/${failedJob.id}/suggestions`, () =>
-        HttpResponse.json([{ ...suggestion, job_id: failedJob.id }]),
+      http.get(`/api/v1/ai/jobs/${job.id}/suggestions`, () =>
+        HttpResponse.json([suggestion, second]),
       ),
       http.post(`/api/v1/ai/suggestions/${suggestion.id}/reject`, async ({ request }) => {
         rejected = await request.json()
         return HttpResponse.json({ ...suggestion, review_status: 'rejected' })
       }),
-      http.post(`/api/v1/ai/suggestions/${suggestion.id}/accept`, () => {
+      http.post(`/api/v1/ai/suggestions/${second.id}/accept`, () => {
         acceptRequests += 1
         return HttpResponse.json({ ...suggestion, review_status: 'accepted' })
       }),
@@ -240,18 +265,32 @@ describe('AIAssistantPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
-    expect(await screen.findByText('校验成功状态码')).toBeVisible()
-    expect(screen.getByText('failed')).toBeVisible()
-    await browser.click(screen.getByRole('button', { name: /拒绝/ }))
-    expect(screen.getByRole('dialog', { name: '拒绝建议' })).toBeInTheDocument()
-    await browser.type(screen.getByLabelText('审核备注'), '人工拒绝')
-    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    const firstTitle = await screen.findByText('校验成功状态码')
+    expect(firstTitle).toBeVisible()
+    expect(screen.getByText('completed')).toBeVisible()
+    await browser.click(within(firstTitle.closest('tr')!).getByRole('button', { name: /拒绝/ }))
+    const rejectionDialog = screen.getByRole('dialog', { name: '拒绝建议' })
+    expect(rejectionDialog).toBeInTheDocument()
+    await browser.click(within(rejectionDialog).getByLabelText('审核备注'))
+    await browser.paste('人工拒绝')
+    await browser.click(within(rejectionDialog).getByRole('button', { name: '确认拒绝' }))
     await waitFor(() => expect(rejected).toEqual({ note: '人工拒绝' }))
 
-    await browser.click(screen.getByRole('button', { name: /接受/ }))
-    fireEvent.change(screen.getByLabelText('建议内容'), { target: { value: '[]' } })
-    await browser.click(screen.getByRole('button', { name: 'OK' }))
-    expect(await screen.findByText('建议内容必须是 JSON 对象')).toBeInTheDocument()
+    const reviewedDialog = await screen.findByRole('dialog', { name: '已审核建议' })
+    await browser.click(within(reviewedDialog).getByRole('button', { name: /关\s*闭/ }))
+    await waitFor(() => expect(reviewedDialog).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const secondTitle = screen.getByText('另一条状态码建议')
+    await browser.click(within(secondTitle.closest('tr')!).getByRole('button', { name: /接受/ }))
+    const acceptanceDialog = screen.getByRole('dialog', { name: '接受建议' })
+    await browser.click(within(acceptanceDialog).getByRole('tab', { name: '高级 JSON' }))
+    fireEvent.change(within(acceptanceDialog).getByLabelText('建议内容'), {
+      target: { value: '[]' },
+    })
+    await browser.click(within(acceptanceDialog).getByRole('button', { name: '确认接受' }))
+    expect(
+      await within(acceptanceDialog).findByText('建议内容必须是 JSON 对象'),
+    ).toBeInTheDocument()
     expect(acceptRequests).toBe(0)
   })
 
@@ -282,10 +321,17 @@ describe('AIAssistantPage', () => {
     expect(screen.getByText('pending')).toBeVisible()
     await browser.click(screen.getByRole('button', { name: /新建 AI 任务/ }))
     expect(screen.getByRole('dialog', { name: '新建 AI 建议任务' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('脱敏样本（Owner 显式开启）'), {
+    await browser.click(screen.getByRole('button', { name: /高级 JSON 材料/ }))
+    fireEvent.change(screen.getByLabelText('契约 Schema JSON（可选）'), {
+      target: { value: '{"openapi":"3.1.0","paths":{}}' },
+    })
+    await browser.click(screen.getByRole('checkbox', { name: '本次提交样本（Owner 显式确认）' }))
+    fireEvent.change(screen.getByLabelText('本次提交样本 JSON'), {
       target: { value: '{"status":500}' },
     })
-    await browser.click(screen.getByRole('button', { name: 'OK' }))
+    await browser.click(screen.getByRole('button', { name: '预览提交材料' }))
+    expect(created).toBeUndefined()
+    await browser.click(screen.getByRole('button', { name: '确认提交任务' }))
     await waitFor(() =>
       expect(created).toEqual({
         project_id: project.id,
@@ -315,12 +361,14 @@ function renderPage(role: 'owner' | 'viewer' = 'owner') {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="ai">
-          <AIAssistantPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="ai">
+            <AIAssistantPage />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
 }

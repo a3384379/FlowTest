@@ -45,6 +45,7 @@ from app.schemas.test_design import (
     MCPControlledWriteEnvelope,
     MCPControlledWriteReview,
     MCPManualApprovalCreate,
+    MCPMaterializedDesignResponse,
     MCPTestCaseDraft,
 )
 from app.schemas.workflows import WorkflowControlBlockInsert
@@ -203,6 +204,33 @@ class MCPControlledWriteService:
             approval=approval,
             confidence=_governance_confidence(governance),
             warnings=_warnings_from_snapshot(change_set),
+        )
+
+    async def materialized_design(
+        self, *, actor: User, change_set_id: UUID, item_id: UUID
+    ) -> MCPMaterializedDesignResponse:
+        change_set = await self._get_change_set(change_set_id)
+        await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=False)
+        items = await self._change_sets.list_items(change_set.id)
+        item = next((candidate for candidate in items if candidate.id == item_id), None)
+        design_id = _materialized_design_id(item)
+        design = await self._session.get(TestDesign, design_id)
+        if (
+            design is None
+            or design.project_id != change_set.project_id
+            or design.source_change_set_id != change_set.id
+        ):
+            raise _materialized_design_not_found()
+        return MCPMaterializedDesignResponse(
+            id=design.id,
+            project_id=design.project_id,
+            name=design.name,
+            status=design.status,
+            fingerprint=design.fingerprint,
+            source_change_set_id=change_set.id,
+            reviewed_by_id=design.reviewed_by_id,
+            reviewed_at=design.reviewed_at,
+            design=_materialized_design_document(design),
         )
 
     async def control_block_preview(
@@ -839,3 +867,41 @@ def _warnings_from_snapshot(change_set: AIChangeSet) -> list[str]:
 
 def _not_found() -> AppError:
     return AppError(code="MCP_CHANGE_SET_NOT_FOUND", message="受控变更集不存在", status_code=404)
+
+
+def _materialized_design_id(item: AIChangeItem | None) -> UUID:
+    if (
+        item is None
+        or item.item_type != "test_design"
+        or item.review_status != "accepted"
+        or item.materialized_resource_type != "test_design"
+        or item.materialized_resource_id is None
+    ):
+        raise _materialized_design_not_found()
+    return item.materialized_resource_id
+
+
+def _materialized_design_not_found() -> AppError:
+    return AppError(
+        code="MCP_MATERIALIZED_DESIGN_NOT_FOUND",
+        message="该变更项没有可读取的已物化测试设计",
+        status_code=404,
+    )
+
+
+def _materialized_design_document(design: TestDesign) -> TestDesignDocument:
+    return TestDesignDocument.model_validate(
+        {
+            "intent": design.intent,
+            "knowledge_graph": design.knowledge_graph,
+            "state_model": design.state_model or None,
+            "scenarios": design.scenarios,
+            "oracles": design.oracles,
+            "coverage": design.coverage,
+            "evidence_refs": design.evidence_refs,
+            "warnings": design.warnings,
+            "confidence": design.confidence,
+            "review_requirements": design.review_requirements,
+            "test_case_refs": design.test_case_refs,
+        }
+    )

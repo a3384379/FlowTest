@@ -13,10 +13,47 @@ from app.schemas.ai import (
     AISuggestionResponse,
     AISuggestionReviewRequest,
 )
+from app.schemas.ai_sources import AIPublicSource, AISourceKind, AISourceSummary
 from app.schemas.common import Page
 from app.services.ai import AIJobService
+from app.services.ai_sources import AISourceService
 
 router = APIRouter(prefix="/ai")
+
+
+@router.get("/projects/{project_id}/sources", response_model=Page[AISourceSummary])
+async def list_public_ai_sources(
+    project_id: UUID,
+    kind: AISourceKind,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
+) -> Page[AISourceSummary]:
+    items, total = await AISourceService(session).list_sources(
+        actor=current_user,
+        project_id=project_id,
+        kind=kind,
+        page=page,
+        page_size=page_size,
+        search=search,
+    )
+    return Page(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/projects/{project_id}/sources/{kind}/{source_id}", response_model=AIPublicSource)
+async def read_public_ai_source(
+    project_id: UUID,
+    kind: AISourceKind,
+    source_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+    version: int | None = Query(default=None, ge=1),
+) -> AIPublicSource:
+    return await AISourceService(session).read_source(
+        actor=current_user, project_id=project_id, kind=kind, source_id=source_id, version=version
+    )
 
 
 @router.get("/status", response_model=AIStatusResponse)

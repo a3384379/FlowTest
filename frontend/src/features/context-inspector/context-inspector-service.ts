@@ -152,5 +152,12 @@ export async function listContexts(
 }
 
 export async function getContext(projectId: string, contextId: string): Promise<ContextDetail> {
-  return (await apiClient.get<ContextDetail>(`/projects/${projectId}/contexts/${contextId}`)).data
+  const detail = (
+    await apiClient.get<ContextDetail>(
+      `/projects/${projectId}/contexts/${encodeURIComponent(contextId)}`,
+    )
+  ).data
+  if (detail.project_id !== projectId || detail.id !== contextId)
+    throw new Error('上下文响应项目或ID不匹配')
+  return detail
 }

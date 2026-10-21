@@ -103,26 +103,55 @@ export async function getV3FeatureFlags(): Promise<V3FeatureFlags> {
   return (await apiClient.get<V3FeatureFlags>('/v3/features')).data
 }
 
-export async function listCapabilities(): Promise<Page<Capability>> {
+export async function listCapabilities(page = 1, search = ''): Promise<Page<Capability>> {
   return (
     await apiClient.get<Page<Capability>>('/capabilities', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20, search },
     })
   ).data
 }
 
-export async function listPlugins(): Promise<Page<Plugin>> {
+export async function listPlugins(page = 1, search = ''): Promise<Page<Plugin>> {
   return (
     await apiClient.get<Page<Plugin>>('/plugins', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20, search },
     })
   ).data
 }
 
-export async function listRunnerPools(): Promise<Page<RunnerPool>> {
+export async function listRunnerPools(page = 1, search = ''): Promise<Page<RunnerPool>> {
   return (
     await apiClient.get<Page<RunnerPool>>('/runner-pools', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20, search },
     })
   ).data
+}
+
+export type PlatformSelection =
+  | { kind: 'capability'; id: string; version: string }
+  | { kind: 'plugin'; id: string }
+  | { kind: 'runnerPool'; id: string }
+
+export type PlatformObject =
+  | { kind: 'capability'; record: Capability }
+  | { kind: 'plugin'; record: Plugin }
+  | { kind: 'runnerPool'; record: RunnerPool }
+
+export async function getPlatformObject(selection: PlatformSelection): Promise<PlatformObject> {
+  const id = encodeURIComponent(selection.id)
+  if (selection.kind === 'capability')
+    return {
+      kind: selection.kind,
+      record: (
+        await apiClient.get<Capability>(
+          `/capabilities/${id}/versions/${encodeURIComponent(selection.version)}`,
+        )
+      ).data,
+    }
+  if (selection.kind === 'plugin')
+    return { kind: selection.kind, record: (await apiClient.get<Plugin>(`/plugins/${id}`)).data }
+  return {
+    kind: selection.kind,
+    record: (await apiClient.get<RunnerPool>(`/runner-pools/${id}`)).data,
+  }
 }
