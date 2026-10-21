@@ -38,7 +38,7 @@ test('S31 全局搜索进入发布门禁并生成不可变 PASS 判断', async (
 
   const decisionRow = page.getByRole('row').filter({ hasText: 'v3.0.0-rc.browser' })
   await expect(decisionRow).toBeVisible()
-  await expect(page.getByText('PASS').last()).toBeVisible()
+  await expect(decisionRow.getByText('PASS', { exact: true })).toBeVisible()
   await decisionRow.getByRole('button', { name: '查看证据' }).click()
   await expect(detail.getByText(/历史判断只读/)).toBeVisible()
   await expect(detail.getByText('QUALITY_GATE_EVIDENCE_MISSING_OPTIONAL')).toBeVisible()

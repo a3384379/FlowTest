@@ -5,6 +5,7 @@ import {
   Card,
   Descriptions,
   Empty,
+  Progress,
   Space,
   Table,
   Tag,
@@ -378,6 +379,7 @@ function CoverageMatrix(props: Props) {
         整份冻结分析覆盖率 {coverage.coverage_percent}% · {coverage.covered_changes}/
         {coverage.total_changes} 项变更；当前定位 {rows.length} 项。
       </Typography.Paragraph>
+      <Progress aria-label="整份冻结分析覆盖率" percent={coverage.coverage_percent} size="small" />
       <Table
         rowKey="change_key"
         size="small"
