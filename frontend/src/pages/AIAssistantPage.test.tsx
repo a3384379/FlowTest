@@ -78,6 +78,7 @@ describe('AIAssistantPage', () => {
     expect(sharing).toHaveRole('switch')
     expect(sharing).toBeVisible()
     expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    expect(sharing.closest('[aria-hidden="true"]')).toBeNull()
     expect(sharing).toBeDisabled()
     for (const name of [/接受/, /拒绝/]) {
       const button = actions.getByRole('button', { name })
@@ -209,6 +210,7 @@ describe('AIAssistantPage', () => {
     expect(sharing).toHaveRole('switch')
     expect(sharing).toBeVisible()
     expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    expect(sharing.closest('[aria-hidden="true"]')).toBeNull()
     await browser.click(sharing)
     await waitFor(() => expect(sharingEnabled).toBe(true))
 
