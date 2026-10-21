@@ -103,6 +103,19 @@ async def list_flaky_tests(
     )
 
 
+@router.get("/projects/{project_id}/flaky-tests/{record_id}", response_model=FlakyRecordResponse)
+async def get_flaky_record(
+    project_id: UUID,
+    record_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> FlakyRecordResponse:
+    record = await QualityService(session).get_flaky_record(
+        actor=current_user, project_id=project_id, record_id=record_id
+    )
+    return FlakyRecordResponse.model_validate(record)
+
+
 @router.put(
     "/projects/{project_id}/flaky-tests/{record_id}/quarantine",
     response_model=FlakyRecordResponse,

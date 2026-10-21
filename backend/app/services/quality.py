@@ -119,6 +119,17 @@ class QualityService:
             limit=page_size,
         )
 
+    async def get_flaky_record(
+        self, *, actor: User, project_id: UUID, record_id: UUID
+    ) -> FlakyRecord:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        record = await self._quality.get_flaky_record(record_id)
+        if record is None or record.project_id != project_id:
+            raise AppError(
+                code="FLAKY_RECORD_NOT_FOUND", message="Flaky 记录不存在", status_code=404
+            )
+        return record
+
     async def set_quarantine(
         self,
         *,
