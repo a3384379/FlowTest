@@ -187,17 +187,15 @@ describe('ContextInspectorPage', () => {
     renderPage()
 
     expect(await screen.findByRole('heading', { name: '上下文检查器' })).toBeVisible()
-    await userEvent.click(await screen.findByRole('tab', { name: '证据' }))
+    await userEvent.click(await findContextTab('证据'))
     expect(await screen.findByText('OrderController.create 提供 POST /orders 路由')).toBeVisible()
-    await userEvent.click(
-      screen.getByRole('button', { name: `查看证据 ${detail.evidence_items[0].id}` }),
-    )
+    await userEvent.click(getContextButton(`查看证据 ${detail.evidence_items[0].id}`))
     expect(screen.getByText('flowtest-java-spring 1.0.0')).toBeVisible()
     expect(screen.getByText('LOMBOK_REVIEW：Lombok 语义需人工确认')).toBeVisible()
-    await userEvent.click(screen.getByRole('tab', { name: '知识关系' }))
+    await userEvent.click(await findContextTab('知识关系'))
     expect(screen.getAllByText('Order.CREATED')).toHaveLength(2)
     expect(screen.getByText('allows_state')).toBeVisible()
-    await userEvent.click(screen.getByRole('tab', { name: '关联提案' }))
+    await userEvent.click(await findContextTab('关联提案'))
     expect(screen.getByText('RuoYi 订单 Flow Proposal')).toBeVisible()
     expect(screen.getByRole('link', { name: /打开 Proposal/ })).toHaveAttribute(
       'href',
@@ -369,11 +367,9 @@ describe('ContextInspectorPage', () => {
     )
     renderPage()
     await userEvent.click(await screen.findByRole('tab', { name: '完整性与冲突' }))
-    await userEvent.click(screen.getByRole('button', { name: '定位冲突证据 1' }))
+    await userEvent.click(getContextButton('定位冲突证据 1'))
     expect(await screen.findByText('显示 1 / 2 条证据')).toBeVisible()
-    await userEvent.click(
-      screen.getByRole('button', { name: `查看证据 ${detail.evidence_items[0].id}` }),
-    )
+    await userEvent.click(getContextButton(`查看证据 ${detail.evidence_items[0].id}`))
     const finding = screen.getByRole('region', { name: '证据详情' })
     expect(within(finding).getByText('ruoyi-fixed', { exact: true })).toBeInTheDocument()
     expect(
@@ -518,6 +514,26 @@ describe('ContextInspectorPage', () => {
     expect(screen.getByText(detail.evidence_items[0].finding.statement)).toBeVisible()
   })
 })
+
+async function findContextTab(name: string): Promise<HTMLElement> {
+  const contextDetails = screen.getByLabelText('上下文详情')
+  const tab = await within(contextDetails).findByText(name, { selector: '[role="tab"]' })
+  expect(tab).toHaveRole('tab')
+  expect(tab).toHaveAccessibleName(name)
+  expect(tab).toBeVisible()
+  expect(tab.closest('[aria-hidden="true"]')).toBeNull()
+  return tab
+}
+
+function getContextButton(name: string): HTMLElement {
+  const contextDetails = screen.getByLabelText('上下文详情')
+  const button = within(contextDetails).getByLabelText(name, { selector: 'button' })
+  expect(button).toHaveRole('button')
+  expect(button).toHaveAccessibleName(name)
+  expect(button).toBeVisible()
+  expect(button.closest('[aria-hidden="true"]')).toBeNull()
+  return button
+}
 
 function renderPage(initialEntry = `/projects/${project.id}/contexts`) {
   server.use(
