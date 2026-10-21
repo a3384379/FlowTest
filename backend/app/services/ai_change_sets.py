@@ -687,6 +687,8 @@ def _rehydrate_workflow_definition(
 def _restore_redacted_value(
     proposed: JsonValue, current: JsonValue | object = _MISSING_REDACTED_SOURCE
 ) -> JsonValue:
+    if not redaction_enabled():
+        return proposed
     if proposed == REDACTED:
         if current is _MISSING_REDACTED_SOURCE:
             raise AppError(
@@ -993,7 +995,7 @@ def _test_case_create(title: str, content: dict[str, JsonValue]) -> AITestCaseDr
             message="AI Test Case 创建内容必须符合受支持的草稿字段",
             status_code=422,
         ) from error
-    if _contains_redacted(create.definition.model_dump(mode="json")):
+    if redaction_enabled() and _contains_redacted(create.definition.model_dump(mode="json")):
         raise AppError(
             code="AI_TEST_CASE_DRAFT_SECRET_BINDING_REQUIRED",
             message="AI Test Case 创建草稿不能包含脱敏占位符。请创建后重新绑定运行值",
@@ -1017,7 +1019,7 @@ def _workflow_create(title: str, content: dict[str, JsonValue]) -> AIWorkflowDra
             message="AI Workflow 创建内容必须符合受支持的草稿字段",
             status_code=422,
         ) from error
-    if _contains_redacted(create.definition.model_dump(mode="json")):
+    if redaction_enabled() and _contains_redacted(create.definition.model_dump(mode="json")):
         raise AppError(
             code="AI_WORKFLOW_DRAFT_SECRET_BINDING_REQUIRED",
             message="AI Workflow 创建草稿不能包含脱敏占位符。请创建后重新绑定运行值",
