@@ -1,6 +1,8 @@
+from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +12,18 @@ from app.models.quality import FlakyRecord, QualityGate, QualityGateEvaluation
 from app.models.tasking import TestPlanRun
 
 QualityEntity = QualityGate | FlakyRecord | QualityGateEvaluation
+
+
+@dataclass(frozen=True)
+class FlakySummary:
+    asset_total: int
+    record_total: int
+    flaky_total: int
+    flaky_version_total: int
+    quarantined_total: int
+    quarantined_version_total: int
+    oldest_updated_at: datetime | None
+    latest_updated_at: datetime | None
 
 
 class QualityRepository:
@@ -53,7 +67,11 @@ class QualityRepository:
                 await self._session.scalars(
                     select(FlakyRecord)
                     .where(condition)
-                    .order_by(FlakyRecord.flaky_score.desc(), FlakyRecord.updated_at.desc())
+                    .order_by(
+                        FlakyRecord.flaky_score.desc(),
+                        FlakyRecord.updated_at.desc(),
+                        FlakyRecord.id.asc(),
+                    )
                     .offset(offset)
                     .limit(limit)
                 )
@@ -63,6 +81,48 @@ class QualityRepository:
             select(func.count()).select_from(FlakyRecord).where(condition)
         )
         return items, int(total or 0)
+
+    async def summarize_flaky_records(self, project_id: UUID) -> FlakySummary:
+        positive = case((FlakyRecord.flaky_score > 0, 1), else_=0)
+        isolated = case((FlakyRecord.quarantined.is_(True), 1), else_=0)
+        assets = (
+            select(
+                func.count().label("versions"),
+                func.max(positive).label("flaky"),
+                func.sum(positive).label("flaky_versions"),
+                func.max(isolated).label("isolated"),
+                func.sum(isolated).label("isolated_versions"),
+                func.min(FlakyRecord.updated_at).label("oldest"),
+                func.max(FlakyRecord.updated_at).label("latest"),
+            )
+            .where(FlakyRecord.project_id == project_id)
+            .group_by(FlakyRecord.target_type, FlakyRecord.target_id)
+            .subquery()
+        )
+        row = (
+            await self._session.execute(
+                select(
+                    func.count().label("asset_total"),
+                    func.sum(assets.c.versions).label("record_total"),
+                    func.sum(assets.c.flaky).label("flaky_total"),
+                    func.sum(assets.c.flaky_versions).label("flaky_version_total"),
+                    func.sum(assets.c.isolated).label("quarantined_total"),
+                    func.sum(assets.c.isolated_versions).label("quarantined_version_total"),
+                    func.min(assets.c.oldest).label("oldest_updated_at"),
+                    func.max(assets.c.latest).label("latest_updated_at"),
+                ).select_from(assets)
+            )
+        ).one()
+        return FlakySummary(
+            asset_total=int(row.asset_total or 0),
+            record_total=int(row.record_total or 0),
+            flaky_total=int(row.flaky_total or 0),
+            flaky_version_total=int(row.flaky_version_total or 0),
+            quarantined_total=int(row.quarantined_total or 0),
+            quarantined_version_total=int(row.quarantined_version_total or 0),
+            oldest_updated_at=row.oldest_updated_at,
+            latest_updated_at=row.latest_updated_at,
+        )
 
     async def get_flaky_record(self, record_id: UUID) -> FlakyRecord | None:
         return await self._session.get(FlakyRecord, record_id)

@@ -190,13 +190,16 @@ export async function getImpactRun(
   contractServiceId?: string,
 ): Promise<ImpactRunDetail> {
   const path = `/projects/${projectId}/impact/runs/${runId}`
-  return (
+  const detail = (
     contractServiceId
       ? await apiClient.get<ImpactRunDetail>(path, {
           params: { contract_service_id: contractServiceId },
         })
       : await apiClient.get<ImpactRunDetail>(path)
   ).data
+  if (detail.project_id !== projectId || detail.id !== runId)
+    throw new Error('影响分析不属于当前项目或记录')
+  return detail
 }
 
 export async function createImpactRun(

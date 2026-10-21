@@ -427,6 +427,51 @@ describe('TestPlansPage', () => {
     expect(dialog.getAllByText('2 次尝试 · 最多 1 次重试')).toHaveLength(2)
   })
 
+  it('opens and highlights an off-page frozen run item from the evidence locator without writes', async () => {
+    installMaintenanceHandlers(
+      () => plan,
+      () => false,
+    )
+    const selectedItem = '00000000-0000-4000-8000-000000007026'
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/test-plan-runs/${queuedRun.id}`, () =>
+        HttpResponse.json({
+          run: { ...queuedRun, status: 'failed' },
+          items: Array.from({ length: 26 }, (_, index) => ({
+            id: index === 25 ? selectedItem : `item-${index}`,
+            target_type: 'workflow',
+            target_id: index === 25 ? 'page-outside-fixed-target' : workflow.id,
+            target_version: 1,
+            workflow_id: workflow.id,
+            workflow_version: 1,
+            environment_id: environment.id,
+            position: index,
+            max_retries: 1,
+            attempts: 2,
+            status: 'failed',
+            workflow_execution_id: index === 25 ? 'exact-item-execution' : null,
+            error_message: '固定运行项失败',
+          })),
+        }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/*`, () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage('viewer', `/projects/${project.id}/tasks?run=${queuedRun.id}&item=${selectedItem}`)
+    const row = await screen.findByRole('row', { name: /page-outside-fixed-target/ })
+    expect(row).toHaveClass('task-run-item-selected')
+    await waitFor(() => expect(within(row).getByText('2 次尝试 · 最多 1 次重试')).toBeVisible())
+    expect(within(row).getByRole('link', { name: '查看报告' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/reports?execution=exact-item-execution`,
+    )
+    expect(screen.getByText(`已定位运行项：${selectedItem}`)).toBeVisible()
+    expect(writes).toBe(0)
+  })
+
   it('keeps three ordered and version-pinned targets intact through a failed creation and retry', async () => {
     installMaintenanceHandlers(
       () => plan,

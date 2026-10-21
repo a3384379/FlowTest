@@ -1,0 +1,44 @@
+.quality-center-page .ant-descriptions-item-content,
+.quality-center-page .ant-typography {
+  overflow-wrap: anywhere;
+}
+.quality-center-page .quality-selected-evidence > td {
+  background: var(--color-primary-bg, #e6f4ff);
+}
+.quality-center-page .quality-grid {
+  align-items: start;
+}
+.quality-center-page .quality-asset-name,
+.quality-center-page .quality-risk-name {
+  height: auto;
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.quality-snapshot-dialog .ant-modal-body {
+  max-height: calc(100dvh - 200px);
+  overflow-y: auto;
+}
+@media (max-width: 600px) {
+  .quality-center-page .ant-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .quality-center-page .ant-pagination-total-text {
+    flex-basis: 100%;
+    height: auto;
+  }
+  .quality-snapshot-dialog {
+    top: 16px;
+  }
+  .quality-snapshot-dialog .ant-modal-body {
+    max-height: calc(100dvh - 140px);
+  }
+}
+@media (max-width: 1000px) {
+  .quality-center-page .quality-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

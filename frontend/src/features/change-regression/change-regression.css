@@ -1,0 +1,26 @@
+.regression-workspace .ant-card,
+.regression-workspace .ant-col,
+.regression-workspace .ant-space-item {
+  min-width: 0;
+}
+
+.regression-workspace .ant-descriptions-item-content,
+.regression-workspace .ant-descriptions-item-label {
+  overflow-wrap: anywhere;
+}
+
+.regression-workspace .ant-card-head-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 575px) {
+  .regression-workspace .ant-space-item {
+    max-width: 100%;
+  }
+
+  .regression-workspace .ant-descriptions-item-content input {
+    min-width: 0;
+    max-width: 100%;
+  }
+}

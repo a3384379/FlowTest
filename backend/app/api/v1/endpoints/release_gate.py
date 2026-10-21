@@ -25,9 +25,15 @@ async def list_release_runner_evidence(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     status: Literal["queued", "leased", "completed", "failed", "cancelled"] | None = None,
+    search: str = Query(default="", max_length=200),
 ) -> Page[ReleaseRunnerEvidenceResponse]:
     tasks, total = await ReleaseGateService(session).list_runner_evidence(
-        actor=current_user, project_id=project_id, page=page, page_size=page_size, status=status
+        actor=current_user,
+        project_id=project_id,
+        page=page,
+        page_size=page_size,
+        status=status,
+        search=search,
     )
     return Page(
         items=[ReleaseRunnerEvidenceResponse.model_validate(task) for task in tasks],

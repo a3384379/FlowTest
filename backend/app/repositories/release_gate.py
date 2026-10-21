@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contracts import DeploymentCompatibilityCheck
@@ -78,11 +78,24 @@ class ReleaseGateRepository:
         return await self._session.get(ReleaseDecision, decision_id)
 
     async def list_project_runner_tasks(
-        self, *, project_id: UUID, offset: int, limit: int, status: str | None
+        self, *, project_id: UUID, offset: int, limit: int, status: str | None, search: str = ""
     ) -> tuple[list[RunnerTask], int]:
         conditions = [RunnerTask.project_id == project_id]
         if status is not None:
             conditions.append(RunnerTask.status == status)
+        if search:
+            normalized = search.replace("-", "") or search
+            conditions.append(
+                or_(
+                    func.replace(cast(RunnerTask.id, String), "-", "").icontains(
+                        normalized, autoescape=True
+                    ),
+                    func.replace(cast(RunnerTask.execution_id, String), "-", "").icontains(
+                        normalized, autoescape=True
+                    ),
+                    RunnerTask.status.icontains(search, autoescape=True),
+                )
+            )
         items = list(
             (
                 await self._session.scalars(

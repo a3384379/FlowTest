@@ -1,5 +1,8 @@
+import type { ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useReleaseGate } from '../features/release-gate/use-release-gate'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -92,6 +95,25 @@ const decision: ReleaseDecision = {
 }
 
 describe('ReleaseGatePage', () => {
+  it.each(['性能运行', 'Runner 任务'])(
+    'shows the retained %s search after closing and reopening the decision dialog',
+    async (label) => {
+      handlers()
+      renderPage()
+      const browser = userEvent.setup()
+      await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+      let dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+      const input = within(dialog).getByRole('searchbox', { name: `${label}跨页搜索` })
+      await browser.type(input, 'cancelled{Enter}')
+      await browser.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+      await browser.click(screen.getByRole('button', { name: '生成发布判断' }))
+      dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+      expect(within(dialog).getByRole('searchbox', { name: `${label}跨页搜索` })).toHaveValue(
+        'cancelled',
+      )
+    },
+  )
   it('renders an immutable historical decision and its explainable evidence', async () => {
     handlers()
     renderPage()
@@ -206,6 +228,7 @@ describe('ReleaseGatePage', () => {
     await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
     await chooseEvidence(browser, dialog, '性能运行', 'v3 · passed')
     await chooseEvidence(browser, dialog, 'Runner 任务', '00000000 · succeeded · fence 7')
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'OK' })).toBeEnabled())
     await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
 
     await waitFor(() =>
@@ -319,6 +342,426 @@ describe('ReleaseGatePage', () => {
     expect(writes).toBe(0)
   })
 
+  it('shows policy requirements and distinguishes unavailable evidence without selecting defaults', async () => {
+    handlers({ impact_engine: false })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-policies`, () =>
+        HttpResponse.json([
+          {
+            ...policy,
+            require_contract_compatibility: false,
+            require_release_risk: false,
+            require_runner_evidence: false,
+          },
+        ]),
+      ),
+      http.get(`/api/v1/projects/${project.id}/performance-runs`, () =>
+        HttpResponse.json(
+          { error: { message: 'Performance catalog unavailable', trace_id: 'perf-unavailable' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    expect(await within(dialog).findByText('必需证据：3 类')).toBeVisible()
+    expect(within(dialog).getByText('影响分析能力已关闭')).toBeVisible()
+    expect(within(dialog).getByText(/Performance catalog unavailable/)).toBeVisible()
+    expect(within(dialog).getByText('Trace ID: perf-unavailable')).toBeVisible()
+    expect(
+      within(dialog).getByText('缺失必需证据仍可评估，结果将由后端按冻结策略判断为 BLOCK'),
+    ).toBeVisible()
+    expect(within(dialog).getByRole('region', { name: '提交前冻结对象摘要' })).toHaveTextContent(
+      '未提供',
+    )
+  })
+
+  it('uses a verified exact evidence ID outside the catalog and reports invalid identities without writes', async () => {
+    handlers()
+    const exactId = '00000000-0000-4000-8000-000000000399'
+    let detailReads = 0
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/performance-runs/${exactId}`, () => {
+        detailReads++
+        return HttpResponse.json({
+          id: exactId,
+          project_id: project.id,
+          status: 'passed',
+          scenario_version: 42,
+        })
+      }),
+      http.post(`/api/v1/projects/${project.id}/*`, () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    await browser.type(within(dialog).getByLabelText('候选版本'), 'lookup-must-not-evaluate')
+    const input = within(dialog).getByRole('searchbox', { name: '性能运行精确ID' })
+    await browser.type(input, exactId)
+    await browser.keyboard('{Enter}')
+    const chosen = await within(dialog).findByRole('button', { name: '使用已核对证据' })
+    await browser.click(chosen)
+    expect(within(dialog).getByRole('region', { name: '提交前冻结对象摘要' })).toHaveTextContent(
+      exactId,
+    )
+    expect(detailReads).toBe(1)
+    await browser.clear(input)
+    await browser.type(input, 'invalid-id')
+    await browser.keyboard('{Enter}')
+    expect(await within(dialog).findByText('请输入完整有效的证据 UUID')).toBeVisible()
+    expect(detailReads).toBe(1)
+    expect(writes).toBe(0)
+  })
+
+  it('rejects runner source identity mismatches while preserving frozen evidence', async () => {
+    handlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-decisions/${decision.id}`, () =>
+        HttpResponse.json({
+          ...decision,
+          evidence_snapshot: {
+            ...decision.evidence_snapshot,
+            runner: {
+              task_id: runnerTaskId,
+              execution_id: 'original-execution',
+              status: 'completed',
+              fencing_token: 7,
+              attempts: 1,
+              completed_lease_count: 1,
+              leases: [],
+              completed_at: decision.created_at,
+            },
+          },
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-runner-evidence/${runnerTaskId}`, () =>
+        HttpResponse.json({ id: 'another-task', status: 'completed' }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/release?decision=${decision.id}&source=runner`)
+    await waitFor(() => expect(screen.getByText('Runner任务响应身份不一致')).toBeVisible())
+    expect(
+      screen.queryByRole('region', { name: '项目 Runner 任务原始摘要' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getAllByText('隔离令牌编号').length).toBeGreaterThan(0)
+  })
+
+  it('waits for risk ownership and keeps it retryable after a read error', async () => {
+    handlers()
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    let reads = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, async () => {
+        reads++
+        if (reads === 1) {
+          await pending
+          return HttpResponse.json(
+            { error: { message: 'Risk ownership unavailable', trace_id: 'risk-ownership' } },
+            { status: 503 },
+          )
+        }
+        return HttpResponse.json({
+          id: releaseRiskId,
+          project_id: project.id,
+          impact_run_id: impactRunId,
+        })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseEvidence(browser, dialog, 'Impact Run', '结算影响 · completed')
+    await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
+    await waitFor(() => expect(reads).toBe(1))
+    const submit = within(dialog).getByRole('button', { name: 'OK' })
+    expect(submit).toBeDisabled()
+    await act(async () => {
+      finish()
+    })
+    expect(await within(dialog).findByText('Trace ID: risk-ownership')).toBeVisible()
+    expect(submit).toBeDisabled()
+    await browser.click(within(dialog).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(submit).toBeEnabled())
+  })
+
+  it('blocks a known risk and impact mismatch before submission and keeps the selected input', async () => {
+    handlers()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, () =>
+        HttpResponse.json({
+          id: releaseRiskId,
+          project_id: project.id,
+          impact_run_id: 'foreign-impact',
+        }),
+      ),
+    )
+    let writes = 0
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/release-decisions`, () => {
+        writes++
+        return HttpResponse.json(decision, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    await browser.type(within(dialog).getByLabelText('候选版本'), 'mismatch-is-not-ready')
+    await chooseEvidence(browser, dialog, 'Impact Run', '结算影响 · completed')
+    await chooseEvidence(browser, dialog, 'Release Risk', '候选风险 · 25')
+    expect(await within(dialog).findByText('所选发布风险与影响分析不匹配')).toBeVisible()
+    const submit = within(dialog).getByRole('button', { name: 'OK' })
+    expect(submit).toBeDisabled()
+    await browser.click(submit)
+    expect(within(dialog).getByLabelText('候选版本')).toHaveValue('mismatch-is-not-ready')
+    expect(writes).toBe(0)
+  })
+
+  it('selects performance evidence after the first page and preserves that exact ID when paging back', async () => {
+    handlers()
+    const laterId = '00000000-0000-4000-8000-000000000321'
+    let created: Record<string, unknown> | null = null
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/performance-runs`, ({ request }) => {
+        const pageNumber = Number(new URL(request.url).searchParams.get('page') ?? 1)
+        return HttpResponse.json({
+          items: [
+            {
+              id: pageNumber === 2 ? laterId : performanceRunId,
+              status: 'passed',
+              scenario_version: pageNumber === 2 ? 21 : 3,
+            },
+          ],
+          total: 21,
+          page: pageNumber,
+          page_size: 20,
+        })
+      }),
+      http.post(`/api/v1/projects/${project.id}/release-decisions`, async ({ request }) => {
+        created = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(decision, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+    const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+    const pagination = within(
+      (await within(dialog).findByText('性能运行证据共 21 项')).closest(
+        '.ant-pagination',
+      )! as HTMLElement,
+    )
+    await browser.click(pagination.getByTitle('2'))
+    await chooseEvidence(browser, dialog, '性能运行', 'v21 · passed')
+    await browser.click(pagination.getByTitle('1'))
+    expect(within(dialog).getByRole('region', { name: '提交前冻结对象摘要' })).toHaveTextContent(
+      laterId,
+    )
+    await chooseOption(browser, dialog, '发布策略', policy.name)
+    await browser.type(within(dialog).getByLabelText('候选版本'), 'page-two-evidence')
+    await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
+    await waitFor(() =>
+      expect(created).toMatchObject({
+        performance_run_id: laterId,
+        candidate_ref: 'page-two-evidence',
+      }),
+    )
+  })
+
+  it('opens six source identities from immutable decision evidence without new decisions', async () => {
+    handlers()
+    const snapshot = {
+      ...decision,
+      evidence_snapshot: {
+        ...decision.evidence_snapshot,
+        quality_gate: {
+          test_plan_run_id: qualityRunId,
+          quality_gate_id: qualityGateId,
+          run_status: 'passed',
+          status: 'passed',
+          quality_summary: {},
+          metrics: {},
+          violations: [],
+          evaluated_at: decision.created_at,
+        },
+        contract_compatibility: {
+          check_id: deploymentCheckId,
+          provider_service_id: 'provider',
+          provider_version: 'old-v1',
+          decision: 'safe',
+          evidence: {},
+          checked_at: decision.created_at,
+        },
+        impact: {
+          run_id: impactRunId,
+          status: 'completed',
+          source_ref: 'old-source',
+          source_fingerprint: 'old-impact',
+          change_count: 1,
+          summary: {},
+          coverage_percent: 100,
+          total_changes: 1,
+          covered_changes: 1,
+          gaps: [],
+          created_at: decision.created_at,
+        },
+        release_risk: {
+          risk_id: releaseRiskId,
+          impact_run_id: impactRunId,
+          algorithm_version: 'old-risk',
+          score: 10,
+          quality_score: 90,
+          risk_level: 'low',
+          factors: [],
+          evidence: {},
+          fingerprint: 'old-risk-fingerprint',
+          created_at: decision.created_at,
+        },
+        performance: {
+          run_id: performanceRunId,
+          scenario_id: 'scenario',
+          scenario_version: 3,
+          status: 'passed',
+          summary: {},
+          threshold_results: [],
+          gate_statuses: [],
+          gate_evaluations: [],
+          completed_at: decision.created_at,
+        },
+        runner: {
+          task_id: runnerTaskId,
+          execution_id: 'execution',
+          status: 'completed',
+          attempts: 1,
+          fencing_token: 7,
+          completed_lease_count: 1,
+          leases: [],
+          completed_at: decision.created_at,
+        },
+      },
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/release-decisions/${decision.id}`, () =>
+        HttpResponse.json(snapshot),
+      ),
+    )
+    let writes = 0
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/*`, () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage(`/projects/${project.id}/release?decision=${decision.id}`)
+    const dialog = await screen.findByRole('dialog', { name: '发布判断证据' })
+    expect(await within(dialog).findByRole('link', { name: '查看质量运行来源' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/tasks?run=${qualityRunId}`,
+    )
+    expect(within(dialog).getByRole('link', { name: '查看影响分析来源' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/impact?run=${impactRunId}`,
+    )
+    expect(within(dialog).getByRole('link', { name: '查看发布风险来源' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/quality?risk=${releaseRiskId}`,
+    )
+    expect(within(dialog).getByRole('link', { name: '查看性能运行来源' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/performance?run=${performanceRunId}`,
+    )
+    expect(within(dialog).getByRole('link', { name: '查看契约判断来源' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('source=contract_compatibility'),
+    )
+    expect(within(dialog).getByRole('link', { name: '查看Runner任务来源' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('source=runner'),
+    )
+    await waitFor(() => expect(within(dialog).getByText('old-v1')).toBeVisible())
+    expect(writes).toBe(0)
+  })
+
+  it.each([
+    ['policy', 'success'],
+    ['policy', 'failure'],
+    ['decision', 'success'],
+    ['decision', 'failure'],
+  ] as const)('ignores late %s %s after leaving the initiating route', async (action, outcome) => {
+    handlers()
+    let finish!: () => void
+    let started!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const sent = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const path = action === 'policy' ? 'release-policies' : 'release-decisions'
+    server.use(
+      http.post(`/api/v1/projects/${project.id}/${path}`, async () => {
+        started()
+        await pending
+        return outcome === 'success'
+          ? HttpResponse.json(action === 'policy' ? policy : decision, { status: 201 })
+          : HttpResponse.json(
+              { error: { message: 'Old release command failed', trace_id: 'old-release-command' } },
+              { status: 503 },
+            )
+      }),
+    )
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    function Wrapper({ children }: { children: ReactNode }) {
+      return (
+        <AntdApp>
+          <QueryClientProvider client={client}>
+            <ProjectTestProvider section="release">{children}</ProjectTestProvider>
+          </QueryClientProvider>
+        </AntdApp>
+      )
+    }
+    const { result } = renderHook(
+      () => ({ release: useReleaseGate(), navigate: useNavigate(), location: useLocation() }),
+      { wrapper: Wrapper },
+    )
+    await waitFor(() => expect(result.current.release.canEdit).toBe(true))
+    let operation!: Promise<boolean>
+    act(() => {
+      operation =
+        action === 'policy'
+          ? result.current.release.addPolicy(policy)
+          : result.current.release.evaluate({
+              release_policy_id: policyId,
+              candidate_ref: 'old-candidate',
+            })
+    })
+    await sent
+    act(() => result.current.navigate(`/projects/${project.id}/release?tab=policies`))
+    await waitFor(() => expect(result.current.location.search).toBe('?tab=policies'))
+    await act(async () => {
+      finish()
+      await expect(operation).resolves.toBe(false)
+    })
+    expect(result.current.location.search).toBe('?tab=policies')
+    expect(document.querySelector('.ant-message-notice')).toBeNull()
+  })
+
   it('keeps missing linked evidence retryable and hides mutation access from viewers', async () => {
     handlers()
     let reads = 0
@@ -407,6 +850,13 @@ function handlers(overrides: Partial<V3FeatureFlags> = {}) {
     ),
     http.get(`/api/v1/projects/${project.id}/impact/runs`, () =>
       HttpResponse.json(page([{ id: impactRunId, title: '结算影响', status: 'completed' }])),
+    ),
+    http.get(`/api/v1/projects/${project.id}/release-risks/${releaseRiskId}`, () =>
+      HttpResponse.json({
+        id: releaseRiskId,
+        project_id: project.id,
+        impact_run_id: impactRunId,
+      }),
     ),
     http.get(`/api/v1/projects/${project.id}/release-risks`, () =>
       HttpResponse.json(page([{ id: releaseRiskId, title: '候选风险', score: 25 }])),

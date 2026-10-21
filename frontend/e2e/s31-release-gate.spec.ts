@@ -27,13 +27,19 @@ test('S31 全局搜索进入发布门禁并生成不可变 PASS 判断', async (
       response.url().endsWith('/release-decisions') && response.request().method() === 'POST',
   )
   await dialog.locator('.ant-modal-footer .ant-btn-primary').click()
-  expect((await created).status()).toBe(201)
+  const response = await created
+  expect(response.status()).toBe(201)
+  const decision = (await response.json()) as Identified
+  await expect(page).toHaveURL(new RegExp(`decision=${decision.id}`))
+  const detail = page.getByRole('dialog', { name: '发布判断证据' })
+  await expect(detail.getByText(decision.id, { exact: true })).toBeVisible()
+  await detail.getByRole('button', { name: /^(关闭|Close)$/ }).click()
+  await expect(detail).not.toBeVisible()
 
   const decisionRow = page.getByRole('row').filter({ hasText: 'v3.0.0-rc.browser' })
   await expect(decisionRow).toBeVisible()
-  await expect(page.getByText('PASS').last()).toBeVisible()
+  await expect(decisionRow.getByText('PASS', { exact: true })).toBeVisible()
   await decisionRow.getByRole('button', { name: '查看证据' }).click()
-  const detail = page.getByRole('dialog', { name: '发布判断证据' })
   await expect(detail.getByText(/历史判断只读/)).toBeVisible()
   await expect(detail.getByText('QUALITY_GATE_EVIDENCE_MISSING_OPTIONAL')).toBeVisible()
 })

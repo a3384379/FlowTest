@@ -171,10 +171,11 @@ export async function listPerformanceRuns(
   projectId: string,
   page = 1,
   pageSize = 20,
+  search = '',
 ): Promise<Page<PerformanceRun>> {
   return (
     await apiClient.get<Page<PerformanceRun>>(`/projects/${projectId}/performance-runs`, {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, search },
     })
   ).data
 }

@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useImpactAnalysis } from '../features/impact/use-impact-analysis'
 import userEvent from '@testing-library/user-event'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
 
@@ -264,8 +264,9 @@ describe('ImpactAnalysisPage', () => {
       act(() => view.result.current.navigate(`?contractServiceId=${serviceId}`))
       await act(async () => {
         release()
-        await pending
+        expect(await pending).toBe(false)
       })
+      expect(screen.queryByText('影响分析完成，推荐集合与覆盖证据已保存')).not.toBeInTheDocument()
       expect(view.result.current.search).toBe(`?contractServiceId=${serviceId}`)
     } finally {
       release()
@@ -289,7 +290,246 @@ describe('ImpactAnalysisPage', () => {
     expect(screen.getByRole('button', { name: /新建影响分析/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /登记资产映射/ })).toBeDisabled()
     expect(reads).toBe(0)
+    const metric = within(screen.getByText('项目显式映射').closest('.ant-card')! as HTMLElement)
+    expect(metric.getByText('已关闭')).toBeVisible()
+    expect(metric.queryByText('0')).not.toBeInTheDocument()
   })
+
+  it('shows the complete mapping total separately from the loaded page', async () => {
+    installHandlers({ mappings: [mapping], runs: [run] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/impact/mappings`, () =>
+        HttpResponse.json({
+          items: Array.from({ length: 20 }, (_, index) => ({ ...mapping, id: `mapping-${index}` })),
+          total: 25,
+          page: 1,
+          page_size: 20,
+        }),
+      ),
+    )
+    renderPage()
+    const metric = within(
+      (await screen.findByText('项目显式映射')).closest('.ant-card')! as HTMLElement,
+    )
+    expect(await metric.findByText('25')).toBeVisible()
+    expect(metric.getByText('本页已载入 20 项')).toBeVisible()
+  })
+
+  it('keeps a failed mapping aggregate unknown with its trace', async () => {
+    installHandlers({ mappings: [], runs: [run] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/impact/mappings`, () =>
+        HttpResponse.json(
+          {
+            error: { code: 'UNAVAILABLE', message: '映射目录暂不可用', trace_id: 'mapping-trace' },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderPage()
+    expect((await screen.findAllByText('映射目录暂不可用'))[0]).toBeVisible()
+    expect(screen.getAllByText('Trace ID: mapping-trace')[0]).toBeVisible()
+    const metric = within(screen.getByText('项目显式映射').closest('.ant-card')! as HTMLElement)
+    expect(metric.getByText('未提供')).toBeVisible()
+    expect(metric.queryByText('0')).not.toBeInTheDocument()
+  })
+
+  it('counts graph assets separately from relationships and links changes, selection and coverage', async () => {
+    const linked = linkedRun()
+    installHandlers({ mappings: [], runs: [linked], details: [linked] })
+    renderPage()
+    const affected = within(await screen.findByRole('region', { name: '② 受影响资产' }))
+    expect(await affected.findByText('关联关系 3 条')).toBeVisible()
+    expect(affected.getAllByRole('button', { name: /^查看资产 / })).toHaveLength(2)
+    const recommended = within(screen.getByRole('region', { name: '③ 推荐测试集' }))
+    expect(recommended.getAllByRole('button', { name: /^查看推荐 / })).toHaveLength(2)
+    const browser = userEvent.setup()
+    await browser.click(screen.getByRole('button', { name: '选择变更 Query.order' }))
+    expect(affected.getByText('当前变更未命中资产')).toBeVisible()
+    expect(recommended.getByText('当前变更没有推荐测试')).toBeVisible()
+    const matrix = within(
+      screen.getByText('Test Mapping / Coverage Matrix').closest('.ant-card')! as HTMLElement,
+    )
+    expect(matrix.getByRole('progressbar', { name: '整份冻结分析覆盖率' })).toHaveAttribute(
+      'aria-valuenow',
+      String(linked.coverage.coverage_percent),
+    )
+    expect(matrix.getAllByRole('row')).toHaveLength(2)
+    expect(matrix.getByText('Query.order')).toBeVisible()
+    expect(matrix.queryByText('backend/app/api/orders.py')).not.toBeInTheDocument()
+    expect(screen.getByTestId('impact-route')).toHaveTextContent('change=change-2')
+    await browser.click(screen.getByRole('button', { name: '选择变更 backend/app/api/orders.py' }))
+    expect(affected.getAllByRole('button', { name: /^查看资产 / })).toHaveLength(2)
+    expect(affected.getByText('关联关系 2 条')).toBeVisible()
+    expect(recommended.getAllByRole('button', { name: /^查看推荐 / })).toHaveLength(2)
+    await browser.click(
+      screen.getByRole('button', { name: '选择变更 backend/app/api/payments.py' }),
+    )
+    expect(affected.getAllByRole('button', { name: /^查看资产 / })).toHaveLength(1)
+    expect(recommended.getAllByRole('button', { name: /^查看推荐 / })).toHaveLength(1)
+    expect(
+      screen.getByRole('button', { name: '选择变更 backend/app/api/payments.py' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    await browser.click(screen.getByRole('button', { name: '显示全部变更' }))
+    expect(affected.getAllByRole('button', { name: /^查看资产 / })).toHaveLength(2)
+    expect(matrix.getAllByRole('row')).toHaveLength(4)
+  })
+
+  it('restores the frozen change and original asset version and clears them on run selection', async () => {
+    const linked = linkedRun(),
+      old = { ...run, id: 'older-run', title: '旧分析' }
+    installHandlers({ mappings: [], runs: [linked, old], details: [linked, old] })
+    const workflowAsset = linked.selection.selected_assets[1]
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/workflows/${workflowAsset.target_id}/versions`, () =>
+        HttpResponse.json([
+          {
+            workflow_id: workflowAsset.target_id,
+            version: 1,
+            fingerprint: 'impact-original-v1',
+            definition: { name: '原固定版本' },
+          },
+          {
+            workflow_id: workflowAsset.target_id,
+            version: 2,
+            fingerprint: 'latest-v2',
+            definition: { name: '新版本' },
+          },
+        ]),
+      ),
+    )
+    renderPage(
+      `/projects/${project.id}/impact?${new URLSearchParams({ run: linked.id, change: 'change-1', asset: 'asset:workflow:' + workflowAsset.target_id })}`,
+    )
+    expect(await screen.findByText('选中资产与固定证据')).toBeVisible()
+    const asset = within(
+      screen.getByText('选中资产与固定证据').closest('.ant-card')! as HTMLElement,
+    )
+    expect(asset.getByText('原始工作流')).toBeVisible()
+    await userEvent.setup().click(asset.getByRole('button', { name: '查看固定版本' }))
+    await waitFor(() => expect(screen.getByText('版本指纹：impact-original-v1')).toBeVisible())
+    expect(screen.queryByText(/latest-v2/)).not.toBeInTheDocument()
+    await userEvent.setup().click(
+      within(screen.getByText('推荐资产固定版本').closest('.ant-modal')! as HTMLElement).getByRole(
+        'button',
+        {
+          name: 'Close',
+        },
+      ),
+    )
+    await userEvent.setup().click(screen.getByText('旧分析'))
+    await waitFor(() =>
+      expect(screen.getByTestId('impact-route')).toHaveTextContent('run=older-run'),
+    )
+    expect(screen.getByTestId('impact-route')).not.toHaveTextContent('change=')
+    expect(screen.getByTestId('impact-route')).not.toHaveTextContent('asset=')
+    expect(screen.queryByText('选中资产与固定证据')).not.toBeInTheDocument()
+  })
+
+  it('counts one graph asset reached through three relationships only once', async () => {
+    const linked = linkedRun()
+    const single = {
+      ...linked,
+      graph: {
+        ...linked.graph,
+        edges: linked.changes.map((change) => ({
+          from: `change:${change.key}`,
+          to: `asset:openapi_contract:${contractId}`,
+          reason: `映射 ${change.key}`,
+        })),
+      },
+    }
+    installHandlers({ mappings: [], runs: [single], details: [single] })
+    renderPage()
+    const affected = within(await screen.findByRole('region', { name: '② 受影响资产' }))
+    expect(await affected.findByText('关联关系 3 条')).toBeVisible()
+    expect(affected.getAllByRole('button', { name: /^查看资产 / })).toHaveLength(1)
+    expect(affected.getByTitle('1', { exact: true })).toBeVisible()
+  })
+
+  it('retains an unresolved graph reference independently from the selected tests', async () => {
+    const unknown = {
+      ...run,
+      graph: {
+        nodes: run.graph.nodes.filter((node) => node.kind === 'change'),
+        edges: [
+          { from: 'change:change-1', to: 'legacy://unresolved/asset', reason: '保留的历史关系' },
+        ],
+      },
+    }
+    installHandlers({ mappings: [], runs: [unknown], details: [unknown] })
+    renderPage()
+    const affected = within(await screen.findByRole('region', { name: '② 受影响资产' }))
+    expect(await affected.findByText('原始关系引用，未提供可确认的资产节点')).toBeVisible()
+    expect(affected.queryByText('订单 OpenAPI')).not.toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: '③ 推荐测试集' })).getByText('订单 OpenAPI'),
+    ).toBeVisible()
+    await userEvent
+      .setup()
+      .click(affected.getByRole('button', { name: '查看原始引用 legacy://unresolved/asset' }))
+    const evidence = within(
+      screen.getByText('选中资产与固定证据').closest('.ant-card')! as HTMLElement,
+    )
+    expect(evidence.getByText('该关系未提供可读取的固定资产版本，保留原始引用')).toBeVisible()
+    expect(evidence.getAllByText('legacy://unresolved/asset')[0]).toBeVisible()
+    expect(evidence.queryByRole('button', { name: '查看固定版本' })).not.toBeInTheDocument()
+  })
+
+  it('keeps cached mapping totals unavailable when feature permission refresh fails', async () => {
+    installHandlers({ mappings: [mapping], runs: [run] })
+    const view = renderPage()
+    const metric = within(
+      (await screen.findByText('项目显式映射')).closest('.ant-card')! as HTMLElement,
+    )
+    expect(await metric.findByText('1')).toBeVisible()
+    server.use(
+      http.get('/api/v1/v3/features', () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '能力状态暂不可用', trace_id: 'flags-trace' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: ['v3-feature-flags'] })
+    })
+    expect(await metric.findByText('未提供')).toBeVisible()
+    expect(metric.queryByText('1')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /新建影响分析/ })).toBeDisabled()
+  })
+
+  it('rejects a frozen analysis response for another project', async () => {
+    installHandlers({ mappings: [], runs: [run], details: [] })
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/impact/runs/${run.id}`, () =>
+        HttpResponse.json({ ...run, project_id: 'foreign-project' }),
+      ),
+    )
+    renderPage(`/projects/${project.id}/impact?run=${run.id}`)
+    expect(await screen.findByText('影响分析不属于当前项目或记录')).toBeVisible()
+    expect(screen.queryByRole('region', { name: '② 受影响资产' })).not.toBeInTheDocument()
+  })
+
+  it.each(['change-2', 'missing-change'])(
+    'rejects an asset without an association to the requested change: %s',
+    async (change) => {
+      const linked = linkedRun()
+      installHandlers({ mappings: [], runs: [linked], details: [linked] })
+      renderPage(
+        `/projects/${project.id}/impact?${new URLSearchParams({ run: linked.id, change, asset: 'asset:workflow:original-workflow' })}`,
+      )
+      const panel = within(
+        (await screen.findByText('选中资产与固定证据')).closest('.ant-card')! as HTMLElement,
+      )
+      expect(await panel.findByText('选中资产与当前变更没有冻结关联')).toBeVisible()
+      expect(panel.queryByRole('button', { name: '查看固定版本' })).not.toBeInTheDocument()
+      expect(screen.getByTestId('impact-route')).toHaveTextContent(
+        'asset=asset%3Aworkflow%3Aoriginal-workflow',
+      )
+    },
+  )
 
   it('renders explainable impact evidence and creates a Git mapping and analysis', async () => {
     const mappings = [mapping]
@@ -484,13 +724,94 @@ function renderPage(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <ProjectTestProvider section="impact" initialEntry={initialEntry}>
-          <ImpactAnalysisPage />
-        </ProjectTestProvider>
-      </QueryClientProvider>
-    </AntdApp>,
+  const view = render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <ProjectTestProvider section="impact" initialEntry={initialEntry}>
+            <ImpactAnalysisPage />
+            <ImpactRouteProbe />
+          </ProjectTestProvider>
+        </QueryClientProvider>
+      </AntdApp>
+    </ConfigProvider>,
   )
+  return { ...view, queryClient }
+}
+
+function ImpactRouteProbe() {
+  const location = useLocation()
+  return (
+    <span data-testid="impact-route">
+      {location.pathname}
+      {location.search}
+    </span>
+  )
+}
+
+function linkedRun(): ImpactRunDetail {
+  const third = {
+    ...run.changes[0],
+    key: 'change-3',
+    source_key: 'backend/app/api/payments.py',
+    label: 'backend/app/api/payments.py',
+  }
+  const original = run.selection.selected_assets[0]
+  const second = {
+    ...original,
+    asset_type: 'workflow' as const,
+    target_type: 'workflow' as const,
+    target_id: 'original-workflow',
+    name: '原始工作流',
+    version: 1,
+    change_keys: ['change-1'],
+  }
+  return {
+    ...run,
+    change_count: 3,
+    summary: { ...run.summary, change_count: 3, selected_asset_count: 2 },
+    changes: [...run.changes, third],
+    graph: {
+      nodes: [
+        ...run.graph.nodes,
+        {
+          id: 'asset:workflow:' + second.target_id,
+          kind: 'asset',
+          label: second.name,
+          asset_type: 'workflow',
+        },
+      ],
+      edges: [
+        ...run.graph.edges,
+        {
+          from: 'change:change-1',
+          to: 'asset:workflow:' + second.target_id,
+          reason: '工作流映射命中',
+        },
+        {
+          from: 'change:change-3',
+          to: 'asset:openapi_contract:' + contractId,
+          reason: '支付路径映射命中',
+        },
+      ],
+    },
+    selection: {
+      ...run.selection,
+      selected_assets: [{ ...original, change_keys: ['change-1', 'change-3'] }, second],
+    },
+    coverage: {
+      ...run.coverage,
+      total_changes: 3,
+      covered_changes: 2,
+      matrix: [
+        ...run.coverage.matrix,
+        {
+          ...run.coverage.matrix[0],
+          change_key: third.key,
+          source_key: third.source_key,
+          label: third.label,
+        },
+      ],
+    },
+  }
 }

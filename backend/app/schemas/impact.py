@@ -42,12 +42,24 @@ class OpenApiDiffReference(BaseModel):
     baseline_run_id: UUID
     current_run_id: UUID
 
+    @model_validator(mode="after")
+    def require_distinct_versions(self) -> "OpenApiDiffReference":
+        if self.baseline_run_id == self.current_run_id:
+            raise ValueError("OpenAPI 基线和当前版本必须不同")
+        return self
+
 
 class SchemaDiffReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     baseline_artifact_id: UUID
     current_artifact_id: UUID
+
+    @model_validator(mode="after")
+    def require_distinct_versions(self) -> "SchemaDiffReference":
+        if self.baseline_artifact_id == self.current_artifact_id:
+            raise ValueError("Schema 基线和当前版本必须不同")
+        return self
 
 
 class ImpactRunCreate(BaseModel):

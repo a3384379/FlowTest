@@ -1,8 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Link } from 'react-router-dom'
 
 import DashboardPage from './DashboardPage'
 import { project } from '../test/fixtures'
@@ -182,6 +184,17 @@ describe('DashboardPage', () => {
           page_size: 100,
         }),
       ),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () =>
+        HttpResponse.json({
+          ...flakySummary(),
+          asset_total: 2,
+          record_total: 2,
+          flaky_total: 2,
+          flaky_version_total: 2,
+          quarantined_total: 1,
+          quarantined_version_total: 1,
+        }),
+      ),
       http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
         HttpResponse.json({
           items: [flakyRecord('flaky-1', false), flakyRecord('flaky-2', true)],
@@ -207,7 +220,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('4 项')).toBeVisible()
     expect(screen.getByText('覆盖 75% · 缺口 1')).toBeVisible()
     expect(screen.getByText('2 项')).toBeVisible()
-    expect(screen.getByText('其中隔离 1 项')).toBeVisible()
+    expect(screen.getByText('隔离 1 项 · 按资产去重')).toBeVisible()
     expect(screen.getAllByText('BLOCK').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('v3.0.0-rc.dashboard').length).toBeGreaterThanOrEqual(1)
     expect(await screen.findByText('Token 获取失败')).toBeVisible()
@@ -253,6 +266,169 @@ describe('DashboardPage', () => {
       'href',
       `/projects/${project.id}/release`,
     )
+  })
+
+  it('uses the full project aggregation while keeping the queue explicitly sampled', async () => {
+    const listRequest = vi.fn()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, ({ request }) => {
+        listRequest(new URL(request.url).searchParams.get('page_size'))
+        return HttpResponse.json({
+          items: Array.from({ length: 100 }, (_, index) =>
+            flakyRecord(`sample-${index}`, index < 10),
+          ),
+          total: 150,
+          page: 1,
+          page_size: 100,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () =>
+        HttpResponse.json({
+          ...flakySummary(),
+          asset_total: 148,
+          record_total: 150,
+          flaky_total: 147,
+          flaky_version_total: 149,
+          quarantined_total: 29,
+          quarantined_version_total: 30,
+        }),
+      ),
+    )
+    renderDashboard()
+    expect(await screen.findByText('147 项')).toBeVisible()
+    expect(screen.getByText('隔离 29 项 · 按资产去重')).toBeVisible()
+    expect(screen.getByText(/项目累计 · 148 项资产 · 150 条版本记录/)).toBeVisible()
+    expect(screen.getByText(/聚合于 2026-10-21T01:00:00Z/)).toBeVisible()
+    expect(await screen.findAllByText(/Flaky 记录已载入 100\/150 项/)).not.toHaveLength(0)
+    expect(listRequest.mock.calls).toEqual([['100']])
+  })
+
+  it('keeps a failed aggregate unknown even when sampled Flaky records are available', async () => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+        HttpResponse.json({
+          items: [flakyRecord('available-sample', true)],
+          total: 150,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () =>
+        HttpResponse.json(
+          {
+            error: { code: 'UNAVAILABLE', message: '全量统计暂不可用', trace_id: 'summary-trace' },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    renderDashboard()
+    expect(await screen.findByText('全量统计暂不可用（Trace ID: summary-trace）')).toBeVisible()
+    expect(screen.getByText('未提供 Flaky 资产数据')).toBeVisible()
+    expect(screen.queryByText('1 项')).not.toBeInTheDocument()
+    const queue = screen.getByRole('region', { name: '优先处理的问题' })
+    expect(await within(queue).findByText(/available-sample-target@1/)).toBeVisible()
+    expect(within(queue).getByText(/部分来源读取失败/)).toBeVisible()
+  })
+
+  it('links every loaded version to its exact record and asset instead of a generic catalog', async () => {
+    const original = {
+      ...flakyRecord('original-record', false),
+      target_id: 'same-workflow',
+      target_version: 1,
+    }
+    const latest = { ...original, id: 'latest-record', target_version: 3 }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
+        HttpResponse.json({
+          items: [original, latest],
+          total: 101,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+    )
+    renderDashboard()
+    const queue = await screen.findByRole('region', { name: '优先处理的问题' })
+    const links = await within(queue).findAllByRole('link', { name: '查看 Flaky 固定版本' })
+    expect(links.map((link) => link.getAttribute('href')).sort()).toEqual(
+      [original, latest]
+        .map(
+          (record) =>
+            `/projects/${project.id}/quality?${new URLSearchParams({ record: record.id, target_type: record.target_type, target: record.target_id, version: String(record.target_version) })}`,
+        )
+        .sort(),
+    )
+  })
+
+  it('does not apply a late aggregate from the previously selected project', async () => {
+    const other = { ...project, id: 'other-project', name: '第二项目' }
+    const requested = vi.fn()
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project, other], total: 2, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${other.id}`, () => HttpResponse.json(other)),
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, async () => {
+        requested()
+        await held
+        return HttpResponse.json({
+          ...flakySummary(),
+          asset_total: 150,
+          record_total: 150,
+          flaky_total: 149,
+        })
+      }),
+      http.get(`/api/v1/projects/${other.id}/flaky-tests/summary`, () =>
+        HttpResponse.json({
+          ...flakySummary(),
+          project_id: other.id,
+          asset_total: 1,
+          record_total: 1,
+          flaky_total: 1,
+        }),
+      ),
+      ...['flaky-tests', 'release-risks', 'impact/runs', 'release-decisions'].map((resource) =>
+        http.get(`/api/v1/projects/${other.id}/${resource}`, () =>
+          HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+        ),
+      ),
+    )
+    const view = renderDashboard()
+    try {
+      await waitFor(() => expect(requested).toHaveBeenCalledOnce())
+      await userEvent.setup().click(screen.getByRole('link', { name: '切换测试项目' }))
+      expect(await screen.findByText('当前查看：第二项目')).toBeVisible()
+      expect(await screen.findByText('1 项')).toBeVisible()
+      release()
+      await waitFor(() =>
+        expect(view.queryClient.getQueryData(['flaky-summary', project.id])).toMatchObject({
+          flaky_total: 149,
+        }),
+      )
+      expect(screen.getByText('1 项')).toBeVisible()
+      expect(screen.queryByText('149 项')).not.toBeInTheDocument()
+      expect(screen.getByText(/项目累计 · 1 项资产 · 1 条版本记录/)).toBeVisible()
+    } finally {
+      release()
+    }
+  })
+
+  it.each([
+    { ...flakySummary(), project_id: 'foreign-project' },
+    { ...flakySummary(), scope: 'first_page' },
+  ])('rejects an aggregate outside the requested project and scope: %s', async (data) => {
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () => HttpResponse.json(data)),
+    )
+    renderDashboard()
+    expect(await screen.findByText('Flaky 汇总不属于当前项目或统计范围')).toBeVisible()
+    expect(screen.getByText('未提供 Flaky 资产数据')).toBeVisible()
+    expect(screen.queryByText(/Flaky 范围：项目累计/)).not.toBeInTheDocument()
   })
 
   it('keeps project quality evidence disabled without calling gated APIs', async () => {
@@ -406,15 +582,17 @@ function renderDashboard(initialEntry?: string) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
         <ProjectTestProvider section="dashboard" initialEntry={initialEntry}>
+          <Link to="/projects/other-project/dashboard">切换测试项目</Link>
           <DashboardPage />
         </ProjectTestProvider>
       </QueryClientProvider>
     </AntdApp>,
   )
+  return { ...view, queryClient }
 }
 
 function insightHandlers() {
@@ -442,6 +620,9 @@ function insightHandlers() {
     ),
     http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () =>
+      HttpResponse.json(flakySummary()),
     ),
     http.get(`/api/v1/projects/${project.id}/release-decisions`, () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
@@ -519,5 +700,21 @@ function releaseDecision() {
     runner_task_id: null,
     created_by_id: 'user-1',
     created_at: '2026-08-15T08:00:00Z',
+  }
+}
+
+function flakySummary() {
+  return {
+    project_id: project.id,
+    scope: 'project_cumulative',
+    asset_total: 0,
+    record_total: 0,
+    flaky_total: 0,
+    flaky_version_total: 0,
+    quarantined_total: 0,
+    quarantined_version_total: 0,
+    oldest_updated_at: null,
+    latest_updated_at: null,
+    observed_at: '2026-10-21T01:00:00Z',
   }
 }

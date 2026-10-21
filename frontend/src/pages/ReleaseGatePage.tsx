@@ -1,3 +1,6 @@
+import ReleaseEvidenceSources from '../features/release-gate/ReleaseEvidenceSources'
+import ReleaseDecisionDialog from '../features/release-gate/ReleaseDecisionDialog'
+import { useProjectContext } from '../features/projects/use-project-context'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import CatalogPagination from '../components/CatalogPagination'
 import { CheckCircleOutlined, CloseCircleOutlined, PlusOutlined } from '@ant-design/icons'
@@ -26,16 +29,20 @@ import { iceColors } from '../theme/ice-theme'
 
 import type {
   ReleaseDecision,
-  ReleaseDecisionInput,
   ReleasePolicyInput,
   ReleaseReason,
 } from '../features/release-gate/release-gate-service'
 import { useReleaseGate } from '../features/release-gate/use-release-gate'
 
 export default function ReleaseGatePage() {
-  const state = useReleaseGate()
+  const { projectId } = useProjectContext()
+  return <ReleaseGateWorkspace key={projectId ?? 'none'} />
+}
+
+function ReleaseGateWorkspace() {
   const [policyOpen, setPolicyOpen] = useState(false)
   const [decisionOpen, setDecisionOpen] = useState(false)
+  const state = useReleaseGate(decisionOpen)
   return (
     <>
       <QueryFailureNotice queries={[state.policies, state.latestDecision]} />
@@ -47,10 +54,6 @@ export default function ReleaseGatePage() {
       />
       <div className="catalog-controls">
         <CatalogPagination query={state.decisions} label="门禁判断历史" />
-        <CatalogPagination query={state.qualityRuns} label="质量运行证据" />
-        <CatalogPagination query={state.deploymentChecks} label="契约判断证据" />
-        <CatalogPagination query={state.impactRuns} label="影响证据" />
-        <CatalogPagination query={state.releaseRisks} label="风险证据" />
       </div>
       <Space orientation="vertical" size="large" style={{ width: '100%' }}>
         <ReleaseOverview
@@ -59,7 +62,10 @@ export default function ReleaseGatePage() {
           latest={state.latestDecision.data?.items.at(0)}
         />
         {state.latestDecision.data?.items[0] && (
-          <LatestDecisionEvidence decision={state.latestDecision.data.items[0]} />
+          <LatestDecisionEvidence
+            decision={state.latestDecision.data.items[0]}
+            onOpen={() => state.selectDecision(state.latestDecision.data!.items[0].id)}
+          />
         )}
         <PoliciesCard policies={state.policies.data} loading={state.policies.isLoading} />
         <DecisionsCard
@@ -69,7 +75,7 @@ export default function ReleaseGatePage() {
         />
       </Space>
       <PolicyDialogContainer state={state} open={policyOpen} onClose={() => setPolicyOpen(false)} />
-      <DecisionDialogContainer
+      <ReleaseDecisionDialog
         state={state}
         open={decisionOpen}
         onClose={() => setDecisionOpen(false)}
@@ -160,7 +166,13 @@ function ReleaseOverview({
   )
 }
 
-function LatestDecisionEvidence({ decision }: { decision: ReleaseDecision }) {
+function LatestDecisionEvidence({
+  decision,
+  onOpen,
+}: {
+  decision: ReleaseDecision
+  onOpen: () => void
+}) {
   const reasons = [...decision.reasons].sort(
     (left, right) => Number(left.status !== 'blocked') - Number(right.status !== 'blocked'),
   )
@@ -195,7 +207,7 @@ function LatestDecisionEvidence({ decision }: { decision: ReleaseDecision }) {
           ]}
         />
       </Card>
-      <Card title="决策上下文">
+      <Card title="决策上下文" extra={<Button onClick={onOpen}>打开此判断的证据来源</Button>}>
         <DecisionTag status={decision.status} />
         <Typography.Paragraph strong>候选版本 {decision.candidate_ref}</Typography.Paragraph>
         <Typography.Paragraph>策略：{decision.policy_snapshot.name}</Typography.Paragraph>
@@ -350,40 +362,6 @@ function PolicyDialogContainer({
   )
 }
 
-function DecisionDialogContainer({
-  state,
-  open,
-  onClose,
-}: {
-  state: ReleaseGateState
-  open: boolean
-  onClose: () => void
-}) {
-  return (
-    <DecisionDialog
-      open={open}
-      submitting={state.evaluating}
-      policies={arrayOrEmpty(state.policies.data)}
-      qualityRuns={pageItems(state.qualityRuns.data)}
-      deploymentChecks={pageItems(state.deploymentChecks.data)}
-      impactRuns={pageItems(state.impactRuns.data)}
-      releaseRisks={pageItems(state.releaseRisks.data)}
-      performanceRuns={pageItems(state.performanceRuns.data)}
-      runnerTasks={pageItems(state.runnerTasks.data)}
-      runnerPagination={
-        <>
-          <QueryFailureNotice queries={[state.runnerTasks]} />
-          <CatalogPagination query={state.runnerTasks} label="Runner 证据" />
-        </>
-      }
-      onClose={onClose}
-      onCreate={async (input) => {
-        if (await state.evaluate(input)) onClose()
-      }}
-    />
-  )
-}
-
 function PolicyDialog({
   open,
   qualityGates,
@@ -467,140 +445,6 @@ function SwitchField({ name, label }: { name: keyof ReleasePolicyInput; label: s
   )
 }
 
-type EvidenceOption = { id: string; label: string }
-
-function DecisionDialog({
-  open,
-  submitting,
-  policies,
-  qualityRuns,
-  deploymentChecks,
-  impactRuns,
-  releaseRisks,
-  performanceRuns,
-  runnerTasks,
-  runnerPagination,
-  onClose,
-  onCreate,
-}: {
-  open: boolean
-  submitting: boolean
-  policies: Array<{ id: string; name: string; enabled: boolean }>
-  qualityRuns: Array<{ id: string; status: string }>
-  deploymentChecks: Array<{ id: string; provider_version: string; decision: string }>
-  impactRuns: Array<{ id: string; title: string; status: string }>
-  releaseRisks: Array<{ id: string; title: string; score: number }>
-  performanceRuns: Array<{ id: string; status: string; scenario_version: number }>
-  runnerTasks: Array<{ id: string; status: string; fencing_token: number }>
-  runnerPagination: React.ReactNode
-  onClose: () => void
-  onCreate: (input: ReleaseDecisionInput) => Promise<void>
-}) {
-  const [form] = Form.useForm<ReleaseDecisionInput>()
-  return (
-    <Modal
-      title="生成发布判断"
-      open={open}
-      width={720}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Alert
-        type="info"
-        showIcon
-        title="每次判断都会固定策略和证据快照；缺失策略要求的证据将生成 BLOCK。"
-      />
-      <Form form={form} layout="vertical" onFinish={(values) => void onCreate(compact(values))}>
-        <Form.Item name="release_policy_id" label="发布策略" rules={[{ required: true }]}>
-          <Select
-            options={policies
-              .filter((item) => item.enabled)
-              .map((item) => ({ value: item.id, label: item.name }))}
-          />
-        </Form.Item>
-        <Form.Item name="candidate_ref" label="候选版本" rules={[{ required: true }]}>
-          <Input placeholder="例如 v3.0.0-rc.1" />
-        </Form.Item>
-        <div className="quality-grid">
-          <EvidenceSelect
-            name="test_plan_run_id"
-            label="Quality Gate 运行"
-            items={qualityRuns.map((item) => ({
-              id: item.id,
-              label: `${short(item.id)} · ${item.status}`,
-            }))}
-          />
-          <EvidenceSelect
-            name="deployment_check_id"
-            label="契约兼容判断"
-            items={deploymentChecks.map((item) => ({
-              id: item.id,
-              label: `${item.provider_version} · ${item.decision}`,
-            }))}
-          />
-          <EvidenceSelect
-            name="impact_run_id"
-            label="Impact Run"
-            items={impactRuns.map((item) => ({
-              id: item.id,
-              label: `${item.title} · ${item.status}`,
-            }))}
-          />
-          <EvidenceSelect
-            name="release_risk_id"
-            label="Release Risk"
-            items={releaseRisks.map((item) => ({
-              id: item.id,
-              label: `${item.title} · ${item.score}`,
-            }))}
-          />
-          <EvidenceSelect
-            name="performance_run_id"
-            label="性能运行"
-            items={performanceRuns.map((item) => ({
-              id: item.id,
-              label: `v${item.scenario_version} · ${item.status}`,
-            }))}
-          />
-          <EvidenceSelect
-            name="runner_task_id"
-            label="Runner 任务"
-            items={runnerTasks.map((item) => ({
-              id: item.id,
-              label: `${short(item.id)} · ${item.status} · fence ${item.fencing_token}`,
-            }))}
-          />
-          {runnerPagination}
-        </div>
-      </Form>
-    </Modal>
-  )
-}
-
-function EvidenceSelect({
-  name,
-  label,
-  items,
-}: {
-  name: keyof ReleaseDecisionInput
-  label: string
-  items: EvidenceOption[]
-}) {
-  return (
-    <Form.Item name={name} label={label}>
-      <Select
-        allowClear
-        showSearch
-        optionFilterProp="label"
-        placeholder="未选择"
-        options={items.map((item) => ({ value: item.id, label: item.label }))}
-      />
-    </Form.Item>
-  )
-}
-
 function DecisionDetail({
   open,
   loading,
@@ -619,6 +463,8 @@ function DecisionDetail({
   return (
     <Modal
       title="发布判断证据"
+      style={{ top: 24 }}
+      styles={{ body: { maxHeight: 'calc(100dvh - 136px)', overflowY: 'auto' } }}
       open={open}
       loading={open && loading}
       footer={null}
@@ -649,34 +495,7 @@ function DecisionDetail({
                 </Typography.Text>
               </Descriptions.Item>
             </Descriptions>
-            <Table
-              rowKey="code"
-              size="small"
-              pagination={false}
-              dataSource={decision.reasons}
-              columns={[
-                {
-                  title: '状态',
-                  dataIndex: 'status',
-                  render: (value: string) => (
-                    <Tag color={value === 'passed' ? 'success' : 'error'}>
-                      {value === 'passed' ? '通过' : '阻断'}
-                    </Tag>
-                  ),
-                },
-                { title: '证据', dataIndex: 'evidence_type' },
-                { title: '原因', dataIndex: 'message' },
-                { title: '代码', dataIndex: 'code' },
-                {
-                  title: '实际',
-                  render: (_, row: ReleaseReason) => JSON.stringify(row.actual) ?? '未提供',
-                },
-                {
-                  title: '期望',
-                  render: (_, row: ReleaseReason) => JSON.stringify(row.expected) ?? '未提供',
-                },
-              ]}
-            />
+            <ReleaseEvidenceSources decision={decision} />
             <Tabs
               items={[
                 {
@@ -734,22 +553,4 @@ function defaultPolicy(): ReleasePolicyInput {
     require_performance_evidence: false,
     require_runner_evidence: false,
   }
-}
-
-function compact(input: ReleaseDecisionInput): ReleaseDecisionInput {
-  return Object.fromEntries(
-    Object.entries(input).filter(([, value]) => value !== undefined && value !== ''),
-  ) as ReleaseDecisionInput
-}
-
-function short(value: string): string {
-  return value.slice(0, 8)
-}
-
-function arrayOrEmpty<T>(items: T[] | undefined): T[] {
-  return items ? items : []
-}
-
-function pageItems<T>(page: { items: T[] } | undefined): T[] {
-  return page ? page.items : []
 }

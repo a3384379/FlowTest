@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.performance import (
@@ -73,22 +73,35 @@ class PerformanceRepository:
         return result.scalar_one_or_none()
 
     async def list_runs(
-        self, *, project_id: UUID, offset: int, limit: int
+        self, *, project_id: UUID, offset: int, limit: int, search: str = ""
     ) -> tuple[list[PerformanceRun], int]:
-        condition = PerformanceRun.project_id == project_id
+        conditions = [PerformanceRun.project_id == project_id]
+        if search:
+            normalized = search.replace("-", "") or search
+            conditions.append(
+                or_(
+                    func.replace(cast(PerformanceRun.id, String), "-", "").icontains(
+                        normalized, autoescape=True
+                    ),
+                    func.replace(cast(PerformanceRun.scenario_id, String), "-", "").icontains(
+                        normalized, autoescape=True
+                    ),
+                    PerformanceRun.status.icontains(search, autoescape=True),
+                )
+            )
         items = list(
             (
                 await self._session.scalars(
                     select(PerformanceRun)
-                    .where(condition)
-                    .order_by(PerformanceRun.created_at.desc())
+                    .where(*conditions)
+                    .order_by(PerformanceRun.created_at.desc(), PerformanceRun.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )
             ).all()
         )
         total = await self._session.scalar(
-            select(func.count()).select_from(PerformanceRun).where(condition)
+            select(func.count()).select_from(PerformanceRun).where(*conditions)
         )
         return items, int(total or 0)
 

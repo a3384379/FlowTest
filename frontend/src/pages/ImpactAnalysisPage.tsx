@@ -2,7 +2,6 @@ import CatalogPagination from '../components/CatalogPagination'
 import { BranchesOutlined, DeleteOutlined, LinkOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   Alert,
-  Badge,
   Button,
   Card,
   Col,
@@ -12,7 +11,6 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Progress,
   Row,
   Select,
   Space,
@@ -23,16 +21,15 @@ import {
 } from 'antd'
 import { useMemo, useState } from 'react'
 
-import { apiErrorMessage } from '../lib/api'
+import { apiErrorWithTrace, type Page } from '../lib/api'
 import type {
   ImpactCatalog,
-  ImpactChange,
   ImpactMapping,
   ImpactRunInput,
   ImpactSourceKind,
   ImpactTargetType,
-  SelectedAsset,
 } from '../features/impact/impact-service'
+import ImpactEvidenceWorkspace from '../features/impact/ImpactEvidenceWorkspace'
 import { useImpactAnalysis } from '../features/impact/use-impact-analysis'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import ContractServiceContextNotice from '../features/services/ContractServiceContextNotice'
@@ -78,8 +75,7 @@ function ImpactAnalysisWorkspace() {
   const state = useImpactAnalysis()
   const [mappingOpen, setMappingOpen] = useState(false)
   const [analysisOpen, setAnalysisOpen] = useState(false)
-  const detail = state.serviceContext.ready ? state.detail.data : undefined
-  const mappings = state.mappings.data?.items ?? []
+  const { detail, mappingPage, mappings, closed } = impactReadData(state)
   return (
     <>
       <ContractServiceContextNotice
@@ -132,11 +128,10 @@ function ImpactAnalysisWorkspace() {
         <CatalogPagination query={state.mappings} label="影响映射" />
         <CatalogPagination query={state.runs} label="分析历史" />
       </div>
-      <ImpactOverview detail={detail} mappingCount={mappings.length} />
+      <ImpactOverview detail={detail} mappingPage={mappingPage} closed={closed} />
       <AnalysisEvidenceState state={state} />
-      <CoverageMatrix detail={detail} />
       <Row gutter={16}>
-        <Col span={14}>
+        <Col xs={24} lg={14}>
           <RunHistory
             runs={state.runs.data?.items ?? []}
             selectedRunId={state.selectedRunId}
@@ -144,7 +139,7 @@ function ImpactAnalysisWorkspace() {
             onSelect={state.setSelectedRunId}
           />
         </Col>
-        <Col span={10}>
+        <Col xs={24} lg={10}>
           <MappingTable
             mappings={mappings}
             loading={state.mappings.isLoading}
@@ -182,19 +177,34 @@ function ImpactAnalysisWorkspace() {
   )
 }
 
+function impactReadData(state: ReturnType<typeof useImpactAnalysis>) {
+  const detail =
+    state.serviceContext.ready && state.detail.isSuccess ? state.detail.data : undefined
+  const mappingPage =
+    state.serviceContext.enabled && state.mappings.isSuccess ? state.mappings.data : undefined
+  return {
+    detail,
+    mappingPage,
+    mappings: mappingPage?.items ?? [],
+    closed: state.flags.data?.impact_engine === false,
+  }
+}
+
 function AnalysisEvidenceState({ state }: { state: ReturnType<typeof useImpactAnalysis> }) {
-  const detail = state.serviceContext.ready ? state.detail.data : undefined
-  return state.detail.isError ? (
+  const detail =
+    state.serviceContext.ready && state.detail.isSuccess ? state.detail.data : undefined
+  return state.serviceContext.ready && state.detail.isError ? (
     <Alert
       showIcon
       type="error"
       title="所选影响分析读取失败"
-      description={apiErrorMessage(state.detail.error)}
+      description={apiErrorWithTrace(state.detail.error)}
       action={<Button onClick={() => void state.detail.refetch()}>重试</Button>}
     />
   ) : (
     <AnalysisWorkspace
       detail={detail}
+      state={state}
       loading={state.detail.isLoading}
       scoped={Boolean(state.serviceContext.selection.id)}
       unavailable={
@@ -209,14 +219,16 @@ function AnalysisEvidenceState({ state }: { state: ReturnType<typeof useImpactAn
 
 function ImpactOverview({
   detail,
-  mappingCount,
+  mappingPage,
+  closed,
 }: {
   detail: ReturnType<typeof useImpactAnalysis>['detail']['data']
-  mappingCount: number
+  mappingPage?: Page<ImpactMapping>
+  closed: boolean
 }) {
   return (
     <Row gutter={16} className="performance-overview">
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
             title="变更项"
@@ -225,39 +237,68 @@ function ImpactOverview({
           />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic title="破坏性变更" value={detail?.summary.breaking_change_count ?? '未提供'} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic title="推荐资产" value={detail?.summary.selected_asset_count ?? '未提供'} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="项目显式映射" value={mappingCount} prefix={<LinkOutlined />} />
+          <Statistic
+            title="项目显式映射"
+            value={mappingCountLabel(mappingPage, closed)}
+            prefix={<LinkOutlined />}
+          />
+          {mappingPage !== undefined && (
+            <Typography.Text type="secondary">
+              本页已载入 {mappingPage.items.length} 项
+            </Typography.Text>
+          )}
         </Card>
       </Col>
     </Row>
   )
 }
 
+function mappingCountLabel(
+  page: Page<ImpactMapping> | undefined,
+  closed: boolean,
+): number | string {
+  if (closed) return '已关闭'
+  return page?.total ?? '未提供'
+}
+
 function AnalysisWorkspace({
   detail,
+  state,
   loading,
   scoped,
   unavailable,
 }: {
   detail: ReturnType<typeof useImpactAnalysis>['detail']['data']
+  state: ReturnType<typeof useImpactAnalysis>
   loading: boolean
   scoped: boolean
   unavailable: boolean
 }) {
   if (!detail)
     return <EmptyAnalysisWorkspace loading={loading} scoped={scoped} unavailable={unavailable} />
-  return <AnalysisContent detail={detail} />
+  return (
+    <ImpactEvidenceWorkspace
+      key={`${state.projectId}:${detail.id}`}
+      projectId={state.projectId!}
+      detail={detail}
+      changeKey={state.selectedChangeKey}
+      assetKey={state.selectedAssetKey}
+      onChange={(key) => state.selectEvidence('change', key)}
+      onAsset={(key) => state.selectEvidence('asset', key)}
+    />
+  )
 }
 
 function EmptyAnalysisWorkspace({
@@ -280,168 +321,6 @@ function EmptyAnalysisWorkspace({
                 ? '当前服务未记录可确认的影响分析'
                 : '登记映射并创建首个影响分析'
           }
-        />
-      ) : null}
-    </Card>
-  )
-}
-
-function AnalysisContent({
-  detail,
-}: {
-  detail: NonNullable<ReturnType<typeof useImpactAnalysis>['detail']['data']>
-}) {
-  return (
-    <Card
-      className="performance-card"
-      title={`${detail.title} · ${detail.source_ref || '未指定来源引用'}`}
-      extra={<Tag color="success">证据已保存</Tag>}
-    >
-      <Descriptions size="small" column={2}>
-        <Descriptions.Item label="分析 ID">{detail.id}</Descriptions.Item>
-        <Descriptions.Item label="冻结于">{detail.created_at}</Descriptions.Item>
-        <Descriptions.Item label="来源指纹" span={2}>
-          {detail.source_fingerprint}
-        </Descriptions.Item>
-      </Descriptions>
-      <div className="impact-workspace">
-        <ImpactColumn title="① 变更" count={detail.changes.length}>
-          {detail.changes.map((change) => (
-            <ChangeItem key={change.key} change={change} />
-          ))}
-        </ImpactColumn>
-        <ImpactColumn title="② 受影响资产" count={detail.graph.edges.length}>
-          {detail.selection.selected_assets.map((asset) => (
-            <AssetItem key={`${asset.target_type}:${asset.target_id}`} asset={asset} showReasons />
-          ))}
-          {detail.selection.selected_assets.length === 0 ? (
-            <Empty description="暂无命中资产" />
-          ) : null}
-        </ImpactColumn>
-        <ImpactColumn title="③ 推荐测试集" count={detail.selection.selected_assets.length}>
-          {detail.selection.selected_assets.map((asset) => (
-            <AssetItem key={`${asset.target_type}:${asset.target_id}`} asset={asset} />
-          ))}
-          {detail.selection.selected_assets.length === 0 ? (
-            <Empty description="需要补充显式映射" />
-          ) : null}
-        </ImpactColumn>
-      </div>
-    </Card>
-  )
-}
-
-function ImpactColumn({
-  title,
-  count,
-  children,
-}: {
-  title: string
-  count: number
-  children: React.ReactNode
-}) {
-  return (
-    <section className="impact-column">
-      <div className="impact-column-title">
-        <Typography.Text strong>{title}</Typography.Text>
-        <Badge count={count} showZero />
-      </div>
-      <div className="impact-column-body">{children}</div>
-    </section>
-  )
-}
-
-function ChangeItem({ change }: { change: ImpactChange }) {
-  const color =
-    change.severity === 'breaking' ? 'error' : change.severity === 'warning' ? 'warning' : 'blue'
-  return (
-    <article className={`impact-item impact-item-${change.severity}`}>
-      <Space wrap>
-        <Tag color={color}>{severityLabel(change.severity)}</Tag>
-        <Tag>{sourceLabels[change.source_kind]}</Tag>
-      </Space>
-      <Typography.Text strong>{change.label}</Typography.Text>
-      <Typography.Text type="secondary">{change.detail}</Typography.Text>
-    </article>
-  )
-}
-
-function AssetItem({
-  asset,
-  showReasons = false,
-}: {
-  asset: SelectedAsset
-  showReasons?: boolean
-}) {
-  return (
-    <article className="impact-item">
-      <Space wrap>
-        <Tag color={asset.risk === 'high' ? 'error' : asset.risk === 'medium' ? 'warning' : 'blue'}>
-          {riskLabel(asset.risk)}
-        </Tag>
-        <Tag>{targetLabels[asset.target_type]}</Tag>
-      </Space>
-      <Typography.Text strong>{asset.name}</Typography.Text>
-      {showReasons ? (
-        asset.reasons.map((reason) => (
-          <Typography.Text type="secondary" key={reason}>
-            {reason}
-          </Typography.Text>
-        ))
-      ) : (
-        <Typography.Text type="secondary">覆盖 {asset.change_keys.length} 个变更</Typography.Text>
-      )}
-    </article>
-  )
-}
-
-function CoverageMatrix({
-  detail,
-}: {
-  detail: ReturnType<typeof useImpactAnalysis>['detail']['data']
-}) {
-  const coverage = detail?.coverage
-  return (
-    <Card
-      title="Test Mapping / Coverage Matrix"
-      className="performance-card"
-      extra={
-        coverage ? <Progress type="circle" size={54} percent={coverage.coverage_percent} /> : null
-      }
-    >
-      <Table
-        rowKey="change_key"
-        size="small"
-        pagination={false}
-        dataSource={coverage?.matrix ?? []}
-        locale={{ emptyText: '暂无覆盖快照' }}
-        columns={[
-          { title: '变更', dataIndex: 'label' },
-          {
-            title: '来源',
-            dataIndex: 'source_kind',
-            render: (value: ImpactSourceKind) => sourceLabels[value],
-          },
-          { title: 'Case', dataIndex: 'case_count', width: 70 },
-          { title: 'Workflow', dataIndex: 'workflow_count', width: 90 },
-          { title: 'Contract', dataIndex: 'contract_count', width: 90 },
-          { title: '性能', dataIndex: 'performance_count', width: 70 },
-          {
-            title: '覆盖',
-            dataIndex: 'covered',
-            render: (value: boolean) => (
-              <Tag color={value ? 'success' : 'error'}>{value ? '已覆盖' : '缺口'}</Tag>
-            ),
-          },
-        ]}
-      />
-      {coverage?.gaps.length ? (
-        <Alert
-          className="impact-gap-alert"
-          type="warning"
-          showIcon
-          title={`${coverage.gaps.length} 个覆盖缺口`}
-          description={coverage.gaps.map((gap) => gap.source_key).join('、')}
         />
       ) : null}
     </Card>
@@ -674,7 +553,7 @@ function AnalysisDialog({
         onFinish={(values) => submitAnalysis(form, values, onSubmit)}
       >
         <Row gutter={16}>
-          <Col span={14}>
+          <Col xs={24} lg={14}>
             <Form.Item
               name="title"
               label="分析名称"
@@ -683,7 +562,7 @@ function AnalysisDialog({
               <Input />
             </Form.Item>
           </Col>
-          <Col span={10}>
+          <Col xs={24} lg={10}>
             <Form.Item name="source_ref" label="来源引用">
               <Input placeholder="例如 feature/FT-128" />
             </Form.Item>
@@ -797,12 +676,4 @@ function referencePair<T>(
   build: (baseline: string, current: string) => T,
 ): T[] {
   return baseline && current ? [build(baseline, current)] : []
-}
-
-function severityLabel(value: ImpactChange['severity']): string {
-  return value === 'breaking' ? '破坏性' : value === 'warning' ? '需关注' : '信息'
-}
-
-function riskLabel(value: SelectedAsset['risk']): string {
-  return value === 'high' ? '高风险' : value === 'medium' ? '中风险' : '常规'
 }
