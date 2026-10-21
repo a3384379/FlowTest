@@ -33,7 +33,24 @@ export type AIChangeSetSummary = {
   updated_at: string
 }
 
+export type AIReviewBaseline = {
+  target_type: 'test_case' | 'workflow'
+  target_id: string
+  snapshot_sha256: string
+  content: {
+    name: string
+    description: string
+    definition: Record<string, unknown>
+    tags?: string[] | null
+  }
+  current_version: number | null
+  draft_revision: number | null
+  updated_at: string
+  redaction_mode: 'on' | 'off'
+  redaction_policy_version: number
+}
 export type AIChangeSetDetail = AIChangeSetSummary & {
+  review_baselines?: AIReviewBaseline[]
   source_snapshot: Record<string, unknown>
   items: AIChangeItem[]
 }
@@ -50,19 +67,28 @@ export async function listAIChangeSets(
   page = 1,
   pageSize = 100,
 ): Promise<Page<AIChangeSetSummary>> {
-  return (
+  const result = (
     await apiClient.get<Page<AIChangeSetSummary>>('/ai/change-sets', {
       params: { project_id: projectId, page, page_size: pageSize },
     })
   ).data
+  if (result.items.some((item) => item.project_id !== projectId))
+    throw new Error('变更集目录含有其他项目记录，已停止展示')
+  return result
 }
 
 export async function getAIChangeSet(changeSetId: string): Promise<AIChangeSetDetail> {
-  return (await apiClient.get<AIChangeSetDetail>(`/ai/change-sets/${changeSetId}`)).data
+  const result = (
+    await apiClient.get<AIChangeSetDetail>(`/ai/change-sets/${encodeURIComponent(changeSetId)}`)
+  ).data
+  if (result.id !== changeSetId) throw new Error('变更集回执与请求不一致')
+  return result
 }
 
 export async function createAIChangeSet(input: AIChangeSetInput): Promise<AIChangeSetSummary> {
-  return (await apiClient.post<AIChangeSetSummary>('/ai/change-sets', input)).data
+  const result = (await apiClient.post<AIChangeSetSummary>('/ai/change-sets', input)).data
+  if (result.project_id !== input.project_id) throw new Error('生成回执不属于当前项目')
+  return result
 }
 
 export async function reviewAIChangeItem(
@@ -71,10 +97,16 @@ export async function reviewAIChangeItem(
   decision: 'accept' | 'reject',
   input: { content?: Record<string, unknown>; note: string },
 ): Promise<AIChangeItem> {
-  return (
+  const result = (
     await apiClient.post<AIChangeItem>(
       `/ai/change-sets/${changeSetId}/items/${itemId}/${decision}`,
       input,
     )
   ).data
+  if (
+    result.id !== itemId ||
+    result.review_status !== (decision === 'accept' ? 'accepted' : 'rejected')
+  )
+    throw new Error('变更项审核回执与请求不一致')
+  return result
 }
