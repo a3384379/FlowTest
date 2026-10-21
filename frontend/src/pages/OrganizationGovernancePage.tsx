@@ -1,5 +1,4 @@
 import {
-  AuditOutlined,
   KeyOutlined,
   LockOutlined,
   PlusOutlined,
@@ -39,7 +38,6 @@ import {
   getOrganizationSecurity,
   getRunnerGovernance,
   getSupportBundleRedaction,
-  listOrganizationAuditLogs,
   listOrganizationMembers,
   listOrganizations,
   listServiceAccounts,
@@ -57,7 +55,10 @@ import {
   type QuotaMode,
   type ServiceAccount,
 } from '../features/organizations/organization-service'
-import { setOrganizationId } from '../lib/api'
+import DirectoryPicker from '../features/projects/DirectoryPicker'
+import { apiErrorWithTrace, setOrganizationId } from '../lib/api'
+import OrganizationAuditPanel from './OrganizationAuditPanel'
+import OrganizationQueryBoundary from './OrganizationQueryBoundary'
 import { rotationAction, type SecurityKeyVersion } from './organization-governance-rotation'
 
 const quotaDimensions: Array<{ key: QuotaDimension; label: string; unit?: string }> = [
@@ -164,7 +165,6 @@ function OrganizationGovernanceContent({
   onSelect: (id: string) => void
 }) {
   const { message } = App.useApp()
-  const [issuedToken, setIssuedToken] = useState<string | null>(null)
   const selected = organizations.find((organization) => organization.id === selectedId) ?? null
 
   if (isLoading) return <div className="page-loading">加载组织治理...</div>
@@ -173,12 +173,11 @@ function OrganizationGovernanceContent({
   if (!selected) return <div className="page-loading">正在选择组织...</div>
   return (
     <OrganizationGovernanceSelected
+      key={selected.id}
       isSystemAdmin={isSystemAdmin}
       organizations={organizations}
       selected={selected}
       onSelect={onSelect}
-      issuedToken={issuedToken}
-      setIssuedToken={setIssuedToken}
       onMessage={(type, text) => notify(message, type, text)}
     />
   )
@@ -197,18 +196,15 @@ function OrganizationGovernanceSelected({
   organizations,
   selected,
   onSelect,
-  issuedToken,
-  setIssuedToken,
   onMessage,
 }: {
   isSystemAdmin: boolean
   organizations: Organization[]
   selected: Organization
   onSelect: (id: string) => void
-  issuedToken: string | null
-  setIssuedToken: (token: string | null) => void
   onMessage: (type: 'success' | 'error', text: string) => void
 }) {
+  const [issuedToken, setIssuedToken] = useState<string | null>(null)
   const canManage = isSystemAdmin || selected.role === 'owner' || selected.role === 'admin'
   const canRotate = isSystemAdmin || selected.role === 'owner'
   return (
@@ -238,6 +234,7 @@ function OrganizationGovernanceSelected({
       </div>
       <OrganizationWorkspace
         organization={selected}
+        canSearchUsers={isSystemAdmin}
         canManage={canManage}
         canRotate={canRotate}
         issuedToken={issuedToken}
@@ -288,6 +285,7 @@ function notify(
 
 function OrganizationWorkspace({
   organization,
+  canSearchUsers,
   canManage,
   canRotate,
   issuedToken,
@@ -295,6 +293,7 @@ function OrganizationWorkspace({
   onMessage,
 }: {
   organization: Organization
+  canSearchUsers: boolean
   canManage: boolean
   canRotate: boolean
   issuedToken: string | null
@@ -302,9 +301,6 @@ function OrganizationWorkspace({
   onMessage: (type: 'success' | 'error', text: string) => void
 }) {
   const workspace = useOrganizationWorkspace({ organization, setIssuedToken, onMessage })
-  const { governance, members, accounts } = workspace
-  const isLoading = [governance, members, accounts].some((query) => query.isLoading)
-  const isError = [governance, members, accounts].some((query) => query.isError)
   const accountPending =
     workspace.accountMutation.isPending ||
     workspace.rotateMutation.isPending ||
@@ -314,11 +310,10 @@ function OrganizationWorkspace({
     workspace.applyKeyMutation.isPending ||
     workspace.rollbackKeyMutation.isPending
 
-  if (isLoading) return <div className="page-loading">正在加载组织治理...</div>
-  if (isError) return <Alert showIcon type="error" title="组织治理数据加载失败" />
   return (
     <OrganizationTabs
       organization={organization}
+      canSearchUsers={canSearchUsers}
       canManage={canManage}
       canRotate={canRotate}
       issuedToken={issuedToken}
@@ -332,6 +327,7 @@ function OrganizationWorkspace({
 
 function OrganizationTabs({
   organization,
+  canSearchUsers,
   canManage,
   canRotate,
   issuedToken,
@@ -341,6 +337,7 @@ function OrganizationTabs({
   securityPending,
 }: {
   organization: Organization
+  canSearchUsers: boolean
   canManage: boolean
   canRotate: boolean
   issuedToken: string | null
@@ -361,42 +358,65 @@ function OrganizationTabs({
             </Space>
           ),
           children: (
-            <OverviewTab
-              organization={organization}
-              members={workspace.members.data ?? []}
-              canManage={canManage}
-              onMemberChange={(userId, role) => workspace.memberMutation.mutate({ userId, role })}
-              pending={workspace.memberMutation.isPending}
-            />
+            <OrganizationQueryBoundary label="组织成员" query={workspace.members}>
+              {(members) => (
+                <OverviewTab
+                  organization={organization}
+                  members={members}
+                  canManage={canManage}
+                  canSearchUsers={canSearchUsers}
+                  memberError={workspace.memberMutation.error}
+                  onMemberChange={async (userId, role) => {
+                    try {
+                      await workspace.memberMutation.mutateAsync({ userId, role })
+                      return true
+                    } catch {
+                      return false
+                    }
+                  }}
+                  pending={workspace.memberMutation.isPending}
+                />
+              )}
+            </OrganizationQueryBoundary>
           ),
         },
         {
           key: 'accounts',
           label: 'Service Account',
           children: (
-            <ServiceAccountsTab
-              accounts={workspace.accounts.data ?? []}
-              canManage={canManage}
-              issuedToken={issuedToken}
-              onClearToken={() => setIssuedToken(null)}
-              onCreate={(input) => workspace.accountMutation.mutate(input)}
-              onRotate={(id) => workspace.rotateMutation.mutate(id)}
-              onRevoke={(id) => workspace.revokeMutation.mutate(id)}
-              pending={accountPending}
-            />
+            <OrganizationQueryBoundary label="服务账号" query={workspace.accounts}>
+              {(accounts) => (
+                <ServiceAccountsTab
+                  accounts={accounts}
+                  canManage={canManage}
+                  issuedToken={issuedToken}
+                  onClearToken={() => setIssuedToken(null)}
+                  onCreate={(input) => workspace.accountMutation.mutate(input)}
+                  onRotate={(id) => workspace.rotateMutation.mutate(id)}
+                  onRevoke={(id) => workspace.revokeMutation.mutate(id)}
+                  pending={accountPending}
+                />
+              )}
+            </OrganizationQueryBoundary>
           ),
         },
         {
           key: 'governance',
           label: '配额与 Runner',
           children: (
-            <GovernanceTab
-              organization={workspace.governance.data as OrganizationGovernance}
-              runner={workspace.runner.data}
-              canManage={canManage}
-              pending={workspace.governanceMutation.isPending}
-              onSave={(input) => workspace.governanceMutation.mutate(input)}
-            />
+            <OrganizationQueryBoundary label="组织策略" query={workspace.governance}>
+              {(governance) => (
+                <GovernanceTab
+                  organization={governance}
+                  runner={workspace.runner}
+                  canManage={
+                    canManage && workspace.runner.isSuccess && !workspace.runner.isFetching
+                  }
+                  pending={workspace.governanceMutation.isPending}
+                  onSave={(input) => workspace.governanceMutation.mutate(input)}
+                />
+              )}
+            </OrganizationQueryBoundary>
           ),
         },
         {
@@ -408,16 +428,30 @@ function OrganizationTabs({
             </Space>
           ),
           children: (
-            <SecurityTab
-              audit={workspace.audit.data?.items ?? []}
-              security={workspace.security.data}
-              supportBundle={workspace.supportBundle.data}
-              canRotate={canRotate}
-              onPrepare={(input) => workspace.prepareMutation.mutate(input)}
-              onApply={(id) => workspace.applyKeyMutation.mutate(id)}
-              onRollback={(id) => workspace.rollbackKeyMutation.mutate(id)}
-              pending={securityPending}
-            />
+            <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+              <Row gutter={[16, 16]}>
+                <Col xs={24} lg={12}>
+                  <OrganizationQueryBoundary label="密钥安全" query={workspace.security}>
+                    {(security) => (
+                      <KeyRotationCard
+                        security={security}
+                        canRotate={canRotate}
+                        onPrepare={(input) => workspace.prepareMutation.mutate(input)}
+                        onApply={(id) => workspace.applyKeyMutation.mutate(id)}
+                        onRollback={(id) => workspace.rollbackKeyMutation.mutate(id)}
+                        pending={securityPending}
+                      />
+                    )}
+                  </OrganizationQueryBoundary>
+                </Col>
+                <Col xs={24} lg={12}>
+                  <OrganizationQueryBoundary label="支持包" query={workspace.supportBundle}>
+                    {(supportBundle) => <SupportBundleCard supportBundle={supportBundle} />}
+                  </OrganizationQueryBoundary>
+                </Col>
+              </Row>
+              <OrganizationAuditPanel organizationId={organization.id} />
+            </Space>
           ),
         },
       ]}
@@ -447,10 +481,6 @@ function useOrganizationWorkspace({
     queryKey: ['organization-service-accounts', organization.id],
     queryFn: () => listServiceAccounts(organization.id),
   })
-  const audit = useQuery({
-    queryKey: ['organization-audit', organization.id],
-    queryFn: () => listOrganizationAuditLogs(organization.id),
-  })
   const runner = useQuery({
     queryKey: ['organization-runner-governance', organization.id],
     queryFn: () => getRunnerGovernance(organization.id),
@@ -475,7 +505,6 @@ function useOrganizationWorkspace({
       await invalidate('organization-members')
       onMessage('success', '组织角色已更新')
     },
-    onError: () => onMessage('error', '组织角色更新失败'),
   })
   const accountMutation = useMutation({
     mutationFn: (input: ServiceAccountFormValues) => createServiceAccount(organization.id, input),
@@ -540,7 +569,6 @@ function useOrganizationWorkspace({
     governance,
     members,
     accounts,
-    audit,
     runner,
     security,
     supportBundle,
@@ -558,14 +586,18 @@ function useOrganizationWorkspace({
 function OverviewTab({
   organization,
   members,
+  canSearchUsers,
+  memberError,
   canManage,
   onMemberChange,
   pending,
 }: {
   organization: Organization
   members: OrganizationMember[]
+  canSearchUsers: boolean
+  memberError: Error | null
   canManage: boolean
-  onMemberChange: (userId: string, role: OrganizationRole) => void
+  onMemberChange: (userId: string, role: OrganizationRole) => Promise<boolean>
   pending: boolean
 }) {
   const [form] = Form.useForm<MemberFormValues>()
@@ -590,42 +622,77 @@ function OverviewTab({
       </Col>
       <Col xs={24} lg={16}>
         <Card title="组织角色" extra={<Tag>{members.length} 人</Tag>}>
+          {memberError && (
+            <Alert
+              showIcon
+              type="error"
+              title="组织角色更新失败"
+              description={apiErrorWithTrace(memberError)}
+              className="page-alert"
+            />
+          )}
           {canManage && (
             <Form
               form={form}
               layout="inline"
-              onFinish={(values) => {
-                onMemberChange(values.user_id.trim(), values.role)
-                form.resetFields()
+              disabled={pending}
+              onFinish={async (values) => {
+                if (pending) return
+                if (await onMemberChange(values.user_id.trim(), values.role)) form.resetFields()
               }}
               className="organization-inline-form"
             >
-              <Form.Item name="user_id" rules={[{ required: true, message: '请输入用户 ID' }]}>
-                <Input placeholder="用户 ID" aria-label="用户 ID" />
+              <Form.Item
+                name="user_id"
+                rules={[{ required: true, message: '请选择用户或输入完整用户 ID' }]}
+              >
+                <OrganizationMemberPicker members={members} canSearchUsers={canSearchUsers} />
               </Form.Item>
               <Form.Item name="role" initialValue="member">
                 <Select aria-label="成员角色" style={{ width: 120 }} options={roleOptions} />
               </Form.Item>
-              <Button htmlType="submit" type="primary" loading={pending}>
+              <Button
+                aria-label="添加 / 更新"
+                htmlType="submit"
+                type="primary"
+                loading={pending}
+                disabled={pending}
+              >
                 添加 / 更新
               </Button>
             </Form>
           )}
+          <Typography.Paragraph type="secondary">
+            Owner（所有者）：成员、治理与密钥轮换；Admin（管理员）：成员与治理；Member（成员）/
+            Viewer（只读成员）：按已有授权读取组织信息，不能管理组织。
+          </Typography.Paragraph>
           <Table
             rowKey="id"
             size="small"
             dataSource={members}
             pagination={{ pageSize: 8, hideOnSinglePage: true }}
             columns={[
-              { title: '用户 ID', dataIndex: 'user_id', ellipsis: true },
+              {
+                title: '用户',
+                render: (_, member) => (
+                  <Space orientation="vertical" size={0}>
+                    <Typography.Text>{member.display_name ?? member.user_id}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {member.email ?? '身份摘要未提供'}
+                    </Typography.Text>
+                    <Typography.Text code>{member.user_id}</Typography.Text>
+                  </Space>
+                ),
+              },
               {
                 title: '角色',
                 render: (_, member) => (
                   <Select
                     value={member.role}
-                    disabled={!canManage}
+                    disabled={!canManage || pending}
+                    aria-label={`更新 ${member.user_id} 角色`}
                     options={roleOptions}
-                    onChange={(role: OrganizationRole) => onMemberChange(member.user_id, role)}
+                    onChange={(role: OrganizationRole) => void onMemberChange(member.user_id, role)}
                     style={{ width: 110 }}
                   />
                 ),
@@ -636,6 +703,66 @@ function OverviewTab({
         </Card>
       </Col>
     </Row>
+  )
+}
+
+function OrganizationMemberPicker({
+  members,
+  canSearchUsers,
+  value,
+  onChange,
+  disabled,
+}: {
+  members: OrganizationMember[]
+  canSearchUsers: boolean
+  value?: string
+  onChange?: (value: string | undefined) => void
+  disabled?: boolean
+}) {
+  const [advanced, setAdvanced] = useState(false)
+  if (canSearchUsers)
+    return (
+      <DirectoryPicker
+        source={{ kind: 'user' }}
+        label="组织用户"
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    )
+  return (
+    <Space orientation="vertical" size={4}>
+      {advanced ? (
+        <Input
+          aria-label="用户 ID"
+          placeholder="输入完整 UUID"
+          value={value ?? ''}
+          onChange={(event) => onChange?.(event.target.value)}
+          disabled={disabled}
+        />
+      ) : (
+        <Select
+          aria-label="组织用户"
+          placeholder="搜索已有组织成员"
+          showSearch
+          optionFilterProp="label"
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          style={{ width: 260 }}
+          options={members.map((member) => ({
+            value: member.user_id,
+            label: `${member.display_name ?? member.user_id} (${member.email ?? member.user_id})`,
+          }))}
+        />
+      )}
+      <Button type="link" size="small" onClick={() => setAdvanced(!advanced)} disabled={disabled}>
+        {advanced ? '返回成员搜索' : '按 ID 输入'}
+      </Button>
+      <Typography.Text type="secondary">
+        仅搜索已有组织成员；添加其他已知账号请使用完整用户 ID。
+      </Typography.Text>
+    </Space>
   )
 }
 
@@ -768,21 +895,32 @@ function GovernanceTab({
   onSave,
 }: {
   organization: OrganizationGovernance
-  runner?: RunnerGovernanceData
+  runner: ReturnType<typeof useOrganizationWorkspace>['runner']
   canManage: boolean
   pending: boolean
   onSave: (input: GovernanceFormValues) => void
 }) {
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-      <RunnerGovernanceStats runner={runner} />
+      <OrganizationQueryBoundary label="Runner 治理" query={runner}>
+        {(data) => (
+          <>
+            <RunnerGovernanceStats runner={data} />
+            <RunnerPoolsTable pools={data.pools} />
+          </>
+        )}
+      </OrganizationQueryBoundary>
+      {!canManage && (
+        <Typography.Paragraph type="secondary">
+          保存策略需要管理权限与完整的 Runner 治理读取结果。
+        </Typography.Paragraph>
+      )}
       <GovernancePolicyForm
         organization={organization}
         canManage={canManage}
         pending={pending}
         onSave={onSave}
       />
-      <RunnerPoolsTable pools={runner?.pools ?? []} />
     </Space>
   )
 }
@@ -937,75 +1075,6 @@ function RunnerPoolsTable({ pools }: { pools: RunnerGovernanceData['pools'] }) {
   )
 }
 
-function SecurityTab({
-  audit,
-  security,
-  supportBundle,
-  canRotate,
-  onPrepare,
-  onApply,
-  onRollback,
-  pending,
-}: {
-  audit: Array<{
-    id: string
-    action: string
-    resource_type: string
-    details: Record<string, unknown>
-    created_at: string
-  }>
-  security?: {
-    active_key_version: number
-    capability_name: 'Organization Data Encryption Key Rotation'
-    capability_mode: 'reencrypt_verify_activate_rollback'
-    ciphertext_reencryption_available: true
-    ga_blocker: null
-    key_versions: Array<{
-      id: string
-      version: number
-      key_reference: string
-      key_fingerprint: string
-      status: string
-      migration_status: string
-      previous_version: number | null
-      created_at: string
-    }>
-  }
-  supportBundle?: {
-    schema_version: string
-    data_classification: string
-    included_sections: string[]
-    redacted_fields: string[]
-    excluded_fields: string[]
-  }
-  canRotate: boolean
-  onPrepare: (input: KeyRotationFormValues) => void
-  onApply: (id: string) => void
-  onRollback: (id: string) => void
-  pending: boolean
-}) {
-  return (
-    <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-      <Row gutter={[16, 16]}>
-        <Col xs={24} lg={12}>
-          <KeyRotationCard
-            security={security}
-            canRotate={canRotate}
-            onPrepare={onPrepare}
-            onApply={onApply}
-            onRollback={onRollback}
-            pending={pending}
-          />
-        </Col>
-        <Col xs={24} lg={12}>
-          <SupportBundleCard supportBundle={supportBundle} />
-        </Col>
-      </Row>
-      <AuditTable audit={audit} />
-    </Space>
-  )
-}
-
 function KeyRotationCard({
   security,
   canRotate,
@@ -1014,7 +1083,7 @@ function KeyRotationCard({
   onRollback,
   pending,
 }: {
-  security?: SecurityView
+  security: SecurityView
   canRotate: boolean
   onPrepare: (input: KeyRotationFormValues) => void
   onApply: (id: string) => void
@@ -1022,6 +1091,11 @@ function KeyRotationCard({
   pending: boolean
 }) {
   const [form] = Form.useForm<KeyRotationFormValues>()
+  const capabilityAvailable =
+    security.ciphertext_reencryption_available === true &&
+    security.capability_name === 'Organization Data Encryption Key Rotation' &&
+    security.ga_blocker === null &&
+    security.capability_mode === 'reencrypt_verify_activate_rollback'
   return (
     <Card
       title={
@@ -1032,22 +1106,18 @@ function KeyRotationCard({
       }
     >
       <Descriptions column={1} size="small">
-        <Descriptions.Item label="当前版本">
-          v{security?.active_key_version ?? '-'}
-        </Descriptions.Item>
+        <Descriptions.Item label="当前版本">v{security.active_key_version}</Descriptions.Item>
         <Descriptions.Item label="密钥材料">外部密钥提供方（只保存引用与指纹）</Descriptions.Item>
-        <Descriptions.Item label="Capability Mode">
-          {security?.capability_mode ?? 'reencrypt_verify_activate_rollback'}
-        </Descriptions.Item>
+        <Descriptions.Item label="Capability Mode">{security.capability_mode}</Descriptions.Item>
       </Descriptions>
       <Alert
-        type="success"
+        type={capabilityAvailable ? 'info' : 'warning'}
         showIcon
         className="page-alert"
-        title="真实 Key Rotation 可用"
+        title={capabilityAvailable ? '密钥轮换能力已确认' : '密钥轮换能力不可用'}
         description="Apply 在同一事务内锁定组织密钥策略，逐项重加密并解密校验后才激活；Rollback 使用前一密钥反向重加密并记录审计证据。"
       />
-      {canRotate && (
+      {canRotate && capabilityAvailable && (
         <Form form={form} layout="vertical" onFinish={onPrepare}>
           <Form.Item
             name="key_reference"
@@ -1069,8 +1139,8 @@ function KeyRotationCard({
         </Form>
       )}
       <KeyVersionTable
-        versions={security?.key_versions ?? []}
-        canRotate={canRotate}
+        versions={security.key_versions}
+        canRotate={canRotate && capabilityAvailable && !pending}
         onApply={onApply}
         onRollback={onRollback}
       />
@@ -1162,46 +1232,6 @@ type SupportBundleView = {
   excluded_fields: string[]
 }
 
-function AuditTable({
-  audit,
-}: {
-  audit: Array<{
-    id: string
-    action: string
-    resource_type: string
-    details: Record<string, unknown>
-    created_at: string
-  }>
-}) {
-  return (
-    <Card
-      title={
-        <Space>
-          <AuditOutlined />
-          组织审计查询
-        </Space>
-      }
-    >
-      <Table
-        rowKey="id"
-        size="small"
-        dataSource={audit}
-        pagination={{ pageSize: 10, hideOnSinglePage: true }}
-        columns={[
-          { title: '时间', dataIndex: 'created_at', render: formatDate },
-          { title: '动作', dataIndex: 'action' },
-          { title: '资源', dataIndex: 'resource_type' },
-          {
-            title: '详情',
-            dataIndex: 'details',
-            render: (value: Record<string, unknown>) => JSON.stringify(value),
-          },
-        ]}
-      />
-    </Card>
-  )
-}
-
 function CreateOrganizationDialog({
   open,
   submitting,
@@ -1240,10 +1270,10 @@ function CreateOrganizationDialog({
 }
 
 const roleOptions = [
-  { value: 'owner' as const, label: 'Owner' },
-  { value: 'admin' as const, label: 'Admin' },
-  { value: 'member' as const, label: 'Member' },
-  { value: 'viewer' as const, label: 'Viewer' },
+  { value: 'owner' as const, label: '所有者 Owner' },
+  { value: 'admin' as const, label: '管理员 Admin' },
+  { value: 'member' as const, label: '成员 Member' },
+  { value: 'viewer' as const, label: '只读成员 Viewer' },
 ]
 
 function toGovernanceFormValues(value: OrganizationGovernance): GovernanceFormValues {

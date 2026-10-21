@@ -27,6 +27,8 @@ export type OrganizationMember = {
   id: string
   organization_id: string
   user_id: string
+  display_name?: string | null
+  email?: string | null
   role: OrganizationRole
   created_at: string
   updated_at: string
@@ -251,12 +253,24 @@ export async function getRunnerGovernance(
 
 export async function listOrganizationAuditLogs(
   organizationId: string,
+  filters: OrganizationAuditFilters = { page: 1, page_size: 10 },
 ): Promise<Page<OrganizationAuditLog>> {
   return (
     await apiClient.get<Page<OrganizationAuditLog>>(`/organizations/${organizationId}/audit-logs`, {
-      params: { page: 1, page_size: 50 },
+      params: filters,
     })
   ).data
+}
+
+export type OrganizationAuditFilters = {
+  page?: number
+  page_size?: number
+  action?: string
+  actor_user_id?: string
+  resource_type?: string
+  resource_id?: string
+  created_from?: string
+  created_to?: string
 }
 
 export async function getOrganizationSecurity(

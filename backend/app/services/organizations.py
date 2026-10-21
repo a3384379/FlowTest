@@ -26,6 +26,13 @@ class OrganizationAccess:
     member_count: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class OrganizationMemberIdentity:
+    member: OrganizationMember
+    display_name: str
+    email: str
+
+
 class OrganizationContextService:
     """Resolve and lazily bootstrap the organization boundary for a user."""
 
@@ -215,9 +222,15 @@ class OrganizationService:
 
     async def list_members(
         self, *, actor: User, organization_id: UUID
-    ) -> Sequence[OrganizationMember]:
+    ) -> Sequence[OrganizationMemberIdentity]:
         await self._authorize(actor, organization_id, "read")
-        return await self._organizations.list_members(organization_id)
+        identities = await self._organizations.list_member_identities(organization_id)
+        return [
+            OrganizationMemberIdentity(
+                member=member, display_name=user.display_name, email=user.email
+            )
+            for member, user in identities
+        ]
 
     async def upsert_member(
         self,

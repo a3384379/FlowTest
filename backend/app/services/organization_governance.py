@@ -110,7 +110,9 @@ class OrganizationGovernanceService:
         actor: User,
         organization_id: UUID,
         action: str | None,
+        actor_user_id: UUID | None,
         resource_type: str | None,
+        resource_id: UUID | None,
         created_from: datetime | None,
         created_to: datetime | None,
         offset: int,
@@ -124,6 +126,10 @@ class OrganizationGovernanceService:
             filters.append(AuditLog.action == action)
         if resource_type:
             filters.append(AuditLog.resource_type == resource_type)
+        if actor_user_id:
+            filters.append(AuditLog.actor_user_id == actor_user_id)
+        if resource_id:
+            filters.append(AuditLog.resource_id == resource_id)
         if created_from:
             filters.append(AuditLog.created_at >= created_from)
         if created_to:
@@ -133,7 +139,7 @@ class OrganizationGovernanceService:
                 await self._session.scalars(
                     select(AuditLog)
                     .where(*filters)
-                    .order_by(AuditLog.created_at.desc())
+                    .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
                     .offset(offset)
                     .limit(limit)
                 )

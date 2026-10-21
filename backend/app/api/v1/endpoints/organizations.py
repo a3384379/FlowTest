@@ -96,7 +96,12 @@ async def list_organization_members(
         actor=current_user,
         organization_id=organization_id,
     )
-    return [OrganizationMemberResponse.model_validate(item) for item in members]
+    return [
+        OrganizationMemberResponse.model_validate(item.member).model_copy(
+            update={"display_name": item.display_name, "email": item.email}
+        )
+        for item in members
+    ]
 
 
 @router.put(
@@ -255,7 +260,9 @@ async def list_organization_audit_logs(
     session: SessionDependency,
     current_user: CurrentUser,
     action: str | None = Query(default=None, max_length=100),
+    actor_user_id: UUID | None = None,
     resource_type: str | None = Query(default=None, max_length=100),
+    resource_id: UUID | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
     page: int = Query(default=1, ge=1),
@@ -265,7 +272,9 @@ async def list_organization_audit_logs(
         actor=current_user,
         organization_id=organization_id,
         action=action,
+        actor_user_id=actor_user_id,
         resource_type=resource_type,
+        resource_id=resource_id,
         created_from=created_from,
         created_to=created_to,
         offset=(page - 1) * page_size,
