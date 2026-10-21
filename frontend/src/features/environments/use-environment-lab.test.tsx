@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { server } from '../../test/server'
@@ -13,7 +13,7 @@ const scope = vi.hoisted(() => ({ projectId: 'first-project' }))
 vi.mock('../projects/use-project-context', () => ({
   useProjectContext: () => ({ projectId: scope.projectId }),
 }))
-function workspace() {
+function workspace(dataRouter = false) {
   scope.projectId = 'first-project'
   server.use(
     http.get('/api/v1/v3/features', () => HttpResponse.json({ environment_lab: true })),
@@ -30,15 +30,20 @@ function workspace() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return renderHook(() => useEnvironmentLab(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
+  let router: ReturnType<typeof createMemoryRouter>
+  function Wrapper({ children }: { children: ReactNode }) {
+    const content = (
       <App>
-        <QueryClientProvider client={client}>
-          <MemoryRouter>{children}</MemoryRouter>
-        </QueryClientProvider>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
       </App>
-    ),
-  })
+    )
+    const initialEntries = ['/projects/first-project/environments']
+    if (!dataRouter) return <MemoryRouter initialEntries={initialEntries}>{content}</MemoryRouter>
+    router ??= createMemoryRouter([{ path: '*', element: content }], { initialEntries })
+    return <RouterProvider router={router} />
+  }
+  const hook = renderHook(() => useEnvironmentLab(), { wrapper: Wrapper })
+  return { ...hook, router: router! }
 }
 describe('environment command ownership', () => {
   afterEach(() => vi.restoreAllMocks())
@@ -92,6 +97,29 @@ describe('environment command ownership', () => {
       complete({} as services.EnvironmentInstance)
       await pending
     })
+    expect(screen.queryByText('环境清理任务已提交')).not.toBeInTheDocument()
+  })
+  it('ignores a result when navigation completed before React committed', async () => {
+    let complete!: (value: services.EnvironmentInstance) => void
+    const command = vi.spyOn(services, 'cleanupEnvironment').mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve
+      }),
+    )
+    const { result, router } = workspace(true)
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.startCleanup('original-object')
+    })
+    await waitFor(() => expect(command).toHaveBeenCalledOnce())
+    const destination = '/projects/second-project/environments'
+    await act(async () => {
+      await router.navigate(destination)
+      complete({} as services.EnvironmentInstance)
+      await pending
+    })
+    expect(router.state.location.pathname + router.state.location.search).toBe(destination)
     expect(screen.queryByText('环境清理任务已提交')).not.toBeInTheDocument()
   })
 })

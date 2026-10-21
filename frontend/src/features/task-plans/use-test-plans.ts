@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useLayoutEffect, useMemo, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
 
 import { apiErrorMessage, type TestPlan } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
@@ -38,6 +38,8 @@ export function useTestPlans() {
   const canEdit = editPermission && permissions.isSuccess
   const canManageTokens = tokenPermission && permissions.isSuccess
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
   const focusedId = searchParams.get('focus')
   const selectedRunId = searchParams.get('run')
   const context = useMemo(
@@ -51,7 +53,9 @@ export function useTestPlans() {
       activeContext.current = null
     }
   }, [context])
-  const isCurrent = () => activeContext.current === context
+  const isCurrent = () =>
+    activeContext.current === context &&
+    (!dataRouter || dataRouter.router.state.location.key === location.key)
   function setSelectedRunId(id: string | null) {
     setSearchParams((current) => {
       const next = new URLSearchParams(current)

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import type { ReactNode } from 'react'
-import { MemoryRouter } from 'react-router-dom'
+import { createMemoryRouter, MemoryRouter, RouterProvider } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -38,7 +38,7 @@ const run: TestPlanRun = {
   created_at: '2026-10-21T00:00:00Z',
 }
 
-function workspace() {
+function workspace(dataRouter = false) {
   scope.projectId = 'first-project'
   server.use(
     http.get('/api/v1/projects/:projectId/permissions', () =>
@@ -59,15 +59,20 @@ function workspace() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return renderHook(() => useTestPlans(), {
-    wrapper: ({ children }: { children: ReactNode }) => (
+  let router: ReturnType<typeof createMemoryRouter>
+  function Wrapper({ children }: { children: ReactNode }) {
+    const content = (
       <App>
-        <QueryClientProvider client={client}>
-          <MemoryRouter initialEntries={['/projects/first-project/tasks']}>{children}</MemoryRouter>
-        </QueryClientProvider>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
       </App>
-    ),
-  })
+    )
+    const initialEntries = ['/projects/first-project/tasks']
+    if (!dataRouter) return <MemoryRouter initialEntries={initialEntries}>{content}</MemoryRouter>
+    router ??= createMemoryRouter([{ path: '*', element: content }], { initialEntries })
+    return <RouterProvider router={router} />
+  }
+  const hook = renderHook(() => useTestPlans(), { wrapper: Wrapper })
+  return { ...hook, router: router! }
 }
 
 describe('task completion ownership', () => {
@@ -147,6 +152,29 @@ describe('task completion ownership', () => {
     })
     expect(result.current.selectedRunId).toBe('already-selected-run')
     expect(result.current.focusedId).toBeNull()
+    expect(screen.queryByText('测试计划已进入队列')).not.toBeInTheDocument()
+  })
+  it('ignores a result when navigation completed before React committed', async () => {
+    let complete!: (value: TestPlanRun) => void
+    const command = vi.spyOn(services, 'runTestPlan').mockReturnValue(
+      new Promise((resolve) => {
+        complete = resolve
+      }),
+    )
+    const { result, router } = workspace(true)
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    let pending!: Promise<void>
+    act(() => {
+      pending = result.current.execute('original-object')
+    })
+    await waitFor(() => expect(command).toHaveBeenCalledOnce())
+    const destination = '/projects/second-project/tasks'
+    await act(async () => {
+      await router.navigate(destination)
+      complete(run)
+      await pending
+    })
+    expect(router.state.location.pathname + router.state.location.search).toBe(destination)
     expect(screen.queryByText('测试计划已进入队列')).not.toBeInTheDocument()
   })
 })
