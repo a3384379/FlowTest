@@ -140,7 +140,7 @@ function FrozenBaseline({
   baseline: AIReviewBaseline
   proposed: Record<string, unknown>
 }) {
-  const after = proposedDraft(baseline.content, proposed)
+  const after = proposedDraft(baseline.content, proposed, baseline.target_type)
   const fields = changeFields(baseline.content, after)
   return (
     <Flex vertical gap={12}>
@@ -161,6 +161,9 @@ function FrozenBaseline({
         />
       </Card>
       <Card size="small" title={`字段差异 · ${fields.length}`}>
+        <Typography.Paragraph type="secondary">
+          省略的运行时参数和节点配置沿用冻结值，显式提供的值会替换。以下是合并后的待校验草稿，接受时仍由服务端校验并规范化定义。
+        </Typography.Paragraph>
         <List
           dataSource={fields.slice(0, 300)}
           locale={{ emptyText: '可读取字段没有变化' }}
@@ -194,8 +197,8 @@ function FrozenBaseline({
           },
           {
             key: 'after',
-            label: '拟写入草稿完整内容',
-            children: <ResponseCodeReader title="拟写入草稿完整内容" value={after} />,
+            label: '按更新规则合并的草稿预览',
+            children: <ResponseCodeReader title="按更新规则合并的草稿预览" value={after} />,
           },
         ]}
       />

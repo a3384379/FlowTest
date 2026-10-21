@@ -26,12 +26,19 @@ import type {
 import { useAIChangeSets } from '../features/ai/use-ai-change-sets'
 import { useProjectContext } from '../features/projects/use-project-context'
 import { apiErrorWithTrace } from '../lib/api'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
 import AIDraftProtection from '../features/ai/AIDraftProtection'
 import {
   AIChangeSource,
   AIChangeBaseline,
   AIChangeReviewReceipt,
 } from '../features/ai/AIChangeReviewEvidence'
+
+type ReviewSelection = {
+  changeSetId: string
+  item: AIChangeItem
+  decision: 'accept' | 'reject'
+}
 
 export default function AIChangeSetsPage() {
   const { projectId } = useProjectContext()
@@ -42,10 +49,11 @@ function AIChangeSetWorkspace() {
   const [searchParams] = useSearchParams()
   const state = useAIChangeSets(searchParams.get('focus'))
   const [createOpen, setCreateOpen] = useState(false)
-  const [review, setReview] = useState<{
-    item: AIChangeItem
-    decision: 'accept' | 'reject'
-  } | null>(null)
+  const [review, setReview] = useRouteScopedState<ReviewSelection | null>(
+    state.projectId,
+    state.activeId,
+    null,
+  )
   const detail = state.detail.data
   return (
     <>
@@ -121,7 +129,7 @@ function AIChangeSetWorkspace() {
               readOnly={!state.canReview || state.reviewing}
               onReview={(value) => {
                 state.clearReviewError()
-                setReview(value)
+                if (detail) setReview({ ...value, changeSetId: detail.id })
               }}
             />
           </Card>
@@ -381,7 +389,7 @@ function ReviewChangeItemDialog({
   detail: AIChangeSetDetail | undefined
   apiError: string
   readOnly: boolean
-  value: { item: AIChangeItem; decision: 'accept' | 'reject' } | null
+  value: ReviewSelection | null
   submitting: boolean
   onClose: () => void
   onSubmit: (
@@ -391,13 +399,13 @@ function ReviewChangeItemDialog({
     note: string,
   ) => Promise<void>
 }) {
-  if (!value) return null
+  if (!value || detail?.id !== value.changeSetId) return null
   return (
     <ReviewChangeItemDialogContent
       detail={detail}
       apiError={apiError}
       readOnly={readOnly}
-      key={`${value.item.id}:${value.decision}`}
+      key={`${value.changeSetId}:${value.item.id}:${value.decision}`}
       value={value}
       submitting={submitting}
       onClose={onClose}
@@ -418,7 +426,7 @@ function ReviewChangeItemDialogContent({
   detail: AIChangeSetDetail | undefined
   apiError: string
   readOnly: boolean
-  value: { item: AIChangeItem; decision: 'accept' | 'reject' }
+  value: ReviewSelection
   submitting: boolean
   onClose: () => void
   onSubmit: (

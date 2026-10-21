@@ -35,3 +35,20 @@
 ## 完成边界
 
 功能、针对性验证、完整后端与上述真实浏览器专项已完成；完整前端、并行模块集成、最新提交的 GitHub Required Gate、合并后独立回归、真实外部模型和正式部署尚需分别确认。进度暂不将本批三项计为完整本地完成，待完整前端结果后更新。
+
+## 独立复审：前端差异与审核归属（2026-10-22）
+
+复审复现了两个实际缺陷：定义对象浅替换会把后端保留的省略运行时字段展示为删除；同一项目从 focus B 返回 A 并确认放弃后，旧 B 表单仍保留，来源却已经切为 A。本节只记录前端补修；OFF 下占位符恢复问题由独立后端提交处理，旧完整后端结果不能作为组合修复后的验证结果。
+
+- 差异按冻结目标类型推导：Test Case 省略 `runtime_variables/runtime_headers` 时保留冻结值；Workflow 省略 `variables` 及按节点 ID 匹配的配置字段时保留冻结值。显式提供的空对象仍按替换处理，删除节点不复活，不修改原基线，也不扫描或替换字面占位符。数组仍按完整替换比较。
+- 将原“拟写入草稿完整内容”明确为“按更新规则合并的草稿预览”，解释省略保留与显式替换，并说明接受时仍需服务端校验和规范化；不将客户端推导冒充最终规范化回执。ON 继续只展示已授权冻结投影，不读取当前资产或隐藏字段。
+- 审核选择用现有路由范围状态绑定项目和当前 ChangeSet，并显式保存 ChangeSet ID 核对来源。确认离开到另一 focus 后销毁旧表单及放行标识；取消导航保留当前输入。相同 ChangeSet 的详情刷新失败和重试成功均不清空 JSON 或备注。
+- 真实 Data Router、页面、查询 Hook 和 MSW 反例覆盖 B→A 导航、取消与确认放弃、新项再次触发导航保护、向新项 ID 提交、同项 503 后恢复、旧审核回执晚到不重开旧表单或宣告旧结果。另有页面级预览验证，确认省略的用例运行时字段保留在合并预览中，未被列为删除。
+
+先增加差异与 focus 反例后修复。首轮 5 项失败、1 项通过，其中一项是测试试图从打开的审核窗口点击后台重试按钮；该项改为触发同一查询的显式重试，以检验输入保留，未修改产品保护逻辑。其余失败对应三个差异断言及旧审核表单未销毁。最终检查：
+
+- `make test-frontend-targeted TARGETS='["src/features/ai/ai-change-diff.test.ts","src/features/ai/ai-change-set-service.test.ts","src/features/ai/use-ai-change-sets.test.tsx","src/pages/AIChangeSetsPage.test.tsx","src/pages/AIChangeSetsPage.navigation.test.tsx"]'`：5 文件、31 项通过。
+- 全前端 `pnpm lint`（含 TypeScript）、`pnpm build`、本批 Prettier 及 `git diff --check` 通过。
+- 原始日志位于本工作树忽略目录 `output/validation/m22-review-frontend/`：`frontend-red.log`、`frontend-final.log`、`frontend-lint.log`、`frontend-build.log`、`format-check.log`。
+
+本前端补修未修改后端、迁移、冻结审计、共享进度或验收环境，未运行完整前端覆盖率与真实浏览器；组合后的完整检查、GUI 和最新远端门禁仍由整合负责人分别记录。

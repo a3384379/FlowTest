@@ -241,6 +241,58 @@ describe('AIChangeSetsPage', () => {
     expect(within(dialog).getByLabelText('审核备注')).toHaveValue('不可静默丢弃')
   })
 
+  it('previews preserved test-case runtime values rather than reporting omitted fields as removed', async () => {
+    const targetId = '00000000-0000-4000-8000-000000000271'
+    const definition = {
+      workflow_id: 'workflow-original',
+      environment_id: 'environment-original',
+      runtime_variables: { region: 'frozen-case-region' },
+      runtime_headers: { 'X-Region': 'frozen-case-header' },
+    }
+    handlers({
+      ...detail,
+      review_baselines: [
+        {
+          target_type: 'test_case',
+          target_id: targetId,
+          snapshot_sha256: 'e'.repeat(64),
+          content: { name: '固定用例', description: '', definition, tags: [] },
+          current_version: 1,
+          draft_revision: null,
+          updated_at: item.created_at,
+          redaction_mode: 'off',
+          redaction_policy_version: 1,
+        },
+      ],
+      items: [
+        {
+          ...item,
+          item_type: 'test_case',
+          action: 'update',
+          target_resource_id: targetId,
+          target_snapshot_sha256: 'e'.repeat(64),
+          proposed_content: {
+            definition: { workflow_id: definition.workflow_id, environment_id: 'environment-next' },
+          },
+        },
+      ],
+    })
+    renderPage()
+    expect(await screen.findByText('$.definition.environment_id', { exact: true })).toBeVisible()
+    expect(
+      screen.queryByText('$.definition.runtime_variables', { exact: true }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('$.definition.runtime_headers', { exact: true }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(screen.getByText('按更新规则合并的草稿预览'))
+    const preview = await screen.findByRole('region', { name: '按更新规则合并的草稿预览' })
+    expect(preview).toHaveTextContent('frozen-case-region')
+    expect(preview).toHaveTextContent('frozen-case-header')
+    expect(preview).toHaveTextContent('environment-next')
+    expect(screen.getByText(/接受时仍由服务端校验并规范化定义/)).toBeVisible()
+  })
+
   it('shows suggestions to viewers without allowing generation or item review', async () => {
     handlers(detail)
     let writes = 0
