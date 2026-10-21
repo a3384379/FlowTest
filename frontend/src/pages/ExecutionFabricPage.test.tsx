@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, waitFor, act, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import { authenticateTestUser } from '../test/auth'
@@ -122,6 +123,203 @@ describe('ExecutionFabricPage', () => {
     expect(await screen.findByText('PostgreSQL 单调递增')).toBeVisible()
   })
 
+  it('uses the server aggregate and reaches Pool 101 without counting a task sample', async () => {
+    installHandlers()
+    const pages: string[] = []
+    server.use(
+      http.get('/api/v1/execution-fabric/queue', () =>
+        HttpResponse.json({
+          generated_at: '2026-10-21T01:00:00Z',
+          scope: 'all_organizations',
+          organization_id: null,
+          groups: [{ runner_type: 'general', queued: 150, leased: 12, failed: 9 }],
+        }),
+      ),
+      http.get('/api/v1/execution-fabric/pools', ({ request }) => {
+        const number = new URL(request.url).searchParams.get('page') ?? '1'
+        pages.push(number)
+        return HttpResponse.json({
+          items: [
+            {
+              ...pool,
+              id: `pool-${number}`,
+              name: number === '6' ? 'Pool 101' : pool.name,
+              runners: [],
+            },
+          ],
+          total: 101,
+          page: Number(number),
+          page_size: 20,
+        })
+      }),
+    )
+    renderPage()
+    expect(await screen.findByText('排队 150 · 运行 12 · 失败 9')).toBeVisible()
+    expect(screen.getByText(/服务端全量聚合/)).toBeVisible()
+    await userEvent.click(screen.getByTitle('6'))
+    expect(await screen.findByRole('button', { name: 'Pool 101 · 签发注册令牌' })).toBeVisible()
+    expect(pages).toEqual(['1', '6'])
+  })
+
+  it('loads an exact task outside the directory and distinguishes old Lease fences', async () => {
+    installHandlers()
+    const current = {
+      ...tasks[1],
+      last_lease_id: 'lease-current',
+      fencing_token: 2,
+      selected_runner_id: pool.runners[0].id,
+    }
+    const lease = {
+      id: 'lease-current',
+      task_id: current.id,
+      runner_id: current.selected_runner_id,
+      fencing_token: 2,
+      status: 'active',
+      acquired_at: '2026-10-21T01:00:00Z',
+      expires_at: '2099-10-21T01:00:00Z',
+      last_renewed_at: '2026-10-21T01:01:00Z',
+      completed_at: null,
+    }
+    server.use(
+      http.get('/api/v1/execution-fabric/tasks', () => page([])),
+      http.get('/api/v1/execution-fabric/tasks/:id', () => HttpResponse.json(current)),
+      http.get('/api/v1/execution-fabric/leases', ({ request }) => {
+        expect(new URL(request.url).searchParams.get('task_id')).toBe(current.id)
+        return page([
+          lease,
+          { ...lease, id: 'lease-old', fencing_token: 1, expires_at: '2026-01-01T00:00:00Z' },
+        ])
+      }),
+    )
+    const view = renderPage(`/execution-fabric?task=${current.id}`)
+    expect(await screen.findByText('当前有效 Lease')).toBeVisible()
+    expect(screen.getByText('已过期，等待回收')).toBeVisible()
+    expect(screen.getByRole('link', { name: '查看执行报告' })).toHaveAttribute(
+      'href',
+      expect.stringContaining(`execution=${current.execution_id}`),
+    )
+    expect(screen.getByRole('link', { name: '查看工作流执行' })).toHaveAttribute(
+      'href',
+      expect.stringContaining(current.project_id),
+    )
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+    server.use(
+      http.get('/api/v1/execution-fabric/leases', () =>
+        HttpResponse.json(
+          { error: { code: 'OFFLINE', message: 'Lease 暂不可用' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '刷新执行面' }))
+    expect(
+      await screen.findByText('部分详情刷新失败，保留的 Lease、事件或 Worker 数据可能过期'),
+    ).toBeVisible()
+    expect(screen.queryByText('当前有效 Lease')).not.toBeInTheDocument()
+    expect(screen.getAllByText('有效性待刷新核对')).toHaveLength(2)
+  })
+
+  it('retains old data on refresh failure without performing a state action', async () => {
+    let writes = 0
+    installHandlers({
+      onAction: () => {
+        writes += 1
+      },
+    })
+    const view = renderPage()
+    await screen.findByText('runner-a')
+    await waitFor(() => expect(view.queryClient.isFetching()).toBe(0))
+    server.use(
+      http.get('/api/v1/execution-fabric/queue', () =>
+        HttpResponse.json(
+          { error: { code: 'OFFLINE', message: '聚合暂不可用', trace_id: 'fabric-trace' } },
+          { status: 503 },
+        ),
+      ),
+    )
+    await userEvent.click(screen.getByRole('button', { name: '刷新执行面' }))
+    expect(await screen.findByText('读取失败，已显示的数据可能过期；请刷新后核对')).toBeVisible()
+    expect(screen.getByText('排队 1 · 运行 1 · 失败 0')).toBeVisible()
+    expect(screen.getByText(/fabric-trace/)).toBeVisible()
+    await waitFor(() => expect(writes).toBe(0))
+  })
+
+  it('does not show a late task from the previous organization', async () => {
+    installHandlers()
+    let finish: (value: Response) => void = () => undefined
+    let reads = 0
+    server.use(
+      http.get('/api/v1/execution-fabric/tasks/:id', () => {
+        reads += 1
+        if (reads === 1)
+          return new Promise<Response>((resolve) => {
+            finish = resolve
+          })
+        return HttpResponse.json(
+          { error: { code: 'RUNNER_TASK_NOT_FOUND', message: '当前组织任务不存在' } },
+          { status: 404 },
+        )
+      }),
+    )
+    renderPage(`/execution-fabric?task=${tasks[0].id}`)
+    await waitFor(() => expect(reads).toBe(1))
+    act(() => {
+      useAuthStore.setState({ organizationId: 'other-organization' })
+    })
+    expect(await screen.findByText('当前组织任务不存在')).toBeVisible()
+    await act(async () => {
+      finish(HttpResponse.json(tasks[0]))
+    })
+    expect(screen.queryByText(tasks[0].execution_id)).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看执行报告' })).not.toBeInTheDocument()
+  })
+
+  it('polls visible pages and pauses while the page is hidden', async () => {
+    let reads = 0
+    installHandlers()
+    server.use(
+      http.get('/api/v1/execution-fabric/overview', () => {
+        reads += 1
+        return HttpResponse.json({
+          pools: 1,
+          runners_online: reads,
+          runners_offline: 0,
+          runners_draining: 0,
+          queued_tasks: 1,
+          active_leases: 1,
+          completed_tasks: 4,
+          failed_tasks: 1,
+        })
+      }),
+    )
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const visibility = vi.spyOn(document, 'visibilityState', 'get')
+    try {
+      renderPage()
+      await screen.findByText('runner-a')
+      await waitFor(() => expect(reads).toBe(1))
+      visibility.mockReturnValue('hidden')
+      act(() => {
+        fireEvent(document, new Event('visibilitychange'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000)
+      })
+      expect(reads).toBe(1)
+      visibility.mockReturnValue('visible')
+      act(() => {
+        fireEvent(document, new Event('visibilitychange'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000)
+      })
+      await waitFor(() => expect(reads).toBe(2))
+    } finally {
+      visibility.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
   it('creates a constrained worker pool and reports query failure', async () => {
     let submitted: Record<string, unknown> | undefined
     installHandlers({
@@ -175,6 +373,17 @@ function installHandlers({
         active_leases: 1,
         completed_tasks: 4,
         failed_tasks: 1,
+      }),
+    ),
+    http.get('/api/v1/execution-fabric/queue', () =>
+      HttpResponse.json({
+        generated_at: '2026-10-21T01:00:00Z',
+        scope: 'all_organizations',
+        organization_id: null,
+        groups: [
+          { runner_type: 'general', queued: 1, leased: 1, failed: 0 },
+          { runner_type: 'protocol', queued: 0, leased: 0, failed: 1 },
+        ],
       }),
     ),
     http.get('/api/v1/execution-fabric/pools', () => page([pool])),
@@ -246,15 +455,18 @@ function page<T>(items: T[]) {
   return HttpResponse.json({ items, total: items.length, page: 1, page_size: 100 })
 }
 
-function renderPage() {
+function renderPage(entry = '/execution-fabric') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  return render(
+  const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
-        <ExecutionFabricPage />
+        <MemoryRouter initialEntries={[entry]}>
+          <ExecutionFabricPage />
+        </MemoryRouter>
       </QueryClientProvider>
     </AntdApp>,
   )
+  return { ...view, queryClient }
 }

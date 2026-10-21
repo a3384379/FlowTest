@@ -112,32 +112,34 @@ export async function getRunnerFabricOverview(): Promise<RunnerFabricOverview> {
   return (await apiClient.get<RunnerFabricOverview>('/execution-fabric/overview')).data
 }
 
-export async function listFabricPools(): Promise<Page<FabricPool>> {
+export async function listFabricPools(page = 1): Promise<Page<FabricPool>> {
   return (
     await apiClient.get<Page<FabricPool>>('/execution-fabric/pools', {
-      params: { page: 1, page_size: 100 },
+      params: { page, page_size: 20 },
     })
   ).data
 }
 
-export async function listFabricTasks(): Promise<Page<FabricTask>> {
+export async function listFabricTasks(page = 1): Promise<Page<FabricTask>> {
   return (
-    await apiClient.get<Page<FabricTask>>('/execution-fabric/tasks', { params: { limit: 100 } })
+    await apiClient.get<Page<FabricTask>>('/execution-fabric/tasks', {
+      params: { limit: 20, page },
+    })
   ).data
 }
 
-export async function listFabricLeases(): Promise<Page<FabricLease>> {
+export async function listFabricLeases(page = 1, taskId?: string): Promise<Page<FabricLease>> {
   return (
     await apiClient.get<Page<FabricLease>>('/execution-fabric/leases', {
-      params: { limit: 100 },
+      params: { limit: 20, page, task_id: taskId },
     })
   ).data
 }
 
-export async function listFabricEvents(): Promise<Page<FabricEvent>> {
+export async function listFabricEvents(page = 1, taskId?: string): Promise<Page<FabricEvent>> {
   return (
     await apiClient.get<Page<FabricEvent>>('/execution-fabric/events', {
-      params: { limit: 100 },
+      params: { limit: 20, page, task_id: taskId },
     })
   ).data
 }
@@ -164,4 +166,27 @@ export async function changeRunnerState(
       action,
     })
   ).data
+}
+
+export type FabricQueueSnapshot = {
+  generated_at: string
+  organization_id: string | null
+  scope: 'all_organizations' | 'organization_and_shared'
+  groups: { runner_type: string; queued: number; leased: number; failed: number }[]
+}
+
+export async function getFabricQueue(): Promise<FabricQueueSnapshot> {
+  return (await apiClient.get<FabricQueueSnapshot>('/execution-fabric/queue')).data
+}
+
+export async function getFabricTask(id: string): Promise<FabricTask> {
+  return (await apiClient.get<FabricTask>(`/execution-fabric/tasks/${id}`)).data
+}
+
+export async function getFabricPool(id: string): Promise<FabricPool> {
+  return (await apiClient.get<FabricPool>(`/execution-fabric/pools/${id}`)).data
+}
+
+export async function getFabricRunner(id: string): Promise<FabricRunner> {
+  return (await apiClient.get<FabricRunner>(`/execution-fabric/runners/${id}`)).data
 }

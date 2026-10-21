@@ -318,6 +318,20 @@ class RunnerFabricOverviewResponse(BaseModel):
     failed_tasks: int
 
 
+class RunnerQueueGroupResponse(BaseModel):
+    runner_type: str
+    queued: int
+    leased: int
+    failed: int
+
+
+class RunnerQueueSnapshotResponse(BaseModel):
+    generated_at: datetime
+    organization_id: UUID | None
+    scope: Literal["all_organizations", "organization_and_shared"]
+    groups: list[RunnerQueueGroupResponse]
+
+
 class RunnerActionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

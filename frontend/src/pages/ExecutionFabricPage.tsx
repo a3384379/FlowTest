@@ -11,6 +11,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Pagination,
   Row,
   Select,
   Space,
@@ -20,24 +21,29 @@ import {
   Typography,
 } from 'antd'
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
+import { useFabricPolling } from '../features/execution-fabric/use-fabric-polling'
+import type { UseQueryResult } from '@tanstack/react-query'
+import type { Page } from '../lib/api'
 import { useAuthStore } from '../features/auth/auth-store'
 import { getV3FeatureFlags } from '../features/capabilities/capability-service'
+import FabricInspection, { FabricTaskTable } from '../features/execution-fabric/FabricInspection'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import {
   changeRunnerState,
   createFabricPool,
   createRegistrationToken,
   getRunnerFabricOverview,
+  getFabricQueue,
   listFabricEvents,
-  listFabricLeases,
   listFabricPools,
   listFabricTasks,
   type FabricEvent,
   type FabricPool,
   type FabricPoolInput,
   type FabricRunner,
-  type FabricTask,
+  type FabricQueueSnapshot,
   type RegistrationToken,
   type RunnerFabricOverview,
 } from '../features/execution-fabric/execution-fabric-service'
@@ -59,32 +65,52 @@ function ExecutionFabricFeatureBoundary() {
   if (flags.isError) return <QueryFailureNotice queries={[flags]} />
   if (flags.isPending) return <Alert showIcon type="info" title="正在读取执行面功能状态" />
   if (!flags.data?.runner_fabric) return <Alert showIcon type="info" title="分布式执行面尚未启用" />
-  return <ExecutionFabricWorkspace />
+  return <ScopedExecutionFabricWorkspace />
 }
 
-function ExecutionFabricWorkspace() {
+function ScopedExecutionFabricWorkspace() {
+  const scope = useAuthStore((state) => `${state.user?.id}:${state.organizationId}`)
+  return <ExecutionFabricWorkspace key={scope} scope={scope} />
+}
+
+function ExecutionFabricWorkspace({ scope }: { scope: string }) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [poolDialogOpen, setPoolDialogOpen] = useState(false)
   const [registration, setRegistration] = useState<RegistrationToken | null>(null)
+  const [poolPage, setPoolPage] = useState(1)
+  const [taskPage, setTaskPage] = useState(1)
+  const [eventPage, setEventPage] = useState(1)
+  const [params, setParams] = useSearchParams()
+  const polling = useFabricPolling()
   const overview = useQuery({
-    queryKey: ['runner-fabric-overview'],
+    queryKey: ['runner-fabric', scope, 'overview'],
     queryFn: getRunnerFabricOverview,
+    ...polling,
   })
-  const pools = useQuery({ queryKey: ['runner-fabric-pools'], queryFn: listFabricPools })
-  const tasks = useQuery({ queryKey: ['runner-fabric-tasks'], queryFn: listFabricTasks })
-  const leases = useQuery({ queryKey: ['runner-fabric-leases'], queryFn: listFabricLeases })
-  const events = useQuery({ queryKey: ['runner-fabric-events'], queryFn: listFabricEvents })
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['runner-fabric'] })
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['runner-fabric-overview'] }),
-      queryClient.invalidateQueries({ queryKey: ['runner-fabric-pools'] }),
-      queryClient.invalidateQueries({ queryKey: ['runner-fabric-tasks'] }),
-      queryClient.invalidateQueries({ queryKey: ['runner-fabric-leases'] }),
-      queryClient.invalidateQueries({ queryKey: ['runner-fabric-events'] }),
-    ])
-  }
+  const queue = useQuery({
+    queryKey: ['runner-fabric', scope, 'queue'],
+    queryFn: getFabricQueue,
+    ...polling,
+  })
+  const pools = useQuery({
+    queryKey: ['runner-fabric', scope, 'pools', poolPage],
+    queryFn: () => listFabricPools(poolPage),
+    ...polling,
+  })
+  const tasks = useQuery({
+    queryKey: ['runner-fabric', scope, 'tasks', taskPage],
+    queryFn: () => listFabricTasks(taskPage),
+    ...polling,
+  })
+  const events = useQuery({
+    queryKey: ['runner-fabric', scope, 'events', eventPage],
+    queryFn: () => listFabricEvents(eventPage),
+    ...polling,
+  })
+  const reads = [overview, queue, pools, tasks, events]
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['runner-fabric', scope] })
+  const selectTask = (id: string) => setParams({ task: id })
   const createPool = useMutation({
     mutationFn: createFabricPool,
     onSuccess: async () => {
@@ -108,10 +134,9 @@ function ExecutionFabricWorkspace() {
     },
     onError: () => void message.error('Runner 状态更新失败'),
   })
-  const poolItems = pools.data?.items ?? []
-  const taskItems = tasks.data?.items ?? []
-  const eventItems = events.data?.items ?? []
-  const failed = [overview, pools, tasks, leases, events].some((query) => query.isError)
+  const poolItems = pageItems(pools.data)
+  const eventItems = pageItems(events.data)
+  const failed = reads.some((query) => query.isError)
   return (
     <>
       <div className="page-heading">
@@ -124,9 +149,18 @@ function ExecutionFabricWorkspace() {
             管理 Worker Pool、队列、Lease 与 Fencing，故障转移时只允许当前 Fence 写入唯一终态。
           </Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setPoolDialogOpen(true)}>
-          新建 Worker Pool
-        </Button>
+        <Space>
+          <Button
+            aria-label="刷新执行面"
+            onClick={() => void invalidate()}
+            loading={reads.some((query) => query.isFetching)}
+          >
+            刷新执行面
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setPoolDialogOpen(true)}>
+            新建 Worker Pool
+          </Button>
+        </Space>
       </div>
       <Alert
         showIcon
@@ -135,6 +169,14 @@ function ExecutionFabricWorkspace() {
         title={failed ? '执行面数据加载失败' : 'PostgreSQL 是任务、Lease 与 Fence 的唯一真相源'}
         description="Runner 仅执行平台生成并加密持久化的 Workflow Plan，不接受任意镜像、Compose、命令或脚本。"
       />
+      <QueryFailureNotice queries={reads} />
+      {failed && <Alert type="warning" title="读取失败，已显示的数据可能过期；请刷新后核对" />}
+      <Typography.Paragraph type="secondary">
+        可见页面每 15 秒刷新；后台暂停。最近成功读取：
+        {overview.dataUpdatedAt
+          ? formatTime(new Date(overview.dataUpdatedAt).toISOString())
+          : '尚未加载'}
+      </Typography.Paragraph>
       <FabricOverview value={overview.data} />
       <div className="execution-fabric-grid">
         <Card title="Worker 列表" className="execution-fabric-workers" loading={pools.isLoading}>
@@ -145,24 +187,54 @@ function ExecutionFabricWorkspace() {
               </Button>
             ))}
           </Space>
+          <Pagination
+            current={poolPage}
+            total={pageTotal(pools.data)}
+            pageSize={20}
+            showSizeChanger={false}
+            onChange={setPoolPage}
+            showTotal={(total) => `共 ${total} 个 Pool`}
+          />
           <RunnerTable
             pools={poolItems}
-            pending={action.isPending || register.isPending}
+            pending={[action, register].some((mutation) => mutation.isPending)}
             onAction={(runnerId, value) => action.mutate({ runnerId, value })}
             onRegister={(poolId) => register.mutate(poolId)}
           />
         </Card>
-        <Card title="队列状态" loading={tasks.isLoading}>
-          <QueueSummary tasks={taskItems} />
-        </Card>
+        <QueueCard query={queue} />
       </div>
+      <Card title="任务历史（服务端分页，不用于队列统计）" loading={tasks.isLoading}>
+        <FabricTaskTable items={pageItems(tasks.data)} onSelect={selectTask} />
+        <Pagination
+          current={taskPage}
+          total={pageTotal(tasks.data)}
+          pageSize={20}
+          showSizeChanger={false}
+          onChange={setTaskPage}
+        />
+      </Card>
       <Card
-        title="最近 Lease / Fencing 事件"
+        title="Lease / Fencing 事件历史"
         className="performance-card"
         loading={events.isLoading}
       >
-        <EventTable events={eventItems} />
+        <EventTable events={eventItems} onSelectTask={selectTask} />
+        <Pagination
+          current={eventPage}
+          total={pageTotal(events.data)}
+          pageSize={20}
+          showSizeChanger={false}
+          onChange={setEventPage}
+        />
       </Card>
+      <FabricInspection
+        scope={scope}
+        taskId={params.get('task')}
+        poolId={params.get('pool')}
+        runnerId={params.get('runner')}
+        onClose={() => setParams({})}
+      />
       <PoolDialog
         open={poolDialogOpen}
         submitting={createPool.isPending}
@@ -171,6 +243,26 @@ function ExecutionFabricWorkspace() {
       />
       <RegistrationDialog value={registration} onClose={() => setRegistration(null)} />
     </>
+  )
+}
+
+function pageItems<T>(page: Page<T> | undefined): T[] {
+  return page?.items ?? []
+}
+function pageTotal<T>(page: Page<T> | undefined): number {
+  return page?.total ?? 0
+}
+function QueueCard({ query }: { query: UseQueryResult<FabricQueueSnapshot> }) {
+  return (
+    <Card title="队列状态" loading={query.isLoading}>
+      {query.isPending ? (
+        <Typography.Text>正在读取队列聚合</Typography.Text>
+      ) : query.data ? (
+        <QueueSummary snapshot={query.data} />
+      ) : (
+        <Typography.Text>队列统计未提供</Typography.Text>
+      )}
+    </Card>
   )
 }
 
@@ -231,14 +323,23 @@ function RunnerTable({
           title: 'Worker',
           render: (_, { runner }) => (
             <Space orientation="vertical" size={0}>
-              <Typography.Text strong>{runner.name}</Typography.Text>
+              <Typography.Link href={`/execution-fabric?runner=${runner.id}`}>
+                {runner.name}
+              </Typography.Link>
               <Typography.Text type="secondary">
                 {runner.runtime} · {runner.architecture}
               </Typography.Text>
             </Space>
           ),
         },
-        { title: '池', render: (_, { pool }) => pool.name },
+        {
+          title: '池',
+          render: (_, { pool }) => (
+            <Typography.Link href={`/execution-fabric?pool=${pool.id}`}>
+              {pool.name}
+            </Typography.Link>
+          ),
+        },
         {
           title: '能力',
           render: (_, { runner }) =>
@@ -285,47 +386,58 @@ function RunnerTable({
   )
 }
 
-function QueueSummary({ tasks }: { tasks: FabricTask[] }) {
-  const groups = useMemo(() => {
-    const counts = new Map<string, { queued: number; leased: number; failed: number }>()
-    for (const task of tasks) {
-      const row = counts.get(task.required_runner_type) ?? { queued: 0, leased: 0, failed: 0 }
-      if (task.status === 'queued') row.queued += 1
-      if (task.status === 'leased') row.leased += 1
-      if (task.status === 'failed') row.failed += 1
-      counts.set(task.required_runner_type, row)
-    }
-    return [...counts.entries()]
-  }, [tasks])
-  if (!groups.length) return <Typography.Text type="secondary">当前队列为空</Typography.Text>
+function QueueSummary({ snapshot }: { snapshot: FabricQueueSnapshot }) {
   return (
-    <Space orientation="vertical" size="middle" className="execution-queue-list">
-      {groups.map(([type, counts]) => (
-        <Card size="small" key={type}>
-          <Space orientation="vertical" size={2}>
-            <Typography.Text strong>{runnerTypeLabel(type)}</Typography.Text>
-            <Typography.Text type="secondary">
-              排队 {counts.queued} · 运行 {counts.leased} · 失败 {counts.failed}
-            </Typography.Text>
-          </Space>
+    <Space orientation="vertical" className="execution-queue-list">
+      <Typography.Text type="secondary">
+        服务端全量聚合 ·{' '}
+        {snapshot.scope === 'all_organizations'
+          ? '全部组织'
+          : `组织 ${snapshot.organization_id} 与共享项目`}{' '}
+        · 更新于 {formatTime(snapshot.generated_at)}。排队/运行按当前任务状态；失败为保留历史累计。
+      </Typography.Text>
+      {!snapshot.groups.length && <Typography.Text>当前范围没有任务记录</Typography.Text>}
+      {snapshot.groups.map((counts) => (
+        <Card size="small" key={counts.runner_type}>
+          <Typography.Text strong>{runnerTypeLabel(counts.runner_type)}</Typography.Text>
+          <div>
+            排队 {counts.queued} · 运行 {counts.leased} · 失败 {counts.failed}
+          </div>
         </Card>
       ))}
     </Space>
   )
 }
 
-function EventTable({ events }: { events: FabricEvent[] }) {
+function EventTable({
+  events,
+  onSelectTask,
+}: {
+  events: FabricEvent[]
+  onSelectTask: (id: string) => void
+}) {
   return (
     <Table
       rowKey="id"
       size="small"
       dataSource={events}
-      pagination={{ pageSize: 100, hideOnSinglePage: true }}
+      pagination={false}
       locale={{ emptyText: '暂无 Lease / Fencing 事件' }}
       columns={[
         { title: '时间', dataIndex: 'created_at', render: formatTime },
         { title: 'Runner', dataIndex: 'runner_id', render: shortId },
-        { title: '任务', dataIndex: 'task_id', render: shortId },
+        {
+          title: '任务',
+          dataIndex: 'task_id',
+          render: (id: string | null) =>
+            id ? (
+              <Button type="link" onClick={() => onSelectTask(id)}>
+                {shortId(id)}
+              </Button>
+            ) : (
+              '—'
+            ),
+        },
         { title: '事件', dataIndex: 'message' },
         {
           title: 'Fencing Token',

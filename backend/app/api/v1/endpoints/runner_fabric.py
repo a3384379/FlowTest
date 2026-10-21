@@ -27,6 +27,7 @@ from app.schemas.runner_fabric import (
     RunnerPoolResponse,
     RunnerPoolUpdate,
     RunnerProgressRequest,
+    RunnerQueueSnapshotResponse,
     RunnerRegisterRequest,
     RunnerRegisterResponse,
     RunnerRegistrationTokenCreate,
@@ -57,13 +58,45 @@ async def list_runner_fabric_pools(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
 ) -> Page[RunnerPoolResponse]:
-    views = await _service(session).list_pools(actor=current_user)
-    start = (page - 1) * page_size
+    views, total = await _service(session).pool_page(actor=current_user, page=page, limit=page_size)
     return Page(
-        items=[_pool_response(pool, runners) for pool, runners in views[start : start + page_size]],
-        total=len(views),
+        items=[_pool_response(pool, runners) for pool, runners in views],
+        total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@admin_router.get("/queue", response_model=RunnerQueueSnapshotResponse)
+async def get_runner_queue(
+    session: SessionDependency, current_user: CurrentUser
+) -> RunnerQueueSnapshotResponse:
+    return await _service(session).queue_snapshot(actor=current_user)
+
+
+@admin_router.get("/pools/{pool_id}", response_model=RunnerPoolResponse)
+async def get_runner_pool(
+    pool_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> RunnerPoolResponse:
+    pool, runners = await _service(session).inspect_pool(actor=current_user, pool_id=pool_id)
+    return _pool_response(pool, runners)
+
+
+@admin_router.get("/runners/{runner_id}", response_model=RunnerResponse)
+async def get_runner(
+    runner_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> RunnerResponse:
+    return RunnerResponse.model_validate(
+        await _service(session).inspect_runner(actor=current_user, runner_id=runner_id)
+    )
+
+
+@admin_router.get("/tasks/{task_id}", response_model=RunnerTaskResponse)
+async def get_runner_task(
+    task_id: UUID, session: SessionDependency, current_user: CurrentUser
+) -> RunnerTaskResponse:
+    return RunnerTaskResponse.model_validate(
+        await _service(session).inspect_task(actor=current_user, task_id=task_id)
     )
 
 
@@ -133,12 +166,13 @@ async def list_runner_tasks(
     session: SessionDependency,
     current_user: CurrentUser,
     limit: int = Query(default=100, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
 ) -> Page[RunnerTaskResponse]:
-    items = await _service(session).list_tasks(actor=current_user, limit=limit)
+    items, total = await _service(session).task_page(actor=current_user, page=page, limit=limit)
     return Page(
         items=[RunnerTaskResponse.model_validate(item) for item in items],
-        total=len(items),
-        page=1,
+        total=total,
+        page=page,
         page_size=limit,
     )
 
@@ -148,12 +182,16 @@ async def list_runner_leases(
     session: SessionDependency,
     current_user: CurrentUser,
     limit: int = Query(default=100, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    task_id: UUID | None = None,
 ) -> Page[RunnerLeaseAdminResponse]:
-    items = await _service(session).list_leases(actor=current_user, limit=limit)
+    items, total = await _service(session).lease_page(
+        actor=current_user, page=page, limit=limit, task_id=task_id
+    )
     return Page(
         items=[RunnerLeaseAdminResponse.model_validate(item) for item in items],
-        total=len(items),
-        page=1,
+        total=total,
+        page=page,
         page_size=limit,
     )
 
@@ -163,12 +201,16 @@ async def list_runner_events(
     session: SessionDependency,
     current_user: CurrentUser,
     limit: int = Query(default=100, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
+    task_id: UUID | None = None,
 ) -> Page[RunnerEventResponse]:
-    items = await _service(session).list_events(actor=current_user, limit=limit)
+    items, total = await _service(session).event_page(
+        actor=current_user, page=page, limit=limit, task_id=task_id
+    )
     return Page(
         items=[RunnerEventResponse.model_validate(item) for item in items],
-        total=len(items),
-        page=1,
+        total=total,
+        page=page,
         page_size=limit,
     )
 

@@ -1284,6 +1284,153 @@ def test_runner_profile_and_production_transport_are_strict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_admin_inspection_counts_all_tasks_and_pages_exact_evidence(
+    fabric_api_context: FabricApiContext,
+) -> None:
+    context = fabric_api_context
+    async with context.sessions() as session:
+        actor = await session.get(User, context.actor.id)
+        assert actor is not None
+        project = await session.scalar(select(Project))
+        assert project is not None
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "inspection-runner")
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        task = await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+        task_id = task.id
+        lease_id = lease.lease_id
+        for index in range(150):
+            execution = WorkflowExecution(
+                project_id=project.id,
+                workflow_id=uuid4(),
+                workflow_version_id=uuid4(),
+                environment_id=uuid4(),
+                triggered_by_id=actor.id,
+                status="running",
+                snapshot={},
+                context={},
+                started_at=datetime.now(UTC),
+            )
+            session.add(execution)
+            await session.flush()
+            session.add(
+                RunnerTask(
+                    execution_id=execution.id,
+                    project_id=project.id,
+                    required_runner_type="protocol" if index < 50 else "general",
+                    required_labels=[],
+                    required_capabilities=["flow.workflow"],
+                    status="queued",
+                    available_at=datetime.now(UTC),
+                )
+            )
+        await session.commit()
+    queue = await context.client.get("/api/v1/execution-fabric/queue")
+    assert queue.status_code == 200, queue.text
+    assert queue.json()["scope"] == "all_organizations"
+    assert sum(item["queued"] for item in queue.json()["groups"]) == 150
+    first = await context.client.get("/api/v1/execution-fabric/tasks?limit=100")
+    second = await context.client.get("/api/v1/execution-fabric/tasks?limit=100&page=2")
+    assert first.json()["total"] == second.json()["total"] == 151
+    assert len(second.json()["items"]) == 51
+    assert not (
+        {item["id"] for item in first.json()["items"]}
+        & {item["id"] for item in second.json()["items"]}
+    )
+    exact = await context.client.get(f"/api/v1/execution-fabric/tasks/{task_id}")
+    assert exact.json()["last_lease_id"] == str(lease_id)
+    leases = await context.client.get(f"/api/v1/execution-fabric/leases?task_id={task_id}")
+    assert leases.json()["items"][0]["id"] == str(lease_id)
+    events = await context.client.get(f"/api/v1/execution-fabric/events?task_id={task_id}")
+    assert all(item["task_id"] == str(task_id) for item in events.json()["items"])
+    missing = await context.client.get(f"/api/v1/execution-fabric/tasks/{uuid4()}")
+    assert missing.status_code == 404 and missing.json()["error"]["trace_id"]
+    context.actor.is_system_admin = False
+    denied = await context.client.get("/api/v1/execution-fabric/queue")
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_pool_inspection_pages_beyond_one_hundred_and_reads_exact_worker(
+    fabric_api_context: FabricApiContext,
+) -> None:
+    from app.models.capabilities import RunnerPool
+
+    context = fabric_api_context
+    async with context.sessions() as session:
+        for index in range(101):
+            session.add(
+                RunnerPool(
+                    name=f"inspection-pool-{index}",
+                    runner_type="general",
+                    network_zone="default",
+                    labels=[],
+                    max_concurrency=1,
+                    enabled=True,
+                    created_by_id=context.actor.id,
+                )
+            )
+        await session.commit()
+    response = await context.client.get("/api/v1/execution-fabric/pools?page=6&page_size=20")
+    assert response.status_code == 200
+    assert response.json()["total"] == 101
+    assert len(response.json()["items"]) == 1
+    selected = response.json()["items"][0]
+    detail = await context.client.get(f"/api/v1/execution-fabric/pools/{selected['id']}")
+    assert detail.status_code == 200 and detail.json()["id"] == selected["id"]
+    context.actor.is_system_admin = False
+    for route in ("queue", "tasks", "leases", "events", f"pools/{selected['id']}"):
+        denied = await context.client.get(f"/api/v1/execution-fabric/{route}")
+        assert denied.status_code == 403, (route, denied.text)
+
+
+@pytest.mark.asyncio
+async def test_inspection_scope_rejects_foreign_tasks_even_in_shared_pool(
+    fabric_sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    from app.core.context import reset_tenant_context, set_tenant_context
+    from app.domain.tenant import TenantContext
+
+    async with fabric_sessions() as session:
+        actor, project = await _seed_actor_and_project(session)
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "foreign-task")
+        task = await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+        project.organization_id = uuid4()
+        await session.commit()
+        context_token = set_tenant_context(
+            TenantContext(
+                organization_id=uuid4(),
+                actor_id=actor.id,
+                role=None,
+                is_system_admin=True,
+            )
+        )
+        try:
+            snapshot = await service.queue_snapshot(actor=actor)
+            assert snapshot.scope == "organization_and_shared" and snapshot.groups == []
+            items, total = await service.task_page(actor=actor, page=1, limit=20)
+            assert items == [] and total == 0
+            items_events, count = await service.event_page(actor=actor, page=1, limit=20)
+            assert count > 0  # Shared pool registration remains visible.
+            assert all(event.task_id is None for event in items_events)
+            with pytest.raises(AppError) as error:
+                await service.inspect_task(actor=actor, task_id=task.id)
+            assert error.value.status_code == 404
+            with pytest.raises(AppError):
+                await service.lease_page(actor=actor, page=1, limit=20, task_id=task.id)
+        finally:
+            reset_tenant_context(context_token)
+
+
+@pytest.mark.asyncio
 async def test_runner_fabric_admin_and_agent_api(
     fabric_api_context: FabricApiContext,
 ) -> None:

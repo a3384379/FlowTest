@@ -45,6 +45,8 @@ from app.schemas.runner_fabric import (
     RunnerPoolCreate,
     RunnerPoolUpdate,
     RunnerProgressRequest,
+    RunnerQueueGroupResponse,
+    RunnerQueueSnapshotResponse,
     RunnerRegisterRequest,
     RunnerRegisterResponse,
 )
@@ -191,6 +193,81 @@ class RunnerFabricService:
     async def list_events(self, *, actor: User, limit: int) -> list[RunnerEvent]:
         self._require_admin(actor)
         return await self._repository.list_events(limit=limit, organization_id=_organization_id())
+
+    async def queue_snapshot(self, *, actor: User) -> RunnerQueueSnapshotResponse:
+        self._require_admin(actor)
+        organization_id = _organization_id()
+        groups = await self._repository.queue_groups(organization_id=organization_id)
+        return RunnerQueueSnapshotResponse(
+            generated_at=datetime.now(UTC),
+            organization_id=organization_id,
+            scope="organization_and_shared" if organization_id else "all_organizations",
+            groups=[
+                RunnerQueueGroupResponse(
+                    runner_type=kind, queued=queued, leased=leased, failed=failed
+                )
+                for kind, queued, leased, failed in groups
+            ],
+        )
+
+    async def pool_page(
+        self, *, actor: User, page: int, limit: int
+    ) -> tuple[list[tuple[RunnerPool, list[Runner]]], int]:
+        self._require_admin(actor)
+        pools, total = await self._repository.pool_page(
+            organization_id=_organization_id(), page=page, limit=limit
+        )
+        return [(pool, await self._repository.list_runners(pool.id)) for pool in pools], total
+
+    async def inspect_pool(self, *, actor: User, pool_id: UUID) -> tuple[RunnerPool, list[Runner]]:
+        self._require_admin(actor)
+        pool = await self._require_pool(pool_id)
+        return pool, await self._repository.list_runners(pool_id)
+
+    async def inspect_runner(self, *, actor: User, runner_id: UUID) -> Runner:
+        self._require_admin(actor)
+        return await self._require_runner(runner_id)
+
+    async def inspect_task(self, *, actor: User, task_id: UUID) -> RunnerTask:
+        self._require_admin(actor)
+        task = await self._require_task(task_id)
+        project = await self._repository.get_project(task.project_id)
+        organization_id = _organization_id()
+        if project is None or (
+            organization_id is not None and project.organization_id not in (None, organization_id)
+        ):
+            raise AppError(
+                code="RUNNER_TASK_NOT_FOUND", message="Runner 任务不存在", status_code=404
+            )
+        return task
+
+    async def task_page(
+        self, *, actor: User, page: int, limit: int
+    ) -> tuple[list[RunnerTask], int]:
+        self._require_admin(actor)
+        return await self._repository.task_page(
+            organization_id=_organization_id(), page=page, limit=limit
+        )
+
+    async def lease_page(
+        self, *, actor: User, page: int, limit: int, task_id: UUID | None = None
+    ) -> tuple[list[RunnerLeaseRecord], int]:
+        self._require_admin(actor)
+        if task_id is not None:
+            await self.inspect_task(actor=actor, task_id=task_id)
+        return await self._repository.lease_page(
+            organization_id=_organization_id(), page=page, limit=limit, task_id=task_id
+        )
+
+    async def event_page(
+        self, *, actor: User, page: int, limit: int, task_id: UUID | None = None
+    ) -> tuple[list[RunnerEvent], int]:
+        self._require_admin(actor)
+        if task_id is not None:
+            await self.inspect_task(actor=actor, task_id=task_id)
+        return await self._repository.event_page(
+            organization_id=_organization_id(), page=page, limit=limit, task_id=task_id
+        )
 
     async def create_registration_token(
         self, *, actor: User, pool_id: UUID, expires_in_seconds: int

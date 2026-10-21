@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import Select, func, or_, select, update
+from sqlalchemy import Select, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -265,6 +265,102 @@ class RunnerFabricRepository:
                 )
             ).all()
         )
+
+    def _inspection_scope(self, organization_id: UUID | None) -> ColumnElement[bool]:
+        return or_(Project.organization_id == organization_id, Project.organization_id.is_(None))
+
+    async def pool_page(
+        self, *, organization_id: UUID | None, page: int, limit: int
+    ) -> tuple[list[RunnerPool], int]:
+        statement = select(RunnerPool)
+        if organization_id is not None:
+            statement = statement.where(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
+                )
+            )
+        return await self._inspection_page(
+            statement.order_by(RunnerPool.created_at.desc(), RunnerPool.id), page, limit
+        )
+
+    async def task_page(
+        self, *, organization_id: UUID | None, page: int, limit: int
+    ) -> tuple[list[RunnerTask], int]:
+        statement = select(RunnerTask).join(Project, Project.id == RunnerTask.project_id)
+        if organization_id is not None:
+            statement = statement.where(self._inspection_scope(organization_id))
+        return await self._inspection_page(
+            statement.order_by(RunnerTask.created_at.desc(), RunnerTask.id), page, limit
+        )
+
+    async def lease_page(
+        self, *, organization_id: UUID | None, page: int, limit: int, task_id: UUID | None
+    ) -> tuple[list[RunnerLeaseRecord], int]:
+        statement = (
+            select(RunnerLeaseRecord)
+            .join(RunnerTask, RunnerTask.id == RunnerLeaseRecord.task_id)
+            .join(Project, Project.id == RunnerTask.project_id)
+        )
+        if organization_id is not None:
+            statement = statement.where(self._inspection_scope(organization_id))
+        if task_id is not None:
+            statement = statement.where(RunnerLeaseRecord.task_id == task_id)
+        return await self._inspection_page(
+            statement.order_by(RunnerLeaseRecord.acquired_at.desc(), RunnerLeaseRecord.id),
+            page,
+            limit,
+        )
+
+    async def event_page(
+        self, *, organization_id: UUID | None, page: int, limit: int, task_id: UUID | None
+    ) -> tuple[list[RunnerEvent], int]:
+        statement = select(RunnerEvent).join(RunnerPool, RunnerPool.id == RunnerEvent.pool_id)
+        if organization_id is not None:
+            statement = statement.where(
+                or_(
+                    RunnerPool.organization_id == organization_id,
+                    RunnerPool.organization_id.is_(None),
+                )
+            )
+            # Shared pools can contain other organizations' tasks. Scope task events too.
+            statement = statement.outerjoin(RunnerTask, RunnerTask.id == RunnerEvent.task_id)
+            statement = statement.outerjoin(Project, Project.id == RunnerTask.project_id).where(
+                or_(RunnerEvent.task_id.is_(None), self._inspection_scope(organization_id))
+            )
+        if task_id is not None:
+            statement = statement.where(RunnerEvent.task_id == task_id)
+        return await self._inspection_page(
+            statement.order_by(RunnerEvent.created_at.desc(), RunnerEvent.id), page, limit
+        )
+
+    async def queue_groups(
+        self, *, organization_id: UUID | None
+    ) -> list[tuple[str, int, int, int]]:
+        statement = select(
+            RunnerTask.required_runner_type,
+            func.sum(case((RunnerTask.status == "queued", 1), else_=0)),
+            func.sum(case((RunnerTask.status == "leased", 1), else_=0)),
+            func.sum(case((RunnerTask.status == "failed", 1), else_=0)),
+        ).join(Project, Project.id == RunnerTask.project_id)
+        if organization_id is not None:
+            statement = statement.where(self._inspection_scope(organization_id))
+        rows = await self._session.execute(statement.group_by(RunnerTask.required_runner_type))
+        return [
+            (kind, int(queued), int(leased), int(failed)) for kind, queued, leased, failed in rows
+        ]
+
+    async def _inspection_page[ModelT](
+        self, statement: Select[tuple[ModelT]], page: int, limit: int
+    ) -> tuple[list[ModelT], int]:
+        total = int(
+            await self._session.scalar(
+                select(func.count()).select_from(statement.order_by(None).subquery())
+            )
+            or 0
+        )
+        items = await self._session.scalars(statement.offset((page - 1) * limit).limit(limit))
+        return list(items.all()), total
 
     async def counts(self, *, organization_id: UUID | None = None) -> dict[str, int]:
         if organization_id is None:
