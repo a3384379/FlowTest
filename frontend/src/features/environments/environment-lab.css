@@ -50,3 +50,11 @@
     width: 100%;
   }
 }
+
+.environment-template-dialog .ant-form {
+  padding-inline: 8px;
+}
+.environment-template-dialog .ant-tag {
+  white-space: normal;
+  max-width: 100%;
+}
