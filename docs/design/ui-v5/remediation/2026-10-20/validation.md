@@ -200,4 +200,4 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 
 ## M17
 
-[M17 validation](batch-20-validation.md)
+[第二十批验证](batch-20-validation.md)
