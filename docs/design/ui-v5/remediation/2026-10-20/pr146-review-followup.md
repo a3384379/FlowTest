@@ -11,3 +11,11 @@
 最终浏览器结果为 `passed:true`，日志 `remediation-pr146-pending-browser-r4.log`；目标测试 `remediation-pr146-pending-stacking-targeted.log`，构建 `remediation-pr146-pending-stacking-build.log`，截图 `remediation-pr146-pending-navigation.png`，均在主验收工作树忽略目录 `output/playwright/audit-20261019/`。临时前端挂载已恢复。
 
 本次仅改前端，后端完整结果继承本PR原精确后端树。旧前端177文件1259项完整结果不作为补修后全量结果；最新提交仍需正式完整前端、Compose与 Required Gate，再检查全部审查线程和精确 HEAD 后合并。没有以30项目标测试推定远端门禁成功。
+
+2026-10-22 正式 CI 补修：`373447988430b7fb3ef2620ffd65fe1922ea5636` 的运行 `39633269613` 中，前端177文件共1260项通过，唯一失败为 `AIAssistantPage.test.tsx` 的拒绝及非法接受反例超过原60秒上限。该反例已经一次性写入 JSON，并非逐字输入 JSON；源码也没有完成态任务轮询或审核后重复读取循环。完整失败日志保留在主验收树 `output/playwright/audit-20261019/remediation-pr146-373-failed-full.log`。
+
+在 SIXTH 使用相同单用例、`CI=true` 与 Node CPU 采样参数对照，原用例耗时21.970秒，其中可访问名称调用链15.732秒、role查询调用链19.059秒；这些包含时间相互重叠，不能相加。测试现在从可见建议标题定位对应表格行，再在该行查询原有具名按钮；弹窗操作与错误读取限定在对应弹窗内，备注通过真实点击及一次粘贴输入。拒绝回执改变审核状态后，重新取得实际重挂的“已审核建议”弹窗再关闭。修复后同一用例耗时5.928秒，可访问名称调用链降至0.160秒。全部原请求体、拒绝、关闭、非法 JSON 及零接受请求断言均保留，独立只读复核没有发现断言弱化。
+
+本次产品源码、fixtures、MSW handlers、超时、重试、覆盖率门槛和 CI 配置均未改动。`CI=true make test-frontend-targeted` 运行助手页面、补修页面、AI service 和 review hook 四个具名文件，共30项通过；全量前端 lint/类型和构建通过。诊断 profile、原始与修复后日志均保留在 SIXTH 的 `output/validation/pr146-ci-frontend/`，不提交生成产物。该定向验证不代表最新提交的远端完整门禁或发布验收已通过。
+
+V8 定向覆盖率首次仅运行助手页面7项，行为测试全部通过，但页面分支覆盖率76.74%，按原80%门槛失败；该日志保留为 `named-coverage.log`。纳入其余三个既有相关文件后，`CI=true pnpm test:coverage` 的30项全部通过；统计范围仅为 `src/pages/AIAssistantPage.tsx`，语句93.75%、分支87.20%、函数94.28%、行98.00%，原门槛未变。最终完整日志为 `four-coverage.log`，具名目标测试为 `fixed-four-targeted.log`，静态检查为 `lint-types.log`、`build.log` 和 `format-check.log`。覆盖率统计范围受本次定向检查限制，没有把这些百分比作为整个前端的结果。

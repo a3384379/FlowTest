@@ -247,29 +247,31 @@ describe('AIAssistantPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
-    expect(await screen.findByText('校验成功状态码')).toBeVisible()
+    const firstTitle = await screen.findByText('校验成功状态码')
+    expect(firstTitle).toBeVisible()
     expect(screen.getByText('completed')).toBeVisible()
-    await browser.click(
-      within(screen.getByRole('row', { name: /校验成功状态码/ })).getByRole('button', {
-        name: /拒绝/,
-      }),
-    )
-    expect(screen.getByRole('dialog', { name: '拒绝建议' })).toBeInTheDocument()
-    await browser.type(screen.getByLabelText('审核备注'), '人工拒绝')
-    await browser.click(screen.getByRole('button', { name: '确认拒绝' }))
+    await browser.click(within(firstTitle.closest('tr')!).getByRole('button', { name: /拒绝/ }))
+    const rejectionDialog = screen.getByRole('dialog', { name: '拒绝建议' })
+    expect(rejectionDialog).toBeInTheDocument()
+    await browser.click(within(rejectionDialog).getByLabelText('审核备注'))
+    await browser.paste('人工拒绝')
+    await browser.click(within(rejectionDialog).getByRole('button', { name: '确认拒绝' }))
     await waitFor(() => expect(rejected).toEqual({ note: '人工拒绝' }))
 
-    await browser.click(await screen.findByRole('button', { name: /关\s*闭/ }))
+    const reviewedDialog = await screen.findByRole('dialog', { name: '已审核建议' })
+    await browser.click(within(reviewedDialog).getByRole('button', { name: /关\s*闭/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    await browser.click(
-      within(screen.getByRole('row', { name: /另一条状态码建议/ })).getByRole('button', {
-        name: /接受/,
-      }),
-    )
-    await browser.click(screen.getByRole('tab', { name: '高级 JSON' }))
-    fireEvent.change(screen.getByLabelText('建议内容'), { target: { value: '[]' } })
-    await browser.click(screen.getByRole('button', { name: '确认接受' }))
-    expect(await screen.findByText('建议内容必须是 JSON 对象')).toBeInTheDocument()
+    const secondTitle = screen.getByText('另一条状态码建议')
+    await browser.click(within(secondTitle.closest('tr')!).getByRole('button', { name: /接受/ }))
+    const acceptanceDialog = screen.getByRole('dialog', { name: '接受建议' })
+    await browser.click(within(acceptanceDialog).getByRole('tab', { name: '高级 JSON' }))
+    fireEvent.change(within(acceptanceDialog).getByLabelText('建议内容'), {
+      target: { value: '[]' },
+    })
+    await browser.click(within(acceptanceDialog).getByRole('button', { name: '确认接受' }))
+    expect(
+      await within(acceptanceDialog).findByText('建议内容必须是 JSON 对象'),
+    ).toBeInTheDocument()
     expect(acceptRequests).toBe(0)
   })
 
