@@ -1,0 +1,72 @@
+.performance-field-stack {
+  width: 100%;
+}
+.performance-number {
+  width: 100%;
+}
+.performance-scenario-dialog .ant-modal-body {
+  max-height: calc(100dvh - 220px);
+  overflow-y: auto;
+}
+.performance-scenario-dialog .ant-card {
+  margin-bottom: 12px;
+}
+.performance-scenario-dialog .ant-card-head-wrapper {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.performance-scenario-dialog .ant-table-cell {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .performance-scenario-dialog {
+    top: 16px;
+  }
+  .performance-scenario-dialog .ant-modal-body {
+    max-height: calc(100dvh - 160px);
+  }
+  .performance-scenario-dialog .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .performance-scenario-dialog .ant-card-head-title {
+    flex: 0 0 100%;
+    white-space: normal;
+  }
+  .performance-scenario-dialog .ant-card-extra {
+    width: 100%;
+  }
+}
+
+.performance-scenario-dialog .ant-form {
+  padding-inline: 8px;
+}
+
+.performance-scenario-dialog .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 200px);
+}
+.performance-scenario-dialog .ant-modal-header,
+.performance-scenario-dialog .ant-modal-footer {
+  flex-shrink: 0;
+}
+.performance-scenario-dialog .ant-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+@media (max-width: 600px) {
+  .performance-scenario-dialog .ant-modal-container {
+    max-height: calc(100dvh - 48px);
+  }
+}
+
+.performance-scenario-name {
+  white-space: normal;
+  height: auto;
+  max-width: 100%;
+  text-align: start;
+  overflow-wrap: anywhere;
+}

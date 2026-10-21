@@ -25,6 +25,7 @@ test('S26 管理员签名模板经过版本化、独立 Runner、Seed 与幂等�
   )
   await registerDialog.getByRole('button', { name: '确 定' }).click()
   expect((await registered).status()).toBe(201)
+  await expect(registerDialog).toBeHidden()
   const templateRow = page.getByRole('row').filter({ hasText: templateKey })
   await expect(templateRow).toContainText(displayName)
 
@@ -35,14 +36,18 @@ test('S26 管理员签名模板经过版本化、独立 Runner、Seed 与幂等�
   )
   await versionDialog.getByRole('button', { name: '确 定' }).click()
   expect((await versioned).status()).toBe(201)
+  await expect(versionDialog).toBeHidden()
   const versionRow = page
     .getByRole('row')
     .filter({ hasText: templateKey })
     .filter({ hasText: 'v2' })
   await expect(versionRow).toContainText(displayName)
 
-  await page.getByLabel('模板版本').click()
-  await page.getByText(`${displayName} · v2`).click()
+  await page.getByRole('combobox', { name: '模板版本', exact: true }).click()
+  await page
+    .locator('.ant-select-dropdown:visible .ant-select-item-option-content')
+    .filter({ hasText: `${displayName} · v2` })
+    .click()
   const queued = page.waitForResponse(
     (item) =>
       item.url().endsWith(`/projects/${project.id}/environment-instances`) &&

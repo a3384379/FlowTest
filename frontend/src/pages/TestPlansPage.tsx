@@ -9,9 +9,6 @@ import {
   Alert,
   Button,
   Card,
-  Form,
-  Input,
-  InputNumber,
   Modal,
   Popconfirm,
   Switch,
@@ -23,14 +20,11 @@ import {
 } from 'antd'
 import { useSearchParams } from 'react-router-dom'
 
-import type {
-  CreateTestPlanInput,
-  TestPlanTargetAsset,
-} from '../features/task-plans/task-plan-service'
-import TestPlanTargetSelect from '../features/task-plans/TestPlanTargetSelect'
+import CreatePlanDialog from '../features/task-plans/CreatePlanDialog'
+import FocusedTestPlan from '../features/task-plans/FocusedTestPlan'
+import '../features/task-plans/task-plans.css'
 import EditTestPlanDialog from '../features/task-plans/EditTestPlanDialog'
 import TestPlanRunDetails from '../features/task-plans/TestPlanRunDetails'
-import type { TestPlanTargetType } from '../features/task-plans/task-plan-service'
 import { useTestPlans } from '../features/task-plans/use-test-plans'
 import { useProjectContext } from '../features/projects/use-project-context'
 import { apiErrorMessage, type TestPlan, type TestPlanRun } from '../lib/api'
@@ -45,13 +39,14 @@ function TaskPlanWorkspace() {
   const state = useTestPlans()
 
   return (
-    <>
+    <div className="task-plan-workspace">
       <TaskHeading state={state} />
       <TaskErrorAlert state={state} />
+      {state.focusedId && <FocusedTestPlan state={state} />}
       <TaskWorkspace state={state} focusedId={searchParams.get('focus') ?? undefined} />
       <TokenCard state={state} />
       <TaskDialogs state={state} />
-    </>
+    </div>
   )
 }
 
@@ -119,7 +114,10 @@ function TaskHeading({ state }: { state: TaskState }) {
           type="primary"
           icon={<PlusOutlined />}
           disabled={cannotCreate}
-          onClick={() => state.setCreateOpen(true)}
+          onClick={() => {
+            state.clearCreateError()
+            state.setCreateOpen(true)
+          }}
         >
           新建计划
         </Button>
@@ -140,9 +138,10 @@ function TaskWorkspace({ state, focusedId }: { state: TaskState; focusedId?: str
           total={state.plans.data?.total ?? 0}
           onPageChange={state.setPlanPage}
           onRun={state.execute}
+          onFocus={state.setFocusedId}
           onEdit={state.setEditingPlan}
           onToggle={state.togglePlan}
-          updating={state.updatingPlan}
+          updating={state.updatingPlan || state.running}
         />
       </Card>
       <Card title="运行队列" loading={state.runs.isLoading}>
@@ -168,6 +167,7 @@ function TokenCard({ state }: { state: TaskState }) {
         rowKey="id"
         size="small"
         pagination={false}
+        scroll={{ x: 650 }}
         dataSource={state.tokens.data ?? []}
         locale={{ emptyText: '暂无 CI Token' }}
         columns={[
@@ -221,6 +221,7 @@ function TaskDialogs({ state }: { state: TaskState }) {
         testCases={state.testCases.data?.items.filter(isPublished) ?? []}
         testSuites={state.testSuites.data?.items.filter(isPublished) ?? []}
         submitting={state.creating}
+        error={state.createError}
         onClose={() => state.setCreateOpen(false)}
         onCreate={state.addPlan}
       />
@@ -245,6 +246,7 @@ function PlanTable({
   total,
   onPageChange,
   onRun,
+  onFocus,
   onEdit,
   onToggle,
   updating,
@@ -256,6 +258,7 @@ function PlanTable({
   total: number
   onPageChange: (page: number) => void
   onRun: (id: string) => void
+  onFocus: (id: string) => void
   onEdit: (plan: TestPlan) => void
   onToggle: (plan: TestPlan) => Promise<void>
   updating: boolean
@@ -264,6 +267,7 @@ function PlanTable({
     <Table
       rowKey="id"
       size="small"
+      scroll={{ x: 720 }}
       pagination={{
         current: page,
         pageSize: 20,
@@ -275,7 +279,14 @@ function PlanTable({
       rowClassName={(item) => (item.id === focusedId ? 'selected-row' : '')}
       locale={{ emptyText: '暂无测试计划' }}
       columns={[
-        { title: '名称', dataIndex: 'name' },
+        {
+          title: '名称',
+          render: (_, plan: TestPlan) => (
+            <Button type="link" onClick={() => onFocus(plan.id)}>
+              {plan.name}
+            </Button>
+          ),
+        },
         {
           title: '启用',
           render: (_, plan: TestPlan) => (
@@ -325,7 +336,7 @@ function PlanTable({
               </Button>
               <Button
                 type="link"
-                disabled={readOnly}
+                disabled={readOnly || updating}
                 icon={<PlayCircleOutlined />}
                 onClick={() => onRun(plan.id)}
               >
@@ -360,6 +371,7 @@ function RunTable({
     <Table
       rowKey="id"
       size="small"
+      scroll={{ x: 680 }}
       pagination={{
         current: page,
         pageSize: 20,
@@ -410,147 +422,6 @@ function RunTable({
   )
 }
 
-function CreatePlanDialog({
-  open,
-  workflows,
-  environments,
-  testCases,
-  testSuites,
-  submitting,
-  onClose,
-  onCreate,
-}: {
-  open: boolean
-  workflows: TestPlanTargetAsset[]
-  environments: Array<{ id: string; name: string }>
-  testCases: TestPlanTargetAsset[]
-  testSuites: TestPlanTargetAsset[]
-  submitting: boolean
-  onClose: () => void
-  onCreate: (input: CreateTestPlanInput) => Promise<void>
-}) {
-  type PlanForm = Omit<
-    CreateTestPlanInput,
-    'intervalSeconds' | 'environmentId' | 'cronExpression'
-  > & {
-    environmentId?: string
-    scheduleMode: 'manual' | 'interval' | 'cron'
-    intervalMinutes: number | null
-    cronExpression?: string
-  }
-  const [form] = Form.useForm<PlanForm>()
-  const targetType = Form.useWatch('targetType', form) ?? 'workflow'
-  const scheduleMode = Form.useWatch('scheduleMode', form) ?? 'manual'
-  const targetAssets = { workflow: workflows, case: testCases, suite: testSuites }
-  return (
-    <Modal
-      title="新建测试计划"
-      open={open}
-      style={{ top: 24 }}
-      styles={{ body: { maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' } }}
-      confirmLoading={submitting}
-      onCancel={onClose}
-      onOk={() => form.submit()}
-      destroyOnHidden
-    >
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          targetType: 'workflow',
-          maxRetries: 0,
-          scheduleMode: 'manual',
-          intervalMinutes: null,
-          timezone: 'Asia/Shanghai',
-          priority: 5,
-        }}
-        onFinish={(values) =>
-          void onCreate({
-            ...values,
-            environmentId: values.environmentId ?? null,
-            intervalSeconds:
-              values.scheduleMode === 'interval' && values.intervalMinutes
-                ? values.intervalMinutes * 60
-                : null,
-            cronExpression: values.scheduleMode === 'cron' ? (values.cronExpression ?? null) : null,
-          })
-        }
-      >
-        <Form.Item name="name" label="计划名称" rules={[{ required: true }]}>
-          <Input maxLength={200} />
-        </Form.Item>
-        <Form.Item name="targetType" label="执行目标" rules={[{ required: true }]}>
-          <Select
-            options={[
-              { value: 'workflow', label: '工作流' },
-              { value: 'case', label: '测试用例' },
-              { value: 'suite', label: '测试套件' },
-            ]}
-            onChange={() => {
-              form.setFieldValue('targetId', undefined)
-              form.setFieldValue('targetVersion', undefined)
-              form.setFieldValue('environmentId', undefined)
-            }}
-          />
-        </Form.Item>
-        <Form.Item name="targetId" label={targetLabel(targetType)} rules={[{ required: true }]}>
-          <TestPlanTargetSelect
-            key={targetType}
-            type={targetType}
-            label={targetLabel(targetType)}
-            known={targetAssets[targetType]}
-            onSelection={(asset) => form.setFieldValue('targetVersion', asset.current_version)}
-          />
-        </Form.Item>
-        <Form.Item name="targetVersion" label="固定发布版本" rules={[{ required: true }]}>
-          <InputNumber readOnly precision={0} className="full-width" />
-        </Form.Item>
-        {targetType === 'workflow' && (
-          <Form.Item name="environmentId" label="环境" rules={[{ required: true }]}>
-            <Select showSearch optionFilterProp="label" options={options(environments)} />
-          </Form.Item>
-        )}
-        <Form.Item name="scheduleMode" label="调度方式">
-          <Select
-            options={[
-              { value: 'manual', label: '手动' },
-              { value: 'interval', label: '固定间隔' },
-              { value: 'cron', label: 'Cron' },
-            ]}
-          />
-        </Form.Item>
-        {scheduleMode === 'interval' && (
-          <Form.Item name="intervalMinutes" label="定时间隔（分钟）" rules={[{ required: true }]}>
-            <InputNumber min={1} max={43_200} precision={0} className="full-width" />
-          </Form.Item>
-        )}
-        {scheduleMode === 'cron' && (
-          <>
-            <Form.Item name="cronExpression" label="Cron 表达式" rules={[{ required: true }]}>
-              <Input placeholder="0 9 * * 1-5" maxLength={120} />
-            </Form.Item>
-            <Form.Item name="timezone" label="时区" rules={[{ required: true }]}>
-              <Select
-                options={[
-                  { value: 'Asia/Shanghai', label: 'Asia/Shanghai' },
-                  { value: 'UTC', label: 'UTC' },
-                  { value: 'Asia/Tokyo', label: 'Asia/Tokyo' },
-                ]}
-              />
-            </Form.Item>
-          </>
-        )}
-        <Form.Item name="priority" label="队列优先级（0 最低，9 最高）">
-          <InputNumber min={0} max={9} precision={0} className="full-width" />
-        </Form.Item>
-        <Form.Item name="maxRetries" label="失败重试次数">
-          <InputNumber min={0} max={3} precision={0} className="full-width" />
-        </Form.Item>
-      </Form>
-    </Modal>
-  )
-}
-
 function SecretValue({ value }: { value: string }) {
   return (
     <Space orientation="vertical" className="full-width">
@@ -579,15 +450,6 @@ function options(items?: Array<{ id: string; name: string }>) {
 
 function isPublished(item: { current_version: number | null }) {
   return item.current_version !== null
-}
-
-function targetLabel(targetType: TestPlanTargetType) {
-  const labels: Record<TestPlanTargetType, string> = {
-    workflow: '工作流',
-    case: '测试用例',
-    suite: '测试套件',
-  }
-  return labels[targetType]
 }
 
 function localTime(value: string): string {

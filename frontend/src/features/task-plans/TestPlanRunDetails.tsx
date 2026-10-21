@@ -26,7 +26,7 @@ export default function TestPlanRunDetails({
   return (
     <Modal open title="计划运行详情" width={1040} footer={null} onCancel={onClose}>
       <QueryFailureNotice queries={[detail]} />
-      <RunSummary runId={runId} run={run} />
+      <RunSummary runId={runId} run={run} failed={detail.isError} />
       <Table<TestPlanRunItem>
         rowKey="id"
         size="small"
@@ -35,6 +35,7 @@ export default function TestPlanRunDetails({
         pagination={{ pageSize: 20 }}
         scroll={{ x: 940 }}
         columns={[
+          { title: '顺序', dataIndex: 'position', render: (value: number) => value + 1 },
           {
             title: '冻结目标',
             render: (_, item) =>
@@ -76,14 +77,19 @@ function RunEvidenceLinks({ projectId, item }: { projectId: string; item: TestPl
   )
 }
 
-function RunSummary({ runId, run }: { runId: string; run?: TestPlanRun }) {
+function RunSummary({ runId, run, failed }: { runId: string; run?: TestPlanRun; failed: boolean }) {
   return (
     <>
       <Descriptions
-        column={2}
+        column={{ xs: 1, sm: 2 }}
+        styles={{ content: { overflowWrap: 'anywhere' } }}
         items={[
           { key: 'id', label: '运行 ID', children: runId },
-          { key: 'status', label: '状态', children: run?.status ?? '加载中' },
+          {
+            key: 'status',
+            label: '状态',
+            children: run?.status ?? (failed ? '读取失败' : '加载中'),
+          },
           { key: 'plan', label: '计划 ID', children: run?.test_plan_id ?? '未提供' },
           { key: 'baseline', label: '基线运行', children: run?.baseline_run_id ?? '未设置' },
         ]}

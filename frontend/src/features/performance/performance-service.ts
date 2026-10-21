@@ -110,11 +110,14 @@ export async function listPerformanceScenarios(
 }
 
 export async function getPerformanceScenario(projectId: string, scenarioId: string) {
-  return (
+  const result = (
     await apiClient.get<PerformanceScenario>(
       `/projects/${projectId}/performance-scenarios/${scenarioId}`,
     )
   ).data
+  if (result.project_id !== projectId || result.id !== scenarioId)
+    throw new Error('返回的性能场景与当前项目或ID不符')
+  return result
 }
 
 export async function createPerformanceScenarioVersion(
@@ -154,11 +157,14 @@ export async function runPerformanceScenario(
   projectId: string,
   scenarioId: string,
 ): Promise<PerformanceRun> {
-  return (
+  const result = (
     await apiClient.post<PerformanceRun>(
       `/projects/${projectId}/performance-scenarios/${scenarioId}/runs`,
     )
   ).data
+  if (result.project_id !== projectId || result.scenario_id !== scenarioId)
+    throw new Error('返回的性能运行与当前项目或场景不符')
+  return result
 }
 
 export async function listPerformanceRuns(
@@ -196,6 +202,10 @@ export async function downloadPerformanceMetrics(
 }
 
 export async function getPerformanceRun(projectId: string, runId: string): Promise<PerformanceRun> {
-  return (await apiClient.get<PerformanceRun>(`/projects/${projectId}/performance-runs/${runId}`))
-    .data
+  const result = (
+    await apiClient.get<PerformanceRun>(`/projects/${projectId}/performance-runs/${runId}`)
+  ).data
+  if (result.project_id !== projectId || result.id !== runId)
+    throw new Error('返回的性能运行与当前项目或ID不符')
+  return result
 }

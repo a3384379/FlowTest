@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.evidence import EvidenceBundle
+from app.domain.evidence import EvidenceBundle, EvidenceSourceType
 from app.domain.test_design import TestDesignDocument
 from app.domain.test_engineering import GenerationPolicy, OperationContract
 
@@ -28,6 +28,18 @@ class TestEngineeringGenerateRequest(BaseModel):
         return self
 
 
+class TestEngineeringEvidenceDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=160)
+    source_type: EvidenceSourceType
+    source_ref: str = Field(min_length=1, max_length=512)
+    revision: str = Field(min_length=1, max_length=160)
+    path: str = Field(min_length=1, max_length=1024)
+    confidence: float = Field(ge=0, le=1)
+    deterministic: bool
+
+
 class TestEngineeringGenerateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -37,6 +49,7 @@ class TestEngineeringGenerateResponse(BaseModel):
     contract_completeness: str
     contract_fingerprint: str
     contract: OperationContract
+    evidence_details: list[TestEngineeringEvidenceDetail] = Field(default_factory=list)
 
 
 class TestEngineeringProposalCreate(BaseModel):
@@ -64,6 +77,25 @@ class TestEngineeringProposalReview(BaseModel):
     note: str = Field(default="", max_length=2000)
 
 
+class TestEngineeringMaterializedAsset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenario_id: str = Field(min_length=1, max_length=160)
+    workflow_id: UUID
+    test_case_id: UUID
+
+
+class TestEngineeringApplyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    change_set_id: UUID
+    test_design_id: UUID
+    workflow_ids: list[UUID]
+    test_case_ids: list[UUID]
+    assets: list[TestEngineeringMaterializedAsset] = Field(default_factory=list, max_length=50)
+    references_complete: bool = True
+
+
 class TestEngineeringProposalResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,15 +109,8 @@ class TestEngineeringProposalResponse(BaseModel):
     contract_completeness: str
     contract_fingerprint: str
     contract: OperationContract
-
-
-class TestEngineeringApplyResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    change_set_id: UUID
-    test_design_id: UUID
-    workflow_ids: list[UUID]
-    test_case_ids: list[UUID]
+    materialization: TestEngineeringApplyResponse | None = None
+    evidence_details: list[TestEngineeringEvidenceDetail] = Field(default_factory=list)
 
 
 def _validate_evidence_input_budget(bundles: list[EvidenceBundle]) -> None:

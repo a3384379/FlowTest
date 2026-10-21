@@ -50,17 +50,21 @@ export async function getPlanTargetAsset(
   ).data
 }
 
-export type CreateTestPlanInput = {
-  name: string
+export type CreatePlanItemInput = {
   targetType: TestPlanTargetType
   targetId: string
-  targetVersion?: number
+  targetVersion: number
   environmentId: string | null
+  maxRetries: number
+}
+
+export type CreateTestPlanInput = {
+  name: string
+  items: CreatePlanItemInput[]
   intervalSeconds: number | null
   cronExpression: string | null
   timezone: string
   priority: number
-  maxRetries: number
 }
 
 export async function listTaskProjects(): Promise<Page<Project>> {
@@ -111,6 +115,9 @@ export async function createTestPlan(
   projectId: string,
   input: CreateTestPlanInput,
 ): Promise<CreatedTestPlan> {
+  if (!input.items.length || input.items.length > 100) throw new Error('测试计划需要1至100个执行项')
+  if (input.items.some((item) => !Number.isInteger(item.targetVersion) || item.targetVersion < 1))
+    throw new Error('每个执行项都必须选择已发布的固定版本')
   const response = await apiClient.post<CreatedTestPlan>(`/projects/${projectId}/test-plans`, {
     name: input.name,
     enabled: true,
@@ -118,17 +125,22 @@ export async function createTestPlan(
     schedule_cron: input.cronExpression,
     schedule_timezone: input.timezone,
     queue_priority: input.priority,
-    items: [
-      {
-        target_type: input.targetType,
-        target_id: input.targetId,
-        target_version: input.targetVersion,
-        environment_id: input.environmentId,
-        max_retries: input.maxRetries,
-      },
-    ],
+    items: input.items.map((item) => ({
+      target_type: item.targetType,
+      target_id: item.targetId,
+      target_version: item.targetVersion,
+      environment_id: item.targetType === 'workflow' ? item.environmentId : null,
+      max_retries: item.maxRetries,
+    })),
   })
   return response.data
+}
+
+export async function getTestPlan(projectId: string, planId: string): Promise<TestPlan> {
+  const plan = (await apiClient.get<TestPlan>(`/projects/${projectId}/test-plans/${planId}`)).data
+  if (plan.id !== planId || plan.project_id !== projectId)
+    throw new Error('计划详情不属于当前项目或计划')
+  return plan
 }
 
 export async function runTestPlan(

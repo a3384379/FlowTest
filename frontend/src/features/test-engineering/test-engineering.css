@@ -1,0 +1,20 @@
+.test-design-review {
+  min-width: 0;
+}
+
+.test-design-review .ant-card,
+.test-design-review .ant-col,
+.test-design-review .ant-table-wrapper {
+  min-width: 0;
+}
+
+.test-design-review .ant-descriptions-item-content {
+  overflow-wrap: anywhere;
+}
+
+.test-design-json {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

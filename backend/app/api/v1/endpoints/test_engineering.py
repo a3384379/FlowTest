@@ -8,6 +8,7 @@ from app.schemas.test_engineering import (
     TestEngineeringApplyResponse,
     TestEngineeringGenerateRequest,
     TestEngineeringGenerateResponse,
+    TestEngineeringMaterializedAsset,
     TestEngineeringProposalCreate,
     TestEngineeringProposalResponse,
     TestEngineeringProposalReview,
@@ -47,6 +48,7 @@ async def generate_test_design(
         contract_completeness=contract.completeness,
         contract_fingerprint=fingerprint_contract(contract),
         contract=contract,
+        evidence_details=service.evidence_details(design, contract, payload.additional_evidence),
     )
 
 
@@ -111,6 +113,8 @@ async def apply_test_design_proposal(
         test_design_id=result.test_design_id,
         workflow_ids=result.workflow_ids,
         test_case_ids=result.test_case_ids,
+        assets=[TestEngineeringMaterializedAsset.model_validate(value) for value in result.assets],
+        references_complete=result.references_complete,
     )
 
 
@@ -132,4 +136,20 @@ def _proposal_response(view: TestEngineeringProposalView) -> TestEngineeringProp
             contract_fingerprint if isinstance(contract_fingerprint, str) else ""
         ),
         contract=contract,
+        evidence_details=view.evidence_details,
+        materialization=(
+            TestEngineeringApplyResponse(
+                change_set_id=view.materialization.change_set_id,
+                test_design_id=view.materialization.test_design_id,
+                workflow_ids=view.materialization.workflow_ids,
+                test_case_ids=view.materialization.test_case_ids,
+                assets=[
+                    TestEngineeringMaterializedAsset.model_validate(value)
+                    for value in view.materialization.assets
+                ],
+                references_complete=view.materialization.references_complete,
+            )
+            if view.materialization is not None
+            else None
+        ),
     )

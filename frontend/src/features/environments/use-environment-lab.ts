@@ -1,9 +1,10 @@
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useSearchParams } from 'react-router-dom'
+import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { useAuthStore } from '../auth/auth-store'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
@@ -13,6 +14,7 @@ import {
   createEnvironmentTemplateVersion,
   disableEnvironmentTemplate,
   getEnvironmentInstance,
+  getInstanceTemplateVersion,
   listEnvironmentInstances,
   listEnvironmentTemplates,
   provisionEnvironment,
@@ -35,12 +37,26 @@ export function useEnvironmentLab() {
   const isSystemAdmin = useAuthStore((state) => Boolean(state.user?.is_system_admin))
   const userId = useAuthStore((state) => state.user?.id)
   const [params, setParams] = useSearchParams()
+  const location = useLocation()
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
   const instanceId = params.get('instance')
+  const context = useMemo(() => ({ projectId, instanceId }), [projectId, instanceId])
+  const activeContext = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    activeContext.current = context
+    return () => {
+      activeContext.current = null
+    }
+  }, [context])
+  const isCurrent = () =>
+    activeContext.current === context &&
+    (!dataRouter || dataRouter.router.state.location.key === location.key)
+  const [templateSearch, setTemplateSearchValue] = useRouteScopedState(projectId, null, '')
   const [templatePage, setTemplatePage] = useRouteScopedState(projectId, null, 1)
   const [instancePage, setInstancePage] = useRouteScopedState(projectId, null, 1)
   const templates = useQuery({
-    queryKey: ['environment-templates', userId, templatePage],
-    queryFn: () => listEnvironmentTemplates(templatePage),
+    queryKey: ['environment-templates', userId, templateSearch, templatePage],
+    queryFn: () => listEnvironmentTemplates(templatePage, { search: templateSearch }),
     enabled: Boolean(featureEnabled && projectId),
   })
   const instances = useQuery({
@@ -52,17 +68,35 @@ export function useEnvironmentLab() {
   const instance = useQuery({
     queryKey: ['environment-instance', projectId, instanceId],
     queryFn: () => getEnvironmentInstance(required(projectId), required(instanceId)),
-    enabled: Boolean(featureEnabled && projectId && instanceId),
+    enabled: isReadEnabled(featureEnabled, projectId, instanceId),
     refetchInterval: (query) =>
       query.state.data && instancePending(query.state.data) ? 2000 : false,
   })
-  const register = useMutation({ mutationFn: registerEnvironmentTemplate })
+  const boundTemplate = useQuery({
+    queryKey: [
+      'environment-instance-template',
+      projectId,
+      instanceId,
+      instance.data?.template_version_id,
+    ],
+    queryFn: () => getInstanceTemplateVersion(required(projectId), instance.data!),
+    enabled: isReadEnabled(featureEnabled && instance.isSuccess, projectId, instanceId),
+  })
+  const register = useMutation({
+    mutationKey: ['register-environment-template', context],
+    mutationFn: registerEnvironmentTemplate,
+  })
   const version = useMutation({
+    mutationKey: ['version-environment-template', context],
     mutationFn: (input: { templateId: string; manifest: EnvironmentTemplateManifest }) =>
       createEnvironmentTemplateVersion(input.templateId, input.manifest),
   })
-  const disable = useMutation({ mutationFn: disableEnvironmentTemplate })
+  const disable = useMutation({
+    mutationKey: ['disable-environment-template', context],
+    mutationFn: disableEnvironmentTemplate,
+  })
   const provision = useMutation({
+    mutationKey: ['provision-environment', context],
     mutationFn: (input: { projectId: string; templateVersionId: string; ttlSeconds: number }) =>
       provisionEnvironment(
         input.projectId,
@@ -72,14 +106,22 @@ export function useEnvironmentLab() {
       ),
   })
   const cleanup = useMutation({
+    mutationKey: ['cleanup-environment', context],
     mutationFn: (input: { projectId: string; instanceId: string }) =>
       cleanupEnvironment(input.projectId, input.instanceId),
   })
 
   function selectInstance(id: string) {
-    const next = new URLSearchParams(params)
-    next.set('instance', id)
-    setParams(next)
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('instance', id)
+      return next
+    })
+  }
+
+  function setTemplateSearch(value: string) {
+    setTemplateSearchValue(value)
+    setTemplatePage(1)
   }
 
   async function registerTemplate(input: EnvironmentTemplateInput): Promise<boolean> {
@@ -113,7 +155,7 @@ export function useEnvironmentLab() {
   }
 
   async function startProvision(templateVersionId: string, ttlSeconds: number): Promise<boolean> {
-    if (!featureEnabled || !canEdit || !projectId) return false
+    if (!featureEnabled || !permissions.isSuccess || !canEdit || !projectId) return false
     const targetProject = projectId
     return mutateWithFeedback(
       () => provision.mutateAsync({ projectId: targetProject, templateVersionId, ttlSeconds }),
@@ -123,7 +165,7 @@ export function useEnvironmentLab() {
   }
 
   async function startCleanup(targetInstanceId: string): Promise<void> {
-    if (!featureEnabled || !canEdit || !projectId) return
+    if (!featureEnabled || !permissions.isSuccess || !canEdit || !projectId) return
     const targetProject = projectId
     await mutateWithFeedback(
       () => cleanup.mutateAsync({ projectId: targetProject, instanceId: targetInstanceId }),
@@ -140,16 +182,22 @@ export function useEnvironmentLab() {
     try {
       await action()
       await refresh()
+      if (!isCurrent()) return false
       void message.success(successText)
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (!isCurrent()) return false
+      void message.error(apiErrorWithTrace(error))
       return false
     }
   }
 
   async function refreshTemplates(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ['environment-templates'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['environment-templates'] }),
+      queryClient.invalidateQueries({ queryKey: ['environment-template-version'] }),
+      queryClient.invalidateQueries({ queryKey: ['environment-instance-template'] }),
+    ])
   }
 
   async function refreshInstances(targetProject: string): Promise<void> {
@@ -164,13 +212,16 @@ export function useEnvironmentLab() {
     featureEnabled,
     projectId,
     isSystemAdmin: isSystemAdmin && featureEnabled,
-    canEdit: canEdit && featureEnabled,
+    canEdit: canWriteEnvironment(canEdit, permissions.isSuccess, featureEnabled),
     canExecute,
     permissions,
     templates,
     instances,
     instance,
     instanceId,
+    boundTemplate,
+    templateSearch,
+    setTemplateSearch,
     selectInstance,
     templatePage,
     setTemplatePage,
@@ -181,7 +232,7 @@ export function useEnvironmentLab() {
     disableTemplate,
     startProvision,
     startCleanup,
-    templateMutationPending: register.isPending || version.isPending || disable.isPending,
+    templateMutationPending: [register, version, disable].some((mutation) => mutation.isPending),
     provisioning: provision.isPending,
     cleaning: cleanup.isPending,
   }
@@ -197,4 +248,15 @@ function instancePending(instance: { status: string; cleanup_status: string }) {
 function required(projectId: string | null): string {
   if (!projectId) throw new Error('请选择项目或实例')
   return projectId
+}
+
+function isReadEnabled(
+  enabled: boolean,
+  projectId: string | null,
+  objectId: string | null,
+): boolean {
+  return enabled && Boolean(projectId && objectId)
+}
+function canWriteEnvironment(permission: boolean, loaded: boolean, enabled: boolean): boolean {
+  return permission && loaded && enabled
 }

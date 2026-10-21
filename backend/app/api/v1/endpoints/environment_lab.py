@@ -30,13 +30,19 @@ async def list_environment_templates(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
+    active_only: bool = False,
 ) -> Page[EnvironmentTemplateVersionResponse]:
-    versions = await EnvironmentTemplateService(session).list_versions(actor=current_user)
-    start = (page - 1) * page_size
-    selected = versions[start : start + page_size]
+    versions, total = await EnvironmentTemplateService(session).list_versions(
+        actor=current_user,
+        page=page,
+        page_size=page_size,
+        search=search,
+        active_only=active_only,
+    )
     return Page(
-        items=[_template_response(view) for view in selected],
-        total=len(versions),
+        items=[_template_response(view) for view in versions],
+        total=total,
         page=page,
         page_size=page_size,
     )
@@ -55,6 +61,37 @@ async def register_environment_template(
     view = await EnvironmentTemplateService(session).register(
         actor=current_user,
         payload=payload,
+    )
+    return _template_response(view)
+
+
+@router.get(
+    "/environment-templates/versions/{version_id}",
+    response_model=EnvironmentTemplateVersionResponse,
+)
+async def get_environment_template_version(
+    version_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> EnvironmentTemplateVersionResponse:
+    view = await EnvironmentTemplateService(session).get_version(
+        actor=current_user, version_id=version_id
+    )
+    return _template_response(view)
+
+
+@router.get(
+    "/projects/{project_id}/environment-instances/{instance_id}/template-version",
+    response_model=EnvironmentTemplateVersionResponse,
+)
+async def get_instance_template_version(
+    project_id: UUID,
+    instance_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> EnvironmentTemplateVersionResponse:
+    view = await EnvironmentTemplateService(session).get_instance_version(
+        actor=current_user, project_id=project_id, instance_id=instance_id
     )
     return _template_response(view)
 

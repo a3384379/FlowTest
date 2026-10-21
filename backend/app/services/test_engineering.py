@@ -9,6 +9,7 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain.evidence import EvidenceBundle, EvidenceFinding
 from app.domain.test_design import TestDesignDocument, fingerprint_design
 from app.domain.test_engineering import (
     ContractAuth,
@@ -16,12 +17,16 @@ from app.domain.test_engineering import (
     ContractRequestBody,
     OperationContract,
     TestEngineeringEngine,
+    contract_evidence,
 )
 from app.models.access import User
 from app.models.api_assets import APIDefinition, APIVersion
 from app.repositories.api_assets import APIAssetRepository
 from app.repositories.service_targets import ServiceTargetRepository
-from app.schemas.test_engineering import TestEngineeringGenerateRequest
+from app.schemas.test_engineering import (
+    TestEngineeringEvidenceDetail,
+    TestEngineeringGenerateRequest,
+)
 from app.services.projects import ProjectService
 
 
@@ -56,6 +61,43 @@ class TestEngineeringService:
             additional_evidence=payload.additional_evidence,
         )
         return design, fingerprint_design(design)
+
+    @staticmethod
+    def evidence_details(
+        design: TestDesignDocument,
+        contract: OperationContract,
+        additional_evidence: list[EvidenceBundle],
+    ) -> list[TestEngineeringEvidenceDetail]:
+        findings = contract_evidence(contract).findings + [
+            finding for bundle in additional_evidence for finding in bundle.findings
+        ]
+        grouped: dict[
+            tuple[str, str, str, str], dict[tuple[str, float, bool], EvidenceFinding]
+        ] = {}
+        for finding in findings:
+            key = (finding.id, finding.source_type, finding.source_ref, finding.revision)
+            metadata = (finding.path, finding.confidence, finding.deterministic)
+            grouped.setdefault(key, {})[metadata] = finding
+        details: list[TestEngineeringEvidenceDetail] = []
+        for reference in design.evidence_refs:
+            matches = grouped.get(
+                (reference.id, reference.source_type, reference.source_ref, reference.revision), {}
+            )
+            if len(matches) != 1:
+                continue
+            finding = next(iter(matches.values()))
+            details.append(
+                TestEngineeringEvidenceDetail(
+                    id=reference.id,
+                    source_type=reference.source_type,
+                    source_ref=reference.source_ref,
+                    revision=reference.revision,
+                    path=finding.path,
+                    confidence=finding.confidence,
+                    deterministic=finding.deterministic,
+                )
+            )
+        return details
 
     async def contract_for_api(
         self,

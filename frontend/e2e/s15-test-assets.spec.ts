@@ -283,7 +283,7 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
   await chooseOption(page, suiteSelect, `${suiteName} · v1`, suiteName)
   await expect(dialog.getByLabel('固定发布版本')).toHaveValue('1')
   const created = waitForProjectPost(page, '/test-plans')
-  await dialog.getByRole('button', { name: /确\s*定/ }).click()
+  await dialog.getByRole('button', { name: '创建计划', exact: true }).click()
   const response = await created
   expect(response.ok(), await response.text()).toBeTruthy()
   const plan = (await response.json()) as {
@@ -302,8 +302,15 @@ async function createSuitePlan(page: Page, suiteName: string, planName: string) 
       response.request().method() === 'POST',
   )
   await planRow.getByRole('button', { name: '运行' }).click()
-  expect((await queued).status()).toBe(202)
+  const queuedResponse = await queued
+  expect(queuedResponse.status()).toBe(202)
+  const run = (await queuedResponse.json()) as { id: string }
   await expect(page.getByText('测试计划已进入队列').last()).toBeVisible()
+  const details = page.getByRole('dialog', { name: '计划运行详情', exact: true })
+  await expect(details.getByText(run.id, { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`run=${run.id}`))
+  await details.locator('.ant-modal-close').click()
+  await expect(details).toBeHidden()
   const runQueue = page.locator('.ant-card').filter({ hasText: '运行队列' })
   await expect(runQueue.getByRole('row').nth(1)).toContainText('passed', { timeout: 30_000 })
 }

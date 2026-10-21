@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, TypedDict
 from uuid import UUID
 
 from sqlalchemy import (
@@ -15,6 +15,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin, UuidPrimaryKeyMixin
+
+
+class MaterializedAssetRecord(TypedDict):
+    scenario_id: str
+    workflow_id: str
+    test_case_id: str
 
 
 class TestDesign(UuidPrimaryKeyMixin, TimestampMixin, Base):
@@ -49,6 +55,9 @@ class TestDesign(UuidPrimaryKeyMixin, TimestampMixin, Base):
     confidence: Mapped[float] = mapped_column(Float, default=1, server_default="1")
     review_requirements: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     test_case_refs: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    materialized_assets: Mapped[list[MaterializedAssetRecord]] = mapped_column(
+        JSON, default=list, server_default="[]"
+    )
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     source_change_set_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("ai_change_sets.id", ondelete="SET NULL"), index=True

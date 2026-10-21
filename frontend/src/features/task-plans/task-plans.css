@@ -1,0 +1,25 @@
+.task-plan-workspace {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.task-plan-workspace > .page-heading,
+.task-plan-workspace > .workflow-result-card {
+  margin-block: 0;
+}
+
+.task-plan-workspace .ant-table-wrapper {
+  min-width: 0;
+}
+
+.task-plan-workspace .ant-table-thead th {
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .task-plan-workspace .task-plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

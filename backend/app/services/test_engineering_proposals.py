@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
@@ -32,10 +32,16 @@ from app.models.access import User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import APIDefinition, Environment
 from app.models.service_targets import ServiceEndpoint
-from app.models.test_design import TestDesign
+from app.models.test_assets import TestCase
+from app.models.test_design import MaterializedAssetRecord, TestDesign
+from app.models.workflows import Workflow
 from app.repositories.api_assets import APIAssetRepository
 from app.schemas.test_assets import TestCaseDefinitionInput
-from app.schemas.test_engineering import TestEngineeringProposalCreate
+from app.schemas.test_engineering import (
+    TestEngineeringEvidenceDetail,
+    TestEngineeringMaterializedAsset,
+    TestEngineeringProposalCreate,
+)
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 from app.services.test_assets import TestCaseService
@@ -49,6 +55,8 @@ class TestEngineeringProposalView:
     item: AIChangeItem
     design: TestDesignDocument
     scenario_ids: list[str]
+    materialization: TestEngineeringMaterialization | None = None
+    evidence_details: list[TestEngineeringEvidenceDetail] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +65,8 @@ class TestEngineeringMaterialization:
     test_design_id: UUID
     workflow_ids: list[UUID]
     test_case_ids: list[UUID]
+    assets: list[MaterializedAssetRecord] = field(default_factory=list)
+    references_complete: bool = True
 
 
 class TestEngineeringProposalService:
@@ -71,7 +81,97 @@ class TestEngineeringProposalService:
     ) -> TestEngineeringProposalView:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         change_set, item = await self._proposal(change_set_id, project_id, for_update=False)
-        return _view(change_set, item)
+        return replace(
+            _view(change_set, item),
+            materialization=await self._materialization(change_set, item),
+        )
+
+    async def _materialization(
+        self, change_set: AIChangeSet, item: AIChangeItem
+    ) -> TestEngineeringMaterialization | None:
+        if change_set.applied_at is None or item.materialized_resource_type != "test_design":
+            return None
+        model = await self._session.scalar(
+            select(TestDesign).where(
+                TestDesign.id == item.materialized_resource_id,
+                TestDesign.project_id == change_set.project_id,
+                TestDesign.source_change_set_id == change_set.id,
+            )
+        )
+        if model is None:
+            return None
+        if not model.materialized_assets:
+            cases = await self._legacy_case_ids(model)
+            return TestEngineeringMaterialization(
+                change_set.id, model.id, [], cases, references_complete=False
+            )
+        assets = await self._visible_assets(model)
+        return TestEngineeringMaterialization(
+            change_set.id,
+            model.id,
+            [UUID(asset["workflow_id"]) for asset in assets],
+            [UUID(asset["test_case_id"]) for asset in assets],
+            assets,
+            len(assets) == len(model.materialized_assets),
+        )
+
+    async def _legacy_case_ids(self, model: TestDesign) -> list[UUID]:
+        ids: list[UUID] = []
+        for ref in model.test_case_refs[:50]:
+            if not ref.startswith("testcase://"):
+                continue
+            try:
+                ids.append(UUID(ref.removeprefix("testcase://")))
+            except ValueError:
+                continue
+        owned = set(
+            await self._session.scalars(
+                select(TestCase.id).where(
+                    TestCase.project_id == model.project_id, TestCase.id.in_(ids)
+                )
+            )
+        )
+        return [value for value in ids if value in owned]
+
+    async def _visible_assets(self, model: TestDesign) -> list[MaterializedAssetRecord]:
+        if len(model.materialized_assets) > 50:
+            raise AppError(
+                code="TEST_ENGINEERING_ASSET_REFERENCES_INVALID",
+                message="生成资产引用超过允许范围",
+                status_code=409,
+            )
+        try:
+            references = [
+                TestEngineeringMaterializedAsset.model_validate(value)
+                for value in model.materialized_assets
+            ]
+        except ValidationError as error:
+            raise AppError(
+                code="TEST_ENGINEERING_ASSET_REFERENCES_INVALID",
+                message="生成资产引用无效",
+                status_code=409,
+            ) from error
+        workflows = set(
+            await self._session.scalars(
+                select(Workflow.id).where(
+                    Workflow.project_id == model.project_id,
+                    Workflow.id.in_([value.workflow_id for value in references]),
+                )
+            )
+        )
+        cases = set(
+            await self._session.scalars(
+                select(TestCase.id).where(
+                    TestCase.project_id == model.project_id,
+                    TestCase.id.in_([value.test_case_id for value in references]),
+                )
+            )
+        )
+        return [
+            record
+            for record, value in zip(model.materialized_assets, references, strict=True)
+            if value.workflow_id in workflows and value.test_case_id in cases
+        ]
 
     async def propose(
         self,
@@ -168,7 +268,7 @@ class TestEngineeringProposalService:
         await self._session.commit()
         await self._session.refresh(change_set)
         await self._session.refresh(item)
-        return TestEngineeringProposalView(change_set, item, design, scenario_ids)
+        return _view(change_set, item)
 
     async def review(
         self,
@@ -345,6 +445,7 @@ class TestEngineeringProposalService:
         await self._ensure_unique_design(project_id, title)
         workflow_ids: list[UUID] = []
         test_case_ids: list[UUID] = []
+        assets: list[MaterializedAssetRecord] = []
         for scenario in scenarios:
             expected_status = _expected_status(design, scenario)
             scenario_oracles = _scenario_oracles(design, scenario)
@@ -379,6 +480,13 @@ class TestEngineeringProposalService:
             )
             workflow_ids.append(workflow.id)
             test_case_ids.append(test_case.id)
+            assets.append(
+                {
+                    "scenario_id": scenario.id,
+                    "workflow_id": str(workflow.id),
+                    "test_case_id": str(test_case.id),
+                }
+            )
         model = _test_design_model(
             actor=actor,
             project_id=project_id,
@@ -387,6 +495,7 @@ class TestEngineeringProposalService:
             design=design,
             scenarios=scenarios,
             test_case_ids=test_case_ids,
+            materialized_assets=assets,
         )
         self._session.add(model)
         await self._session.flush()
@@ -395,6 +504,7 @@ class TestEngineeringProposalService:
             test_design_id=model.id,
             workflow_ids=workflow_ids,
             test_case_ids=test_case_ids,
+            assets=assets,
         )
 
     async def _proposal(
@@ -840,6 +950,7 @@ def _test_design_model(
     design: TestDesignDocument,
     scenarios: list[ScenarioCandidate],
     test_case_ids: list[UUID],
+    materialized_assets: list[MaterializedAssetRecord],
 ) -> TestDesign:
     selected_ids = {scenario.id for scenario in scenarios}
     approved_design = design.model_copy(
@@ -868,6 +979,7 @@ def _test_design_model(
         confidence=approved_design.confidence,
         review_requirements=list(approved_design.review_requirements),
         test_case_refs=[f"testcase://{value}" for value in test_case_ids],
+        materialized_assets=materialized_assets,
         fingerprint=fingerprint_design(approved_design),
         source_change_set_id=change_set.id,
         created_by_id=actor.id,
@@ -996,4 +1108,15 @@ def _change_regression_target_mismatch() -> AppError:
 
 def _view(change_set: AIChangeSet, item: AIChangeItem) -> TestEngineeringProposalView:
     design, scenario_ids = _proposal_content(item)
-    return TestEngineeringProposalView(change_set, item, design, scenario_ids)
+    contract = OperationContract.model_validate(change_set.source_snapshot.get("contract"))
+    evidence = [
+        EvidenceBundle.model_validate(value)
+        for value in change_set.source_snapshot.get("additional_evidence", [])
+    ]
+    return TestEngineeringProposalView(
+        change_set,
+        item,
+        design,
+        scenario_ids,
+        evidence_details=TestEngineeringService.evidence_details(design, contract, evidence),
+    )

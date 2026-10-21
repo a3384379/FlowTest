@@ -39,7 +39,8 @@ for (const viewport of viewports) {
     await page.getByRole('button', { name: '切换工作流列表', exact: true }).click()
     await expect(list).toBeVisible()
     const listWidth = (await requiredBox(list)).width
-    expect(listWidth).toBeGreaterThanOrEqual(280)
+    // Transform matrices can introduce a few millionths of a CSS pixel.
+    expect(Math.round(listWidth * 100) / 100).toBeGreaterThanOrEqual(280)
     expect(listWidth).toBeLessThanOrEqual(400)
     await page.keyboard.press('Escape')
     await expect(list).toBeHidden()
