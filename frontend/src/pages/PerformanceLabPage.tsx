@@ -10,6 +10,7 @@ import {
   Button,
   Descriptions,
   Empty,
+  Grid,
   Spin,
   Tabs,
   Card,
@@ -37,6 +38,10 @@ import { usePerformanceLab } from '../features/performance/use-performance-lab'
 
 export default function PerformanceLabPage() {
   const state = usePerformanceLab()
+  const screens = Grid.useBreakpoint()
+  const fixed: { name: 'left' | undefined; actions: 'right' | undefined } = screens.lg
+    ? { name: 'left', actions: 'right' }
+    : { name: undefined, actions: undefined }
   const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
   const [versionBase, setVersionBase] = useRouteScopedState<PerformanceScenario | null>(
     state.projectId,
@@ -88,30 +93,39 @@ export default function PerformanceLabPage() {
                 showSizeChanger: false,
                 onChange: state.setScenarioPage,
               }}
-              scroll={{ x: 700 }}
+              scroll={{ x: 810 }}
               dataSource={scenarios}
               locale={{ emptyText: '暂无性能场景' }}
               columns={[
                 {
                   title: '名称',
+                  width: 200,
+                  fixed: fixed.name,
                   render: (_, row) => (
-                    <Button type="link" onClick={() => state.selectObject('scenario', row.id)}>
+                    <Button
+                      className="performance-scenario-name"
+                      type="link"
+                      onClick={() => state.selectObject('scenario', row.id)}
+                    >
                       {row.name}
                     </Button>
                   ),
                 },
-                { title: '版本', dataIndex: 'version', width: 80, render: (value) => `v${value}` },
+                { title: '版本', dataIndex: 'version', width: 70, render: (value) => `v${value}` },
                 {
                   title: '目标',
+                  width: 140,
                   dataIndex: 'target_type',
                   render: (value) => (value === 'rest' ? 'REST' : '纯 HTTP Workflow'),
                 },
                 {
                   title: '负载',
+                  width: 140,
                   render: (_, row) => loadDescription(row.definition),
                 },
                 {
                   title: '状态',
+                  width: 80,
                   dataIndex: 'status',
                   render: (value) => (
                     <Tag color={value === 'published' ? 'success' : 'default'}>
@@ -122,6 +136,7 @@ export default function PerformanceLabPage() {
                 {
                   title: '操作',
                   width: 180,
+                  fixed: fixed.actions,
                   render: (_, row) => (
                     <Space>
                       <Button
@@ -258,9 +273,11 @@ function PerformanceOverview({
   runs: number | undefined
   latest: PerformanceRun | undefined
 }) {
+  const p95 = latest?.summary.http_req_duration_p95_ms
+  const change = latest?.summary.p95_regression_percent
   return (
-    <Row gutter={16} className="performance-overview">
-      <Col span={6}>
+    <Row gutter={[16, 16]} className="performance-overview">
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
             title="场景版本"
@@ -269,26 +286,28 @@ function PerformanceOverview({
           />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic title="运行总数" value={runs ?? '未提供'} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
             title="最近一次运行 P95"
-            value={latest?.summary.http_req_duration_p95_ms ?? '未提供'}
-            suffix="ms"
+            value={p95 ?? '未提供'}
+            precision={2}
+            suffix={p95 == null ? undefined : 'ms'}
           />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
             title="基线回归"
-            value={latest?.summary.p95_regression_percent ?? '未提供'}
-            suffix="%"
+            value={change ?? '未提供'}
+            precision={2}
+            suffix={change == null ? undefined : '%'}
           />
         </Card>
       </Col>

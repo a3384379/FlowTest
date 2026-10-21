@@ -62,3 +62,11 @@
     max-height: calc(100dvh - 48px);
   }
 }
+
+.performance-scenario-name {
+  white-space: normal;
+  height: auto;
+  max-width: 100%;
+  text-align: start;
+  overflow-wrap: anywhere;
+}

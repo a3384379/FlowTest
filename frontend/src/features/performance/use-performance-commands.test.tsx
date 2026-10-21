@@ -88,6 +88,50 @@ describe('performance command ownership', () => {
     expect(result.current.scenarioId).toBeNull()
     expect(client.getQueryData(['performance-run', 'first-project', 'new-run'])).toEqual(queued)
   })
+  it('keeps the selected scenario after a queue failure and retries only on an explicit command', async () => {
+    const { result } = workspace()
+    let commands = 0
+    server.use(
+      http.get('/api/v1/projects/first-project/performance-scenarios/scenario', () =>
+        HttpResponse.json({ id: 'scenario', project_id: 'first-project' }),
+      ),
+      http.post('/api/v1/projects/first-project/performance-scenarios/scenario/runs', () => {
+        commands += 1
+        return commands === 1
+          ? HttpResponse.json(
+              {
+                error: {
+                  code: 'UNAVAILABLE',
+                  message: '性能队列暂不可用',
+                  trace_id: 'performance-retry-trace',
+                },
+              },
+              { status: 503 },
+            )
+          : HttpResponse.json(queued, { status: 202 })
+      }),
+    )
+    await waitFor(() => expect(result.current.canEdit).toBe(true))
+    act(() => result.current.selectObject('scenario', 'scenario'))
+    await act(async () => {
+      await result.current.startRun('scenario')
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByText('性能队列暂不可用（Trace ID: performance-retry-trace）'),
+      ).toBeVisible(),
+    )
+    expect(result.current.scenarioId).toBe('scenario')
+    expect(result.current.runId).toBeNull()
+    expect(commands).toBe(1)
+    await act(async () => {
+      await result.current.startRun('scenario')
+    })
+    await waitFor(() => expect(result.current.runId).toBe('new-run'))
+    expect(result.current.scenarioId).toBeNull()
+    expect(commands).toBe(2)
+  })
+
   it.each(['project-success', 'project-error', 'selection', 'unmount'] as const)(
     'ignores a delayed run after %s',
     async (mode) => {
