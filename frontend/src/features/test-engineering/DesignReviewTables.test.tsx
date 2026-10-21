@@ -2,8 +2,8 @@ import { render, screen, within } from '@testing-library/react'
 import { ConfigProvider } from 'antd'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ScenarioTable } from './DesignReviewTables'
-import type { OracleSpec, ScenarioCandidate } from './test-engineering-service'
+import { CoverageTable, ScenarioTable } from './DesignReviewTables'
+import type { CoverageEntry, OracleSpec, ScenarioCandidate } from './test-engineering-service'
 
 const scenario: ScenarioCandidate = {
   id: 'definitive',
@@ -91,5 +91,40 @@ describe('scenario materialization eligibility', () => {
     expect(row(missing.title).getByText('未提供')).toBeVisible()
     expect(row(missing.title).getByRole('checkbox')).toBeDisabled()
     expect(screen.queryByText('NaN%')).not.toBeInTheDocument()
+  })
+})
+
+describe('design coverage business labels', () => {
+  it('renders known coverage terms in Chinese while preserving custom requirements and paths', () => {
+    const entry: CoverageEntry = {
+      target_ref: 'orders.body.quantity',
+      dimension: 'boundary',
+      requirement: 'above maximum',
+      covered: true,
+      evidence_refs: [],
+      reason: '',
+      recommended_scenario_kind: null,
+      priority: 'high',
+    }
+    render(
+      <CoverageTable
+        items={[
+          entry,
+          { ...entry, dimension: 'response_status', requirement: 'status 400' },
+          { ...entry, dimension: 'enum', requirement: 'enum value enterprise-v2' },
+          { ...entry, dimension: 'schema', requirement: 'custom English contract constraint' },
+        ]}
+      />,
+    )
+    for (const name of [
+      '边界',
+      '超过最大值',
+      '响应状态码',
+      '状态码 400',
+      '枚举值 enterprise-v2',
+      'custom English contract constraint',
+    ])
+      expect(screen.getByText(name, { exact: true })).toBeVisible()
+    expect(screen.getAllByText('orders.body.quantity')).toHaveLength(4)
   })
 })

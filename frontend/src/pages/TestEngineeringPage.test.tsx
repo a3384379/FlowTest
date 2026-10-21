@@ -180,6 +180,7 @@ describe('TestEngineeringPage', () => {
     )
     renderPage(`/projects/${project.id}/test-engineering?proposal=${proposal.change_set_id}`)
     expect(await screen.findByText(design.intent.objective)).toBeVisible()
+    expect(screen.getByText('必须认证 · Bearer 令牌 · 请求头（Authorization）')).toBeVisible()
     expect(actionButton('只读生成预览')).not.toBeDisabled()
     expect(actionButton('创建待审核草稿')).toBeDisabled()
     for (const name of ['接受设计草稿', '拒绝设计草稿']) {

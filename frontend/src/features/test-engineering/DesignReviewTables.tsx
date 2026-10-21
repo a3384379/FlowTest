@@ -130,8 +130,8 @@ export function CoverageTable({ items }: { items: CoverageEntry[] }) {
       scroll={{ x: 760 }}
       dataSource={items}
       columns={[
-        { title: '维度', dataIndex: 'dimension' },
-        { title: '评估要求', dataIndex: 'requirement' },
+        { title: '维度', dataIndex: 'dimension', render: coverageDimension },
+        { title: '评估要求', dataIndex: 'requirement', render: coverageRequirement },
         { title: '目标路径', dataIndex: 'target_ref' },
         {
           title: '状态',
@@ -151,6 +151,8 @@ export function CoverageTable({ items }: { items: CoverageEntry[] }) {
 function categoryLabel(value: string): string {
   const labels: Record<string, string> = {
     success: '成功响应',
+    invalid_request: '无效请求',
+    review: '需要人工复核',
     client_error: '客户端错误',
     unauthorized: '未认证',
     forbidden: '无权限',
@@ -158,6 +160,54 @@ function categoryLabel(value: string): string {
     server_error: '服务端错误',
   }
   return labels[value] ?? value
+}
+
+function coverageDimension(value: string): string {
+  const names: Record<string, string> = {
+    endpoint: '接口',
+    required_field: '必填字段',
+    parameter: '参数',
+    boundary: '边界',
+    enum: '枚举值',
+    type_negative: '错误类型',
+    format: '格式',
+    response_status: '响应状态码',
+    schema: '数据结构',
+    authorization: '认证与权限',
+    state: '状态',
+    transition: '状态转换',
+    database_constraint: '数据库约束',
+    change_impact: '变更影响',
+  }
+  return names[value] ?? value
+}
+
+function coverageRequirement(value: string): string {
+  const names: Record<string, string> = {
+    'happy path': '正常请求',
+    'auth missing': '缺失认证',
+    'required omitted': '省略必填值',
+    null: '必填值为空',
+    minimum: '最小边界',
+    'below minimum': '低于最小值',
+    maximum: '最大边界',
+    'above maximum': '超过最大值',
+    'exclusive minimum': '高于排他最小值',
+    'at exclusive minimum': '等于排他最小值',
+    'exclusive maximum': '低于排他最大值',
+    'at exclusive maximum': '等于排他最大值',
+    maxLength: '最大长度',
+    'above maxLength': '超过最大长度',
+    'invalid enum': '无效枚举值',
+    'invalid type': '错误类型',
+    'valid format': '有效格式',
+    'invalid format': '无效格式',
+    'duplicate unique value': '重复的唯一值',
+    'nonexistent foreign key': '不存在的外键引用',
+  }
+  if (/^status [0-9]{3}$/.test(value)) return `状态码 ${value.slice(7)}`
+  if (value.startsWith('enum value ')) return `枚举值 ${value.slice(11)}`
+  return names[value] ?? value
 }
 
 function oracleKind(value: string): string {

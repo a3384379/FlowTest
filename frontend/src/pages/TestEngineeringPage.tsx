@@ -484,26 +484,38 @@ function ContractOverview({ contract }: { contract?: OperationContract }) {
     return (
       <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
         <Descriptions.Item label="操作标识">历史响应未提供</Descriptions.Item>
-        <Descriptions.Item label="认证要求">unknown</Descriptions.Item>
-        <Descriptions.Item label="参数位置">unknown</Descriptions.Item>
+        <Descriptions.Item label="认证要求">未提供</Descriptions.Item>
+        <Descriptions.Item label="参数位置">未提供</Descriptions.Item>
       </Descriptions>
     )
   }
   const parameterLocations = contract.parameters
     .map((parameter) => `${parameter.location}.${parameter.name}`)
     .join('、')
-  const authName = contract.auth.name ? `:${contract.auth.name}` : ''
   return (
     <Descriptions bordered size="small" column={{ xs: 1, sm: 2 }}>
       <Descriptions.Item label="操作标识">
-        {`${contract.service ?? 'default'} · ${contract.method} ${contract.path} · ${contract.operation}`}
+        {`${contract.service ?? '默认服务'} · ${contract.method} ${contract.path} · ${contract.operation}`}
       </Descriptions.Item>
-      <Descriptions.Item label="认证要求">
-        {`${contract.auth.required ? 'required' : 'optional'} · ${contract.auth.kind} · ${contract.auth.location ?? 'none'}${authName}`}
-      </Descriptions.Item>
+      <Descriptions.Item label="认证要求">{contractAuthLabel(contract.auth)}</Descriptions.Item>
       <Descriptions.Item label="参数位置">{parameterLocations || '无显式参数'}</Descriptions.Item>
     </Descriptions>
   )
+}
+
+function contractAuthLabel(auth: OperationContract['auth']): string {
+  if (auth.kind === 'none') return auth.required ? '必须认证（未提供认证方式）' : '不要求认证'
+  const kinds = {
+    bearer: 'Bearer 令牌',
+    basic: 'Basic 用户名密码',
+    api_key: 'API 密钥',
+    oauth2: 'OAuth2',
+    other: '其他认证',
+  }
+  const locations = { header: '请求头', query: '查询参数', cookie: 'Cookie' }
+  const location = auth.location ? ` · ${locations[auth.location]}` : ''
+  const name = auth.name ? `（${auth.name}）` : ''
+  return `${auth.required ? '必须认证' : '可选认证'} · ${kinds[auth.kind]}${location}${name}`
 }
 
 function ContractAlerts({
