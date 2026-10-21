@@ -217,11 +217,7 @@ describe('TestPlansPage', () => {
     await browser.click(heading.getByRole('button', { name: /生成 CI Token/ }))
     expect(await screen.findByText(serviceToken.token)).toBeInTheDocument()
     expect(tokenRequests).toBe(1)
-    const secret = within(
-      screen.getByText(serviceToken.token).closest('.ant-modal')! as HTMLElement,
-    )
-    await browser.click(secret.getByRole('button', { name: 'Close' }))
-    await waitFor(() => expect(screen.queryByText(serviceToken.token)).not.toBeVisible())
+    await closeRevealedSecret(browser, serviceToken.token)
   })
 
   it.each(['固定间隔', 'Cron'] as const)(
@@ -292,8 +288,7 @@ describe('TestPlansPage', () => {
       await browser.click(dialog.getByRole('button', { name: '创建计划' }))
       expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
       expect(created).toBe(1)
-      await browser.keyboard('{Escape}')
-      await waitFor(() => expect(screen.queryByText(plan.webhook_secret)).not.toBeVisible())
+      await closeRevealedSecret(browser, plan.webhook_secret)
     },
   )
 
@@ -329,7 +324,10 @@ describe('TestPlansPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('task-route')).toHaveTextContent(`run=${queuedRun.id}`),
     )
-    await browser.keyboard('{Escape}')
+    const details = screen.getByText('计划运行详情').closest('.ant-modal')! as HTMLElement
+    await waitFor(() => expect(details).toBeVisible())
+    await browser.click(within(details).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.getByTestId('task-route')).not.toHaveTextContent('run='))
     const queue = within(workspace.getByText('运行队列').closest('.ant-card')! as HTMLElement)
     await browser.click(queue.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))
@@ -712,4 +710,16 @@ function installMaintenanceHandlers(planValue: () => CreatedTestPlan, revoked: (
       ]),
     ),
   )
+}
+
+async function closeRevealedSecret(browser: ReturnType<typeof userEvent.setup>, value: string) {
+  const content = await screen.findByText(value)
+  await waitFor(() => expect(content).toBeVisible())
+  const dialog = within(content.closest('.ant-modal')! as HTMLElement)
+  await browser.click(dialog.getByRole('button', { name: 'Close' }))
+  await waitFor(() => {
+    const remaining = screen.queryByText(value)
+    if (remaining) expect(remaining).not.toBeVisible()
+    else expect(remaining).toBeNull()
+  })
 }
