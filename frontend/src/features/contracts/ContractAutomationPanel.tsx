@@ -359,7 +359,7 @@ export function ContractSummary({ run }: { run: ContractRun }) {
     <Card title="契约差异与覆盖率" size="small">
       <Descriptions
         size="small"
-        column={4}
+        column={{ xs: 1, sm: 2, lg: 4 }}
         items={[
           { label: '操作覆盖', children: operations.label },
           { label: '分析状态', children: run.status },

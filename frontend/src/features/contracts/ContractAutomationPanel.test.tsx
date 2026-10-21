@@ -72,7 +72,7 @@ describe('ContractAutomationPanel views', () => {
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('生成定义'), { target: { value: '[]' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '接受草稿' }))
-    expect(await within(dialog).findByText('生成定义必须为JSON对象')).toBeVisible()
+    await waitFor(() => expect(within(dialog).getByText('生成定义必须为JSON对象')).toBeVisible())
     expect(within(dialog).getByLabelText('生成定义')).toHaveValue('[]')
     expect(submit).not.toHaveBeenCalled()
   })
