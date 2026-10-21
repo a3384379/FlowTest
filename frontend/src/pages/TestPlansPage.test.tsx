@@ -173,24 +173,13 @@ describe('TestPlansPage', () => {
     expect(forbiddenRequests).toBe(0)
   })
 
-  it('creates, queues and cancels plans, and reveals one-time credentials', async () => {
-    const requests = { created: 0, run: 0, cancelled: 0, token: 0 }
+  it('shows interval, cron and manual schedules and reveals a new CI credential once', async () => {
+    installMaintenanceHandlers(
+      () => plan,
+      () => false,
+    )
+    let tokenRequests = 0
     server.use(
-      http.get('/api/v1/projects', () =>
-        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
-      ),
-      http.get(`/api/v1/projects/${project.id}/workflows`, () =>
-        HttpResponse.json({ items: [workflow], total: 1, page: 1, page_size: 100 }),
-      ),
-      http.get(`/api/v1/projects/${project.id}/environments`, () =>
-        HttpResponse.json([environment]),
-      ),
-      http.get(`/api/v1/projects/${project.id}/test-cases`, () =>
-        HttpResponse.json({ items: [testCase], total: 1, page: 1, page_size: 100 }),
-      ),
-      http.get(`/api/v1/projects/${project.id}/test-suites`, () =>
-        HttpResponse.json({ items: [testSuite], total: 1, page: 1, page_size: 100 }),
-      ),
       http.get(`/api/v1/projects/${project.id}/test-plans`, () =>
         HttpResponse.json({
           items: [
@@ -202,121 +191,147 @@ describe('TestPlansPage', () => {
               schedule_interval_seconds: null,
               schedule_cron: '0 9 * * 1-5',
             },
-            {
-              ...plan,
-              id: `${plan.id}-manual`,
-              name: '手动回归',
-              schedule_interval_seconds: null,
-            },
+            { ...plan, id: `${plan.id}-manual`, name: '手动回归', schedule_interval_seconds: null },
           ],
           total: 3,
           page: 1,
           page_size: 100,
         }),
       ),
-      http.get(`/api/v1/projects/${project.id}/test-plan-runs`, () =>
-        HttpResponse.json({ items: [queuedRun], total: 1, page: 1, page_size: 50 }),
-      ),
-      http.get(`/api/v1/projects/${project.id}/service-tokens`, () =>
-        HttpResponse.json([withoutRawToken(serviceToken)]),
-      ),
       http.post(`/api/v1/projects/${project.id}/service-tokens`, () => {
-        requests.token += 1
+        tokenRequests++
         return HttpResponse.json(serviceToken, { status: 201 })
       }),
+    )
+    const view = renderPage()
+    const workspace = within(view.container)
+    expect(await workspace.findByRole('heading', { name: '任务执行' })).toBeVisible()
+    expect(await workspace.findByText('每日回归')).toBeVisible()
+    expect(workspace.getByText('每 60 分钟')).toBeVisible()
+    expect(workspace.getByText('0 9 * * 1-5 · Asia/Shanghai')).toBeVisible()
+    expect(workspace.getByText('手动')).toBeVisible()
+    expect(workspace.getByText('尚未使用')).toBeVisible()
+    expect(screen.queryByText(serviceToken.token)).not.toBeInTheDocument()
+    const browser = userEvent.setup()
+    const heading = within(view.container.querySelector('.page-heading')! as HTMLElement)
+    await browser.click(heading.getByRole('button', { name: /生成 CI Token/ }))
+    expect(await screen.findByText(serviceToken.token)).toBeInTheDocument()
+    expect(tokenRequests).toBe(1)
+    const secret = within(
+      screen.getByText(serviceToken.token).closest('.ant-modal')! as HTMLElement,
+    )
+    await browser.click(secret.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByText(serviceToken.token)).not.toBeVisible())
+  })
+
+  it.each(['固定间隔', 'Cron'] as const)(
+    'creates a version-pinned suite plan with %s scheduling',
+    async (schedule) => {
+      installMaintenanceHandlers(
+        () => plan,
+        () => false,
+      )
+      let created = 0
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/test-cases`, () =>
+          HttpResponse.json({ items: [testCase], total: 1, page: 1, page_size: 20 }),
+        ),
+        http.get(`/api/v1/projects/${project.id}/test-suites`, () =>
+          HttpResponse.json({ items: [testSuite], total: 1, page: 1, page_size: 20 }),
+        ),
+        http.post(`/api/v1/projects/${project.id}/test-plans`, async ({ request }) => {
+          const body: unknown = await request.json()
+          expect(body).toMatchObject({
+            schedule_interval_seconds: schedule === '固定间隔' ? 1800 : null,
+            schedule_cron: schedule === 'Cron' ? '0 9 * * 1-5' : null,
+            queue_priority: schedule === 'Cron' ? 9 : 5,
+            items: [
+              expect.objectContaining({
+                target_type: 'suite',
+                target_id: testSuite.id,
+                target_version: 1,
+                environment_id: null,
+              }),
+            ],
+          })
+          if (schedule === 'Cron')
+            expect(body).toMatchObject({ schedule_timezone: 'Asia/Shanghai' })
+          created++
+          return HttpResponse.json(plan, { status: 201 })
+        }),
+      )
+      const view = renderPage()
+      const workspace = within(view.container)
+      await workspace.findByText('每日回归')
+      const browser = userEvent.setup()
+      const heading = within(view.container.querySelector('.page-heading')! as HTMLElement)
+      await waitFor(() => expect(heading.getByRole('button', { name: /新建计划/ })).toBeEnabled())
+      await browser.click(heading.getByRole('button', { name: /新建计划/ }))
+      const title = await screen.findByText('新建测试计划')
+      await waitFor(() => expect(title).toBeVisible())
+      const dialog = within(title.closest('.ant-modal')! as HTMLElement)
+      await browser.type(
+        dialog.getByLabelText('计划名称'),
+        schedule === 'Cron' ? 'Cron 部署回归' : '部署回归',
+      )
+      await chooseScopedSelect(browser, dialog, '执行目标', '测试套件')
+      await chooseScopedSelect(
+        browser,
+        dialog,
+        '测试套件',
+        `${testSuite.name} · v${testSuite.current_version}`,
+      )
+      await chooseScopedSelect(browser, dialog, '调度方式', schedule)
+      if (schedule === '固定间隔')
+        await browser.type(dialog.getByLabelText('定时间隔（分钟）'), '30')
+      else {
+        await browser.type(dialog.getByLabelText('Cron 表达式'), '0 9 * * 1-5')
+        await browser.clear(dialog.getByLabelText('队列优先级（0 最低，9 最高）'))
+        await browser.type(dialog.getByLabelText('队列优先级（0 最低，9 最高）'), '9')
+      }
+      await browser.click(dialog.getByRole('button', { name: '创建计划' }))
+      expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
+      expect(created).toBe(1)
+      await browser.keyboard('{Escape}')
+      await waitFor(() => expect(screen.queryByText(plan.webhook_secret)).not.toBeVisible())
+    },
+  )
+
+  it('queues the selected plan, opens the exact run and submits cancellation', async () => {
+    installMaintenanceHandlers(
+      () => plan,
+      () => false,
+    )
+    const requests = { run: 0, cancelled: 0 }
+    server.use(
       http.get(`/api/v1/projects/${project.id}/test-plans/${plan.id}`, () =>
         HttpResponse.json(plan),
       ),
       http.get(`/api/v1/projects/${project.id}/test-plan-runs/${queuedRun.id}`, () =>
         HttpResponse.json({ run: queuedRun, items: [] }),
       ),
-      http.post(`/api/v1/projects/${project.id}/test-plans`, async ({ request }) => {
-        const body = (await request.json()) as {
-          schedule_interval_seconds: number | null
-          schedule_cron: string | null
-          schedule_timezone: string
-          queue_priority: number
-          items: Array<{
-            target_type: string
-            target_id: string
-            target_version: number
-            environment_id: string | null
-          }>
-        }
-        if (requests.created === 0) {
-          expect(body.schedule_interval_seconds).toBe(1800)
-        } else {
-          expect(body).toMatchObject({
-            schedule_interval_seconds: null,
-            schedule_cron: '0 9 * * 1-5',
-            schedule_timezone: 'Asia/Shanghai',
-            queue_priority: 9,
-          })
-        }
-        expect(body.items[0]).toMatchObject({
-          target_type: 'suite',
-          target_id: testSuite.id,
-          target_version: 1,
-          environment_id: null,
-        })
-        requests.created += 1
-        return HttpResponse.json(plan, { status: 201 })
-      }),
       http.post(`/api/v1/projects/${project.id}/test-plans/${plan.id}/runs`, () => {
-        requests.run += 1
+        requests.run++
         return HttpResponse.json(queuedRun, { status: 202 })
       }),
       http.post(`/api/v1/projects/${project.id}/test-plan-runs/${queuedRun.id}/cancel`, () => {
-        requests.cancelled += 1
+        requests.cancelled++
         return HttpResponse.json({ ...queuedRun, status: 'cancelled' })
       }),
     )
-    renderPage()
+    const view = renderPage()
+    const workspace = within(view.container)
+    const row = within((await workspace.findByText('每日回归')).closest('tr')!)
     const browser = userEvent.setup()
-
-    expect(await screen.findByRole('heading', { name: '任务执行' })).toBeVisible()
-    expect(await screen.findByText('每日回归')).toBeVisible()
-    expect(screen.getByText('每 60 分钟')).toBeVisible()
-    expect(screen.getByText('0 9 * * 1-5 · Asia/Shanghai')).toBeVisible()
-    expect(screen.getByText('手动')).toBeVisible()
-    expect(screen.getByText('尚未使用')).toBeVisible()
-
-    await browser.click(screen.getByRole('button', { name: /生成 CI Token/ }))
-    expect(await screen.findByText(serviceToken.token)).toBeInTheDocument()
-    expect(requests.token).toBe(1)
-    await browser.keyboard('{Escape}')
-
-    await browser.click(screen.getByRole('button', { name: /新建计划/ }))
-    await browser.type(screen.getByLabelText('计划名称'), '部署回归')
-    await chooseSelect(browser, '执行目标', '测试套件')
-    await chooseSelect(browser, '测试套件', `${testSuite.name} · v${testSuite.current_version}`)
-    await chooseSelect(browser, '调度方式', '固定间隔')
-    await browser.type(screen.getByLabelText('定时间隔（分钟）'), '30')
-    await browser.click(screen.getByRole('button', { name: '创建计划' }))
-    expect(await screen.findByText(plan.webhook_secret)).toBeInTheDocument()
-    expect(requests.created).toBe(1)
-    await browser.keyboard('{Escape}')
-
-    await browser.click(screen.getByRole('button', { name: /新建计划/ }))
-    await browser.type(screen.getByLabelText('计划名称'), 'Cron 部署回归')
-    await chooseSelect(browser, '执行目标', '测试套件')
-    await chooseSelect(browser, '测试套件', `${testSuite.name} · v${testSuite.current_version}`)
-    await chooseSelect(browser, '调度方式', 'Cron')
-    await browser.type(screen.getByLabelText('Cron 表达式'), '0 9 * * 1-5')
-    await browser.clear(screen.getByLabelText('队列优先级（0 最低，9 最高）'))
-    await browser.type(screen.getByLabelText('队列优先级（0 最低，9 最高）'), '9')
-    await browser.click(screen.getByRole('button', { name: '创建计划' }))
-    await waitFor(() => expect(requests.created).toBe(2))
-    await browser.keyboard('{Escape}')
-
-    await browser.click(screen.getAllByRole('button', { name: /运行/ })[0])
+    await browser.click(row.getByRole('button', { name: /运行/ }))
     await waitFor(() => expect(requests.run).toBe(1))
     await screen.findByText('计划运行详情')
     await waitFor(() =>
       expect(screen.getByTestId('task-route')).toHaveTextContent(`run=${queuedRun.id}`),
     )
     await browser.keyboard('{Escape}')
-    await browser.click(screen.getByRole('button', { name: /取消/ }))
+    const queue = within(workspace.getByText('运行队列').closest('.ant-card')! as HTMLElement)
+    await browser.click(queue.getByRole('button', { name: /取消/ }))
     await waitFor(() => expect(requests.cancelled).toBe(1))
   })
   it('edits scheduling without changing frozen targets, stops future scheduling, and revokes tokens', async () => {
@@ -646,17 +661,6 @@ function TaskRouteProbe() {
       </span>
       <button onClick={() => navigate(-1)}>任务历史后退</button>
     </>
-  )
-}
-
-async function chooseSelect(
-  browser: ReturnType<typeof userEvent.setup>,
-  label: string,
-  option: string,
-) {
-  await browser.click(screen.getByRole('combobox', { name: label }))
-  await browser.click(
-    await screen.findByText(option, { selector: '.ant-select-item-option-content' }),
   )
 }
 
