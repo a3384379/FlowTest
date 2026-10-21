@@ -160,3 +160,6 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 额外审计先复现停用状态陈旧和0.15→0.2精度问题后修复；手机四列挤压、服务标题及内部栅格/Tag滚动均在实际页面补修。中间检查只绑定相应树，最终树独立完整复验。全站仍27项待完成，最新HEAD正式Required Gate、合并后回归和正式发布未据此宣称通过。
 
 交付补充：PR143的194e376正式Required Gate39546205418成功并保护合并到main915ce9dbcaa0ea4492233143a3dd68218cd4bce5，当前39项已合并；其合并后Full Regression39550844459另行运行。PR144旧HEAD d9bed230门禁成功但有auth覆盖审查问题，552b81a已本地补修并通过25项专项，没有提前合并。
+
+
+2026-10-21 GitHub契约中心交付：PR #143 在head `194e376348811494aa04fd8ca492cded40259928` 的正式Required Gate运行39546205418成功，全部已选择的检查（含Compose/S27、后端、前端、升级和Windows）通过；reviewThreads为空且分页完整。按该head保护合并，main为`915ce9dbcaa0ea4492233143a3dd68218cd4bce5`，不是仅本地通过。合并后Full Regression另行跟踪，未用PR结果替代。已合并整改项39/73。

@@ -428,6 +428,42 @@ describe('TestEngineeringPage', () => {
     expect(screen.queryByText('生成工作流与用例草稿', { exact: true })).not.toBeInTheDocument()
   })
 
+  it.each([
+    { location: 'auth', path: 'auth', target: 'orders.create.auth' },
+    { location: 'body', path: 'body.quantity', target: 'orders.create.body.quantity' },
+    { location: 'body', path: 'quantity', target: 'orders.create.body.quantity' },
+  ])(
+    'matches direct scenario coverage for $location / $path without duplicating its location',
+    async ({ location, path, target }) => {
+      const entry = {
+        ...design.coverage!.entries[0],
+        target_ref: target,
+        dimension: 'authorization',
+        requirement: 'auth missing',
+      }
+      const selected = {
+        ...design.scenarios[1],
+        mutations: [{ location, path, operation: 'omit', value: null }],
+      }
+      const saved = installLinkedProposal({
+        design: {
+          ...design,
+          scenarios: [design.scenarios[0], selected],
+          coverage: { entries: [entry, { ...entry, target_ref: `${target}.unrelated` }] },
+        },
+      })
+      renderPage(`/projects/${project.id}/test-engineering?proposal=${saved.change_set_id}`)
+      const browser = userEvent.setup()
+      await browser.click(await screen.findByLabelText('查看场景：缺失认证'))
+      const direct = within(
+        screen.getByText('本场景的直接覆盖项').closest('.ant-card') as HTMLElement,
+      )
+      expect(await direct.findByText(target, { exact: true })).toBeVisible()
+      expect(direct.getByText('认证与权限', { exact: true })).toBeVisible()
+      expect(direct.queryByText(`${target}.unrelated`, { exact: true })).not.toBeInTheDocument()
+    },
+  )
+
   it('restores generated asset references and protects unsaved targets before opening the exact asset', async () => {
     let writes = 0
     const workflowId = '00000000-0000-4000-8000-000000007901'
