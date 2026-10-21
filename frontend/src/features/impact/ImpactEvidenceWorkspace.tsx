@@ -102,7 +102,8 @@ export default function ImpactEvidenceWorkspace(props: Props) {
                     {reason}
                   </Typography.Text>
                 ))}
-                <Tag>{asset.target_type}</Tag>
+                <Tag>{targetLabel(asset.target_type)}</Tag>
+                <AssetRisk risk={asset.risk} />
                 <Button onClick={() => props.onAsset(assetKey(asset))}>
                   查看推荐 {asset.name}
                 </Button>
@@ -178,8 +179,10 @@ function ChangeItem({
       className={`impact-item impact-item-${change.severity}${selected ? ' impact-item-selected' : ''}`}
     >
       <Space wrap>
-        <Tag color={change.severity === 'breaking' ? 'error' : 'blue'}>{change.severity}</Tag>
-        <Tag>{change.source_kind}</Tag>
+        <Tag color={{ breaking: 'error', warning: 'warning', info: 'blue' }[change.severity]}>
+          {severityLabel(change.severity)}
+        </Tag>
+        <Tag>{sourceLabel(change.source_kind)}</Tag>
       </Space>
       <Button
         type="link"
@@ -192,6 +195,34 @@ function ChangeItem({
       </Button>
       <Typography.Text type="secondary">{change.detail}</Typography.Text>
     </article>
+  )
+}
+
+function severityLabel(value: ImpactChange['severity']): string {
+  return { breaking: '破坏性', warning: '警告', info: '信息' }[value]
+}
+
+function sourceLabel(value: ImpactChange['source_kind']): string {
+  return { git: 'Git', openapi: 'OpenAPI', graphql: 'GraphQL', grpc: 'Proto / gRPC' }[value]
+}
+
+function targetLabel(value: SelectedAsset['target_type']): string {
+  return {
+    test_case: '测试用例',
+    workflow: '工作流',
+    openapi_contract: 'OpenAPI 契约',
+    pact_contract: 'Pact 契约',
+    performance: '性能场景',
+  }[value]
+}
+
+function riskLabel(value: SelectedAsset['risk']): string {
+  return { high: '高风险', medium: '中风险', normal: '一般风险' }[value]
+}
+
+function AssetRisk({ risk }: { risk: SelectedAsset['risk'] }) {
+  return (
+    <Tag color={{ high: 'error', medium: 'warning', normal: 'blue' }[risk]}>{riskLabel(risk)}</Tag>
   )
 }
 
@@ -230,6 +261,7 @@ function GraphAssetItem({
   return (
     <article className="impact-item">
       <Typography.Text strong>{asset.label}</Typography.Text>
+      {asset.selected && <AssetRisk risk={asset.selected.risk} />}
       <Typography.Text type="secondary">{asset.id}</Typography.Text>
       {asset.edges.map((edge, index) => (
         <Typography.Text key={`${edge.from}:${index}`}>
@@ -285,7 +317,7 @@ function AssetEvidence(props: Props) {
             items={[
               { label: '完整资产', children: `${asset.target_type}:${asset.target_id}` },
               { label: '固定版本', children: asset.version ?? '未提供' },
-              { label: '风险', children: asset.risk },
+              { label: '风险', children: riskLabel(asset.risk) },
             ]}
           />
           {asset.reasons.map((reason) => (
