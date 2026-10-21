@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, case, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.domain.service_catalog import ServiceContractVersion
 from app.models.contracts import (
@@ -212,6 +213,7 @@ class ContractHubRepository:
         rows = (
             await self._session.execute(
                 select(PactContractVersion, page.c.total)
+                .options(defer(PactContractVersion.contract_document))
                 .select_from(page)
                 .outerjoin(PactContractVersion, PactContractVersion.id == page.c.item_id)
                 .order_by(page.c.position)

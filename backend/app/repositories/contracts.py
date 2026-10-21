@@ -2,6 +2,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.models.contracts import ContractRun, GeneratedContractCase
 from app.repositories.catalog_paging import ranked_catalog_page
@@ -52,6 +53,7 @@ class ContractRepository:
         rows = (
             await self._session.execute(
                 select(ContractRun, page.c.total)
+                .options(defer(ContractRun.schema_document))
                 .select_from(page)
                 .outerjoin(ContractRun, ContractRun.id == page.c.item_id)
                 .order_by(page.c.position)
