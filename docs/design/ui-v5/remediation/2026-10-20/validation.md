@@ -145,3 +145,6 @@ PR #142 的旧HEAD `b30027ef96424b6bfdefc97d5e8555fa6b6b16cf` 对应[正式运�
 整合M10的正式门禁补修194e376后，源码 `4dcfc223e1aa963ebf0facd0a93d75f3588a8d41` 的前端树 `1e918ff43a52ff76338fd8b35c7da53edebdad66` 已重新完成7文件48项受影响专项及完整前端检查：164文件1092项通过，无未处理异常，覆盖率85.97/81.95/85.61/88.45%，格式、lint/类型与构建通过。日志 `remediation-engineering-contract-label-integrated-targeted.log`、`remediation-engineering-contract-label-frontend-full.log`。后台树仍为24f0584db804775d4b88af8853cbab0af63dff46，与1882项/91.07%完整通过一致。
 
 同步只在进度/验证文档保留测试工程42项/31项待完成的最新状态，并补入M10失败及补修回执，没有改写冻结审计或物化快照。当前42项本地完成、37项已合并，任务执行2项仍在验收，未计入完成。M10的最新194e376正式门禁39546205418仍在运行；本批GitHub PR与正式验收另行确认。
+
+
+2026-10-21 GitHub契约中心交付：PR #143 在head `194e376348811494aa04fd8ca492cded40259928` 的正式Required Gate运行39546205418成功，全部已选择的检查（含Compose/S27、后端、前端、升级和Windows）通过；reviewThreads为空且分页完整。按该head保护合并，main为`915ce9dbcaa0ea4492233143a3dd68218cd4bce5`，不是仅本地通过。合并后Full Regression另行跟踪，未用PR结果替代。已合并整改项39/73。
