@@ -33,6 +33,9 @@ export function useQualityCenter() {
   const canEdit = editAllowed && permissions.isSuccess
   const [params, setParams] = useSearchParams()
   const linkedRecordId = params.get('record')
+  const recordTargetType = params.get('target_type')
+  const recordTargetId = params.get('target')
+  const recordVersion = params.get('version')
   const featureFlags = useQuery({
     queryKey: ['v3-feature-flags'],
     queryFn: getV3FeatureFlags,
@@ -84,13 +87,30 @@ export function useQualityCenter() {
     enabled: Boolean(projectId && activeRiskId && riskEnabled),
   })
   const record = useQuery({
-    queryKey: ['flaky-record', projectId, linkedRecordId],
-    queryFn: () => getFlakyRecord(required(projectId), required(linkedRecordId)),
+    queryKey: [
+      'flaky-record',
+      projectId,
+      linkedRecordId,
+      recordTargetType,
+      recordTargetId,
+      recordVersion,
+    ],
+    queryFn: () =>
+      getFlakyRecord(required(projectId), required(linkedRecordId), {
+        targetType: recordTargetType,
+        targetId: recordTargetId,
+        version: recordVersion,
+      }),
     enabled: Boolean(projectId && linkedRecordId),
   })
   function selectEvidence(key: 'risk' | 'record', id: string | null) {
     setParams((current) => {
       const next = new URLSearchParams(current)
+      if (key === 'record') {
+        next.delete('target_type')
+        next.delete('target')
+        next.delete('version')
+      }
       if (id) next.set(key, id)
       else next.delete(key)
       return next

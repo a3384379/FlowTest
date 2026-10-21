@@ -19,11 +19,17 @@ import { projectPath } from '../features/projects/project-routing'
 import ProjectEmptyState from '../features/projects/ProjectEmptyState'
 import type { ReleaseDecision } from '../features/release-gate/release-gate-service'
 import type {
-  FlakyRecord,
+  FlakySummary,
   ReleaseRiskDetail,
   ReleaseRiskSummary,
 } from '../features/quality/quality-service'
-import { apiErrorMessage, type DashboardSummary, type Page, type RecentExecution } from '../lib/api'
+import {
+  apiErrorMessage,
+  apiErrorWithTrace,
+  type DashboardSummary,
+  type Page,
+  type RecentExecution,
+} from '../lib/api'
 
 const statusLabels: Record<string, string> = {
   queued: '排队中',
@@ -81,7 +87,7 @@ export default function DashboardPage() {
           type="error"
           showIcon
           title="质量证据加载失败"
-          description={apiErrorMessage(dashboard.insightError)}
+          description={apiErrorWithTrace(dashboard.insightError)}
         />
       )}
       {dashboard.projectId ? (
@@ -143,11 +149,14 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
       <ProjectQualityStats
         summary={summary}
         impact={impact}
-        flaky={dashboard.flaky.data?.items}
+        flaky={dashboard.flakySummary.isSuccess ? dashboard.flakySummary.data : undefined}
         decision={decision}
         impactEnabled={dashboard.impactEnabled}
         loading={anyLoading(dashboard.flags.isLoading, dashboard.summary.isLoading)}
       />
+      {dashboard.flakySummary.isSuccess && dashboard.flakySummary.data && (
+        <FlakySummaryScope summary={dashboard.flakySummary.data} />
+      )}
       <PriorityIssueQueue
         issues={issues}
         loading={dashboard.evidenceLoading || dashboard.recent.isLoading}
@@ -246,13 +255,12 @@ function ProjectQualityStats({
 }: {
   summary?: DashboardSummary
   impact?: ImpactRunSummary
-  flaky?: FlakyRecord[]
+  flaky?: FlakySummary
   decision?: ReleaseDecision
   impactEnabled: boolean
   loading: boolean
 }) {
   const executionState = executionSummaryMetric(summary)
-  const quarantined = flaky?.filter((item) => item.quarantined).length
   const impactState = impactMetric(impact, impactEnabled)
   const decisionState = decisionMetric(decision)
   return (
@@ -275,9 +283,9 @@ function ProjectQualityStats({
       />
       <QualityMetric
         title="Flaky 资产"
-        value={metricCount(flaky?.length, '项')}
-        detail={flaky ? `其中隔离 ${quarantined} 项` : '未提供 Flaky 资产数据'}
-        tone={flaky ? countTone(flaky.length) : 'default'}
+        value={metricCount(flaky?.flaky_total, '项')}
+        detail={flaky ? `隔离 ${flaky.quarantined_total} 项 · 按资产去重` : '未提供 Flaky 资产数据'}
+        tone={flaky ? countTone(flaky.flaky_total) : 'default'}
         icon={<ApartmentOutlined />}
         loading={loading}
       />
@@ -290,6 +298,19 @@ function ProjectQualityStats({
         loading={loading}
       />
     </div>
+  )
+}
+
+function FlakySummaryScope({ summary }: { summary: FlakySummary }) {
+  return (
+    <Typography.Paragraph type="secondary">
+      Flaky 范围：项目累计 · {summary.asset_total} 项资产 · {summary.record_total} 条版本记录。
+      得分大于 0 的版本 {summary.flaky_version_total} 条，已隔离版本{' '}
+      {summary.quarantined_version_total} 条。 聚合于 {summary.observed_at}。
+      {summary.oldest_updated_at && summary.latest_updated_at
+        ? `记录更新范围 ${summary.oldest_updated_at} 至 ${summary.latest_updated_at}。`
+        : '暂无记录更新时间。'}
+    </Typography.Paragraph>
   )
 }
 
@@ -540,6 +561,7 @@ function RecentExecutionTable({ items }: { items: RecentExecution[] }) {
       rowKey={(record) => `${record.kind}:${record.id}`}
       size="small"
       pagination={false}
+      scroll={{ x: 650 }}
       dataSource={items}
       columns={[
         {

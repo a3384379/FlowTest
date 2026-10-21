@@ -10,6 +10,7 @@ from app.schemas.common import Page
 from app.schemas.quality import (
     FlakyQuarantineUpdate,
     FlakyRecordResponse,
+    FlakySummaryResponse,
     QualityGateEvaluationResponse,
     QualityGateResponse,
     QualityGateWrite,
@@ -100,6 +101,17 @@ async def list_flaky_tests(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get("/projects/{project_id}/flaky-tests/summary", response_model=FlakySummaryResponse)
+async def summarize_flaky_tests(
+    project_id: UUID,
+    session: SessionDependency,
+    current_user: CurrentUser,
+) -> FlakySummaryResponse:
+    return await QualityService(session).summarize_flaky_records(
+        actor=current_user, project_id=project_id
     )
 
 

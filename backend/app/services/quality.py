@@ -19,7 +19,7 @@ from app.models.tasking import TestPlanRun, TestPlanRunItem
 from app.models.workflows import WorkflowExecution
 from app.repositories.quality import QualityRepository
 from app.repositories.tasking import TaskingRepository
-from app.schemas.quality import QualityGateWrite, RunQualityResponse
+from app.schemas.quality import FlakySummaryResponse, QualityGateWrite, RunQualityResponse
 from app.services.audit import AuditService
 from app.services.projects import ProjectService
 
@@ -117,6 +117,28 @@ class QualityService:
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+        )
+
+    async def summarize_flaky_records(
+        self, *, actor: User, project_id: UUID
+    ) -> FlakySummaryResponse:
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        summary = await self._quality.summarize_flaky_records(project_id)
+        return FlakySummaryResponse(
+            project_id=project_id,
+            asset_total=summary.asset_total,
+            record_total=summary.record_total,
+            flaky_total=summary.flaky_total,
+            flaky_version_total=summary.flaky_version_total,
+            quarantined_total=summary.quarantined_total,
+            quarantined_version_total=summary.quarantined_version_total,
+            oldest_updated_at=_aware(summary.oldest_updated_at)
+            if summary.oldest_updated_at
+            else None,
+            latest_updated_at=_aware(summary.latest_updated_at)
+            if summary.latest_updated_at
+            else None,
+            observed_at=datetime.now(UTC),
         )
 
     async def get_flaky_record(

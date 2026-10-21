@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -45,6 +45,20 @@ class FlakyRecordResponse(BaseModel):
     last_run_id: UUID | None
     last_run_at: datetime | None
     updated_at: datetime
+
+
+class FlakySummaryResponse(BaseModel):
+    project_id: UUID
+    scope: Literal["project_cumulative"] = "project_cumulative"
+    asset_total: int = Field(ge=0)
+    record_total: int = Field(ge=0)
+    flaky_total: int = Field(ge=0)
+    flaky_version_total: int = Field(ge=0)
+    quarantined_total: int = Field(ge=0)
+    quarantined_version_total: int = Field(ge=0)
+    oldest_updated_at: datetime | None
+    latest_updated_at: datetime | None
+    observed_at: datetime
 
 
 class FlakyQuarantineUpdate(BaseModel):

@@ -552,7 +552,9 @@ describe('QualityCenterPage', () => {
         },
       ),
     )
-    renderPage(`/projects/${project.id}/quality?record=${flaky.id}`)
+    renderPage(
+      `/projects/${project.id}/quality?record=${flaky.id}&target_type=${flaky.target_type}&target=${flaky.target_id}&version=${flaky.target_version}`,
+    )
     const title = await screen.findByText('Flaky 固定版本证据')
     const evidence = within(title.closest('.ant-card')! as HTMLElement)
     expect(await evidence.findByText(`${flaky.target_type}:${flaky.target_id}@2`)).toBeVisible()
@@ -570,6 +572,10 @@ describe('QualityCenterPage', () => {
       'href',
       `/projects/${project.id}/tasks?run=${run.baseline_run_id}`,
     )
+    expect(evidence.getByRole('link', { name: '返回项目总览' })).toHaveAttribute(
+      'href',
+      `/projects/${project.id}/dashboard`,
+    )
     expect(writes).toBe(0)
     await userEvent
       .setup()
@@ -579,6 +585,39 @@ describe('QualityCenterPage', () => {
     )
     expect(writes).toBe(1)
     expect(evidence.getByText('版本指纹：original-v2')).toBeVisible()
+  })
+
+  it.each([
+    ['target_type=case&target=wrong&version=2', 'Flaky 记录与链接中的资产或版本不一致'],
+    [
+      `target_type=workflow&target=${flaky.target_id}&version=3`,
+      'Flaky 记录与链接中的资产或版本不一致',
+    ],
+    [
+      `target_type=workflow&target=${flaky.target_id}&version=0`,
+      'Flaky 链接的资产和版本定位不完整或无效',
+    ],
+    ['version=2', 'Flaky 链接的资产和版本定位不完整或无效'],
+  ])('rejects inconsistent fixed-record metadata: %s', async (metadata, message) => {
+    const write = vi.fn()
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/flaky-tests/${flaky.id}`, () =>
+        HttpResponse.json(flaky),
+      ),
+      http.put(`/api/v1/projects/${project.id}/flaky-tests/:id/quarantine`, () => {
+        write()
+        return HttpResponse.json(flaky)
+      }),
+    )
+    renderPage(`/projects/${project.id}/quality?record=${flaky.id}&${metadata}`)
+    const evidence = within(
+      (await screen.findByText('Flaky 固定版本证据')).closest('.ant-card')! as HTMLElement,
+    )
+    expect(await evidence.findByText(message)).toBeVisible()
+    expect(evidence.queryByRole('switch')).not.toBeInTheDocument()
+    expect(evidence.queryByText(/版本指纹/)).not.toBeInTheDocument()
+    expect(write).not.toHaveBeenCalled()
+    expect(screen.getByTestId('quality-location')).toHaveTextContent(metadata)
   })
 
   it.each(['missing', 'foreign'] as const)(

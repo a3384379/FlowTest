@@ -373,6 +373,9 @@ describe('App authentication', () => {
         return HttpResponse.json(createdProject, { status: 201 })
       }),
       http.get(`/api/v1/projects/${createdProject.id}`, () => HttpResponse.json(createdProject)),
+      http.get(`/api/v1/projects/${createdProject.id}/flaky-tests/summary`, () =>
+        HttpResponse.json(emptyFlakySummary(createdProject.id)),
+      ),
       http.get(`/api/v1/projects/${createdProject.id}/flaky-tests`, () =>
         HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
       ),
@@ -428,6 +431,9 @@ function renderApp(
         impact_engine: false,
         quality_intelligence: false,
       }),
+    ),
+    http.get(`/api/v1/projects/${project.id}/flaky-tests/summary`, () =>
+      HttpResponse.json(emptyFlakySummary(project.id)),
     ),
     http.get(`/api/v1/projects/${project.id}/flaky-tests`, () =>
       HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 }),
@@ -516,4 +522,20 @@ function installApiWorkspaceHandlers() {
       }),
     ),
   )
+}
+
+function emptyFlakySummary(projectId: string) {
+  return {
+    project_id: projectId,
+    scope: 'project_cumulative',
+    asset_total: 0,
+    record_total: 0,
+    flaky_total: 0,
+    flaky_version_total: 0,
+    quarantined_total: 0,
+    quarantined_version_total: 0,
+    oldest_updated_at: null,
+    latest_updated_at: null,
+    observed_at: '2026-10-21T01:00:00Z',
+  }
 }

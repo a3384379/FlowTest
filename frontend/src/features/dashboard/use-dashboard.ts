@@ -4,7 +4,12 @@ import { getV3FeatureFlags } from '../capabilities/capability-service'
 import { listImpactRuns } from '../impact/impact-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { listReleaseDecisions } from '../release-gate/release-gate-service'
-import { getReleaseRisk, listFlakyTests, listReleaseRisks } from '../quality/quality-service'
+import {
+  getReleaseRisk,
+  getFlakySummary,
+  listFlakyTests,
+  listReleaseRisks,
+} from '../quality/quality-service'
 import { getDashboardSummary, listRecentExecutions } from './dashboard-service'
 
 export function useDashboard() {
@@ -33,7 +38,7 @@ function useDashboardEvidence(projectId: string | null) {
   const risks = useQuery({
     queryKey: ['release-risks', projectId],
     queryFn: () => listReleaseRisks(required(projectId)),
-    enabled: qualityEnabled,
+    enabled: hasProject && qualityEnabled,
   })
   const latestRiskId = risks.data?.items.at(0)?.id
   const risk = useQuery({
@@ -44,11 +49,16 @@ function useDashboardEvidence(projectId: string | null) {
   const impactRuns = useQuery({
     queryKey: ['impact-runs', projectId],
     queryFn: () => listImpactRuns(required(projectId)),
-    enabled: impactEnabled,
+    enabled: hasProject && impactEnabled,
   })
   const flaky = useQuery({
     queryKey: ['flaky-tests', projectId],
     queryFn: () => listFlakyTests(required(projectId)),
+    enabled: hasProject,
+  })
+  const flakySummary = useQuery({
+    queryKey: ['flaky-summary', projectId],
+    queryFn: () => getFlakySummary(required(projectId)),
     enabled: hasProject,
   })
   const decisions = useQuery({
@@ -62,10 +72,11 @@ function useDashboardEvidence(projectId: string | null) {
     enabledError(qualityEnabled, risk.error),
     enabledError(impactEnabled, impactRuns.error),
     flaky.error,
+    flakySummary.error,
     decisions.error,
   ])
   const evidenceLoading = hasPendingEvidence({
-    base: [flags.isLoading, decisions.isLoading, flaky.isLoading],
+    base: [flags.isLoading, decisions.isLoading, flaky.isLoading, flakySummary.isLoading],
     qualityEnabled,
     riskList: risks.isLoading,
     riskDetail: latestRiskId !== undefined && risk.isLoading,
@@ -78,6 +89,7 @@ function useDashboardEvidence(projectId: string | null) {
     risk,
     impactRuns,
     flaky,
+    flakySummary,
     decisions,
     insightError,
     evidenceLoading,

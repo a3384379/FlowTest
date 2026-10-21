@@ -36,6 +36,26 @@ export type FlakyRecord = {
   updated_at: string
 }
 
+export type FlakySummary = {
+  project_id: string
+  scope: 'project_cumulative'
+  asset_total: number
+  record_total: number
+  flaky_total: number
+  flaky_version_total: number
+  quarantined_total: number
+  quarantined_version_total: number
+  oldest_updated_at: string | null
+  latest_updated_at: string | null
+  observed_at: string
+}
+
+type FlakyRecordLocator = {
+  targetType: string | null
+  targetId: string | null
+  version: string | null
+}
+
 export type FailureCluster = {
   id: string
   release_risk_id: string
@@ -131,6 +151,14 @@ export async function listFlakyTests(
   ).data
 }
 
+export async function getFlakySummary(projectId: string): Promise<FlakySummary> {
+  const summary = (await apiClient.get<FlakySummary>(`/projects/${projectId}/flaky-tests/summary`))
+    .data
+  if (summary.project_id !== projectId || summary.scope !== 'project_cumulative')
+    throw new Error('Flaky 汇总不属于当前项目或统计范围')
+  return summary
+}
+
 export async function setFlakyQuarantine(
   projectId: string,
   recordId: string,
@@ -143,13 +171,45 @@ export async function setFlakyQuarantine(
   ).data
 }
 
-export async function getFlakyRecord(projectId: string, recordId: string): Promise<FlakyRecord> {
+export async function getFlakyRecord(
+  projectId: string,
+  recordId: string,
+  locator?: FlakyRecordLocator,
+): Promise<FlakyRecord> {
+  const expected = validatedFlakyLocator(locator)
   const record = (
     await apiClient.get<FlakyRecord>(`/projects/${projectId}/flaky-tests/${recordId}`)
   ).data
   if (record.id !== recordId || record.project_id !== projectId)
     throw new Error('Flaky 记录不属于当前项目或记录')
+  if (
+    expected &&
+    (record.target_type !== expected.targetType ||
+      record.target_id !== expected.targetId ||
+      record.target_version !== expected.version)
+  )
+    throw new Error('Flaky 记录与链接中的资产或版本不一致')
   return record
+}
+
+function validatedFlakyLocator(locator?: FlakyRecordLocator) {
+  if (
+    !locator ||
+    [locator.targetType, locator.targetId, locator.version].every((value) => value === null)
+  )
+    return null
+  if (
+    !locator.targetType?.trim() ||
+    !locator.targetId?.trim() ||
+    !/^[1-9]\d*$/.test(locator.version ?? '') ||
+    !Number.isSafeInteger(Number(locator.version))
+  )
+    throw new Error('Flaky 链接的资产和版本定位不完整或无效')
+  return {
+    targetType: locator.targetType,
+    targetId: locator.targetId,
+    version: Number(locator.version),
+  }
 }
 
 export async function listQualityRuns(

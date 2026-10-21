@@ -101,6 +101,7 @@ export function QualityFlakyEvidence({ state }: { state: QualityState }) {
       className="quality-runs-card"
       extra={<Button onClick={() => state.selectEvidence('record', null)}>关闭详情</Button>}
     >
+      <Link to={projectPath(state.projectId, 'dashboard')}>返回项目总览</Link>
       <QueryFailureNotice queries={[state.record]} />
       {state.record.isPending && <Typography.Text>正在读取指定 Flaky 记录</Typography.Text>}
       {record && (

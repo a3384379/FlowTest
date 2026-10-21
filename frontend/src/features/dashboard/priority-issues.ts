@@ -133,7 +133,7 @@ function flakyAssets(projectId: string, page?: Page<FlakyRecord>): PriorityIssue
       title: `${record.target_type}:${record.target_id}@${record.target_version} 执行不稳定`,
       description: `得分 ${record.flaky_score} · ${record.quarantined ? '已隔离' : '未隔离'} · ${record.total_runs} 次运行中失败 ${record.failed_runs} 次`,
       scope: `Flaky 记录已载入 ${page.items.length}/${page.total} 项 · 最后更新 ${record.updated_at}`,
-      href: projectPath(projectId, 'quality'),
-      action: '打开质量中心',
+      href: `${projectPath(projectId, 'quality')}?${new URLSearchParams({ record: record.id, target_type: record.target_type, target: record.target_id, version: String(record.target_version) })}`,
+      action: '查看 Flaky 固定版本',
     }))
 }
