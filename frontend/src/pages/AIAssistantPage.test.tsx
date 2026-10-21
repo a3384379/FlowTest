@@ -67,18 +67,26 @@ describe('AIAssistantPage', () => {
         return HttpResponse.json({})
       }),
     )
-    renderPage('viewer')
-    expect(await screen.findByText(suggestion.title)).toBeVisible()
-    expect(screen.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
-    expect(screen.getByRole('switch', { name: '允许 Owner 提交样本' })).toBeDisabled()
+    const page = renderPage('viewer')
+    const browser = userEvent.setup()
+    const title = await screen.findByText(suggestion.title)
+    expect(title).toBeVisible()
+    const actions = within(title.closest('tr')!)
+    const header = within(page.container.querySelector<HTMLElement>('.page-heading')!)
+    expect(header.getByRole('button', { name: /新建 AI 任务/ })).toBeDisabled()
+    const sharing = screen.getByLabelText('允许 Owner 提交样本')
+    expect(sharing).toHaveRole('switch')
+    expect(sharing).toBeVisible()
+    expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    expect(sharing).toBeDisabled()
     for (const name of [/接受/, /拒绝/]) {
-      const button = screen.getByRole('button', { name })
+      const button = actions.getByRole('button', { name })
       expect(button).toBeDisabled()
-      await userEvent.click(button)
+      await browser.click(button)
     }
     expect(writes).toBe(0)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '查看' }))
+    await browser.click(actions.getByRole('button', { name: '查看' }))
     const dialog = await screen.findByRole('dialog', { name: '只读建议' })
     await waitFor(() => expect(dialog).toBeVisible())
     expect(within(dialog).getByLabelText('审核备注')).toHaveAttribute('readonly')
@@ -193,22 +201,30 @@ describe('AIAssistantPage', () => {
     renderPage()
     const browser = userEvent.setup()
 
-    expect(await screen.findByText('校验成功状态码')).toBeVisible()
+    const title = await screen.findByText('校验成功状态码')
+    expect(title).toBeVisible()
+    const actions = within(title.closest('tr')!)
     expect(screen.getByText('模型：flowtest-eval-model')).toBeVisible()
-    await browser.click(screen.getByRole('switch', { name: '允许 Owner 提交样本' }))
+    const sharing = screen.getByLabelText('允许 Owner 提交样本')
+    expect(sharing).toHaveRole('switch')
+    expect(sharing).toBeVisible()
+    expect(sharing).toHaveAccessibleName('允许 Owner 提交样本')
+    await browser.click(sharing)
     await waitFor(() => expect(sharingEnabled).toBe(true))
 
-    await browser.click(screen.getByRole('button', { name: /接受/ }))
-    expect(screen.getByRole('dialog', { name: '接受建议' })).toBeInTheDocument()
-    await browser.click(screen.getByRole('tab', { name: '高级 JSON' }))
-    const content = screen.getByLabelText('建议内容')
+    await browser.click(actions.getByRole('button', { name: /接受/ }))
+    const dialog = screen.getByRole('dialog', { name: '接受建议' })
+    expect(dialog).toBeInTheDocument()
+    await browser.click(within(dialog).getByRole('tab', { name: '高级 JSON' }))
+    const content = within(dialog).getByLabelText('建议内容')
     fireEvent.change(content, {
       target: {
         value: JSON.stringify({ expression: 'status_code', operator: 'equals', expected: 201 }),
       },
     })
-    await browser.type(screen.getByLabelText('审核备注'), '人工确认')
-    await browser.click(screen.getByRole('button', { name: '确认接受' }))
+    await browser.click(within(dialog).getByLabelText('审核备注'))
+    await browser.paste('人工确认')
+    await browser.click(within(dialog).getByRole('button', { name: '确认接受' }))
     await waitFor(() =>
       expect(reviewed).toEqual({
         content: { expression: 'status_code', operator: 'equals', expected: 201 },
@@ -260,7 +276,8 @@ describe('AIAssistantPage', () => {
 
     const reviewedDialog = await screen.findByRole('dialog', { name: '已审核建议' })
     await browser.click(within(reviewedDialog).getByRole('button', { name: /关\s*闭/ }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() => expect(reviewedDialog).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     const secondTitle = screen.getByText('另一条状态码建议')
     await browser.click(within(secondTitle.closest('tr')!).getByRole('button', { name: /接受/ }))
     const acceptanceDialog = screen.getByRole('dialog', { name: '接受建议' })
