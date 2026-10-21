@@ -32,7 +32,10 @@ from app.schemas.contract_hub import (
     CompatibilityMatrixResponse,
     CompatibilityRow,
     ContractHubSummaryResponse,
+    PactContractDetailResponse,
     PactContractResponse,
+    ProviderVerificationDetailResponse,
+    ProviderVerificationResponse,
     ServiceCatalogCreate,
     ServiceGraphEdge,
     ServiceGraphNode,
@@ -249,6 +252,65 @@ class ContractHubService:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         contracts = await self._repository.list_pacts(project_id=project_id)
         return [await self._view(item) for item in contracts]
+
+    async def page_pacts(
+        self, *, actor: User, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[PactContractView], int]:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        contracts, total = await self._repository.page_pacts(
+            project_id=project_id, search=search.strip(), offset=offset, limit=limit
+        )
+        service_ids = {item.consumer_service_id for item in contracts} | {
+            item.provider_service_id for item in contracts
+        }
+        services = {
+            item.id: item
+            for item in await self._repository.get_services(service_ids)
+            if item.project_id == project_id
+        }
+        return [_catalog_pact_view(item, services) for item in contracts], total
+
+    async def get_pact(
+        self, *, actor: User, project_id: UUID, pact_id: UUID
+    ) -> PactContractDetailResponse:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        model = await self._project_pact(project_id, pact_id)
+        return await self._pact_detail(model)
+
+    async def _pact_detail(self, model: PactContractVersion) -> PactContractDetailResponse:
+        return PactContractDetailResponse(
+            contract=pact_response(await self._view(model)), contract_document=_stored_pact(model)
+        )
+
+    async def get_verification(
+        self, *, actor: User, project_id: UUID, verification_id: UUID
+    ) -> ProviderVerificationDetailResponse:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        model = await self._repository.get_verification(verification_id)
+        if model is None or model.project_id != project_id:
+            raise AppError(
+                code="PACT_VERIFICATION_NOT_FOUND", message="提供方验证记录不存在", status_code=404
+            )
+        pact = await self._project_pact(project_id, model.pact_contract_version_id)
+        return ProviderVerificationDetailResponse(
+            verification=ProviderVerificationResponse.model_validate(model),
+            pact=await self._pact_detail(pact),
+        )
+
+    async def get_deployment_check(
+        self, *, actor: User, project_id: UUID, check_id: UUID
+    ) -> DeploymentCompatibilityCheck:
+        self._require_enabled()
+        await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
+        model = await self._repository.get_deployment_check(check_id)
+        if model is None or model.project_id != project_id:
+            raise AppError(
+                code="DEPLOYMENT_CHECK_NOT_FOUND", message="部署兼容判断不存在", status_code=404
+            )
+        return model
 
     async def verify_provider(
         self,
@@ -573,7 +635,12 @@ class ContractHubService:
     async def _view(self, contract: PactContractVersion) -> PactContractView:
         consumer = await self._repository.get_service(contract.consumer_service_id)
         provider = await self._repository.get_service(contract.provider_service_id)
-        if consumer is None or provider is None:
+        if (
+            consumer is None
+            or provider is None
+            or consumer.project_id != contract.project_id
+            or provider.project_id != contract.project_id
+        ):
             raise AppError(
                 code="PACT_SERVICE_REFERENCE_INVALID",
                 message="Pact 服务引用不存在",
@@ -622,6 +689,18 @@ def pact_response(view: PactContractView) -> PactContractResponse:
         created_by_id=model.created_by_id,
         created_at=model.created_at,
     )
+
+
+def _catalog_pact_view(
+    model: PactContractVersion, services: dict[UUID, ServiceCatalogEntry]
+) -> PactContractView:
+    consumer = services.get(model.consumer_service_id)
+    provider = services.get(model.provider_service_id)
+    if consumer is None or provider is None:
+        raise AppError(
+            code="PACT_SERVICE_REFERENCE_INVALID", message="Pact服务引用不存在", status_code=409
+        )
+    return PactContractView(model, consumer, provider)
 
 
 def _load_pact(content: bytes) -> PactDocument:

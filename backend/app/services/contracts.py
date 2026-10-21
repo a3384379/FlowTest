@@ -117,13 +117,14 @@ class ContractService:
         return run
 
     async def list_runs(
-        self, *, actor: User, project_id: UUID, page: int, page_size: int
+        self, *, actor: User, project_id: UUID, page: int, page_size: int, search: str = ""
     ) -> tuple[list[ContractRun], int]:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         return await self._contracts.list_runs(
             project_id=project_id,
             offset=(page - 1) * page_size,
             limit=page_size,
+            search=search.strip(),
         )
 
     async def get_run(self, *, actor: User, project_id: UUID, run_id: UUID) -> ContractRun:

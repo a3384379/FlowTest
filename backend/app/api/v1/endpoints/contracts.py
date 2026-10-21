@@ -46,12 +46,14 @@ async def list_contract_runs(
     current_user: CurrentUser,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str = Query(default="", max_length=200),
 ) -> Page[ContractRunResponse]:
     items, total = await ContractService(session).list_runs(
         actor=current_user,
         project_id=project_id,
         page=page,
         page_size=page_size,
+        search=search,
     )
     return Page(
         items=[ContractRunResponse.model_validate(item) for item in items],

@@ -899,6 +899,35 @@ body {
   gap: 16px;
 }
 
+.contract-hub-grid > * {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .contract-hub-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .contract-compatibility .ant-card-head-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding-block: 12px;
+  }
+
+  .contract-compatibility .ant-card-head-title {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .contract-compatibility .ant-card-extra {
+    width: 100%;
+    margin-inline-start: 0;
+  }
+}
+
 .contract-graph {
   display: grid;
   gap: 12px;
@@ -939,6 +968,25 @@ body {
   color: var(--ft-text-secondary);
   font-size: 22px;
   text-align: center;
+}
+
+@media (max-width: 600px) {
+  .contract-graph-edge {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .contract-graph-node {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .contract-graph-arrow {
+    transform: rotate(90deg);
+  }
+
+  .contract-graph-edge .ant-tag {
+    justify-self: start;
+  }
 }
 
 .performance-evidence {

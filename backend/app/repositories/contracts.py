@@ -2,8 +2,10 @@ from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.models.contracts import ContractRun, GeneratedContractCase
+from app.repositories.catalog_paging import ranked_catalog_page
 
 
 class ContractRepository:
@@ -32,24 +34,32 @@ class ContractRepository:
         return result.scalar_one_or_none()
 
     async def list_runs(
-        self, *, project_id: UUID, offset: int, limit: int
+        self, *, project_id: UUID, offset: int, limit: int, search: str = ""
     ) -> tuple[list[ContractRun], int]:
-        filters = (ContractRun.project_id == project_id,)
-        items = list(
-            (
-                await self._session.scalars(
-                    select(ContractRun)
-                    .where(*filters)
-                    .order_by(ContractRun.created_at.desc())
-                    .offset(offset)
-                    .limit(limit)
-                )
-            ).all()
+        filters = [ContractRun.project_id == project_id]
+        if search:
+            filters.append(ContractRun.source_name.icontains(search, autoescape=True))
+        ranked = (
+            select(
+                ContractRun.id.label("item_id"),
+                func.row_number()
+                .over(order_by=(ContractRun.created_at.desc(), ContractRun.id.desc()))
+                .label("position"),
+            )
+            .where(*filters)
+            .cte()
         )
-        total = await self._session.scalar(
-            select(func.count()).select_from(ContractRun).where(*filters)
-        )
-        return items, int(total or 0)
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(ContractRun, page.c.total)
+                .options(defer(ContractRun.schema_document))
+                .select_from(page)
+                .outerjoin(ContractRun, ContractRun.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
 
     async def latest_run(self, *, project_id: UUID, source_name: str) -> ContractRun | None:
         result = await self._session.execute(
@@ -84,6 +94,7 @@ class ContractRepository:
                         GeneratedContractCase.path,
                         GeneratedContractCase.method,
                         GeneratedContractCase.generation_kind,
+                        GeneratedContractCase.id,
                     )
                     .offset(offset)
                     .limit(limit)

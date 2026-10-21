@@ -1,10 +1,19 @@
 import { apiClient, type ContractRun, type GeneratedContractCase, type Page } from '../../lib/api'
 
-export async function listContractRuns(projectId: string): Promise<Page<ContractRun>> {
+export async function listContractRuns(
+  projectId: string,
+  page = 1,
+  pageSize = 20,
+  search = '',
+): Promise<Page<ContractRun>> {
   const response = await apiClient.get<Page<ContractRun>>(`/projects/${projectId}/contract-runs`, {
-    params: { page: 1, page_size: 100 },
+    params: { page, page_size: pageSize, search },
   })
   return response.data
+}
+
+export async function getContractRun(projectId: string, runId: string): Promise<ContractRun> {
+  return (await apiClient.get<ContractRun>(`/projects/${projectId}/contract-runs/${runId}`)).data
 }
 
 export async function createContractRun(
@@ -28,10 +37,13 @@ export async function createContractRun(
 export async function listGeneratedContractCases(
   projectId: string,
   runId: string,
+  page = 1,
+  pageSize = 20,
+  reviewStatus?: GeneratedContractCase['review_status'],
 ): Promise<Page<GeneratedContractCase>> {
   const response = await apiClient.get<Page<GeneratedContractCase>>(
     `/projects/${projectId}/contract-runs/${runId}/generated-cases`,
-    { params: { page: 1, page_size: 100 } },
+    { params: { page, page_size: pageSize, review_status: reviewStatus } },
   )
   return response.data
 }

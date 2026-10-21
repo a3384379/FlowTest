@@ -26,7 +26,7 @@ describe('contract service', () => {
     await listGeneratedContractCases('project-1', 'run-2')
 
     expect(get).toHaveBeenNthCalledWith(1, '/projects/project-1/contract-runs', {
-      params: { page: 1, page_size: 100 },
+      params: { page: 1, page_size: 20, search: '' },
     })
     const firstForm = post.mock.calls[0][1] as FormData
     expect(firstForm.get('document')).toBe(file)
@@ -40,7 +40,7 @@ describe('contract service', () => {
     expect(get).toHaveBeenNthCalledWith(
       2,
       '/projects/project-1/contract-runs/run-2/generated-cases',
-      { params: { page: 1, page_size: 100 } },
+      { params: { page: 1, page_size: 20, review_status: undefined } },
     )
   })
 

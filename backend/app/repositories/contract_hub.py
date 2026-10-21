@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, case, func, literal, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from app.domain.service_catalog import ServiceContractVersion
 from app.models.contracts import (
@@ -183,6 +184,57 @@ class ContractHubRepository:
                 )
             ).all()
         )
+
+    async def page_pacts(
+        self, *, project_id: UUID, search: str, offset: int, limit: int
+    ) -> tuple[list[PactContractVersion], int]:
+        query = select(PactContractVersion.id.label("item_id")).where(
+            PactContractVersion.project_id == project_id
+        )
+        if search:
+            matching_services = select(ServiceCatalogEntry.id).where(
+                ServiceCatalogEntry.project_id == project_id,
+                ServiceCatalogEntry.display_name.icontains(search, autoescape=True),
+            )
+            query = query.where(
+                or_(
+                    PactContractVersion.source_name.icontains(search, autoescape=True),
+                    PactContractVersion.consumer_version.icontains(search, autoescape=True),
+                    PactContractVersion.consumer_service_id.in_(matching_services),
+                    PactContractVersion.provider_service_id.in_(matching_services),
+                )
+            )
+        ranked = query.add_columns(
+            func.row_number()
+            .over(order_by=(PactContractVersion.created_at.desc(), PactContractVersion.id.desc()))
+            .label("position")
+        ).cte()
+        page = ranked_catalog_page(ranked, offset, limit)
+        rows = (
+            await self._session.execute(
+                select(PactContractVersion, page.c.total)
+                .options(defer(PactContractVersion.contract_document))
+                .select_from(page)
+                .outerjoin(PactContractVersion, PactContractVersion.id == page.c.item_id)
+                .order_by(page.c.position)
+            )
+        ).all()
+        return [row[0] for row in rows if row[0] is not None], int(rows[0][1])
+
+    async def get_services(self, service_ids: set[UUID]) -> list[ServiceCatalogEntry]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(ServiceCatalogEntry).where(ServiceCatalogEntry.id.in_(service_ids))
+                )
+            ).all()
+        )
+
+    async def get_verification(self, verification_id: UUID) -> PactProviderVerification | None:
+        return await self._session.get(PactProviderVerification, verification_id)
+
+    async def get_deployment_check(self, check_id: UUID) -> DeploymentCompatibilityCheck | None:
+        return await self._session.get(DeploymentCompatibilityCheck, check_id)
 
     def add_verification(self, model: PactProviderVerification) -> None:
         self._session.add(model)

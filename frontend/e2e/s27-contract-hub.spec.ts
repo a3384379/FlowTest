@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
 
 import { authenticate } from './support/auth'
 
@@ -38,8 +38,11 @@ test('S27 OpenAPI 与 Pact 形成服务依赖、提供方验证和安全发布�
   await expect(page.getByText(providerName)).toBeVisible()
   await page.getByRole('button', { name: '执行提供方验证' }).click()
   const verifyDialog = page.getByRole('dialog', { name: '执行提供方验证' })
-  await verifyDialog.getByLabel('Pact 契约').click()
-  await page.getByText(`${consumerName} web-browser-1 → ${providerName}`).click()
+  await selectReference(
+    page,
+    verifyDialog.getByLabel('Pact 契约'),
+    `${consumerName} web-browser-1 → ${providerName}`,
+  )
   await verifyDialog.getByLabel('提供方版本').fill('1.0.0')
   await verifyDialog.getByLabel('Provider Origin').fill('http://mock-target:8080')
   const verified = page.waitForResponse(
@@ -55,17 +58,22 @@ test('S27 OpenAPI 与 Pact 形成服务依赖、提供方验证和安全发布�
     mimeType: 'application/json',
     buffer: Buffer.from(openapiDocument(providerName)),
   })
-  await openapiDialog.getByLabel('提供方服务').click()
-  await page.getByText(providerName, { exact: true }).last().click()
-  await openapiDialog.locator('input').last().fill('1.0.0')
+  await selectReference(page, openapiDialog.getByLabel('提供方服务'), providerName)
+  await openapiDialog.getByLabel('提供方版本').fill('1.0.0')
   const openapiImported = page.waitForResponse(
     (item) => item.url().endsWith(`/projects/${project.id}/contract-runs`) && item.status() === 201,
   )
   await page.locator('.ant-modal:visible .ant-modal-footer .ant-btn-primary').click()
   await openapiImported
+  await expect(openapiDialog).toBeHidden()
 
-  await page.getByRole('combobox', { name: '提供方服务', exact: true }).click()
-  await page.getByText(providerName, { exact: true }).last().click()
+  await selectReference(
+    page,
+    page
+      .locator('.contract-compatibility')
+      .getByRole('combobox', { name: '提供方服务', exact: true }),
+    providerName,
+  )
   await expect(page.getByRole('columnheader', { name: `${providerName} 1.0.0` })).toBeVisible()
   await expect(page.getByText('通过', { exact: true }).first()).toBeVisible()
   await page.getByLabel('待发布提供方版本').fill('1.0.0')
@@ -81,6 +89,11 @@ test('S27 OpenAPI 与 Pact 形成服务依赖、提供方验证和安全发布�
   await page.getByRole('tab', { name: /OpenAPI/ }).click()
   await expect(page.getByText(`${providerName} · 1.0.0`)).toBeVisible()
 })
+
+async function selectReference(page: Page, field: Locator, label: string): Promise<void> {
+  await field.click()
+  await page.locator('.ant-select-dropdown:visible').getByText(label, { exact: true }).click()
+}
 
 async function accessTokenFromSession(request: APIRequestContext): Promise<string> {
   const response = await request.post('/api/v1/auth/refresh', {
