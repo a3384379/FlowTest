@@ -1,4 +1,5 @@
 import RegressionSourceSnapshot from '../features/change-regression/RegressionSourceSnapshot'
+import '../features/change-regression/change-regression.css'
 import {
   RegressionChainLinks,
   RegressionMaterializedAssets,
@@ -86,7 +87,7 @@ function ChangeRegressionWorkspace() {
   }
 
   return (
-    <Layout className="page-layout">
+    <Layout className="page-layout regression-workspace">
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <div className="page-heading">
           <div>
@@ -601,7 +602,7 @@ function CoverageDimensionsPanel({
           style={{ marginBottom: 12 }}
         />
       ))}
-      <Descriptions size="small" bordered column={3}>
+      <Descriptions size="small" bordered column={{ xs: 1, sm: 1, md: 2, lg: 3 }}>
         <Descriptions.Item label="Asset Mapping Coverage">
           <CoverageStatus
             value={assetGapCount === undefined ? 'unknown' : assetGapCount ? 'missing' : 'covered'}
@@ -618,6 +619,7 @@ function CoverageDimensionsPanel({
         <Table
           rowKey="change_key"
           size="small"
+          scroll={{ x: 1400 }}
           pagination={false}
           dataSource={scopes}
           columns={[
@@ -781,7 +783,12 @@ function SemanticPlanGatePanel({
           style={{ marginBottom: 12 }}
         />
       ) : null}
-      <Descriptions size="small" bordered column={5} style={{ marginBottom: 12 }}>
+      <Descriptions
+        size="small"
+        bordered
+        column={{ xs: 1, sm: 2, md: 3, lg: 5 }}
+        style={{ marginBottom: 12 }}
+      >
         <Descriptions.Item label="Asset Mapping">
           {run.selection_summary.asset_mapping_gap_count ?? '未提供'}
         </Descriptions.Item>
@@ -819,6 +826,7 @@ function SemanticPlanGatePanel({
           <Table
             rowKey="id"
             size="small"
+            scroll={{ x: 1000 }}
             pagination={false}
             dataSource={run.semantic_gap_waivers}
             columns={[
@@ -920,7 +928,7 @@ function SemanticGapCard({
       title={semanticGapOperationLabel(gap)}
       extra={<CoverageStatus value={gap.coverage_status} />}
     >
-      <Descriptions size="small" column={3} bordered>
+      <Descriptions size="small" column={{ xs: 1, sm: 1, md: 2, lg: 3 }} bordered>
         <Descriptions.Item label="Field">{semanticGapFieldLabel(gap)}</Descriptions.Item>
         <Descriptions.Item label="Value / Category">
           {gap.semantic_requirement.semantic_value ?? '?'} ·{' '}
@@ -1180,7 +1188,7 @@ function FailureTriagePanel({
       extra={<Tag color="red">{value.primary_classification}</Tag>}
     >
       <Space orientation="vertical" style={{ width: '100%' }}>
-        <Descriptions size="small" bordered column={2}>
+        <Descriptions size="small" bordered column={{ xs: 1, sm: 2 }}>
           <Descriptions.Item label="Confidence">
             {(value.confidence * 100).toFixed(0)}%
           </Descriptions.Item>

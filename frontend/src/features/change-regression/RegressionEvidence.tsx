@@ -70,12 +70,18 @@ export function RegressionChainLinks({
               查看发布判断
             </Link>
           ) : (
-            '尚未评估'
+            releaseDecisionAbsence(run)
           ),
         },
       ]}
     />
   )
+}
+
+function releaseDecisionAbsence(run: ChangeRegressionRun): string {
+  return run.stages.some((stage) => stage.stage === 'release_gate')
+    ? '评估已阻断，未生成独立发布判断'
+    : '尚未评估'
 }
 
 export function RegressionTriageReferences({

@@ -1246,6 +1246,20 @@ describe('ChangeRegressionPage', () => {
     expect(await screen.findByText('LEGACY', { exact: false })).toBeVisible()
   })
 
+  it('distinguishes a blocked gate evaluation from a never-evaluated decision', async () => {
+    installHandlers(
+      () => ({
+        ...baseRun,
+        status: 'blocked',
+        stages: [...baseRun.stages, stage('release_gate', 'blocked')],
+      }),
+      () => undefined,
+    )
+    renderPage()
+    expect(await screen.findByText('评估已阻断，未生成独立发布判断')).toBeVisible()
+    expect(screen.queryByRole('link', { name: '查看发布判断' })).not.toBeInTheDocument()
+  })
+
   it('reports review decisions and action failures through the hook', async () => {
     let rejectCalls = 0
     const addPayloads: unknown[] = []
