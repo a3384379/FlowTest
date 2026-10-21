@@ -1,11 +1,10 @@
-import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useSearchParams } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { getV3FeatureFlags } from '../capabilities/capability-service'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorWithTrace, type Page } from '../../lib/api'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listImpactRuns } from '../impact/impact-service'
@@ -18,22 +17,22 @@ import {
   listQualityRuns,
   listReleaseRisks,
   getReleaseRisk,
+  getFlakyRecord,
   setFlakyQuarantine,
   type QualityGateInput,
   type ReleaseRiskInput,
+  type ReleaseRiskSummary,
 } from './quality-service'
 
 export function useQualityCenter() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
-  const currentProject = useRef(projectId)
-  useEffect(() => {
-    currentProject.current = projectId
-  }, [projectId])
-  const { canEdit, permissions } = useProjectCapabilities()
+  const isCurrent = useQualityCommandContext(projectId)
+  const { canEdit: editAllowed, permissions } = useProjectCapabilities()
+  const canEdit = editAllowed && permissions.isSuccess
   const [params, setParams] = useSearchParams()
-  const linkedRiskId = params.get('risk')
+  const linkedRecordId = params.get('record')
   const featureFlags = useQuery({
     queryKey: ['v3-feature-flags'],
     queryFn: getV3FeatureFlags,
@@ -45,72 +44,92 @@ export function useQualityCenter() {
     queryFn: () => listQualityGates(required(projectId)),
     enabled: Boolean(projectId),
   })
-  const flaky = useCatalogQuery(
+  const flaky = useQualityCatalog(
     'flaky-tests',
+    'flaky_page',
     projectId,
     (page) => listFlakyTests(required(projectId), page, 20),
     Boolean(projectId),
-    '',
-    {},
   )
   const latestRun = useQuery({
     queryKey: ['quality-runs', projectId, 'latest'],
     queryFn: () => listQualityRuns(required(projectId), 1, 1),
     enabled: Boolean(projectId),
   })
-  const runs = useCatalogQuery(
+  const runs = useQualityCatalog(
     'quality-runs',
+    'run_page',
     projectId,
     (page) => listQualityRuns(required(projectId), page, 20),
     Boolean(projectId),
-    '',
-    {},
   )
-  const risks = useCatalogQuery(
+  const risks = useQualityCatalog(
     'release-risks',
+    'risk_page',
     projectId,
     (page) => listReleaseRisks(required(projectId), page, 20),
     Boolean(projectId && riskEnabled),
-    '',
-    {},
   )
-  const impactRuns = useCatalogQuery(
+  const impactRuns = useQualityCatalog(
     'impact-runs',
+    'impact_page',
     projectId,
     (page) => listImpactRuns(required(projectId), page, 20),
     Boolean(projectId && featureFlags.data?.impact_engine),
-    '',
-    {},
   )
-  const activeRiskId = linkedRiskId ?? risks.data?.items.at(0)?.id
+  const { linkedRiskId, activeRiskId } = usePinnedRisk(riskEnabled, risks.data)
   const risk = useQuery({
     queryKey: ['release-risk', projectId, activeRiskId],
     queryFn: () => getReleaseRisk(required(projectId), required(activeRiskId ?? null)),
     enabled: Boolean(projectId && activeRiskId && riskEnabled),
   })
+  const record = useQuery({
+    queryKey: ['flaky-record', projectId, linkedRecordId],
+    queryFn: () => getFlakyRecord(required(projectId), required(linkedRecordId)),
+    enabled: Boolean(projectId && linkedRecordId),
+  })
+  function selectEvidence(key: 'risk' | 'record', id: string | null) {
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (id) next.set(key, id)
+      else next.delete(key)
+      return next
+    })
+  }
   const createGate = useMutation({
-    mutationFn: (input: QualityGateInput) => createQualityGate(required(projectId), input),
+    mutationFn: (input: { projectId: string; payload: QualityGateInput }) =>
+      createQualityGate(input.projectId, input.payload),
   })
   const quarantine = useMutation({
-    mutationFn: ({ recordId, value }: { recordId: string; value: boolean }) =>
-      setFlakyQuarantine(required(projectId), recordId, value),
+    mutationFn: ({
+      projectId: targetProject,
+      recordId,
+      value,
+    }: {
+      projectId: string
+      recordId: string
+      value: boolean
+    }) => setFlakyQuarantine(targetProject, recordId, value),
   })
   const analyzeRisk = useMutation({
-    mutationFn: (input: ReleaseRiskInput) => createReleaseRisk(required(projectId), input),
+    mutationFn: (input: { projectId: string; payload: ReleaseRiskInput }) =>
+      createReleaseRisk(input.projectId, input.payload),
   })
 
   async function addRisk(input: ReleaseRiskInput) {
     if (!canEdit || !riskEnabled) return false
     try {
-      const created = await analyzeRisk.mutateAsync(input)
-      const next = new URLSearchParams(params)
-      next.set('risk', created.id)
-      if (currentProject.current === projectId) setParams(next)
+      const created = await analyzeRisk.mutateAsync({
+        projectId: required(projectId),
+        payload: input,
+      })
       await queryClient.invalidateQueries({ queryKey: ['release-risks', projectId] })
+      if (!isCurrent()) return false
+      selectEvidence('risk', created.id)
       void message.success('发布风险分析已完成')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
     }
   }
@@ -118,12 +137,13 @@ export function useQualityCenter() {
   async function addGate(input: QualityGateInput) {
     if (!canEdit) return false
     try {
-      await createGate.mutateAsync(input)
+      await createGate.mutateAsync({ projectId: required(projectId), payload: input })
       await queryClient.invalidateQueries({ queryKey: ['quality-gates', projectId] })
+      if (!isCurrent()) return false
       void message.success('质量门禁已创建')
       return true
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
     }
   }
@@ -131,17 +151,20 @@ export function useQualityCenter() {
   async function toggleQuarantine(recordId: string, value: boolean) {
     if (!canEdit) return
     try {
-      await quarantine.mutateAsync({ recordId, value })
+      await quarantine.mutateAsync({ projectId: required(projectId), recordId, value })
       await queryClient.invalidateQueries({ queryKey: ['flaky-tests', projectId] })
+      await queryClient.invalidateQueries({ queryKey: ['flaky-record', projectId, recordId] })
+      if (!isCurrent()) return
       void message.success(value ? '已隔离 Flaky 资产' : '已恢复 Flaky 资产')
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
     }
   }
 
   async function exportJunit(runId: string) {
     try {
       const blob = await downloadJunit(required(projectId), runId)
+      if (!isCurrent()) return
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -149,7 +172,7 @@ export function useQualityCenter() {
       link.click()
       URL.revokeObjectURL(url)
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
     }
   }
 
@@ -159,6 +182,10 @@ export function useQualityCenter() {
     riskEnabled,
     canEdit,
     linkedRiskId,
+    activeRiskId,
+    linkedRecordId,
+    record,
+    selectEvidence,
     projectId,
     latestRun,
     gates,
@@ -177,7 +204,69 @@ export function useQualityCenter() {
   }
 }
 
+function usePinnedRisk(riskEnabled: boolean, risks: Page<ReleaseRiskSummary> | undefined) {
+  const [params, setParams] = useSearchParams()
+  const linkedRiskId = params.get('risk')
+  const firstRiskId = risks?.items.at(0)?.id
+  useEffect(() => {
+    if (!riskEnabled || linkedRiskId || !firstRiskId) return
+    setParams(
+      (current) => {
+        if (current.has('risk')) return current
+        const next = new URLSearchParams(current)
+        next.set('risk', firstRiskId)
+        return next
+      },
+      { replace: true },
+    )
+  }, [riskEnabled, linkedRiskId, firstRiskId, setParams])
+  const activeRiskId = linkedRiskId ?? firstRiskId
+  return { linkedRiskId, activeRiskId }
+}
+
+function useQualityCatalog<T>(
+  resource: string,
+  pageKey: string,
+  projectId: string | null,
+  load: (page: number) => Promise<Page<T>>,
+  enabled: boolean,
+) {
+  const [params, setParams] = useSearchParams()
+  const raw = params.get(pageKey) ?? '1'
+  const value = /^[1-9]\d*$/.test(raw) ? Number(raw) : 1
+  const page = Number.isSafeInteger(value) ? value : 1
+  const query = useQuery({
+    queryKey: [resource, projectId, '', 'catalog', page],
+    queryFn: () => load(page),
+    enabled: Boolean(projectId && enabled),
+  })
+  function setPage(nextPage: number) {
+    setParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set(pageKey, String(nextPage))
+      return next
+    })
+  }
+  return { ...query, page, setPage }
+}
+
 function required(value: string | null): string {
   if (!value) throw new Error('请选择项目')
   return value
+}
+
+function useQualityCommandContext(projectId: string | null) {
+  const location = useLocation()
+  const dataRouter = useContext(UNSAFE_DataRouterContext)
+  const context = useMemo(() => ({ projectId, key: location.key }), [projectId, location.key])
+  const active = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    active.current = context
+    return () => {
+      active.current = null
+    }
+  }, [context])
+  return () =>
+    active.current === context &&
+    (!dataRouter || dataRouter.router.state.location.key === location.key)
 }

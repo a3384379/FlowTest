@@ -21,7 +21,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useState } from 'react'
+import { useRouteScopedState } from '../lib/use-route-scoped-state'
+import { Link } from 'react-router-dom'
 
 import type {
   QualityGateInput,
@@ -30,17 +31,26 @@ import type {
 } from '../features/quality/quality-service'
 import type { ImpactRunSummary } from '../features/impact/impact-service'
 import { useQualityCenter } from '../features/quality/use-quality-center'
+import { qualityRunPath } from '../features/quality/quality-navigation'
+import { qualityGateCounts } from '../features/quality/quality-metrics'
+import {
+  QualityAssetEvidence,
+  QualityFlakyEvidence,
+  QualityRiskHistory,
+} from '../features/quality/QualityEvidence'
+import { reportExecutionPath } from '../features/workflows/execution-navigation'
 import { apiErrorMessage } from '../lib/api'
 import type { TestPlanRun } from '../lib/api'
+import '../features/quality/quality-center.css'
 
 export default function QualityCenterPage() {
   const state = useQualityCenter()
-  const [createOpen, setCreateOpen] = useState(false)
-  const [riskOpen, setRiskOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
+  const [riskOpen, setRiskOpen] = useRouteScopedState(state.projectId, null, false)
   const records = pageItems(state.flaky.data)
   const latest = firstPageItem(state.latestRun.data)
   return (
-    <>
+    <div className="quality-center-page">
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>质量中心</Typography.Title>
@@ -66,18 +76,21 @@ export default function QualityCenterPage() {
         queries={[state.gates, state.latestRun, state.permissions, state.featureFlags]}
       />
       <QualityOverview
-        gateCount={listItems(state.gates.data).length}
-        flakyCount={records.filter((item) => item.flaky_score > 0).length}
-        quarantinedCount={records.filter((item) => item.quarantined).length}
+        gateCounts={qualityGateCounts(state.gates.isSuccess ? state.gates.data : undefined)}
+        flakyCount={
+          state.flaky.isSuccess ? records.filter((item) => item.flaky_score > 0).length : undefined
+        }
+        quarantinedCount={
+          state.flaky.isSuccess ? records.filter((item) => item.quarantined).length : undefined
+        }
         latest={latest}
       />
       <div className="catalog-controls">
-        <CatalogPagination query={state.flaky} label="Flaky 目录" />
-        <CatalogPagination query={state.runs} label="计划运行／基线" />
-        <CatalogPagination query={state.risks} label="风险记录" />
         <CatalogPagination query={state.impactRuns} label="影响证据" />
       </div>
+      <QualityRiskHistory state={state} />
       <QualityRiskReadState state={state} />
+      <QualityFlakyEvidence state={state} />
       <div className="quality-grid">
         <Card title="质量门禁" loading={state.gates.isLoading}>
           <Table
@@ -106,17 +119,27 @@ export default function QualityCenterPage() {
           />
         </Card>
         <Card title="Flaky 检测与隔离" loading={state.flaky.isLoading}>
+          <CatalogPagination query={state.flaky} label="Flaky 目录" />
           <Table
             rowKey="id"
             size="small"
-            pagination={{ pageSize: 8 }}
+            pagination={false}
+            scroll={{ x: 720 }}
+            rowClassName={(row) =>
+              row.id === state.linkedRecordId ? 'quality-selected-evidence' : ''
+            }
             dataSource={records}
             locale={{ emptyText: '暂无 Flaky 记录' }}
             columns={[
               {
                 title: '资产',
-                render: (_, row) =>
-                  `${row.target_type}:${row.target_id.slice(0, 8)}@${row.target_version}`,
+                render: (_, row) => (
+                  <Button
+                    type="link"
+                    className="quality-asset-name"
+                    onClick={() => state.selectEvidence('record', row.id)}
+                  >{`${row.target_type}:${row.target_id}@${row.target_version}`}</Button>
+                ),
               },
               {
                 title: '得分',
@@ -134,7 +157,7 @@ export default function QualityCenterPage() {
                 dataIndex: 'quarantined',
                 render: (value: boolean, row) => (
                   <Switch
-                    aria-label={`隔离 ${row.target_id}`}
+                    aria-label={`隔离 ${row.target_id}@${row.target_version}`}
                     checked={value}
                     loading={state.toggling}
                     disabled={!state.canEdit}
@@ -147,14 +170,24 @@ export default function QualityCenterPage() {
         </Card>
       </div>
       <Card title="最近运行与基线" className="quality-runs-card" loading={state.runs.isLoading}>
+        <CatalogPagination query={state.runs} label="计划运行／基线" />
         <Table
           rowKey="id"
           size="small"
           pagination={false}
+          scroll={{ x: 760 }}
           dataSource={pageItems(state.runs.data)}
           locale={{ emptyText: '暂无运行数据' }}
           columns={[
-            { title: '运行 ID', dataIndex: 'id', render: (value: string) => value.slice(0, 8) },
+            {
+              title: '运行 ID',
+              render: (_, run) =>
+                state.projectId && (
+                  <Link to={qualityRunPath(state.projectId, run.id, run.test_plan_id)}>
+                    {run.id}
+                  </Link>
+                ),
+            },
             { title: '队列', dataIndex: 'queue_name' },
             { title: '优先级', dataIndex: 'queue_priority' },
             {
@@ -165,20 +198,28 @@ export default function QualityCenterPage() {
             {
               title: '操作',
               render: (_, run) => (
-                <Button
-                  type="link"
-                  icon={<DownloadOutlined />}
-                  disabled={!['passed', 'failed', 'cancelled'].includes(run.status)}
-                  onClick={() => void state.exportJunit(run.id)}
-                >
-                  JUnit
-                </Button>
+                <Space wrap>
+                  {state.projectId && run.baseline_run_id && (
+                    <Link to={qualityRunPath(state.projectId, run.baseline_run_id)}>
+                      查看基线运行
+                    </Link>
+                  )}
+                  <Button
+                    type="link"
+                    icon={<DownloadOutlined />}
+                    disabled={!['passed', 'failed', 'cancelled'].includes(run.status)}
+                    onClick={() => void state.exportJunit(run.id)}
+                  >
+                    JUnit
+                  </Button>
+                </Space>
               ),
             },
           ]}
         />
       </Card>
       <CreateGateDialog
+        key={`${state.projectId}:gate`}
         open={createOpen}
         submitting={state.creating}
         onClose={() => setCreateOpen(false)}
@@ -187,6 +228,7 @@ export default function QualityCenterPage() {
         }}
       />
       <CreateRiskDialog
+        key={`${state.projectId}:risk`}
         open={riskOpen}
         submitting={state.analyzingRisk}
         impactRuns={pageItems(state.impactRuns.data)}
@@ -195,16 +237,18 @@ export default function QualityCenterPage() {
           if (await state.addRisk(input)) setRiskOpen(false)
         }}
       />
-    </>
+    </div>
   )
 }
 
 function QualityInsights({
   risk,
   loading,
+  projectId,
 }: {
   risk: ReleaseRiskDetail | undefined
   loading: boolean
+  projectId: string
 }) {
   return (
     <Card title="质量洞察与可解释发布风险" loading={loading} className="quality-runs-card">
@@ -214,7 +258,7 @@ function QualityInsights({
         </Typography.Text>
       ) : (
         <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-          <Descriptions column={2} size="small" bordered>
+          <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
             <Descriptions.Item label="风险快照">{risk.id}</Descriptions.Item>
             <Descriptions.Item label="冻结于">{risk.created_at}</Descriptions.Item>
             <Descriptions.Item label="证据窗口">
@@ -223,24 +267,24 @@ function QualityInsights({
             <Descriptions.Item label="算法版本">{risk.algorithm_version}</Descriptions.Item>
             <Descriptions.Item label="来源影响分析">{risk.impact_run_id}</Descriptions.Item>
           </Descriptions>
-          <Row gutter={16}>
-            <Col span={6}>
+          <Row gutter={[16, 16]}>
+            <Col xs={12} lg={6}>
               <Statistic title="质量评分" value={risk.quality_score} suffix="/ 100" />
             </Col>
-            <Col span={6}>
+            <Col xs={12} lg={6}>
               <Statistic
                 title="发布风险"
                 value={risk.score}
                 suffix={<Tag color={riskColor(risk.risk_level)}>{riskLabel(risk.risk_level)}</Tag>}
               />
             </Col>
-            <Col span={6}>
+            <Col xs={12} lg={6}>
               <Statistic
                 title="覆盖缺口"
                 value={nestedNumber(risk.evidence_snapshot, 'impact', 'coverage_gap_count')}
               />
             </Col>
-            <Col span={6}>
+            <Col xs={12} lg={6}>
               <Statistic title="失败根因" value={risk.failure_clusters.length} />
             </Col>
           </Row>
@@ -267,10 +311,16 @@ function QualityInsights({
                 rowKey={(row) => `${row.target_type}:${row.target_id}`}
                 size="small"
                 pagination={false}
+                scroll={{ x: 650 }}
                 dataSource={risk.recommended_tests}
                 locale={{ emptyText: '暂无有证据的测试建议' }}
                 columns={[
                   { title: '资产', dataIndex: 'name' },
+                  {
+                    title: '版本',
+                    dataIndex: 'version',
+                    render: (value) => (value == null ? '未提供' : `v${value}`),
+                  },
                   {
                     title: '优先级',
                     dataIndex: 'priority',
@@ -285,6 +335,17 @@ function QualityInsights({
                     dataIndex: 'reasons',
                     render: (value: string[]) => value.join('；'),
                   },
+                  {
+                    title: '固定资产',
+                    render: (_, row) => (
+                      <QualityAssetEvidence
+                        projectId={projectId}
+                        type={row.target_type}
+                        id={row.target_id}
+                        version={row.version}
+                      />
+                    ),
+                  },
                 ]}
               />
             </Card>
@@ -293,6 +354,7 @@ function QualityInsights({
             rowKey="id"
             size="small"
             pagination={false}
+            scroll={{ x: 900 }}
             dataSource={risk.failure_clusters}
             locale={{ emptyText: '当前窗口没有失败聚类' }}
             columns={[
@@ -312,6 +374,18 @@ function QualityInsights({
                 render: (value: number) => `${Math.round(value * 100)}%`,
               },
               { title: '建议', dataIndex: 'recommendation' },
+              {
+                title: '样本报告',
+                render: (_, row) => (
+                  <Space orientation="vertical">
+                    {row.sample_execution_ids.map((id, index) => (
+                      <Link key={id} to={reportExecutionPath(projectId, { executionId: id })}>
+                        查看样本 {index + 1}
+                      </Link>
+                    ))}
+                  </Space>
+                ),
+              },
             ]}
           />
           <Typography.Text type="secondary">
@@ -325,40 +399,47 @@ function QualityInsights({
 }
 
 function QualityOverview({
-  gateCount,
+  gateCounts,
   flakyCount,
   quarantinedCount,
   latest,
 }: {
-  gateCount: number
-  flakyCount: number
-  quarantinedCount: number
+  gateCounts: { enabled: number; total: number } | undefined
+  flakyCount: number | undefined
+  quarantinedCount: number | undefined
   latest: TestPlanRun | undefined
 }) {
   const passRate = latest?.quality_summary.pass_rate
   return (
-    <Row gutter={16} className="quality-overview">
-      <Col span={6}>
+    <Row gutter={[16, 16]} className="quality-overview">
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="启用门禁" value={gateCount} prefix={<SafetyCertificateOutlined />} />
+          <Statistic
+            title="启用门禁"
+            value={gateCounts?.enabled ?? '未提供'}
+            prefix={<SafetyCertificateOutlined />}
+          />
+          {gateCounts && (
+            <Typography.Text type="secondary">共 {gateCounts.total} 项门禁</Typography.Text>
+          )}
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="已载入 Flaky 资产" value={flakyCount} />
+          <Statistic title="已载入 Flaky 资产" value={flakyCount ?? '未提供'} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
-          <Statistic title="已载入隔离资产" value={quarantinedCount} />
+          <Statistic title="已载入隔离资产" value={quarantinedCount ?? '未提供'} />
         </Card>
       </Col>
-      <Col span={6}>
+      <Col xs={12} lg={6}>
         <Card>
           <Statistic
             title="最近通过率"
             value={typeof passRate === 'number' ? passRate : '未提供'}
-            suffix="%"
+            suffix={typeof passRate === 'number' ? '%' : undefined}
           />
         </Card>
       </Col>
@@ -553,7 +634,12 @@ function QualityRiskReadState({ state }: { state: ReturnType<typeof useQualityCe
           action={<Button onClick={() => void state.risk.refetch()}>重试</Button>}
         />
       ) : (
-        <QualityInsights risk={state.risk.data} loading={state.risk.isLoading} />
+        <QualityInsights
+          key={`${state.projectId}:${state.activeRiskId}`}
+          projectId={state.projectId ?? ''}
+          risk={state.risk.data}
+          loading={state.risk.isLoading}
+        />
       )}
     </>
   )

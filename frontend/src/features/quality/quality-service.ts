@@ -143,6 +143,15 @@ export async function setFlakyQuarantine(
   ).data
 }
 
+export async function getFlakyRecord(projectId: string, recordId: string): Promise<FlakyRecord> {
+  const record = (
+    await apiClient.get<FlakyRecord>(`/projects/${projectId}/flaky-tests/${recordId}`)
+  ).data
+  if (record.id !== recordId || record.project_id !== projectId)
+    throw new Error('Flaky 记录不属于当前项目或记录')
+  return record
+}
+
 export async function listQualityRuns(
   projectId: string,
   page = 1,
@@ -179,8 +188,12 @@ export async function getReleaseRisk(
   projectId: string,
   riskId: string,
 ): Promise<ReleaseRiskDetail> {
-  return (await apiClient.get<ReleaseRiskDetail>(`/projects/${projectId}/release-risks/${riskId}`))
-    .data
+  const risk = (
+    await apiClient.get<ReleaseRiskDetail>(`/projects/${projectId}/release-risks/${riskId}`)
+  ).data
+  if (risk.id !== riskId || risk.project_id !== projectId)
+    throw new Error('风险快照不属于当前项目或记录')
+  return risk
 }
 
 export async function createReleaseRisk(
