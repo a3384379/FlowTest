@@ -1,4 +1,6 @@
 import CatalogPagination from '../components/CatalogPagination'
+import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useQuery } from '@tanstack/react-query'
 import {
   ApartmentOutlined,
   CheckCircleOutlined,
@@ -19,7 +21,6 @@ import {
   Input,
   Modal,
   Row,
-  Select,
   Space,
   Statistic,
   Table,
@@ -32,6 +33,10 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import ContractAutomationPanel from '../features/contracts/ContractAutomationPanel'
+import ContractReferencePicker from '../features/contracts/ContractReferencePicker'
+import ContractEvidenceViewer, {
+  type ContractEvidenceSelection,
+} from '../features/contracts/ContractEvidenceDrawer'
 import ContractServiceContextNotice from '../features/services/ContractServiceContextNotice'
 import { contractServiceLocation } from '../features/services/contract-service-location'
 import { useContractServiceContext } from '../features/services/use-contract-service-context'
@@ -46,6 +51,7 @@ import type {
   ServiceCatalogEntry,
   ServiceGraph,
 } from '../features/contracts/contract-hub-service'
+import { getContractService } from '../features/contracts/contract-hub-service'
 import { useContractHub } from '../features/contracts/use-contract-hub'
 import { useProjectContext } from '../features/projects/use-project-context'
 import { apiErrorMessage } from '../lib/api'
@@ -84,14 +90,11 @@ function ContractHubWorkspace() {
   const pacts = pageItems(state.pacts.data)
   const openapiRuns = pageItems(state.openapiRuns.data)
   const checks = pageItems(state.checks.data)
-  const providers = appendSelectedProvider(
-    providerServices(services, pacts),
-    serviceContext.selected.data,
-  )
   const [serviceDialog, setServiceDialog] = useState(false)
   const [pactDialog, setPactDialog] = useState<'upload' | 'broker' | null>(null)
   const [openapiDialog, setOpenapiDialog] = useState(false)
   const [verificationDialog, setVerificationDialog] = useState(false)
+  const [evidence, setEvidence] = useState<ContractEvidenceSelection | null>(null)
 
   return (
     <>
@@ -115,7 +118,7 @@ function ContractHubWorkspace() {
           <ContractHubHeader
             readOnly={!state.canEdit}
             brokerAvailable={Boolean(state.summary.data?.broker_available)}
-            hasPacts={pacts.length > 0}
+            hasPacts={Boolean(catalogTotal(state.pacts))}
             onService={() => setServiceDialog(true)}
             onOpenapi={() => setOpenapiDialog(true)}
             onPact={() => setPactDialog('upload')}
@@ -138,7 +141,7 @@ function ContractHubWorkspace() {
           <ContractOverview summary={state.summary.data} loading={state.summary.isLoading} />
           <CompatibilityPanel
             readOnly={!state.canEdit || !serviceContext.ready}
-            providers={providers}
+            projectId={projectId}
             providerId={providerId}
             matrix={serviceContext.ready ? state.matrix.data : undefined}
             checks={checks}
@@ -146,20 +149,26 @@ function ContractHubWorkspace() {
             checking={state.checking}
             onProviderChange={setProviderId}
             onRunCheck={state.runCheck}
+            onEvidence={setEvidence}
           />
           <div className="contract-hub-grid">
             <ServiceGraphPanel graph={state.graph.data} loading={state.graph.isLoading} />
-            <FailedEvidencePanel checks={checks} />
+            <FailedEvidencePanel checks={checks} onEvidence={setEvidence} />
           </div>
           <div className="catalog-controls">
             <CatalogPagination query={state.services} label="服务目录" />
             <CatalogPagination query={state.pacts} label="Pact 契约" />
+            <CatalogPagination query={state.openapiRuns} label="OpenAPI 契约" />
             <CatalogPagination query={state.checks} label="兼容判断" />
           </div>
           <UnifiedContractsPanel
+            projectId={projectId}
             services={services}
             pacts={pacts}
             openapiRuns={openapiRuns}
+            openapiTotal={catalogTotal(state.openapiRuns)}
+            pactTotal={catalogTotal(state.pacts)}
+            onEvidence={setEvidence}
             loading={state.pacts.isLoading || state.openapiRuns.isLoading}
           />
           <ServiceDialog
@@ -184,7 +193,7 @@ function ContractHubWorkspace() {
           <OpenapiDialog
             readOnly={!state.canEdit}
             open={openapiDialog}
-            services={services}
+            projectId={projectId}
             submitting={state.importing}
             onClose={() => setOpenapiDialog(false)}
             onSubmit={async (input) => {
@@ -194,12 +203,17 @@ function ContractHubWorkspace() {
           <VerificationDialog
             readOnly={!state.canEdit}
             open={verificationDialog}
-            pacts={pacts}
+            projectId={projectId}
             submitting={state.verifying}
             onClose={() => setVerificationDialog(false)}
             onSubmit={async (input) => {
               if (await state.verifyProvider(input)) setVerificationDialog(false)
             }}
+          />
+          <ContractEvidenceViewer
+            projectId={projectId}
+            selection={evidence}
+            onClose={() => setEvidence(null)}
           />
         </>
       )}
@@ -345,7 +359,7 @@ export function ContractOverview({
 
 export function CompatibilityPanel({
   readOnly = false,
-  providers,
+  projectId,
   providerId,
   matrix,
   checks,
@@ -353,9 +367,10 @@ export function CompatibilityPanel({
   checking,
   onProviderChange,
   onRunCheck,
+  onEvidence,
 }: {
   readOnly?: boolean
-  providers: ServiceCatalogEntry[]
+  projectId: string | null
   providerId: string | null
   matrix?: CompatibilityMatrix
   checks: DeploymentCheck[]
@@ -363,8 +378,10 @@ export function CompatibilityPanel({
   checking: boolean
   onProviderChange: (value: string) => void
   onRunCheck: (input: { providerServiceId: string; providerVersion: string }) => Promise<boolean>
+  onEvidence: (selection: ContractEvidenceSelection) => void
 }) {
   const [providerVersion, setProviderVersion] = useState('')
+  const [providerReady, setProviderReady] = useState(false)
   const selectedCheck = checks.find(
     (item) =>
       item.provider_service_id === providerId && item.provider_version === providerVersion.trim(),
@@ -382,11 +399,19 @@ export function CompatibilityPanel({
     ...(matrix?.provider_versions ?? []).map((version) => ({
       title: `${matrix?.provider_name ?? 'Provider'} ${version}`,
       key: version,
-      render: (_: unknown, row: CompatibilityMatrix['rows'][number]) => (
-        <CompatibilityStatus
-          status={row.cells.find((cell) => cell.provider_version === version)?.status ?? 'pending'}
-        />
-      ),
+      render: (_: unknown, row: CompatibilityMatrix['rows'][number]) => {
+        const cell = row.cells.find((item) => item.provider_version === version)
+        const target = compatibilityEvidence(row.pact_contract_version_id, cell?.verification_id)
+        return (
+          <Button
+            type="text"
+            aria-label={`查看${row.consumer_name} ${row.consumer_version}与${version}的兼容证据`}
+            onClick={() => onEvidence(target)}
+          >
+            <CompatibilityStatus status={cell?.status ?? 'pending'} />
+          </Button>
+        )
+      },
     })),
   ]
   return (
@@ -395,13 +420,16 @@ export function CompatibilityPanel({
       title="部署兼容矩阵"
       loading={loading}
       extra={
-        <Select
-          aria-label="提供方服务"
-          placeholder="选择提供方"
+        <ContractReferencePicker
+          projectId={projectId}
+          kind="service"
+          label="提供方服务"
+          allowClear={false}
           value={providerId ?? undefined}
-          onChange={onProviderChange}
-          options={providers.map((item) => ({ value: item.id, label: item.display_name }))}
-          className="contract-provider-select"
+          onChange={(id) => {
+            if (id) onProviderChange(id)
+          }}
+          onReadyChange={setProviderReady}
         />
       }
     >
@@ -427,7 +455,7 @@ export function CompatibilityPanel({
         <Button
           type="primary"
           loading={checking}
-          disabled={deploymentCheckDisabled(readOnly, providerId, providerVersion)}
+          disabled={deploymentCheckDisabled(readOnly, providerId, providerVersion, providerReady)}
           onClick={() =>
             providerId &&
             void onRunCheck({
@@ -438,7 +466,11 @@ export function CompatibilityPanel({
         >
           判断是否可安全发布
         </Button>
-        {selectedCheck ? <DecisionTag decision={selectedCheck.decision} /> : null}
+        {selectedCheck ? (
+          <Button type="text" onClick={() => onEvidence({ kind: 'check', id: selectedCheck.id })}>
+            <DecisionTag decision={selectedCheck.decision} />
+          </Button>
+        ) : null}
       </Space>
     </Card>
   )
@@ -448,8 +480,9 @@ function deploymentCheckDisabled(
   readOnly: boolean,
   providerId: string | null,
   version: string,
+  providerReady: boolean,
 ): boolean {
-  return readOnly || !providerId || !version.trim()
+  return readOnly || !providerReady || !providerId || !version.trim()
 }
 
 export function ServiceGraphPanel({ graph, loading }: { graph?: ServiceGraph; loading: boolean }) {
@@ -483,19 +516,32 @@ export function ServiceGraphPanel({ graph, loading }: { graph?: ServiceGraph; lo
   )
 }
 
-export function FailedEvidencePanel({ checks }: { checks: DeploymentCheck[] }) {
-  const failed = checks.filter((item) => item.decision === 'unsafe')
+export function FailedEvidencePanel({
+  checks,
+  onEvidence,
+}: {
+  checks: DeploymentCheck[]
+  onEvidence?: (selection: ContractEvidenceSelection) => void
+}) {
   return (
     <Card title="发布判断证据" className="performance-card">
-      {failed.length ? (
+      {checks.length ? (
         <Space orientation="vertical" className="full-width">
-          {failed.slice(0, 5).map((item) => (
+          {checks.map((item) => (
             <Alert
               key={item.id}
-              type="error"
+              type={checkAlertType(item.decision)}
               showIcon
-              title={`Provider ${item.provider_version} 不可安全发布`}
+              title={`Provider ${item.provider_version} ${decisionText(item.decision)}`}
               description={`${evidenceCount(item.evidence, 'blockers')} 项阻断证据 · ${formatDate(item.created_at)}`}
+              action={
+                <Button
+                  disabled={!onEvidence}
+                  onClick={() => onEvidence?.({ kind: 'check', id: item.id })}
+                >
+                  查看逐项证据
+                </Button>
+              }
             />
           ))}
         </Space>
@@ -507,24 +553,31 @@ export function FailedEvidencePanel({ checks }: { checks: DeploymentCheck[] }) {
 }
 
 export function UnifiedContractsPanel({
+  projectId,
   services,
   pacts,
   openapiRuns,
   loading,
+  openapiTotal,
+  pactTotal,
+  onEvidence,
 }: {
+  projectId?: string | null
   services: ServiceCatalogEntry[]
   pacts: PactContract[]
   openapiRuns: ContractRun[]
   loading: boolean
+  openapiTotal?: number
+  pactTotal?: number
+  onEvidence?: (selection: ContractEvidenceSelection) => void
 }) {
-  const names = new Map(services.map((item) => [item.id, item.display_name]))
   return (
     <Card title="统一契约资产" loading={loading} className="performance-card">
       <Tabs
         items={[
           {
             key: 'openapi',
-            label: `OpenAPI（${openapiRuns.length}）`,
+            label: `OpenAPI（共${openapiTotal ?? openapiRuns.length}项，本页${openapiRuns.length}项）`,
             children: (
               <Table
                 rowKey="id"
@@ -535,10 +588,15 @@ export function UnifiedContractsPanel({
                   { title: '文档', dataIndex: 'source_name' },
                   {
                     title: '提供方版本',
-                    render: (_: unknown, item: ContractRun) =>
-                      item.provider_service_id
-                        ? `${names.get(item.provider_service_id) ?? '未知服务'} · ${item.provider_version}`
-                        : '未绑定',
+                    render: (_: unknown, item: ContractRun) => (
+                      <ContractRunProvider
+                        projectId={projectId}
+                        run={item}
+                        initialService={services.find(
+                          (service) => service.id === item.provider_service_id,
+                        )}
+                      />
+                    ),
                   },
                   {
                     title: '破坏性变更',
@@ -557,13 +615,24 @@ export function UnifiedContractsPanel({
                     title: '导入时间',
                     render: (_: unknown, item: ContractRun) => formatDate(item.created_at),
                   },
+                  {
+                    title: '证据',
+                    render: (_: unknown, item: ContractRun) => (
+                      <Button
+                        disabled={!onEvidence}
+                        onClick={() => onEvidence?.({ kind: 'run', id: item.id })}
+                      >
+                        查看固定分析
+                      </Button>
+                    ),
+                  },
                 ]}
               />
             ),
           },
           {
             key: 'pact',
-            label: `Pact（${pacts.length}）`,
+            label: `Pact（共${pactTotal ?? pacts.length}项，本页${pacts.length}项）`,
             children: (
               <Table
                 rowKey="id"
@@ -594,6 +663,17 @@ export function UnifiedContractsPanel({
                     title: '导入时间',
                     render: (_: unknown, item: PactContract) => formatDate(item.created_at),
                   },
+                  {
+                    title: '证据',
+                    render: (_: unknown, item: PactContract) => (
+                      <Button
+                        disabled={!onEvidence}
+                        onClick={() => onEvidence?.({ kind: 'pact', id: item.id })}
+                      >
+                        查看固定契约
+                      </Button>
+                    ),
+                  },
                 ]}
               />
             ),
@@ -601,6 +681,58 @@ export function UnifiedContractsPanel({
         ]}
       />
     </Card>
+  )
+}
+
+function ContractRunProvider({
+  projectId,
+  run,
+  initialService,
+}: {
+  projectId?: string | null
+  run: ContractRun
+  initialService?: ServiceCatalogEntry
+}) {
+  if (!run.provider_service_id) return <>未绑定</>
+  if (!projectId)
+    return (
+      <>
+        {initialService?.display_name ?? run.provider_service_id} · {run.provider_version}
+      </>
+    )
+  return (
+    <ResolvedProvider
+      projectId={projectId}
+      id={run.provider_service_id}
+      version={run.provider_version}
+      initialService={initialService}
+    />
+  )
+}
+
+function ResolvedProvider({
+  projectId,
+  id,
+  version,
+  initialService,
+}: {
+  projectId: string
+  id: string
+  version: string | null
+  initialService?: ServiceCatalogEntry
+}) {
+  const query = useQuery({
+    queryKey: ['contract-service', projectId, id],
+    queryFn: () => getContractService(projectId, id),
+    initialData: initialService,
+  })
+  return (
+    <Space orientation="vertical" size={0}>
+      <Typography.Text>
+        {query.data?.display_name ?? `服务ID：${id}`} · {version}
+      </Typography.Text>
+      <QueryFailureNotice queries={[query]} />
+    </Space>
   )
 }
 
@@ -724,14 +856,14 @@ function PactDialog({
 function OpenapiDialog({
   readOnly,
   open,
-  services,
+  projectId,
   submitting,
   onClose,
   onSubmit,
 }: {
   readOnly: boolean
   open: boolean
-  services: ServiceCatalogEntry[]
+  projectId: string | null
   submitting: boolean
   onClose: () => void
   onSubmit: (input: {
@@ -742,6 +874,7 @@ function OpenapiDialog({
 }) {
   const [form] = Form.useForm<OpenapiForm>()
   const [file, setFile] = useState<File | null>(null)
+  const [providerReady, setProviderReady] = useState(false)
   return (
     <Modal
       title="导入并绑定 OpenAPI"
@@ -749,7 +882,7 @@ function OpenapiDialog({
       confirmLoading={submitting}
       okText="导入"
       cancelText="取消"
-      okButtonProps={{ disabled: readOnly || !file }}
+      okButtonProps={{ disabled: readOnly || !file || !providerReady }}
       onCancel={onClose}
       onOk={() =>
         void form.validateFields().then((values) =>
@@ -781,8 +914,12 @@ function OpenapiDialog({
           </Upload>
         </Form.Item>
         <Form.Item name="provider_service_id" label="提供方服务" rules={[{ required: true }]}>
-          <Select
-            options={services.map((item) => ({ value: item.id, label: item.display_name }))}
+          <ContractReferencePicker
+            projectId={projectId}
+            kind="service"
+            label="提供方服务"
+            disabled={readOnly || submitting}
+            onReadyChange={setProviderReady}
           />
         </Form.Item>
         <Form.Item name="provider_version" label="提供方版本" rules={[{ required: true }]}>
@@ -796,14 +933,14 @@ function OpenapiDialog({
 function VerificationDialog({
   readOnly,
   open,
-  pacts,
+  projectId,
   submitting,
   onClose,
   onSubmit,
 }: {
   readOnly: boolean
   open: boolean
-  pacts: PactContract[]
+  projectId: string | null
   submitting: boolean
   onClose: () => void
   onSubmit: (input: {
@@ -813,12 +950,13 @@ function VerificationDialog({
   }) => Promise<void>
 }) {
   const [form] = Form.useForm<VerificationForm>()
+  const [pactReady, setPactReady] = useState(false)
   return (
     <Modal
       title="执行提供方验证"
       open={open}
       confirmLoading={submitting}
-      okButtonProps={{ disabled: readOnly }}
+      okButtonProps={{ disabled: readOnly || !pactReady }}
       okText="执行验证"
       cancelText="取消"
       onCancel={onClose}
@@ -835,11 +973,12 @@ function VerificationDialog({
     >
       <Form form={form} layout="vertical" disabled={readOnly}>
         <Form.Item name="pact_id" label="Pact 契约" rules={[{ required: true }]}>
-          <Select
-            options={pacts.map((item) => ({
-              value: item.id,
-              label: `${item.consumer_name} ${item.consumer_version} → ${item.provider_name}`,
-            }))}
+          <ContractReferencePicker
+            projectId={projectId}
+            kind="pact"
+            label="Pact 契约"
+            disabled={readOnly || submitting}
+            onReadyChange={setPactReady}
           />
         </Form.Item>
         <Form.Item name="provider_version" label="提供方版本" rules={[{ required: true }]}>
@@ -883,13 +1022,12 @@ export function DecisionTag({ decision }: { decision: DeploymentCheck['decision'
   return <Tag color={colors[decision]}>{labels[decision]}</Tag>
 }
 
-function providerServices(services: ServiceCatalogEntry[], pacts: PactContract[]) {
-  const providerIds = new Set(pacts.map((item) => item.provider_service_id))
-  return services.filter((item) => providerIds.has(item.id))
-}
-
 function pageItems<T>(page?: { items: T[] }): T[] {
   return page?.items ?? []
+}
+
+function catalogTotal(query: { data?: { total: number } }): number | undefined {
+  return query.data?.total
 }
 
 function evidenceCount(evidence: Record<string, unknown>, key: string): number {
@@ -897,13 +1035,27 @@ function evidenceCount(evidence: Record<string, unknown>, key: string): number {
   return Array.isArray(value) ? value.length : 0
 }
 
+function compatibilityEvidence(
+  pactId: string,
+  verificationId?: string | null,
+): ContractEvidenceSelection {
+  return verificationId
+    ? { kind: 'verification', id: verificationId }
+    : { kind: 'pact', id: pactId }
+}
+
+function checkAlertType(decision: DeploymentCheck['decision']) {
+  return { safe: 'success', unsafe: 'error', unknown: 'warning' }[decision] as
+    'success' | 'error' | 'warning'
+}
+
+function decisionText(decision: DeploymentCheck['decision']): string {
+  return { safe: '可安全发布', unsafe: '不可安全发布', unknown: '证据不足' }[decision]
+}
+
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date(value))
-}
-
-function appendSelectedProvider(items: ServiceCatalogEntry[], selected?: ServiceCatalogEntry) {
-  return selected && !items.some((item) => item.id === selected.id) ? [...items, selected] : items
 }

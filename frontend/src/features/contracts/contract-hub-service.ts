@@ -38,9 +38,41 @@ export type ProviderVerification = {
   interaction_count: number
   passed_count: number
   failed_count: number
-  results: Array<Record<string, unknown>>
+  results: Array<{
+    interaction_index: number
+    description: string
+    status: 'passed' | 'failed'
+    mismatch_codes: string[]
+  }>
   verified_by_id: string
   created_at: string
+}
+
+export type PactContractDetail = {
+  contract: PactContract
+  contract_document: {
+    consumer: string
+    provider: string
+    specification_version: string
+    interactions: Array<{
+      description: string
+      provider_states: string[]
+      request: {
+        method: string
+        path: string
+        query: Record<string, string | string[]>
+        headers: Record<string, string>
+        body: unknown
+      }
+      response: { status: number; headers: Record<string, string>; body: unknown }
+    }>
+  }
+}
+
+export type ProviderVerificationDetail = {
+  verification: ProviderVerification
+  pact: PactContractDetail
+  actual_response_available: false
 }
 
 export type ContractHubSummary = {
@@ -156,10 +188,10 @@ export async function createContractService(
   ).data
 }
 
-export async function listPactContracts(projectId: string, page = 1, pageSize = 100) {
+export async function listPactContracts(projectId: string, page = 1, pageSize = 20, search = '') {
   return (
     await apiClient.get<Page<PactContract>>(`/projects/${projectId}/contract-hub/pacts`, {
-      params: { page, page_size: pageSize },
+      params: { page, page_size: pageSize, search },
     })
   ).data
 }
@@ -183,6 +215,28 @@ export async function importPactContract(projectId: string, input: PactImportInp
   form.append('source_name', input.document.name)
   return (await apiClient.post<PactContract>(`/projects/${projectId}/contract-hub/pacts`, form))
     .data
+}
+
+export async function getPactContract(projectId: string, pactId: string) {
+  return (
+    await apiClient.get<PactContractDetail>(`/projects/${projectId}/contract-hub/pacts/${pactId}`)
+  ).data
+}
+
+export async function getProviderVerification(projectId: string, verificationId: string) {
+  return (
+    await apiClient.get<ProviderVerificationDetail>(
+      `/projects/${projectId}/contract-hub/verifications/${verificationId}`,
+    )
+  ).data
+}
+
+export async function getDeploymentCheck(projectId: string, checkId: string) {
+  return (
+    await apiClient.get<DeploymentCheck>(
+      `/projects/${projectId}/contract-hub/deployment-checks/${checkId}`,
+    )
+  ).data
 }
 
 export async function verifyPactProvider(

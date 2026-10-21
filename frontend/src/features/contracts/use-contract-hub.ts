@@ -27,7 +27,8 @@ export function useContractHub(providerServiceId: string | null) {
   const { projectId } = useProjectContext()
   const { canEdit, permissions } = useProjectCapabilities()
   const flags = useQuery({ queryKey: ['v3-feature-flags'], queryFn: getV3FeatureFlags })
-  const enabled = Boolean(projectId && flags.data?.contract_hub)
+  const enabled = Boolean(projectId && flags.isSuccess && flags.data?.contract_hub)
+  const editable = canEdit && permissions.isSuccess && enabled
   const services = useCatalogQuery(
     'contract-services',
     projectId,
@@ -44,11 +45,12 @@ export function useContractHub(providerServiceId: string | null) {
     '',
     {},
   )
-  const openapiRuns = useQuery({
-    queryKey: ['contract-runs', projectId],
-    queryFn: () => listContractRuns(required(projectId)),
+  const openapiRuns = useCatalogQuery(
+    'contract-runs',
+    projectId,
+    (page) => listContractRuns(required(projectId), page, 20),
     enabled,
-  })
+  )
   const summary = useQuery({
     queryKey: ['contract-hub-summary', projectId],
     queryFn: () => getContractHubSummary(required(projectId)),
@@ -96,7 +98,7 @@ export function useContractHub(providerServiceId: string | null) {
   })
 
   async function withFeedback<T>(action: () => Promise<T>, successText: string): Promise<boolean> {
-    if (!canEdit || !enabled) return false
+    if (!editable) return false
     try {
       await action()
       await refresh()
@@ -117,11 +119,12 @@ export function useContractHub(providerServiceId: string | null) {
     await queryClient.invalidateQueries({ queryKey: ['contract-service-graph', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['contract-compatibility', projectId] })
     await queryClient.invalidateQueries({ queryKey: ['deployment-checks', projectId] })
+    await queryClient.invalidateQueries({ queryKey: ['contract-reference-options', projectId] })
   }
 
   return {
     projectId,
-    canEdit: canEdit && enabled,
+    canEdit: editable,
     flags,
     permissions,
     services,

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ContractRun, GeneratedContractCase } from '../../lib/api'
 import ProjectTestProvider from '../../test/ProjectTestProvider'
@@ -15,7 +15,125 @@ import ContractAutomationPanel, {
   GeneratedCaseTable,
 } from './ContractAutomationPanel'
 
+beforeEach(() => {
+  server.use(
+    http.get(`/api/v1/projects/${project.id}/contract-runs/:runId`, ({ params }) =>
+      HttpResponse.json({
+        ...contractRun,
+        id: String(params.runId),
+        source_name: params.runId === 'run-2' ? 'next.json' : contractRun.source_name,
+      }),
+    ),
+  )
+})
+
 describe('ContractAutomationPanel views', () => {
+  it('reaches the 101st run and candidate, keeps the selected run across pages and filters by review status', async () => {
+    const run101 = { ...contractRun, id: 'run-101', source_name: '第101批次.json' }
+    const case101 = {
+      ...generatedCase,
+      id: 'case-101',
+      contract_run_id: run101.id,
+      name: '第101条候选',
+    }
+    const calls: Array<{ page: string | null; status: string | null }> = []
+    const accepted: string[] = []
+    server.use(
+      http.get('/api/v1/projects', () =>
+        HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/contract-runs`, ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'))
+        return HttpResponse.json({
+          items: [page === 6 ? run101 : contractRun],
+          total: 105,
+          page,
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/contract-runs/run-101`, () =>
+        HttpResponse.json(run101),
+      ),
+      http.get(
+        `/api/v1/projects/${project.id}/contract-runs/run-101/generated-cases`,
+        ({ request }) => {
+          const params = new URL(request.url).searchParams
+          calls.push({ page: params.get('page'), status: params.get('review_status') })
+          const page = Number(params.get('page'))
+          return HttpResponse.json({
+            items: [page === 6 ? case101 : { ...case101, id: 'case-first', name: '首条候选' }],
+            total: 105,
+            page,
+            page_size: 20,
+          })
+        },
+      ),
+      http.post(
+        `/api/v1/projects/${project.id}/contract-runs/run-101/generated-cases/case-101/accept`,
+        async ({ request }) => {
+          const input = (await request.json()) as { name: string }
+          accepted.push(input.name)
+          if (accepted.length === 1)
+            return HttpResponse.json(
+              {
+                error: {
+                  code: 'UNAVAILABLE',
+                  message: '第101候选审核暂不可用',
+                  trace_id: 'case-101-trace',
+                },
+              },
+              { status: 503 },
+            )
+          return HttpResponse.json({ ...case101, name: input.name, review_status: 'accepted' })
+        },
+      ),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <AntdApp>
+            <ProjectTestProvider section="contracts">
+              <ContractAutomationPanel />
+            </ProjectTestProvider>
+          </AntdApp>
+        </ConfigProvider>
+      </QueryClientProvider>,
+    )
+    const pagination = (name: string) =>
+      screen.getByText(name).closest('.ant-pagination') as HTMLElement
+    await screen.findByText('分析批次共 105 项')
+    fireEvent.click(within(pagination('分析批次共 105 项')).getByTitle('6'))
+    expect(await screen.findByText('第101批次.json')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /审核用例/ }))
+    await screen.findByText('首条候选')
+    fireEvent.click(within(pagination('生成候选共 105 项')).getByTitle('6'))
+    expect(await screen.findByText('第101条候选')).toBeVisible()
+    fireEvent.click(within(pagination('分析批次共 105 项')).getByTitle('1'))
+    expect(await screen.findByText('openapi.json')).toBeVisible()
+    expect(screen.getByText('第101条候选')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /编辑并接受/ }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByLabelText('用例名称')).toHaveValue('第101条候选')
+    fireEvent.change(within(dialog).getByLabelText('用例名称'), {
+      target: { value: '人工审核第101候选' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '接受草稿' }))
+    await waitFor(() => expect(within(dialog).getByText(/第101候选审核暂不可用/)).toBeVisible())
+    expect(within(dialog).getByText('case-101-trace')).toBeVisible()
+    expect(within(dialog).getByLabelText('用例名称')).toHaveValue('人工审核第101候选')
+    fireEvent.click(within(dialog).getByRole('button', { name: '接受草稿' }))
+    await waitFor(() => expect(accepted).toEqual(['人工审核第101候选', '人工审核第101候选']))
+    await waitFor(() => expect(dialog).not.toBeVisible())
+    const browser = (await import('@testing-library/user-event')).default.setup()
+    await browser.click(screen.getByLabelText('候选审核状态'))
+    await browser.click(
+      await screen.findByText('待审核', { selector: '.ant-select-item-option-content' }),
+    )
+    await waitFor(() => expect(calls).toContainEqual({ page: '1', status: 'pending' }))
+    expect(calls).toContainEqual({ page: '6', status: null })
+  })
+
   it('lets viewers inspect generated evidence without creating or reviewing contract drafts', async () => {
     let writes = 0
     server.use(

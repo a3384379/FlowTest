@@ -22,22 +22,28 @@ import {
   Typography,
   Upload,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import {
   apiErrorMessage,
+  apiErrorTraceId,
   type ContractRun,
   type GeneratedContractCase,
   type Page,
 } from '../../lib/api'
+import CatalogPagination from '../../components/CatalogPagination'
+import QueryFailureNotice from '../../components/QueryFailureNotice'
+import { useCatalogQuery } from '../../lib/catalog-query'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import {
   createContractRun,
+  getContractRun,
   listContractRuns,
   listGeneratedContractCases,
   reviewGeneratedContractCase,
 } from './contract-service'
+import ContractReferencePicker from './ContractReferencePicker'
 
 export default function ContractAutomationPanel() {
   const { projectId } = useProjectContext()
@@ -48,33 +54,57 @@ function ContractAutomationWorkspace() {
   const queryClient = useQueryClient()
   const { projectId } = useProjectContext()
   const { canEdit, permissions } = useProjectCapabilities()
+  const editable = canEdit && permissions.isSuccess
+  const [runSearch, setRunSearch] = useState('')
+  const [reviewStatus, setReviewStatus] = useState<GeneratedContractCase['review_status'] | 'all'>(
+    'all',
+  )
   const [file, setFile] = useState<File | null>(null)
   const [baselineRunId, setBaselineRunId] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [editor, setEditor] = useState<GeneratedContractCase | null>(null)
-  const runs = useQuery({
-    queryKey: ['contract-runs', projectId],
-    queryFn: () => listContractRuns(projectId!),
-    enabled: Boolean(projectId),
-  })
-  const cases = useQuery({
-    queryKey: ['contract-cases', projectId, selectedRunId],
-    queryFn: () => listGeneratedContractCases(projectId!, selectedRunId!),
+  const runs = useCatalogQuery(
+    'contract-runs',
+    projectId,
+    (page) => listContractRuns(projectId!, page, 20, runSearch),
+    true,
+    runSearch,
+  )
+  const selected = useQuery({
+    queryKey: ['contract-run', projectId, selectedRunId],
+    queryFn: () => getContractRun(projectId!, selectedRunId!),
     enabled: Boolean(projectId && selectedRunId),
   })
+  const cases = useCatalogQuery(
+    'contract-cases',
+    projectId,
+    (page) =>
+      listGeneratedContractCases(
+        projectId!,
+        selectedRunId!,
+        page,
+        20,
+        reviewStatus === 'all' ? undefined : reviewStatus,
+      ),
+    Boolean(selectedRunId),
+    `${selectedRunId}:${reviewStatus}`,
+  )
   const runItems = pageItems(runs.data)
   const caseItems = pageItems(cases.data)
-  const selectedRun = useMemo(
-    () => findSelectedRun(runItems, selectedRunId),
-    [runItems, selectedRunId],
-  )
+  const selectedRun = selected.data
+  function selectRun(id: string) {
+    const item = runItems.find((run) => run.id === id)
+    if (item) queryClient.setQueryData(['contract-run', projectId, id], item)
+    setSelectedRunId(id)
+  }
   const createRun = useMutation({
     mutationFn: () => {
-      if (!canEdit) throw new Error('当前项目为只读')
+      if (!editable) throw new Error('当前项目为只读或权限读取失败')
       return createContractRun(projectId!, file!, baselineRunId)
     },
     onSuccess: async (created) => {
       setFile(null)
+      queryClient.setQueryData(['contract-run', projectId, created.id], created)
       setSelectedRunId(created.id)
       await queryClient.invalidateQueries({ queryKey: ['contract-runs', projectId] })
     },
@@ -87,7 +117,7 @@ function ContractAutomationWorkspace() {
       definition?: Record<string, unknown>
       note: string
     }) => {
-      if (!canEdit) throw new Error('当前项目为只读')
+      if (!editable) throw new Error('当前项目为只读或权限读取失败')
       return reviewGeneratedContractCase(
         projectId!,
         input.item.contract_run_id,
@@ -96,51 +126,80 @@ function ContractAutomationWorkspace() {
         { name: input.name, definition: input.definition, note: input.note },
       )
     },
-    onSuccess: async () => {
-      setEditor(null)
+    onSuccess: async (item) => {
+      setEditor((current) => (current?.id === item.id ? null : current))
       await queryClient.invalidateQueries({
-        queryKey: ['contract-cases', projectId, selectedRunId],
+        queryKey: ['contract-cases', projectId],
       })
     },
   })
-  const errors = [permissions.error, runs.error, cases.error, createRun.error, review.error]
+  const errors = [permissions.error, createRun.error, review.error]
   const error = errors.find(Boolean)
+  function openReview(item: GeneratedContractCase) {
+    review.reset()
+    setEditor(item)
+  }
 
   return (
     <Space direction="vertical" size="large" className="contract-panel">
       {error ? <Alert showIcon type="error" title={apiErrorMessage(error)} /> : null}
       <ContractUploadCard
-        readOnly={!canEdit}
+        projectId={projectId}
+        readOnly={!editable}
         file={file}
         baselineRunId={baselineRunId}
-        runs={runItems}
         uploading={createRun.isPending}
         onFile={setFile}
         onBaseline={setBaselineRunId}
         onSubmit={() => createRun.mutate()}
       />
+      <Input.Search
+        aria-label="分析批次搜索"
+        placeholder="按文档名称搜索批次"
+        onSearch={setRunSearch}
+        allowClear
+      />
       <ContractRunTable
         items={runItems}
         loading={runs.isLoading}
         selectedRunId={selectedRunId}
-        onSelect={setSelectedRunId}
+        onSelect={selectRun}
       />
+      <CatalogPagination query={runs} label="分析批次" />
+      <QueryFailureNotice queries={[selected, cases]} />
       {selectedRun && <ContractSummary run={selectedRun} />}
       {selectedRun && (
-        <GeneratedCaseTable
-          readOnly={!canEdit}
-          items={caseItems}
-          loading={cases.isLoading}
-          onAccept={setEditor}
-          onReject={(item) => review.mutate({ item, decision: 'reject', note: 'Web 审核拒绝' })}
-        />
+        <>
+          <Select
+            aria-label="候选审核状态"
+            value={reviewStatus}
+            onChange={setReviewStatus}
+            options={[
+              { value: 'all', label: '全部审核状态' },
+              { value: 'pending', label: '待审核' },
+              { value: 'accepted', label: '已接受' },
+              { value: 'rejected', label: '已拒绝' },
+            ]}
+          />
+          <GeneratedCaseTable
+            readOnly={!editable || review.isPending || cases.isError}
+            items={caseItems}
+            loading={cases.isLoading}
+            onAccept={openReview}
+            onReject={(item) => review.mutate({ item, decision: 'reject', note: 'Web 审核拒绝' })}
+          />
+          <CatalogPagination query={cases} label="生成候选" />
+        </>
       )}
       {editor && (
         <CaseReviewDialog
-          readOnly={!canEdit}
+          readOnly={!editable}
           item={editor}
           submitting={review.isPending}
-          onClose={() => setEditor(null)}
+          error={review.error}
+          onClose={() => {
+            if (!review.isPending) setEditor(null)
+          }}
           onSubmit={(input) => review.mutate({ item: editor, decision: 'accept', ...input })}
         />
       )}
@@ -148,37 +207,35 @@ function ContractAutomationWorkspace() {
   )
 }
 
-function pageItems<T>(page: Page<T> | undefined): T[] {
-  return page ? page.items : []
-}
-
-function findSelectedRun(items: ContractRun[], selectedRunId: string | null): ContractRun | null {
-  return items.find((item) => item.id === selectedRunId) || null
+function pageItems<T>(page?: Page<T>): T[] {
+  return page?.items ?? []
 }
 
 export function ContractUploadCard({
+  projectId,
   readOnly = false,
   file,
   baselineRunId,
-  runs,
   uploading,
   onFile,
   onBaseline,
   onSubmit,
 }: {
+  projectId: string | null
   readOnly?: boolean
   file: File | null
   baselineRunId: string | null
-  runs: ContractRun[]
   uploading: boolean
   onFile: (file: File | null) => void
   onBaseline: (id: string | null) => void
   onSubmit: () => void
 }) {
+  const [baselineReady, setBaselineReady] = useState(true)
   return (
     <Card title="OpenAPI 契约分析" size="small">
       <Space wrap>
         <Upload
+          disabled={readOnly || uploading}
           accept=".json,.yaml,.yml"
           maxCount={1}
           beforeUpload={(selected) => {
@@ -190,22 +247,19 @@ export function ContractUploadCard({
         >
           <Button icon={<UploadOutlined />}>选择契约文档</Button>
         </Upload>
-        <Select
-          aria-label="契约基线"
-          allowClear
-          placeholder="自动选择同名最新基线"
+        <ContractReferencePicker
+          projectId={projectId}
+          kind="run"
+          label="契约基线"
+          disabled={readOnly || uploading}
           value={baselineRunId ?? undefined}
-          style={{ minWidth: 240 }}
-          options={runs.map((run) => ({
-            value: run.id,
-            label: `${run.source_name} · ${formatTime(run.created_at)}`,
-          }))}
+          onReadyChange={setBaselineReady}
           onChange={(value?: string) => onBaseline(value ?? null)}
         />
         <Button
           type="primary"
           icon={<FileSearchOutlined />}
-          disabled={readOnly || !file}
+          disabled={readOnly || !file || !baselineReady}
           loading={uploading}
           onClick={onSubmit}
         >
@@ -373,14 +427,16 @@ export function CaseReviewDialog({
   submitting,
   onClose,
   onSubmit,
+  error,
 }: {
   readOnly?: boolean
   item: GeneratedContractCase
   submitting: boolean
   onClose: () => void
   onSubmit: (input: { name: string; definition: Record<string, unknown>; note: string }) => void
+  error?: unknown
 }) {
-  const [form] = Form.useForm()
+  const [form] = Form.useForm<{ name: string; definition: string; note?: string }>()
   return (
     <Modal
       open
@@ -390,20 +446,27 @@ export function CaseReviewDialog({
       confirmLoading={submitting}
       okButtonProps={{ disabled: readOnly }}
       onCancel={onClose}
-      onOk={() =>
-        void form.validateFields().then((values) =>
-          onSubmit({
-            name: values.name,
-            definition: JSON.parse(values.definition) as Record<string, unknown>,
-            note: values.note ?? '',
-          }),
-        )
-      }
+      onOk={() => form.submit()}
     >
+      {error ? (
+        <Alert
+          type="error"
+          showIcon
+          title={apiErrorMessage(error)}
+          description={apiErrorTraceId(error)}
+        />
+      ) : null}
       <Form
         disabled={readOnly}
         form={form}
         layout="vertical"
+        onFinish={(values) =>
+          onSubmit({
+            name: values.name,
+            definition: parseCaseDefinition(values.definition),
+            note: values.note ?? '',
+          })
+        }
         initialValues={{
           name: item.name,
           definition: JSON.stringify(item.definition, null, 2),
@@ -420,11 +483,7 @@ export function CaseReviewDialog({
             { required: true },
             {
               validator: async (_, value: string) => {
-                try {
-                  JSON.parse(value)
-                } catch {
-                  throw new Error('请输入有效的 JSON')
-                }
+                parseCaseDefinition(value)
               },
             },
           ]}
@@ -438,6 +497,19 @@ export function CaseReviewDialog({
       <Typography.Text type="secondary">接受后才允许进入后续测试用例流程。</Typography.Text>
     </Modal>
   )
+}
+
+function parseCaseDefinition(value: string): Record<string, unknown> {
+  let result: unknown
+  try {
+    result = JSON.parse(value)
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('请输入有效的JSON', { cause: error })
+    throw error
+  }
+  if (typeof result !== 'object' || result === null || Array.isArray(result))
+    throw new Error('生成定义必须为JSON对象')
+  return result as Record<string, unknown>
 }
 
 function generationLabel(value: GeneratedContractCase['generation_kind']) {

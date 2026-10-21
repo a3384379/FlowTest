@@ -536,6 +536,22 @@ function installHandlers({ empty = false }: { empty?: boolean } = {}) {
     http.get(`/api/v1/projects/${project.id}/contract-hub/pacts`, () =>
       HttpResponse.json(page(empty ? [] : [pact])),
     ),
+    http.get(`/api/v1/projects/${project.id}/contract-hub/pacts/${pactId}`, () =>
+      HttpResponse.json({
+        contract: pact,
+        contract_document: {
+          consumer: pact.consumer_name,
+          provider: pact.provider_name,
+          specification_version: '3.0.0',
+          interactions: Array.from({ length: 3 }, (_, index) => ({
+            description: `订单Interaction${index + 1}`,
+            provider_states: [],
+            request: { method: 'GET', path: '/orders', query: {}, headers: {}, body: null },
+            response: { status: 200, headers: {}, body: { status: 'ok' } },
+          })),
+        },
+      }),
+    ),
     http.get(`/api/v1/projects/${project.id}/contract-runs`, () =>
       HttpResponse.json(page(empty ? [] : [openapiRun])),
     ),
