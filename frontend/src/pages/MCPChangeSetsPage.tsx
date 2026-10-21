@@ -1,7 +1,25 @@
 import { AuditOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, App, Button, Card, Flex, Space, Tag, Typography } from 'antd'
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Collapse,
+  Descriptions,
+  Flex,
+  Space,
+  Tag,
+  Typography,
+} from 'antd'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useAuthStore } from '../features/auth/auth-store'
+import MCPGovernanceSummary from '../features/mcp/MCPGovernanceSummary'
+import MCPStructuredPreview from '../features/mcp/MCPStructuredPreview'
+import MCPMaterializedResult from '../features/mcp/MCPMaterializedResult'
+import ResponseCodeReader from '../features/api-console/ResponseCodeReader'
+import QueryFailureNotice from '../components/QueryFailureNotice'
 
 import {
   approveMCPChangeSet,
@@ -9,81 +27,130 @@ import {
   reviewMCPChangeItem,
   type MCPChangeItem,
   type MCPChangeSet,
+  type MCPChangeSetEnvelope,
 } from '../features/mcp/mcp-change-set-service'
 import ControlBlockGraphPreview from '../features/mcp/ControlBlockGraphPreview'
 import ControlWorkflowGraphPreview from '../features/mcp/ControlWorkflowGraphPreview'
-import { apiErrorMessage, type WorkflowDefinition } from '../lib/api'
+import { apiErrorMessage, apiErrorTraceId, type WorkflowDefinition } from '../lib/api'
 import { useProjectContext } from '../features/projects/use-project-context'
 import { useProjectCapabilities } from '../features/projects/use-project-capabilities'
 
 export default function MCPChangeSetsPage() {
   const { projectId } = useProjectContext()
-  return <MCPChangeSetWorkspace key={projectId ?? 'none'} />
+  const [params] = useSearchParams()
+  const actor = useAuthStore((state) => `${state.user?.id}:${state.organizationId}`)
+  return (
+    <MCPChangeSetWorkspace key={`${projectId}:${params.get('focus')}:${actor}`} scope={actor} />
+  )
 }
 
-function MCPChangeSetWorkspace() {
+function MCPChangeSetWorkspace({ scope }: { scope: string }) {
   const { projectId } = useProjectContext()
   const { canEdit, permissions } = useProjectCapabilities()
   const [searchParams] = useSearchParams()
   const focusId = searchParams.get('focus')
   const { message } = App.useApp()
   const queryClient = useQueryClient()
+  const active = useRef(true)
+  const [actionError, setActionError] = useState<unknown>(null)
+  useEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const changeSet = useQuery({
-    queryKey: ['mcp-change-set', projectId, focusId],
+    queryKey: ['mcp-change-set', scope, projectId, focusId],
     queryFn: async () => {
       const result = await getMCPChangeSet(required(focusId))
       if (result.data.project_id !== projectId)
         throw new Error('该变更集不属于当前项目，请核对项目和 ChangeSet ID。')
+      if (result.data.id !== focusId)
+        throw new Error('返回的变更集 ID 与当前定位不一致，请重新读取。')
       return result
     },
-    enabled: Boolean(focusId),
+    enabled: Boolean(projectId && focusId),
   })
   const approve = useMutation({
-    mutationFn: () => approveMCPChangeSet(required(focusId), '前端人工批准'),
+    mutationFn: (changeSetId: string) => approveMCPChangeSet(changeSetId, '前端人工批准'),
   })
   const review = useMutation({
-    mutationFn: ({ itemId, decision }: { itemId: string; decision: 'accept' | 'reject' }) =>
-      reviewMCPChangeItem(
-        required(focusId),
-        itemId,
-        decision,
-        changeSet.data?.data.approval?.id ?? null,
-      ),
+    mutationFn: ({
+      changeSetId,
+      itemId,
+      decision,
+      approvalId,
+    }: {
+      changeSetId: string
+      itemId: string
+      decision: 'accept' | 'reject'
+      approvalId: string | null
+    }) => reviewMCPChangeItem(changeSetId, itemId, decision, approvalId),
   })
 
-  async function refresh(): Promise<void> {
-    await queryClient.invalidateQueries({ queryKey: ['mcp-change-set', projectId, focusId] })
+  async function updateReceipt(result: MCPChangeSetEnvelope): Promise<void> {
+    if (result.data.id !== focusId || result.data.project_id !== projectId)
+      throw new Error('审核回执与当前变更集或项目不一致，请重新读取。')
+    queryClient.setQueryData(['mcp-change-set', scope, projectId, focusId], result)
+    await queryClient.invalidateQueries({ queryKey: ['mcp-change-set', scope, projectId, focusId] })
   }
 
   async function approveChangeSet(): Promise<void> {
-    if (!editable) return
+    if (!editable || busy) return
+    setActionError(null)
     try {
-      await approve.mutateAsync()
-      await refresh()
-      void message.success('MCP 变更集已完成人工批准')
+      const result = await approve.mutateAsync(required(focusId))
+      if (!active.current) return
+      confirmApprovalReceipt(result)
+      await updateReceipt(result)
+      if (active.current) void message.success('MCP 变更集已完成人工批准')
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (active.current) {
+        setActionError(error)
+        void message.error(apiErrorMessage(error))
+      }
     }
   }
 
   async function reviewItem(itemId: string, decision: 'accept' | 'reject'): Promise<void> {
-    if (!editable) return
+    if (!editable || busy) return
+    setActionError(null)
     try {
-      await review.mutateAsync({ itemId, decision })
-      await refresh()
-      if (
-        decision === 'accept' &&
-        data?.items.some((item) => item.id === itemId && item.item_type === 'workflow')
+      const result = await review.mutateAsync({
+        changeSetId: required(focusId),
+        itemId,
+        decision,
+        approvalId: approvalIdentity(data),
+      })
+      if (!active.current) return
+      confirmReviewReceipt(result, itemId, decision)
+      await updateReceipt(result)
+      await Promise.all(
+        materializedQueryPrefixes(result.data, itemId).map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, projectId] }),
+        ),
       )
-        await queryClient.invalidateQueries({ queryKey: ['workflows', data.project_id] })
-      void message.success(decision === 'accept' ? '变更项已接受并物化' : '变更项已拒绝')
+      if (active.current)
+        void message.success(decision === 'accept' ? '变更项已接受并物化' : '变更项已拒绝')
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (active.current) {
+        setActionError(error)
+        void message.error(apiErrorMessage(error))
+      }
     }
   }
 
+  async function readAfterFailure(): Promise<void> {
+    const [nextData, nextPermission] = await Promise.all([
+      changeSet.refetch(),
+      permissions.refetch(),
+    ])
+    if (active.current && nextData.isSuccess && nextPermission.isSuccess) setActionError(null)
+  }
+
   const data = changeSet.data?.data
-  const editable = canEdit && Boolean(data)
+  const editable = editableRead(canEdit, permissions, changeSet) && actionError === null
+  const busy = approve.isPending || review.isPending
   return (
     <Flex vertical gap={16}>
       <div className="page-heading">
@@ -97,17 +164,10 @@ function MCPChangeSetWorkspace() {
       {!focusId ? (
         <Alert showIcon type="info" title="请从资源发现结果打开一个 MCP 变更集。" />
       ) : null}
-      {changeSet.isError ? (
-        <Alert
-          showIcon
-          type="error"
-          title={apiErrorMessage(changeSet.error)}
-          action={<Button onClick={() => void changeSet.refetch()}>重试</Button>}
-        />
-      ) : null}
-      {permissions.isError ? (
-        <Alert showIcon type="error" title={apiErrorMessage(permissions.error)} />
-      ) : null}
+      <QueryFailureNotice queries={[changeSet, permissions]} />
+      <ActionFailure error={actionError} onRead={readAfterFailure} />
+      <ReadStaleNotice hasData={Boolean(data)} failed={changeSet.isError} />
+
       <Card
         loading={changeSet.isLoading}
         title={data?.title ?? '受控变更集'}
@@ -116,9 +176,10 @@ function MCPChangeSetWorkspace() {
         {data ? (
           <MCPReviewContent
             data={data}
+            envelope={changeSet.data!}
             editable={editable}
             approvePending={approve.isPending}
-            reviewPending={review.isPending}
+            reviewPending={busy}
             onApprove={approveChangeSet}
             onReview={reviewItem}
           />
@@ -137,12 +198,14 @@ type MCPReviewActions = {
 
 function MCPReviewContent({
   data,
+  envelope,
   editable,
   approvePending,
   reviewPending,
   onApprove,
   onReview,
 }: MCPReviewActions & {
+  envelope: MCPChangeSetEnvelope
   approvePending: boolean
   onApprove: () => Promise<void>
 }) {
@@ -152,15 +215,17 @@ function MCPReviewContent({
         <Tag color="blue">{data.governance.risk_level}</Tag>
         <Typography.Text code>{data.id}</Typography.Text>
       </Space>
-      {data.governance.manual_approval_required && !data.approval ? (
+      <MCPGovernanceSummary envelope={envelope} />
+      {data.governance.manual_approval_required && data.approval?.decision !== 'approved' ? (
         <Alert
           showIcon
           type="warning"
           title="高风险变更必须先人工批准"
+          description="审批尚未通过，服务端会拒绝接受并物化；警告提示不替代审批。"
           action={
             <Button
               aria-label="批准变更集"
-              disabled={!editable}
+              disabled={!editable || reviewPending || Boolean(data.approval)}
               icon={<AuditOutlined />}
               loading={approvePending}
               onClick={() => void onApprove()}
@@ -235,13 +300,121 @@ function MCPChangeItemCard({
           baseRevision={data.base_revision ?? null}
         />
       ) : null}
-      <pre className="code-preview">{JSON.stringify(item.proposed_content, null, 2)}</pre>
+      <MCPStructuredPreview item={item} projectId={data.project_id} />
+      <MCPMaterializedResult item={item} projectId={data.project_id} changeSetId={data.id} />
+      <ItemReviewRecord item={item} />
+      <Collapse
+        items={[
+          {
+            key: 'raw',
+            label: '完整提案（只读核对）',
+            children: <ResponseCodeReader title="完整提案" value={item.proposed_content} />,
+          },
+        ]}
+      />
     </Card>
   )
 }
 
+function ReadStaleNotice({ hasData, failed }: { hasData: boolean; failed: boolean }) {
+  if (!hasData || !failed) return null
+  return <Alert type="warning" title="读取失败，保留的审核证据可能过期；重新读取成功前不能审核" />
+}
+
+function ActionFailure({ error, onRead }: { error: unknown; onRead: () => Promise<void> }) {
+  if (!error) return null
+  const traceId = apiErrorTraceId(error)
+  return (
+    <Alert
+      showIcon
+      type="error"
+      title="审核结果未确认"
+      action={<Button onClick={() => void onRead()}>重新读取变更集</Button>}
+      description={
+        <Space orientation="vertical">
+          <Typography.Text>{apiErrorMessage(error)}</Typography.Text>
+          {traceId && <Typography.Text copyable>Trace ID: {traceId}</Typography.Text>}
+        </Space>
+      }
+    />
+  )
+}
+
+function confirmApprovalReceipt(result: MCPChangeSetEnvelope): void {
+  if (result.data.approval?.decision !== 'approved' || !result.data.approval.id)
+    throw new Error('服务端回执未确认审批已通过，请重新读取变更集核对。')
+}
+
+function confirmReviewReceipt(
+  result: MCPChangeSetEnvelope,
+  itemId: string,
+  decision: 'accept' | 'reject',
+): void {
+  const item = result.data.items.find((candidate) => candidate.id === itemId)
+  const expected = decision === 'accept' ? 'accepted' : 'rejected'
+  if (!item || item.review_status !== expected)
+    throw new Error('服务端回执未确认被操作项的审核状态，请重新读取变更集核对。')
+  if (decision === 'accept' && !hasConfirmedMaterialization(item))
+    throw new Error('服务端回执未确认匹配的物化结果，请重新读取变更集核对。')
+}
+
+function hasConfirmedMaterialization(item: MCPChangeItem): boolean {
+  if (!item.materialized_resource_id) return false
+  if (item.item_type === 'test_plan_update') return item.materialized_resource_type === 'test_plan'
+  return (
+    ['workflow', 'test_design', 'test_case'].includes(item.item_type) &&
+    item.materialized_resource_type === item.item_type
+  )
+}
+
+function materializedQueryPrefixes(data: MCPChangeSet, itemId: string): string[] {
+  const item = data.items.find((candidate) => candidate.id === itemId)
+  if (!item || item.review_status !== 'accepted') return []
+  if (item.materialized_resource_type === 'workflow') return ['workflows']
+  if (item.materialized_resource_type === 'test_case')
+    return ['test-cases', 'test-case-options', 'asset-directory-counts']
+  if (item.materialized_resource_type === 'test_plan')
+    return ['test-plans', 'test-plan', 'asset-plans']
+  return []
+}
+
+function ItemReviewRecord({ item }: { item: MCPChangeItem }) {
+  return (
+    <Descriptions
+      column={2}
+      size="small"
+      items={[
+        { label: '审核人 ID', children: item.reviewed_by_id ?? '未提供' },
+        { label: '审核时间', children: item.reviewed_at ?? '未提供' },
+        { label: '审核说明', children: item.review_note || '未提供' },
+      ]}
+    />
+  )
+}
+
+function editableRead(
+  canEdit: boolean,
+  permissions: { isSuccess: boolean; isError: boolean },
+  changeSet: { isSuccess: boolean; isError: boolean },
+): boolean {
+  return (
+    canEdit &&
+    permissions.isSuccess &&
+    !permissions.isError &&
+    changeSet.isSuccess &&
+    !changeSet.isError
+  )
+}
+function approvalIdentity(data: MCPChangeSet | undefined): string | null {
+  return data?.approval?.id ?? null
+}
+
 function materializationDisabled(editable: boolean, pending: boolean, data: MCPChangeSet): boolean {
-  return !editable || pending || (data.governance.manual_approval_required && !data.approval)
+  return (
+    !editable ||
+    pending ||
+    (data.governance.manual_approval_required && data.approval?.decision !== 'approved')
+  )
 }
 
 function WorkflowReviewSummary({
@@ -304,11 +477,6 @@ function ControlWorkflowReviewSummary({
           projectId={projectId}
           proposalId={item.id}
         />
-        {item.materialized_resource_id ? (
-          <Link to={`/projects/${projectId}/workflows?focus=${item.materialized_resource_id}`}>
-            查看已创建草稿
-          </Link>
-        ) : null}
       </Space>
       {(definition.regions ?? []).map((region) => (
         <Typography.Text key={region.id}>

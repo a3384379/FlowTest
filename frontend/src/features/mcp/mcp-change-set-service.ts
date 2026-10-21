@@ -1,4 +1,5 @@
 import { apiClient, type WorkflowDefinition } from '../../lib/api'
+import type { TestDesignDocument } from '../test-engineering/test-engineering-service'
 
 export type MCPChangeItem = {
   id: string
@@ -47,7 +48,7 @@ export type MCPChangeSet = {
   items: MCPChangeItem[]
 }
 
-type MCPChangeSetEnvelope = {
+export type MCPChangeSetEnvelope = {
   data: MCPChangeSet
   warnings: string[]
   trace_id: string
@@ -98,6 +99,29 @@ export async function reviewMCPChangeItem(
         note: '前端人工审核',
         ...(decision === 'accept' && approvalId ? { approval_id: approvalId } : {}),
       },
+    )
+  ).data
+}
+
+export type MCPMaterializedDesign = {
+  id: string
+  project_id: string
+  name: string
+  status: string
+  fingerprint: string
+  source_change_set_id: string
+  reviewed_by_id: string | null
+  reviewed_at: string | null
+  design: TestDesignDocument
+}
+
+export async function getMCPMaterializedDesign(
+  changeSetId: string,
+  itemId: string,
+): Promise<MCPMaterializedDesign> {
+  return (
+    await apiClient.get<MCPMaterializedDesign>(
+      `/mcp/write/change-sets/${encodeURIComponent(changeSetId)}/items/${encodeURIComponent(itemId)}/materialized-design`,
     )
   ).data
 }
