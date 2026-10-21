@@ -124,12 +124,12 @@ function ServiceFields({ index, names }: { index: number; names: string[] }) {
                     <Input maxLength={128} />
                   </Form.Item>
                 </Col>
-                <Col xs={20} sm={11}>
+                <Col xs={24} sm={11}>
                   <Form.Item name={[field.name, 'value']} label={`变量${variableIndex + 1}值`}>
                     <Input maxLength={1000} />
                   </Form.Item>
                 </Col>
-                <Col xs={4} sm={4}>
+                <Col xs={24} sm={4}>
                   <Button danger onClick={() => remove(field.name)}>
                     删除变量
                   </Button>
@@ -251,7 +251,7 @@ function SeedFields({ names }: { names: string[] }) {
                     <Select options={names.map((value) => ({ value, label: value }))} />
                   </Form.Item>
                 </Col>
-                <Col xs={20} sm={11}>
+                <Col xs={24} sm={11}>
                   <Form.Item
                     name={[field.name, 'path']}
                     label={`Seed ${index + 1}路径`}
@@ -260,7 +260,7 @@ function SeedFields({ names }: { names: string[] }) {
                     <Input placeholder="/seed" />
                   </Form.Item>
                 </Col>
-                <Col xs={4} sm={4}>
+                <Col xs={24} sm={4}>
                   <Button danger onClick={() => remove(field.name)}>
                     删除 Seed
                   </Button>

@@ -40,3 +40,13 @@
     margin-inline-start: 0;
   }
 }
+
+@media (max-width: 600px) {
+  .environment-template-dialog .ant-card-head-title {
+    flex: 0 0 100%;
+    white-space: normal;
+  }
+  .environment-template-dialog .ant-card-extra {
+    width: 100%;
+  }
+}
