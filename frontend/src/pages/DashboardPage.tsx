@@ -126,13 +126,12 @@ function DashboardHeading({
 
 function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState }) {
   const summary = dashboard.summary.data
-  const risk = firstItem(dashboard.risks.data)
-  const impact = firstItem(dashboard.impactRuns.data)
+  const { risk, riskDetail, impact } = currentQualityEvidence(dashboard)
   const decision = firstItem(dashboard.decisions.data)
   const projectId = required(dashboard.projectId)
   const issues = priorityIssues({
     projectId,
-    risk: dashboard.risk.data,
+    risk: riskDetail,
     decision,
     impact,
     recent: dashboard.recent.data,
@@ -142,7 +141,7 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
     <>
       <RiskSummaryCard
         risk={risk}
-        detail={dashboard.risk.data}
+        detail={riskDetail}
         enabled={dashboard.qualityEnabled}
         loading={dashboard.flags.isLoading || dashboard.risks.isLoading}
       />
@@ -178,7 +177,7 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
           <RiskEvidenceCard
             projectId={projectId}
             enabled={dashboard.qualityEnabled}
-            risk={dashboard.risk.data}
+            risk={riskDetail}
             loading={anyLoading(dashboard.risks.isLoading, dashboard.risk.isLoading)}
           />
           <ImpactEvidenceCard
@@ -191,6 +190,14 @@ function ProjectQualityCommandCenter({ dashboard }: { dashboard: DashboardState 
       </div>
     </>
   )
+}
+
+function currentQualityEvidence(dashboard: DashboardState) {
+  return {
+    risk: dashboard.qualityEnabled ? firstItem(dashboard.risks.data) : undefined,
+    riskDetail: dashboard.qualityEnabled ? dashboard.risk.data : undefined,
+    impact: dashboard.impactEnabled ? firstItem(dashboard.impactRuns.data) : undefined,
+  }
 }
 
 function GlobalQualityOverview({ dashboard }: { dashboard: DashboardState }) {

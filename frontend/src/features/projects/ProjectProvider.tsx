@@ -1,8 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useEffect, useMemo, type ReactNode } from 'react'
 import { matchPath, useLocation, useNavigate } from 'react-router-dom'
 
 import { ProjectContext, type ProjectContextValue } from './project-context'
+import type { Project } from '../../lib/api'
 import {
   globalPath,
   isGlobalAdministrationSection,
@@ -26,7 +27,7 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(projectId),
     retry: false,
   })
-  const currentProject = listedProject ?? routeProject.data ?? null
+  const currentProject = resolveCurrentProject(listedProject, projects.isSuccess, routeProject)
   const availableProjects = useMemo(
     () => includeCurrentProject(projects, currentProject),
     [currentProject, projects],
@@ -54,6 +55,17 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     [availableProjects, currentProject, navigate, projectId, section],
   )
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>
+}
+
+function resolveCurrentProject(
+  listed: Project | null,
+  listSuccessful: boolean,
+  detail: UseQueryResult<Project>,
+): Project | null {
+  if (listSuccessful && listed) return listed
+  if (detail.isSuccess) return detail.data
+  const previous = listed ?? detail.data
+  return previous ? { ...previous, role: null } : null
 }
 
 function includeCurrentProject(

@@ -31,7 +31,7 @@ from app.models.runner_fabric import (
     RunnerTask,
 )
 from app.models.workflows import WorkflowExecution
-from app.repositories.runner_fabric import RunnerFabricRepository
+from app.repositories.runner_fabric import RunnerEventInspection, RunnerFabricRepository
 from app.runner.results import RUNNER_EXECUTION_RESULT_ADAPTER, RunnerExecutionResult
 from app.schemas.runner_fabric import (
     RunnerAcquirePermitResponse,
@@ -261,7 +261,7 @@ class RunnerFabricService:
 
     async def event_page(
         self, *, actor: User, page: int, limit: int, task_id: UUID | None = None
-    ) -> tuple[list[RunnerEvent], int]:
+    ) -> tuple[list[RunnerEventInspection], int]:
         self._require_admin(actor)
         if task_id is not None:
             await self.inspect_task(actor=actor, task_id=task_id)

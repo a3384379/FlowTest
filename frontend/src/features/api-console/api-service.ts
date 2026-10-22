@@ -202,10 +202,12 @@ export async function getApiDetail(
   projectId: string,
   apiId: string,
   version?: number,
+  signal?: AbortSignal,
 ): Promise<ApiDetail> {
   return (
     await apiClient.get<ApiDetail>(`/projects/${projectId}/apis/${apiId}`, {
       params: version ? { version } : undefined,
+      signal,
     })
   ).data
 }

@@ -34,6 +34,7 @@ export default function ReleaseEvidencePicker({
   onChange,
   onSearch,
   searchValue = '',
+  disabled = false,
 }: {
   projectId: string
   kind: ReleaseEvidenceKind
@@ -45,16 +46,19 @@ export default function ReleaseEvidencePicker({
   onChange?: (value: string | undefined) => void
   onSearch?: (term: string) => void
   searchValue?: string
+  disabled?: boolean
 }) {
   const [selected, setSelected] = useState<EvidenceOption | null>(null)
   const [lookupId, setLookupId] = useState('')
   const [searchDraft, setSearchDraft] = useState(searchValue)
+  const controlsDisabled = disabled || Boolean(availability)
   const lookup = useQuery({
     queryKey: ['release-evidence-reference', projectId, kind, lookupId],
     queryFn: () => readEvidenceReference(projectId, kind, lookupId),
-    enabled: Boolean(lookupId && !availability),
+    enabled: Boolean(lookupId) && !controlsDisabled,
   })
   function select(id: string | undefined) {
+    if (disabled) return
     setSelected(options.find((option) => option.id === id) ?? lookup.data ?? null)
     onChange?.(id)
   }
@@ -62,12 +66,12 @@ export default function ReleaseEvidencePicker({
   return (
     <Space orientation="vertical" className="full-width">
       <Typography.Text type="secondary">
-        {availability ?? directoryStatus(query, label)}
+        {directoryStatus(query, label, availability)}
       </Typography.Text>
       <Select
         aria-label={label}
         value={value}
-        disabled={Boolean(availability)}
+        disabled={controlsDisabled}
         allowClear
         showSearch
         optionFilterProp="label"
@@ -90,16 +94,19 @@ export default function ReleaseEvidencePicker({
           </Space>
         )}
       />
-      {!availability && <CatalogPagination query={query} label={`${label}证据`} />}
+      {!availability && (
+        <CatalogPagination query={query} label={`${label}证据`} disabled={disabled} />
+      )}
       {onSearch && (
         <Input.Search
           aria-label={`${label}跨页搜索`}
           placeholder="按运行/任务ID、关联ID或状态跨页搜索"
           allowClear
-          disabled={Boolean(availability)}
+          disabled={controlsDisabled}
           value={searchDraft}
           onChange={(event) => setSearchDraft(event.target.value)}
           onSearch={(term) => {
+            if (disabled) return
             setSearchDraft(term.trim())
             onSearch(term.trim())
           }}
@@ -110,7 +117,7 @@ export default function ReleaseEvidencePicker({
         aria-label={`${label}精确ID`}
         placeholder="粘贴完整证据ID，先核对再选入"
         enterButton="核对"
-        disabled={Boolean(availability)}
+        disabled={controlsDisabled}
         maxLength={36}
         onSearch={(id) => setLookupId(id.trim())}
       />
@@ -121,7 +128,9 @@ export default function ReleaseEvidencePicker({
             {lookup.data.label} · {lookup.data.id}
           </Typography.Text>
           <Button
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return
               setSelected(lookup.data)
               onChange?.(lookup.data.id)
             }}
@@ -144,7 +153,12 @@ function selectedOptions(
   return [selected, ...options]
 }
 
-function directoryStatus(query: EvidenceDirectory, label: string): string {
+function directoryStatus(
+  query: EvidenceDirectory,
+  label: string,
+  availability: string | null,
+): string {
+  if (availability !== null) return availability
   if (query.isError) return `${label}目录读取失败，不能按无数据处理`
   if (query.isPending) return `正在读取${label}目录`
   if (query.data?.total === 0) return `当前项目没有${label}证据`

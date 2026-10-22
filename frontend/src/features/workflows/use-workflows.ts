@@ -92,7 +92,7 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     queryFn: () => getProjectPermission(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const canEdit = permissions.data?.capabilities.includes('edit') ?? false
+  const canEdit = permissions.isSuccess && permissions.data.capabilities.includes('edit')
   const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
   const [workflowSearch, setWorkflowSearchValue] = useRouteScopedState(projectId, null, '')
   const [workflowPage, setWorkflowPage] = useRouteScopedState(projectId, null, 1)

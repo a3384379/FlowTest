@@ -51,6 +51,122 @@ const detail: AIChangeSetDetail = {
 }
 
 describe('AIChangeSetsPage', () => {
+  it.each(['accept', 'reject'] as const)(
+    'locks submitted review inputs while %s is pending and retains them after failure',
+    async (decision) => {
+      handlers(detail)
+      let release!: () => void
+      const response = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let releaseRefresh!: () => void
+      const refresh = new Promise<void>((resolve) => {
+        releaseRefresh = resolve
+      })
+      let refreshing = false
+      const submissions: unknown[] = []
+      const reviewedItem = completedReviewItem(decision)
+      server.use(
+        http.get(`/api/v1/ai/change-sets/${changeSetId}`, async () => {
+          if (submissions.length === 2) {
+            refreshing = true
+            await refresh
+          }
+          return HttpResponse.json(
+            submissions.length === 2 ? { ...detail, items: [reviewedItem] } : detail,
+          )
+        }),
+        http.post(
+          `/api/v1/ai/change-sets/${changeSetId}/items/${item.id}/${decision}`,
+          async ({ request }) => {
+            submissions.push(await request.json())
+            if (submissions.length === 1) {
+              await response
+              return HttpResponse.json(
+                {
+                  error: {
+                    code: 'UNAVAILABLE',
+                    message: '审核暂不可用',
+                    trace_id: 'pending-review',
+                  },
+                },
+                { status: 503 },
+              )
+            }
+            return HttpResponse.json(reviewedItem)
+          },
+        ),
+      )
+      renderPage()
+      const browser = userEvent.setup()
+      await browser.click(
+        await screen.findByRole('button', { name: decision === 'accept' ? '审核并接受' : '拒绝' }),
+      )
+      const title = await screen.findByText(
+        decision === 'accept' ? '编辑并接受变更项' : '拒绝变更项',
+        { selector: '.ant-modal-title' },
+      )
+      const dialog = title.closest('.ant-modal') as HTMLElement
+      const note = within(dialog).getByLabelText('审核备注')
+      const content = decision === 'accept' ? within(dialog).getByLabelText('变更内容 JSON') : null
+      const draft = '{"name":"提交时确认的流程"}'
+      if (content) {
+        await browser.click(content)
+        await browser.clear(content)
+        await browser.paste(draft)
+      }
+      await browser.click(note)
+      await browser.paste('已核对固定来源')
+      const confirm = within(dialog).getByRole('button', { name: 'OK' })
+      await browser.click(confirm)
+      await waitFor(() => expect(submissions).toHaveLength(1))
+      try {
+        if (content) {
+          await browser.click(content)
+          await browser.keyboard('{End}x')
+          expect.soft(content).toHaveAttribute('readonly')
+          expect.soft(content).toHaveValue(draft)
+        }
+        await browser.click(note)
+        await browser.keyboard('{End}x')
+        expect.soft(note).toHaveAttribute('readonly')
+        expect.soft(note).toHaveValue('已核对固定来源')
+        await browser.click(confirm)
+        expect(submissions).toHaveLength(1)
+      } finally {
+        release()
+      }
+      expect(
+        await within(dialog).findByText('审核暂不可用（Trace ID: pending-review）'),
+      ).toBeVisible()
+      expect(note).not.toHaveAttribute('readonly')
+      expect(note).toHaveValue('已核对固定来源')
+      if (content) {
+        expect(content).not.toHaveAttribute('readonly')
+        expect(content).toHaveValue(draft)
+      }
+      expect(submissions).toEqual([
+        decision === 'accept'
+          ? { content: { name: '提交时确认的流程' }, note: '已核对固定来源' }
+          : { note: '已核对固定来源' },
+      ])
+      await browser.click(confirm)
+      await waitFor(() => expect(submissions).toHaveLength(2))
+      await waitFor(() => expect(refreshing).toBe(true))
+      try {
+        expect.soft(note).toHaveAttribute('readonly')
+        if (content) expect.soft(content).toHaveAttribute('readonly')
+        await browser.click(note)
+        await browser.keyboard('{End}x')
+        expect.soft(note).toHaveValue('已核对固定来源')
+      } finally {
+        releaseRefresh()
+      }
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      expect(submissions[1]).toEqual(submissions[0])
+    },
+  )
+
   it('paginates risk choices inside the dialog while keeping the selected risk binding', async () => {
     handlers(detail)
     let submitted: Record<string, unknown> | null = null
@@ -583,4 +699,15 @@ function renderPage(initialEntry?: string) {
       </AntdApp>
     </ConfigProvider>,
   )
+}
+
+function completedReviewItem(decision: 'accept' | 'reject'): AIChangeItem {
+  return {
+    ...item,
+    proposed_content: decision === 'accept' ? { name: '提交时确认的流程' } : item.proposed_content,
+    review_status: decision === 'accept' ? 'accepted' : 'rejected',
+    review_note: '已核对固定来源',
+    materialized_resource_type: decision === 'accept' ? 'workflow' : null,
+    materialized_resource_id: decision === 'accept' ? 'saved-draft' : null,
+  }
 }

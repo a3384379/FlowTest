@@ -1,9 +1,10 @@
 import { useCatalogQuery } from '../../lib/catalog-query'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
-import { useState } from 'react'
+import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { UNSAFE_DataRouterContext, useLocation } from 'react-router-dom'
 
-import { apiErrorMessage } from '../../lib/api'
+import { apiErrorWithTrace } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useReportScope } from './report-scope'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
@@ -26,7 +27,10 @@ export function useReports(initialExecutionId?: string) {
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
   const { permissions } = useProjectCapabilities()
-  const canManageNotifications = permissions.data?.capabilities.includes('manage_members') ?? false
+  const canManageNotifications =
+    permissions.isSuccess && permissions.data.capabilities.includes('manage_members')
+  const isCurrent = useReportCommandContext(projectId)
+  const creating = useRef(false)
   const [selectedExecutionId, setSelectedExecutionId] = useRouteScopedSelection(
     projectId,
     initialExecutionId ?? null,
@@ -70,52 +74,60 @@ export function useReports(initialExecutionId?: string) {
     {},
   )
   const exportReport = useMutation({
-    mutationFn: (executionId: string) => exportReportHtml(required(projectId), executionId),
+    mutationFn: (input: { projectId: string; executionId: string }) =>
+      exportReportHtml(input.projectId, input.executionId),
   })
   const createWebhook = useMutation({
-    mutationFn: (input: CreateNotificationWebhookInput) =>
-      createNotificationWebhook(required(projectId), input),
+    mutationFn: (input: { projectId: string; definition: CreateNotificationWebhookInput }) =>
+      createNotificationWebhook(input.projectId, input.definition),
+    onSuccess: async (_created, input) => {
+      await queryClient.invalidateQueries({ queryKey: ['notification-webhooks', input.projectId] })
+    },
   })
   const toggleWebhook = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      setNotificationWebhookEnabled(required(projectId), id, enabled),
+    mutationFn: (input: { projectId: string; id: string; enabled: boolean }) =>
+      setNotificationWebhookEnabled(input.projectId, input.id, input.enabled),
+    onSuccess: async (_updated, input) => {
+      await queryClient.invalidateQueries({ queryKey: ['notification-webhooks', input.projectId] })
+    },
   })
 
   async function exportHtml(executionId: string) {
+    if (!projectId || !isCurrent()) return
+    const project = projectId
     try {
-      const artifact = await exportReport.mutateAsync(executionId)
-      await downloadArtifact(required(projectId), artifact)
-      void message.success('HTML 报告已导出')
+      const artifact = await exportReport.mutateAsync({ projectId: project, executionId })
+      if (!isCurrent()) return
+      await downloadArtifact(project, artifact)
+      if (isCurrent()) void message.success('HTML 报告已导出')
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
     }
   }
 
   async function addWebhook(input: CreateNotificationWebhookInput) {
-    if (!canManageNotifications) return
+    if (!projectId || !canManageNotifications || !isCurrent() || creating.current) return
+    creating.current = true
     try {
-      const created = await createWebhook.mutateAsync(input)
+      const created = await createWebhook.mutateAsync({ projectId, definition: input })
+      if (!isCurrent()) return
       setWebhookOpen(false)
       setRevealedSecret(created.secret)
-      await refresh('notification-webhooks')
       void message.success('通知 Webhook 已创建')
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
+    } finally {
+      creating.current = false
     }
   }
 
   async function setWebhookEnabled(id: string, enabled: boolean) {
-    if (!canManageNotifications) return
+    if (!projectId || !canManageNotifications || !isCurrent()) return
     try {
-      await toggleWebhook.mutateAsync({ id, enabled })
-      await refresh('notification-webhooks')
+      await toggleWebhook.mutateAsync({ projectId, id, enabled })
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorWithTrace(error))
     }
-  }
-
-  async function refresh(resource: string) {
-    await queryClient.invalidateQueries({ queryKey: [resource, projectId] })
   }
 
   return {
@@ -144,6 +156,21 @@ export function useReports(initialExecutionId?: string) {
     setWebhookEnabled,
     creatingWebhook: createWebhook.isPending,
   }
+}
+
+function useReportCommandContext(projectId: string | null) {
+  const location = useLocation()
+  const router = useContext(UNSAFE_DataRouterContext)
+  const context = useMemo(() => ({ projectId, key: location.key }), [projectId, location.key])
+  const active = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    active.current = context
+    return () => {
+      active.current = null
+    }
+  }, [context])
+  return () =>
+    active.current === context && (!router || router.router.state.location.key === location.key)
 }
 
 function required(value: string | null): string {

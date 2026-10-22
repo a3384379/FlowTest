@@ -201,8 +201,8 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     refreshCatalog: () =>
       Promise.all([cases.refetch(), suites.refetch(), directoryCounts.refetch()]),
     permissions,
-    canEdit: permissions.data?.capabilities.includes('edit') ?? false,
-    canExecute: permissions.data?.capabilities.includes('execute') ?? false,
+    canEdit: permissions.isSuccess && permissions.data.capabilities.includes('edit'),
+    canExecute: permissions.isSuccess && permissions.data.capabilities.includes('execute'),
     diff,
     setDiff,
     saveCase: saveCaseMutation.mutateAsync,

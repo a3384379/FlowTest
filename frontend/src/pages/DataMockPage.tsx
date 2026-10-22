@@ -39,12 +39,14 @@ import {
   type CredentialInput,
 } from '../features/data-sources/data-source-service'
 import { useProjectContext } from '../features/projects/use-project-context'
+import { useAuthStore } from '../features/auth/auth-store'
 import { apiErrorMessage, type Credential, type MockService } from '../lib/api'
 
 export default function DataMockPage() {
   const { projectId, currentProject } = useProjectContext()
+  const systemAdmin = useAuthStore((state) => state.user?.is_system_admin === true)
   if (!projectId || !currentProject) return <Card>请选择项目</Card>
-  const canEdit = currentProject.role !== 'viewer'
+  const canEdit = systemAdmin || currentProject.role === 'owner' || currentProject.role === 'editor'
   return (
     <Space orientation="vertical" className="full-width" size="large">
       <div>

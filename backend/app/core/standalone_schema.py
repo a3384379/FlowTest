@@ -506,6 +506,7 @@ async def _ensure_s47_test_design_columns(connection: AsyncConnection) -> None:
         ("warnings", "JSON NOT NULL DEFAULT '[]'"),
         ("confidence", "FLOAT NOT NULL DEFAULT 1"),
         ("review_requirements", "JSON NOT NULL DEFAULT '[]'"),
+        ("materialized_assets", "JSON NOT NULL DEFAULT '[]'"),
     ):
         await _add_column_if_missing(
             connection,

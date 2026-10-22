@@ -5,17 +5,19 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import get_session
 from app.core.security import password_service
-from app.domain.access import ProjectRole
+from app.domain.access import ProjectRole, TeamGrantRole
 from app.main import app
 from app.models import Base
-from app.models.access import Project, ProjectMember, User
+from app.models.access import Project, ProjectMember, ProjectTeamGrant, Team, TeamMember, User
 from app.models.api_assets import APIDefinition, APIVersion, Environment
 from app.models.executions import APICallExecution
+from app.models.organizations import Organization, OrganizationMember
 from app.models.workflows import Workflow, WorkflowExecution, WorkflowVersion
 
 ADMIN_PASSWORD = "admin-password-123!"
@@ -27,6 +29,7 @@ class DashboardTestContext:
     client: AsyncClient
     visible_project_id: UUID
     hidden_project_id: UUID
+    sessions: async_sessionmaker[AsyncSession]
 
 
 @pytest.fixture
@@ -51,7 +54,7 @@ async def dashboard_context() -> AsyncIterator[DashboardTestContext]:
         transport=ASGITransport(app=app, raise_app_exceptions=False),
         base_url="http://test",
     ) as client:
-        yield DashboardTestContext(client, visible_project_id, hidden_project_id)
+        yield DashboardTestContext(client, visible_project_id, hidden_project_id, session_maker)
     app.dependency_overrides.clear()
     await engine.dispose()
 
@@ -116,6 +119,179 @@ async def test_dashboard_project_scope_preserves_project_isolation(
     assert global_summary.json()["project_count"] == 2
     assert global_summary.json()["api_count"] == 2
     assert global_summary.json()["workflow_count"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", [TeamGrantRole.VIEWER, TeamGrantRole.EDITOR])
+async def test_dashboard_team_only_scope_matches_project_directory_and_revocation(
+    dashboard_context: DashboardTestContext, role: TeamGrantRole
+) -> None:
+    context = dashboard_context
+    await _grant_team_access(context, role=role, remove_direct=True)
+    headers = await _login_headers(
+        context.client, email="viewer@example.com", password=VIEWER_PASSWORD
+    )
+    project_id = str(context.visible_project_id)
+    directory = await context.client.get("/api/v1/projects", headers=headers)
+    assert directory.status_code == 200
+    assert {item["id"] for item in directory.json()["items"]} == {project_id}
+    permission = await context.client.get(
+        f"/api/v1/projects/{project_id}/permissions", headers=headers
+    )
+    assert permission.status_code == 200 and permission.json()["effective_role"] == role.value
+    summary = await context.client.get(
+        "/api/v1/dashboard/summary", params={"project_id": project_id}, headers=headers
+    )
+    aggregate = await context.client.get("/api/v1/dashboard/summary", headers=headers)
+    assert summary.status_code == aggregate.status_code == 200
+    assert summary.json()["project_count"] == aggregate.json()["project_count"] == 1
+    assert summary.json()["today_total"] == aggregate.json()["today_total"] == 2
+    recent_ids: set[str] = set()
+    for page in (1, 2):
+        recent = await context.client.get(
+            "/api/v1/dashboard/recent-executions",
+            params={"project_id": project_id, "page": page, "page_size": 1},
+            headers=headers,
+        )
+        assert recent.status_code == 200 and recent.json()["total"] == 2
+        assert {item["project_id"] for item in recent.json()["items"]} == {project_id}
+        recent_ids.update(item["id"] for item in recent.json()["items"])
+    assert len(recent_ids) == 2
+    hidden = await context.client.get(
+        "/api/v1/dashboard/summary",
+        params={"project_id": str(context.hidden_project_id)},
+        headers=headers,
+    )
+    assert hidden.status_code == 404 and hidden.json()["error"]["trace_id"]
+    async with context.sessions() as session:
+        await session.execute(
+            delete(ProjectTeamGrant).where(
+                ProjectTeamGrant.project_id == context.visible_project_id
+            )
+        )
+        await session.commit()
+    revoked = await context.client.get(
+        "/api/v1/dashboard/summary", params={"project_id": project_id}, headers=headers
+    )
+    assert revoked.status_code == 404 and revoked.json()["error"]["trace_id"]
+    aggregate = await context.client.get("/api/v1/dashboard/summary", headers=headers)
+    recent = await context.client.get("/api/v1/dashboard/recent-executions", headers=headers)
+    assert aggregate.json()["project_count"] == recent.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_dashboard_overlapping_team_grants_keep_direct_role_and_do_not_duplicate_assets(
+    dashboard_context: DashboardTestContext,
+) -> None:
+    context = dashboard_context
+    await _grant_team_access(context, role=TeamGrantRole.EDITOR, remove_direct=False)
+    headers = await _login_headers(
+        context.client, email="viewer@example.com", password=VIEWER_PASSWORD
+    )
+    permission = await context.client.get(
+        f"/api/v1/projects/{context.visible_project_id}/permissions", headers=headers
+    )
+    assert permission.status_code == 200 and permission.json()["effective_role"] == "viewer"
+    summary = await context.client.get("/api/v1/dashboard/summary", headers=headers)
+    recent = await context.client.get("/api/v1/dashboard/recent-executions", headers=headers)
+    assert summary.status_code == recent.status_code == 200
+    assert summary.json()["project_count"] == 1
+    assert summary.json()["api_count"] == summary.json()["workflow_count"] == 1
+    assert recent.json()["total"] == len(recent.json()["items"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_dashboard_team_and_admin_scopes_respect_current_organization(
+    dashboard_context: DashboardTestContext,
+) -> None:
+    context = dashboard_context
+    await _grant_team_access(context, role=TeamGrantRole.VIEWER, remove_direct=True)
+    async with context.sessions() as session:
+        actor = await session.scalar(select(User).where(User.email == "admin@example.com"))
+        viewer = await session.scalar(select(User).where(User.email == "viewer@example.com"))
+        assert actor is not None and viewer is not None
+        organizations = [
+            Organization(name=name, slug=name, created_by_id=actor.id)
+            for name in ("dashboard-org-a", "dashboard-org-b")
+        ]
+        session.add_all(organizations)
+        await session.flush()
+        visible = await session.get(Project, context.visible_project_id)
+        hidden = await session.get(Project, context.hidden_project_id)
+        assert visible is not None and hidden is not None
+        visible.organization_id, hidden.organization_id = [item.id for item in organizations]
+        for organization in organizations:
+            session.add(
+                OrganizationMember(
+                    organization_id=organization.id, user_id=viewer.id, role="member"
+                )
+            )
+        team = await session.scalar(select(Team))
+        assert team is not None
+        session.add(
+            ProjectTeamGrant(
+                project_id=hidden.id,
+                team_id=team.id,
+                role=TeamGrantRole.EDITOR,
+                created_by_id=actor.id,
+            )
+        )
+        await session.commit()
+        organization_id = organizations[0].id
+    for email, password in (
+        ("viewer@example.com", VIEWER_PASSWORD),
+        ("admin@example.com", ADMIN_PASSWORD),
+    ):
+        headers = {
+            **await _login_headers(context.client, email=email, password=password),
+            "X-Organization-Id": str(organization_id),
+        }
+        directory = await context.client.get("/api/v1/projects", headers=headers)
+        assert directory.status_code == 200
+        assert {item["id"] for item in directory.json()["items"]} == {
+            str(context.visible_project_id)
+        }
+        summary = await context.client.get("/api/v1/dashboard/summary", headers=headers)
+        recent = await context.client.get("/api/v1/dashboard/recent-executions", headers=headers)
+        assert summary.status_code == recent.status_code == 200
+        assert summary.json()["project_count"] == 1
+        assert recent.json()["total"] == 2
+        hidden = await context.client.get(
+            "/api/v1/dashboard/summary",
+            params={"project_id": str(context.hidden_project_id)},
+            headers=headers,
+        )
+        assert hidden.status_code == 404 and hidden.json()["error"]["trace_id"]
+
+
+async def _grant_team_access(
+    context: DashboardTestContext, *, role: TeamGrantRole, remove_direct: bool
+) -> None:
+    async with context.sessions() as session:
+        viewer = await session.scalar(select(User).where(User.email == "viewer@example.com"))
+        actor = await session.scalar(select(User).where(User.email == "admin@example.com"))
+        assert viewer is not None and actor is not None
+        if remove_direct:
+            await session.execute(
+                delete(ProjectMember).where(
+                    ProjectMember.project_id == context.visible_project_id,
+                    ProjectMember.user_id == viewer.id,
+                )
+            )
+        for index, grant_role in enumerate((role, TeamGrantRole.VIEWER)):
+            team = Team(name=f"dashboard-team-{index}", created_by_id=actor.id)
+            session.add(team)
+            await session.flush()
+            session.add(TeamMember(team_id=team.id, user_id=viewer.id))
+            session.add(
+                ProjectTeamGrant(
+                    project_id=context.visible_project_id,
+                    team_id=team.id,
+                    role=grant_role,
+                    created_by_id=actor.id,
+                )
+            )
+        await session.commit()
 
 
 async def _seed_dashboard(session: AsyncSession) -> tuple[UUID, UUID]:

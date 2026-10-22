@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
-import { apiErrorWithTrace } from '../../lib/api'
+import { apiErrorWithTrace, SessionBoundaryError } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { listImpactRuns } from '../impact/impact-service'
 import { useProjectContext } from '../projects/use-project-context'
@@ -17,6 +17,7 @@ import {
   listAIChangeSets,
   reviewAIChangeItem,
   type AIChangeSetInput,
+  type AIChangeItem,
 } from './ai-change-set-service'
 
 export function useAIChangeSets(initialChangeSetId: string | null = null) {
@@ -50,12 +51,40 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
       decision,
       content,
       note,
+      changeSetId,
     }: {
       itemId: string
       decision: 'accept' | 'reject'
       content?: Record<string, unknown>
       note: string
-    }) => reviewAIChangeItem(required(activeId), itemId, decision, { content, note }),
+      project: string
+      changeSetId: string
+      resourceType: AIChangeItem['item_type']
+    }) => reviewAIChangeItem(changeSetId, itemId, decision, { content, note }),
+    onSuccess: async (result, { project, changeSetId, decision }) => {
+      if (decision === 'accept')
+        await invalidateDraft(queryClient, project, result.materialized_resource_type)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ai-change-set', project, changeSetId] }),
+        queryClient.invalidateQueries({ queryKey: ['ai-change-sets', project] }),
+      ])
+    },
+    onError: async (error, { project, changeSetId, decision, resourceType }) => {
+      if (!(error instanceof SessionBoundaryError)) return
+      await Promise.all([
+        decision === 'accept'
+          ? invalidateDraft(queryClient, project, resourceType, 'none')
+          : Promise.resolve(),
+        queryClient.invalidateQueries({
+          queryKey: ['ai-change-set', project, changeSetId],
+          refetchType: 'none',
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['ai-change-sets', project],
+          refetchType: 'none',
+        }),
+      ])
+    },
   })
 
   async function addChangeSet(input: Omit<AIChangeSetInput, 'project_id'>) {
@@ -83,16 +112,19 @@ export function useAIChangeSets(initialChangeSetId: string | null = null) {
     content: Record<string, unknown> | undefined,
     note: string,
   ) {
-    if (!mayReviewItem(canReview, pending.current, detail.data, itemId)) return false
+    const item = reviewableItem(canReview, pending.current, detail.data, itemId)
+    if (!item) return false
     pending.current = true
     try {
-      const result = await review.mutateAsync({ itemId, decision, content, note })
-      if (decision === 'accept')
-        await invalidateDraft(queryClient, projectId, result.materialized_resource_type)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['ai-change-set', projectId, activeId] }),
-        queryClient.invalidateQueries({ queryKey: ['ai-change-sets', projectId] }),
-      ])
+      await review.mutateAsync({
+        itemId,
+        decision,
+        content,
+        note,
+        project: required(projectId),
+        changeSetId: required(activeId),
+        resourceType: item.item_type,
+      })
       if (!alive.current || current.current !== scope) return false
       void message.success(decision === 'accept' ? '变更项已接受并生成草稿' : '变更项已拒绝')
       return true
@@ -169,6 +201,7 @@ async function invalidateDraft(
   client: ReturnType<typeof useQueryClient>,
   projectId: string | null,
   type: string | null,
+  refetchType: 'active' | 'none' = 'active',
 ) {
   const keys =
     type === 'test_case'
@@ -180,7 +213,9 @@ async function invalidateDraft(
           'asset-directory-counts',
         ]
       : ['workflows', 'workflow', 'workflow-versions']
-  await Promise.all(keys.map((key) => client.invalidateQueries({ queryKey: [key, projectId] })))
+  await Promise.all(
+    keys.map((key) => client.invalidateQueries({ queryKey: [key, projectId], refetchType })),
+  )
 }
 
 function useAIChangeRecords(projectId: string | null, selection: string | null, polling: boolean) {
@@ -213,15 +248,12 @@ function useAIChangeRecords(projectId: string | null, selection: string | null, 
   return { changeSets, detail, activeId }
 }
 
-function mayReviewItem(
+function reviewableItem(
   allowed: boolean,
   pending: boolean,
   detail: import('./ai-change-set-service').AIChangeSetDetail | undefined,
   itemId: string,
-): boolean {
-  return Boolean(
-    allowed &&
-    !pending &&
-    detail?.items.some((item) => item.id === itemId && item.review_status === 'pending'),
-  )
+): AIChangeItem | undefined {
+  if (!allowed || pending) return undefined
+  return detail?.items.find((item) => item.id === itemId && item.review_status === 'pending')
 }

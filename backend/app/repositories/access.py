@@ -201,7 +201,7 @@ class ProjectRepository:
         system_admin: bool,
         organization_id: UUID | None,
         offset: int,
-        limit: int,
+        limit: int | None,
     ) -> tuple[list[tuple[Project, ProjectRole | None]], int]:
         organization_filter = (
             or_(Project.organization_id == organization_id, Project.organization_id.is_(None))
@@ -249,7 +249,8 @@ class ProjectRepository:
             if current is None or role is ProjectRole.EDITOR:
                 accessible[project.id] = (project, role)
         ordered = sorted(accessible.values(), key=lambda item: item[0].created_at, reverse=True)
-        return list(ordered[offset : offset + limit]), len(ordered)
+        end = None if limit is None else offset + limit
+        return list(ordered[offset:end]), len(ordered)
 
     async def list_for_organization(
         self,

@@ -36,6 +36,7 @@ import { iceColors } from '../theme/ice-theme'
 import { ReportTrendChart } from '../features/reports/ReportTrendChart'
 import type { CreateNotificationWebhookInput } from '../features/reports/report-service'
 import { useReports } from '../features/reports/use-reports'
+import { useProjectContext } from '../features/projects/use-project-context'
 import type {
   FailureCategory,
   NotificationDelivery,
@@ -45,6 +46,11 @@ import type {
 } from '../lib/api'
 
 export default function ReportsPage() {
+  const { projectId } = useProjectContext()
+  return <ReportWorkspace key={projectId ?? 'global'} />
+}
+
+function ReportWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
   const reports = useReports(searchParams.get('execution') ?? undefined)
   const state = {
@@ -437,6 +443,7 @@ function WebhookDialog({
       />
       <Form
         form={form}
+        disabled={submitting}
         layout="vertical"
         initialValues={{ events: ['workflow.completed', 'test_plan.completed'] }}
         onFinish={(values) => void onCreate(values)}

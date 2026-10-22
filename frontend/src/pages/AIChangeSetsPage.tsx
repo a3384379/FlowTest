@@ -515,6 +515,7 @@ function ReviewChangeItemDialogContent({
             </Typography.Paragraph>
             <Input.TextArea
               aria-label="变更内容 JSON"
+              readOnly={readOnly || submitting}
               rows={14}
               value={content}
               onChange={(event) => setContent(event.target.value)}
@@ -524,6 +525,7 @@ function ReviewChangeItemDialogContent({
         ) : null}
         <Input.TextArea
           aria-label="审核备注"
+          readOnly={readOnly || submitting}
           rows={3}
           maxLength={2000}
           value={note}
