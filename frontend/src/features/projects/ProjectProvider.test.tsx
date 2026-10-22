@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -11,6 +11,47 @@ import ProjectProvider from './ProjectProvider'
 import { useProjectContext } from './use-project-context'
 
 describe('ProjectProvider', () => {
+  it('retains a known role during an ordinary stale background refresh', async () => {
+    const { queryClient } = renderProvider(`/projects/${project.id}/apis`)
+    await waitFor(() => expect(screen.getByTestId('current-role')).toHaveTextContent('owner'))
+    expect(screen.getByTestId('project-list-freshness')).toHaveTextContent('stale')
+    expect(queryClient.getQueryState(['projects'])?.isInvalidated).toBe(false)
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('/api/v1/projects', async () => {
+        await pending
+        return HttpResponse.json({ items: [project], total: 1, page: 1, page_size: 100 })
+      }),
+      http.get(`/api/v1/projects/${project.id}`, async () => {
+        await pending
+        return HttpResponse.json(project)
+      }),
+    )
+    let refresh!: Promise<void[]>
+    try {
+      act(() => {
+        refresh = Promise.all([
+          queryClient.refetchQueries({ queryKey: ['projects'], exact: true }),
+          queryClient.refetchQueries({ queryKey: ['project', project.id], exact: true }),
+        ])
+      })
+      await waitFor(() => expect(queryClient.isFetching()).toBe(2))
+      expect(screen.getByTestId('current-role')).toHaveTextContent('owner')
+      expect(queryClient.getQueryState(['projects'])?.isInvalidated).toBe(false)
+      await act(async () => {
+        release()
+        await refresh
+      })
+      expect(screen.getByTestId('current-role')).toHaveTextContent('owner')
+    } finally {
+      release()
+      await refresh
+    }
+  })
+
   it.each(['/organization', '/platform', '/execution-fabric'])(
     'selects a project from %s without constructing a project-scoped global route',
     async (route) => {
@@ -88,6 +129,10 @@ function ContextProbe() {
   return (
     <>
       <span data-testid="current-project">{context.currentProject?.name ?? '全部项目'}</span>
+      <span data-testid="current-role">{context.currentProject?.role ?? 'unknown'}</span>
+      <span data-testid="project-list-freshness">
+        {context.projects.isStale ? 'stale' : 'fresh'}
+      </span>
       <span data-testid="location">{location.pathname}</span>
       <span data-testid="project-options">
         {context.projects.data?.items.map((item) => item.name).join(',')}
@@ -119,7 +164,7 @@ function renderProvider(initialEntry: string, deepLinkedProject = project, proje
     }),
   )
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <ProjectProvider>
@@ -128,4 +173,5 @@ function renderProvider(initialEntry: string, deepLinkedProject = project, proje
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...view, queryClient }
 }

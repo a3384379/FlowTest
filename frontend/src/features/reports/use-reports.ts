@@ -4,7 +4,7 @@ import { App } from 'antd'
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { UNSAFE_DataRouterContext, useLocation } from 'react-router-dom'
 
-import { apiErrorWithTrace } from '../../lib/api'
+import { apiErrorWithTrace, SessionBoundaryError } from '../../lib/api'
 import { useRouteScopedSelection } from '../../lib/use-route-scoped-state'
 import { useReportScope } from './report-scope'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
@@ -26,9 +26,8 @@ export function useReports(initialExecutionId?: string) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
-  const { permissions } = useProjectCapabilities()
-  const canManageNotifications =
-    permissions.isSuccess && permissions.data.capabilities.includes('manage_members')
+  const { permissions, canManageTokens } = useProjectCapabilities()
+  const canManageNotifications = canManageTokens
   const isCurrent = useReportCommandContext(projectId)
   const creating = useRef(false)
   const [selectedExecutionId, setSelectedExecutionId] = useRouteScopedSelection(
@@ -83,12 +82,30 @@ export function useReports(initialExecutionId?: string) {
     onSuccess: async (_created, input) => {
       await queryClient.invalidateQueries({ queryKey: ['notification-webhooks', input.projectId] })
     },
+    onError: async (error, input) => {
+      if (error instanceof SessionBoundaryError) {
+        await queryClient.cancelQueries({ queryKey: ['notification-webhooks', input.projectId] })
+        await queryClient.invalidateQueries({
+          queryKey: ['notification-webhooks', input.projectId],
+          refetchType: 'none',
+        })
+      }
+    },
   })
   const toggleWebhook = useMutation({
     mutationFn: (input: { projectId: string; id: string; enabled: boolean }) =>
       setNotificationWebhookEnabled(input.projectId, input.id, input.enabled),
     onSuccess: async (_updated, input) => {
       await queryClient.invalidateQueries({ queryKey: ['notification-webhooks', input.projectId] })
+    },
+    onError: async (error, input) => {
+      if (error instanceof SessionBoundaryError) {
+        await queryClient.cancelQueries({ queryKey: ['notification-webhooks', input.projectId] })
+        await queryClient.invalidateQueries({
+          queryKey: ['notification-webhooks', input.projectId],
+          refetchType: 'none',
+        })
+      }
     },
   })
 

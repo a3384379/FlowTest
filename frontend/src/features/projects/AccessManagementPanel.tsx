@@ -1,5 +1,6 @@
 import { DeleteOutlined, TeamOutlined, UserAddOutlined } from '@ant-design/icons'
 import {
+  useIsMutating,
   useMutation,
   useQuery,
   useQueryClient,
@@ -26,18 +27,32 @@ import {
   upsertProjectMember,
   upsertProjectTeamGrant,
 } from './access-service'
-import { apiErrorMessage, type ProjectMember, type ProjectTeamGrant } from '../../lib/api'
+import {
+  apiErrorMessage,
+  SessionBoundaryError,
+  type ProjectMember,
+  type ProjectTeamGrant,
+} from '../../lib/api'
 
 type AccessManagementPanelProps = {
   projectId: string
   canManage: boolean
 }
 
+type AccessCommand = {
+  projectId: string
+  operation: () => Promise<unknown>
+  teamId?: string
+  directory?: 'user' | 'team'
+}
+
+type AccessCommandTargets = Pick<AccessCommand, 'teamId' | 'directory'>
+
 export default function AccessManagementPanel({
   projectId,
   canManage,
 }: AccessManagementPanelProps) {
-  const state = useAccessManagement(projectId)
+  const state = useAccessManagement(projectId, canManage)
   return (
     <Card title="成员与团队" className="management-card">
       <Tabs
@@ -69,10 +84,13 @@ export default function AccessManagementPanel({
   )
 }
 
-function useAccessManagement(projectId: string) {
+function useAccessManagement(projectId: string, canManage: boolean) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const isAdministrator = useAuthStore((value) => Boolean(value.user?.is_system_admin))
+  const projectPending = useIsMutating({ mutationKey: ['project-access', projectId] }) > 0
+  const commandPending = useRef(false)
+  const commandAccess = useRef({ canManage, isAdministrator, projectPending })
   const active = useRef(true)
   useLayoutEffect(() => {
     active.current = true
@@ -80,6 +98,9 @@ function useAccessManagement(projectId: string) {
       active.current = false
     }
   }, [])
+  useLayoutEffect(() => {
+    commandAccess.current = { canManage, isAdministrator, projectPending }
+  }, [canManage, isAdministrator, projectPending])
   const [activeTab, setActiveTab] = useState('members')
   const [teamId, setTeamId] = useState<string | null>(null)
   const [teamLabel, setTeamLabel] = useState<string | undefined>()
@@ -99,8 +120,9 @@ function useAccessManagement(projectId: string) {
   })
   const mutation = useMutation({
     mutationKey: ['project-access', projectId],
-    mutationFn: async (operation: () => Promise<unknown>) => operation(),
-    onSuccess: async () => {
+    mutationFn: async (command: AccessCommand) => command.operation(),
+    onSuccess: async (_, command) => {
+      const projectId = command.projectId
       const refreshes = await Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ['project-members', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['project-team-grants', projectId] }),
@@ -117,20 +139,36 @@ function useAccessManagement(projectId: string) {
       if (!active.current) return
       void message.success('成员与团队配置已更新')
     },
-    onError: (error) => {
+    onError: async (error, command) => {
+      if (error instanceof SessionBoundaryError) await invalidateAccessCommand(queryClient, command)
       if (active.current) void message.error(apiErrorMessage(error))
+    },
+    onSettled: () => {
+      commandPending.current = false
     },
   })
 
+  function run(operation: AccessCommand['operation'], targets: AccessCommandTargets = {}): void {
+    const access = commandAccess.current
+    if (!active.current || commandPending.current || access.projectPending) return
+    const requiresAdministrator = Boolean(targets.teamId || targets.directory)
+    if (requiresAdministrator ? !access.isAdministrator : !access.canManage) return
+    commandPending.current = true
+    mutation.mutate({ projectId, operation, ...targets })
+  }
+
   function createAndSelectTeam(values: { name: string; description: string }) {
-    mutation.mutate(async () => {
-      const created = await createTeamRequest(values)
-      if (active.current) {
-        setTeamId(created.id)
-        setTeamLabel(created.name)
-      }
-      return created
-    })
+    run(
+      async () => {
+        const created = await createTeamRequest(values)
+        if (active.current) {
+          setTeamId(created.id)
+          setTeamLabel(created.name)
+        }
+        return created
+      },
+      { directory: 'team' },
+    )
   }
   return {
     projectId,
@@ -152,10 +190,31 @@ function useAccessManagement(projectId: string) {
     },
     teamMembers: arrayItems(teamMembers.data),
     teamMembersLoading: teamMembers.isLoading,
-    pending: mutation.isPending,
-    run: mutation.mutate,
+    pending: mutation.isPending || projectPending,
+    run,
     createAndSelectTeam,
   }
+}
+
+async function invalidateAccessCommand(client: QueryClient, command: AccessCommand): Promise<void> {
+  const { projectId, teamId, directory } = command
+  const keys: QueryKey[] = [
+    ['project-members', projectId],
+    ['project-team-grants', projectId],
+    ['project-audit', projectId],
+    ['project-permissions', projectId],
+    ['project-permission', projectId],
+    ['project', projectId],
+    ['projects'],
+    ['access-directory', { kind: 'project-user', projectId }],
+  ]
+  if (teamId) keys.push(['team-members', teamId])
+  if (directory) keys.push(['access-directory', { kind: directory }])
+  if (directory === 'user') keys.push(['access-directory', { kind: 'project-user' }])
+  await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })))
+  await Promise.all(
+    keys.map((queryKey) => client.invalidateQueries({ queryKey, refetchType: 'none' })),
+  )
 }
 
 function refreshAccessReads(
@@ -181,10 +240,10 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
   const [form] = Form.useForm<{ user_id: string; role: ProjectMember['role'] }>()
   return (
     <Space orientation="vertical" className="full-width">
-      {canManage && (
+      {(canManage || state.pending) && (
         <Form
           form={form}
-          disabled={state.pending}
+          disabled={!canManage || state.pending}
           layout="inline"
           initialValues={{ role: 'viewer' }}
           onFinish={(values) =>
@@ -195,7 +254,7 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
             <DirectoryPicker
               source={{ kind: 'project-user', projectId: state.projectId }}
               label="项目用户"
-              disabled={state.pending}
+              disabled={!canManage || state.pending}
             />
           </Form.Item>
           <Form.Item name="role">
@@ -210,7 +269,7 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
             type="primary"
             icon={<UserAddOutlined />}
             loading={state.pending}
-            disabled={!state.membersQuery.isSuccess}
+            disabled={!canManage || state.pending || !state.membersQuery.isSuccess}
           >
             添加成员
           </Button>
@@ -258,9 +317,10 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
   const [form] = Form.useForm<{ team_id: string; role: ProjectTeamGrant['role'] }>()
   return (
     <Space orientation="vertical" className="full-width">
-      {canManage && (
+      {(canManage || state.pending) && (
         <Form
           form={form}
+          disabled={!canManage || state.pending}
           layout="inline"
           initialValues={{ role: 'viewer' }}
           onFinish={(values) =>
@@ -268,7 +328,11 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
           }
         >
           <Form.Item name="team_id" rules={identityRules('请选择团队')}>
-            <DirectoryPicker source={{ kind: 'team' }} label="授权团队" disabled={state.pending} />
+            <DirectoryPicker
+              source={{ kind: 'team' }}
+              label="授权团队"
+              disabled={!canManage || state.pending}
+            />
           </Form.Item>
           <Form.Item name="role">
             <Select
@@ -282,7 +346,7 @@ function TeamGrants({ state, canManage }: { state: AccessState; canManage: boole
             type="primary"
             icon={<TeamOutlined />}
             loading={state.pending}
-            disabled={!state.grantsQuery.isSuccess}
+            disabled={!canManage || state.pending || !state.grantsQuery.isSuccess}
           >
             授权团队
           </Button>
@@ -357,8 +421,11 @@ function CreateOrganizationEntities({ state }: { state: AccessState }) {
     <Space wrap align="start">
       <Form
         form={userForm}
+        disabled={state.pending}
         layout="inline"
-        onFinish={(values) => state.run(() => createUser({ ...values, is_system_admin: false }))}
+        onFinish={(values) =>
+          state.run(() => createUser({ ...values, is_system_admin: false }), { directory: 'user' })
+        }
       >
         <Form.Item name="email" rules={[{ required: true, type: 'email' }]}>
           <Input placeholder="用户邮箱" />
@@ -373,7 +440,12 @@ function CreateOrganizationEntities({ state }: { state: AccessState }) {
           创建用户
         </Button>
       </Form>
-      <Form form={teamForm} layout="inline" onFinish={state.createAndSelectTeam}>
+      <Form
+        form={teamForm}
+        disabled={state.pending}
+        layout="inline"
+        onFinish={state.createAndSelectTeam}
+      >
         <Form.Item name="name" rules={[{ required: true }]}>
           <Input placeholder="团队名称" />
         </Form.Item>
@@ -403,9 +475,12 @@ function TeamMembership({ state }: { state: AccessState }) {
         />
         <Form
           form={form}
+          disabled={state.pending}
           layout="inline"
           onFinish={(values) =>
-            state.run(() => addTeamMember(required(state.selectedTeamId), values.user_id))
+            state.run(() => addTeamMember(required(state.selectedTeamId), values.user_id), {
+              teamId: required(state.selectedTeamId),
+            })
           }
         >
           <Form.Item name="user_id" rules={identityRules('请选择团队用户')}>
@@ -413,7 +488,7 @@ function TeamMembership({ state }: { state: AccessState }) {
           </Form.Item>
           <Button
             htmlType="submit"
-            disabled={!state.selectedTeamId || !state.teamMembersQuery.isSuccess}
+            disabled={state.pending || !state.selectedTeamId || !state.teamMembersQuery.isSuccess}
             loading={state.pending}
           >
             添加到团队
@@ -440,7 +515,11 @@ function TeamMembership({ state }: { state: AccessState }) {
             render: (_, member) => (
               <Popconfirm
                 title="确认移除团队成员？"
-                onConfirm={() => state.run(() => removeTeamMember(member.team_id, member.user_id))}
+                onConfirm={() =>
+                  state.run(() => removeTeamMember(member.team_id, member.user_id), {
+                    teamId: member.team_id,
+                  })
+                }
               >
                 <Button
                   type="text"

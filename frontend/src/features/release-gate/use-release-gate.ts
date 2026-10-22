@@ -12,7 +12,7 @@ import { listPerformanceRuns } from '../performance/performance-service'
 import { useProjectContext } from '../projects/use-project-context'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { listQualityGates, listQualityRuns, listReleaseRisks } from '../quality/quality-service'
-import { apiErrorWithTrace } from '../../lib/api'
+import { apiErrorWithTrace, SessionBoundaryError } from '../../lib/api'
 import {
   createReleaseDecision,
   createReleasePolicy,
@@ -144,6 +144,24 @@ export function useReleaseGate(loadEvidence = false) {
         queryClient.invalidateQueries({ queryKey: ['release-decisions', input.projectId] }),
         queryClient.invalidateQueries({ queryKey: ['release-latest-decision', input.projectId] }),
       ])
+    },
+    onError: async (error, input) => {
+      if (error instanceof SessionBoundaryError) {
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: ['release-decisions', input.projectId] }),
+          queryClient.cancelQueries({ queryKey: ['release-latest-decision', input.projectId] }),
+        ])
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ['release-decisions', input.projectId],
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['release-latest-decision', input.projectId],
+            refetchType: 'none',
+          }),
+        ])
+      }
     },
   })
   const evaluating = useRef(false)

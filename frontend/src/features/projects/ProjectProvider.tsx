@@ -1,9 +1,10 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useEffect, useMemo, type ReactNode } from 'react'
 import { matchPath, useLocation, useNavigate } from 'react-router-dom'
 
 import { ProjectContext, type ProjectContextValue } from './project-context'
 import type { Project } from '../../lib/api'
+import { useQueryInvalidated } from '../../lib/use-query-invalidated'
 import {
   globalPath,
   isGlobalAdministrationSection,
@@ -16,6 +17,7 @@ import { getManagedProject, listManagedProjects } from './project-service'
 export default function ProjectProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const projects = useQuery({ queryKey: ['projects'], queryFn: listManagedProjects })
   const route = matchPath('/projects/:projectId/*', location.pathname)
   const projectId = route?.params.projectId ?? null
@@ -27,7 +29,14 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(projectId),
     retry: false,
   })
-  const currentProject = resolveCurrentProject(listedProject, projects.isSuccess, routeProject)
+  const listInvalidated = useQueryInvalidated(['projects'])
+  const detailInvalidated = useQueryInvalidated(['project', projectId])
+  const currentProject = resolveCurrentProject(
+    listedProject,
+    projects.isSuccess && !listInvalidated,
+    routeProject,
+    detailInvalidated,
+  )
   const availableProjects = useMemo(
     () => includeCurrentProject(projects, currentProject),
     [currentProject, projects],
@@ -37,6 +46,14 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
     if (projects.isSuccess && projectId && !listedProject && routeProject.isError)
       navigate('/dashboard', { replace: true })
   }, [listedProject, navigate, projectId, projects.isSuccess, routeProject.isError])
+
+  useEffect(() => {
+    if (projectId && queryClient.getQueryState(['projects'])?.isInvalidated)
+      void queryClient.refetchQueries(
+        { queryKey: ['projects'], exact: true, type: 'active' },
+        { cancelRefetch: false },
+      )
+  }, [projectId, queryClient])
 
   const value = useMemo<ProjectContextValue>(
     () => ({
@@ -59,11 +76,12 @@ export default function ProjectProvider({ children }: { children: ReactNode }) {
 
 function resolveCurrentProject(
   listed: Project | null,
-  listSuccessful: boolean,
+  listTrusted: boolean,
   detail: UseQueryResult<Project>,
+  detailInvalidated: boolean,
 ): Project | null {
-  if (listSuccessful && listed) return listed
-  if (detail.isSuccess) return detail.data
+  if (listTrusted && listed) return listed
+  if (detail.isSuccess && !detailInvalidated) return detail.data
   const previous = listed ?? detail.data
   return previous ? { ...previous, role: null } : null
 }
