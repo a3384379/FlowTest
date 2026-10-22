@@ -57,3 +57,9 @@
 - Service Account：分段诊断确认原生 JSDOM 对深层 button 的 getComputedStyle 单次约 11.7 秒，24 层祖先各小于 0.6 毫秒；真实主题、缓存预热和焦点顺序均没有改善，试验全部撤回。边界单元验证活动面板可见，并保留实际控件角色、名称、权限、焦点、Enter、写入次数及一次性结果隔离。按钮及全部 CSS 祖先的完整可见性要求交由新增 Chromium 用例验证；这是验证分层调整，不能称为局部断言完全等价。
 
 新增 `frontend/e2e/service-account-actions.spec.ts` 使用独立组织与账号、真实服务和 bundled Chromium，独立 SQLite 服务 18023 上已通过；仅该用例关闭 trace/截图/视频，并在结束时关闭独立页面以阻止自动整页 ARIA 快照记录一次性 Token；未改变全局 Playwright 配置、运行重试或时限。产品源码保持首次候选的全部字节。新增用例及最新候选完整本地检查、远程 frontend-full/Compose/Required Gate 的实际终态，仍以本轮最终 PR 和交付记录为准；本节不将正在执行写为通过。
+
+## 7. 合并后追加审查
+
+候选 `a6b4d89` 的完整本地检查通过：后端 1955 项通过、14 项跳过；前端 188 文件、1439 项通过。远程 PR Validation `39764279174` 的 quick、frontend-full、Compose、Shadow 和正式 Required Gate 均通过，Compose 非 S29 浏览器组 68 项通过，五个容量步骤跳过。PR #149 已合并为 `c8ff3e8`，主分支、候选和 CI tested merge 的代码树一致；这些结果不等同于生产部署或容量 RC。
+
+最终日志补查发现共享权限订阅的遗漏 P2：无关查询及重复 metadata 事件会在子组件渲染期间重复通知父组件。首次独立终审将旧 CI 轮次中的相同告警当作历史问题，未与原始基线对照，归属判断不足；现已用同一 403 回归完成 `104e09f` 零告警与新产品快照出现告警的对照。追加审计、完整修改方案和验证合同见[权限缓存订阅追加审计与修复方案](query-subscription-followup.md)。该追加修复须以自身候选的独立复审、完整检查和最新 Head 门禁收口，不复用 PR #149 绿灯。
