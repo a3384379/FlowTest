@@ -1,4 +1,4 @@
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { Alert, Button, Dropdown, Modal, Space, Tabs, Typography } from 'antd'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -10,7 +10,14 @@ import {
 } from '../drafts/draft-session'
 import { nodeEditorScope } from '../../flow/editor/editor-identity'
 import type { ApiDefinition, ApiDetail, ReportExecutionDetail, Workflow } from '../../lib/api'
-import { apiDetailKey, apiDefinitionKey } from '../api-console/api-query-keys'
+import {
+  apiDetailKey,
+  apiDefinitionKey,
+  apiDefinitionRecoveryKey,
+  type ApiDefinitionRecoveryScope,
+} from '../api-console/api-query-keys'
+import { getApiDetail } from '../api-console/api-service'
+import { useAuthStore } from '../auth/auth-store'
 import { projectPath } from '../projects/project-routing'
 import {
   readWorkflowDraft,
@@ -218,6 +225,7 @@ function ObjectTabLabel({
   onClose: (keys: string[]) => void
   allKeys: string[]
 }) {
+  useApiDefinitionRecovery(projectId, tab.section === 'apis' ? tab.objectId : null)
   const cached = useSyncExternalStore(
     (notify) => queryClient.getQueryCache().subscribe(notify),
     () => cachedLabel(queryClient, projectId, tab),
@@ -251,6 +259,37 @@ function ObjectTabLabel({
       </Typography.Text>
     </Dropdown>
   )
+}
+
+function useApiDefinitionRecovery(projectId: string, apiId: string | null) {
+  const client = useQueryClient()
+  const recoveryKey = apiDefinitionRecoveryKey(projectId, apiId ?? '')
+  const recovery = useSyncExternalStore(
+    (notify) => client.getQueryCache().subscribe(notify),
+    () => client.getQueryData<ApiDefinitionRecoveryScope>(recoveryKey),
+  )
+  const epoch = useAuthStore((state) => state.epoch)
+  const userId = useAuthStore((state) => state.user?.id ?? null)
+  const organizationId = useAuthStore((state) => state.organizationId)
+  useQuery({
+    queryKey: apiDefinitionKey(projectId, apiId ?? ''),
+    queryFn: async ({ signal }) => {
+      if (!apiId) throw new Error('缺少接口标识')
+      const detail = await getApiDetail(projectId, apiId, undefined, signal)
+      signal.throwIfAborted()
+      if (client.getQueryData(recoveryKey) === recovery) {
+        client.removeQueries({ queryKey: recoveryKey, exact: true })
+      }
+      return detail.definition
+    },
+    enabled: Boolean(
+      apiId &&
+      recovery &&
+      recovery.epoch === epoch &&
+      recovery.userId === userId &&
+      recovery.organizationId === organizationId,
+    ),
+  })
 }
 
 function cachedLabel(client: QueryClient, projectId: string, tab: WorkspaceTab): string | null {

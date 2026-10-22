@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 
 import {
   apiErrorMessage,
+  SessionBoundaryError,
   type ApiDetail,
   type ApiVersion,
   type Environment,
@@ -51,7 +52,13 @@ import { getProjectRedactionPolicy } from '../projects/project-service'
 import { useApiExecutions } from './use-api-executions'
 import { invalidateRequestTargets } from '../service-targets/request-target-cache'
 import { useAuthStore } from '../auth/auth-store'
-import { apiDetailKey, apiDefinitionKey } from './api-query-keys'
+import {
+  apiDetailKey,
+  apiDefinitionKey,
+  apiDefinitionRecoveryKey,
+  apiDefinitionRecoveryPrefix,
+  type ApiDefinitionRecoveryScope,
+} from './api-query-keys'
 
 export function useApiConsole(initialApiId?: string, initialExecutionId?: string) {
   const { message } = App.useApp()
@@ -201,6 +208,14 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     },
   })
   const renameMutation = useMutation({
+    onMutate: (): ApiDefinitionRecoveryScope => {
+      const identity = useAuthStore.getState()
+      return {
+        epoch: identity.epoch,
+        userId: identity.user?.id ?? null,
+        organizationId: identity.organizationId,
+      }
+    },
     mutationFn: ({
       projectId: targetProjectId,
       apiId: targetApiId,
@@ -211,10 +226,20 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
       name: string
     }) => updateApiDefinition(targetProjectId, targetApiId, { name }),
     onSuccess: async (definition, variables) => {
-      await queryClient.cancelQueries({
-        queryKey: ['api-detail', variables.projectId, variables.apiId],
-      })
+      await Promise.all([
+        queryClient.cancelQueries({
+          queryKey: ['api-detail', variables.projectId, variables.apiId],
+        }),
+        queryClient.cancelQueries({
+          queryKey: apiDefinitionKey(variables.projectId, variables.apiId),
+          exact: true,
+        }),
+      ])
       queryClient.setQueryData(apiDefinitionKey(variables.projectId, variables.apiId), definition)
+      queryClient.removeQueries({
+        queryKey: apiDefinitionRecoveryKey(variables.projectId, variables.apiId),
+        exact: true,
+      })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['apis', variables.projectId] }),
         queryClient.invalidateQueries({
@@ -224,7 +249,42 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
       ])
       void message.success('接口名称已更新')
     },
-    onError: (error) => void message.error(apiErrorMessage(error)),
+    onError: async (error, variables, identity) => {
+      if (error instanceof SessionBoundaryError && identity) {
+        await Promise.all([
+          queryClient.cancelQueries({
+            queryKey: ['api-detail', variables.projectId, variables.apiId],
+          }),
+          queryClient.cancelQueries({
+            queryKey: apiDefinitionKey(variables.projectId, variables.apiId),
+            exact: true,
+          }),
+        ])
+        queryClient.setQueryDefaults(apiDefinitionRecoveryPrefix, { gcTime: Infinity })
+        queryClient.setQueryData(
+          apiDefinitionRecoveryKey(variables.projectId, variables.apiId),
+          identity,
+        )
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: apiDefinitionKey(variables.projectId, variables.apiId),
+            exact: true,
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['api-detail', variables.projectId, variables.apiId],
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ['apis', variables.projectId],
+            refetchType: 'none',
+          }),
+          queryClient.invalidateQueries({ queryKey: ['global-search'], refetchType: 'none' }),
+        ])
+        return
+      }
+      void message.error(apiErrorMessage(error))
+    },
   })
   const previewMutation = useMutation({
     mutationFn: () =>
@@ -423,6 +483,10 @@ function useApiVersionQueries(
         apiDefinitionKey(requiredId(projectId), requiredId(apiId)),
         detail.definition,
       )
+      client.removeQueries({
+        queryKey: apiDefinitionRecoveryKey(requiredId(projectId), requiredId(apiId)),
+        exact: true,
+      })
       return detail
     },
     enabled: Boolean(projectId && apiId),

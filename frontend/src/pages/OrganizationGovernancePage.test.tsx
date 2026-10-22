@@ -1165,7 +1165,9 @@ async function submitAccountCommand(
     const action = text.closest('button') as HTMLButtonElement
     expect(action).toHaveRole('button')
     expect(action).toHaveAccessibleName(label)
-    expect(action).toBeVisible()
+    expect(panel).toBeVisible()
+    expect(action).not.toHaveAttribute('hidden')
+    expect(action).not.toHaveAttribute('aria-hidden')
     expect(action.closest('[aria-hidden="true"]')).toBeNull()
     expect(action).toBeEnabled()
     action.focus()

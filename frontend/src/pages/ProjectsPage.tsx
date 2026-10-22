@@ -21,6 +21,7 @@ import {
 } from 'antd'
 import { useEffect } from 'react'
 import QueryFailureNotice from '../components/QueryFailureNotice'
+import { useQueryInvalidated } from '../lib/use-query-invalidated'
 
 import AccessManagementPanel from '../features/projects/AccessManagementPanel'
 import AssetManagementPanel from '../features/projects/AssetManagementPanel'
@@ -89,6 +90,8 @@ function useProjectsPageState() {
     queryFn: () => getProjectPermission(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
+  const permissionInvalidated = useQueryInvalidated(['project-permissions', projectId])
+  const permissionTrusted = permission.isSuccess && !permissionInvalidated
   const policy = useQuery({
     queryKey: ['project-security-policy', projectId],
     queryFn: () => getProjectSecurityPolicy(requiredId(projectId)),
@@ -109,14 +112,15 @@ function useProjectsPageState() {
     queryFn: () => getProjectRedactionPolicy(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const canManageSecurity =
-    !accessPending &&
-    permission.isSuccess &&
-    hasCapability(permission.data, 'manage_security') &&
-    governanceReadComplete([policy, outbound, retention, redaction])
-  const canManageMembers = permission.isSuccess && hasCapability(permission.data, 'manage_members')
-  const canEdit = permission.isSuccess && hasCapability(permission.data, 'edit')
-  const canViewAudit = permission.isSuccess && hasCapability(permission.data, 'view_audit')
+  const canManageSecurity = canWriteSecurityPolicy(
+    permission.data,
+    permissionTrusted,
+    accessPending,
+    [policy, outbound, retention, redaction],
+  )
+  const canManageMembers = permissionTrusted && hasCapability(permission.data, 'manage_members')
+  const canEdit = permissionTrusted && hasCapability(permission.data, 'edit')
+  const canViewAudit = permissionTrusted && hasCapability(permission.data, 'view_audit')
 
   useEffect(() => synchronizePolicyForm(form, policy.data), [form, policy.data])
 
@@ -203,6 +207,20 @@ type ProjectsPageState = ReturnType<typeof useProjectsPageState>
 
 function governanceReadComplete(queries: readonly { isSuccess: boolean }[]): boolean {
   return queries.every((query) => query.isSuccess)
+}
+
+function canWriteSecurityPolicy(
+  permission: ProjectPermission | undefined,
+  trusted: boolean,
+  accessPending: boolean,
+  queries: readonly { isSuccess: boolean }[],
+): boolean {
+  return (
+    !accessPending &&
+    trusted &&
+    hasCapability(permission, 'manage_security') &&
+    governanceReadComplete(queries)
+  )
 }
 
 function ProjectsView({ state }: { state: ProjectsPageState }) {

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { useQueryInvalidated } from '../../lib/use-query-invalidated'
 import { useAssetCatalogScope } from './asset-catalog-scope'
 
 import { listFolders } from '../projects/asset-service'
@@ -106,6 +107,7 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     queryFn: () => getProjectPermission(projectId!),
     enabled,
   })
+  const permissionsInvalidated = useQueryInvalidated(['project-permission', projectId])
 
   async function invalidateAssets() {
     await Promise.all([
@@ -201,8 +203,14 @@ export function useTestAssets(options: AssetBrowseOptions = {}) {
     refreshCatalog: () =>
       Promise.all([cases.refetch(), suites.refetch(), directoryCounts.refetch()]),
     permissions,
-    canEdit: permissions.isSuccess && permissions.data.capabilities.includes('edit'),
-    canExecute: permissions.isSuccess && permissions.data.capabilities.includes('execute'),
+    canEdit:
+      !permissionsInvalidated &&
+      permissions.isSuccess &&
+      permissions.data.capabilities.includes('edit'),
+    canExecute:
+      !permissionsInvalidated &&
+      permissions.isSuccess &&
+      permissions.data.capabilities.includes('execute'),
     diff,
     setDiff,
     saveCase: saveCaseMutation.mutateAsync,

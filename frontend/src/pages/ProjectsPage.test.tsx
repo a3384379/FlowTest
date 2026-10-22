@@ -41,11 +41,11 @@ describe('ProjectsPage', () => {
       expect(
         await screen.findByText(`当前身份：${nextRole === 'viewer' ? 'Viewer' : 'Editor'}`),
       ).toBeVisible()
-      expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      expect(queryButtonByText('添加成员')).not.toBeInTheDocument()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       if (nextRole === 'editor')
-        expect(await screen.findByRole('button', { name: /新建目录/ })).toBeEnabled()
-      else expect(screen.queryByRole('button', { name: /新建目录/ })).not.toBeInTheDocument()
+        expect((await screen.findByText('新建目录')).closest('button')).toBeEnabled()
+      else expect(queryButtonByText('新建目录')).not.toBeInTheDocument()
       expect(fixture.writes).toHaveBeenCalledExactlyOnceWith({ user_id: user.id, role: nextRole })
       expect(queryClient.getQueryData(['projects'])).toMatchObject({ items: [{ role: nextRole }] })
       expect(queryClient.getQueryData(['project', project.id])).toMatchObject({ role: nextRole })
@@ -69,13 +69,11 @@ describe('ProjectsPage', () => {
       renderPage()
       await submitSelfRole('viewer')
       expect((await screen.findAllByText('权限重读失败'))[0]).toBeVisible()
-      await waitFor(() =>
-        expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument(),
-      )
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      await waitFor(() => expect(queryButtonByText('添加成员')).not.toBeInTheDocument())
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       expect(screen.queryByText('成员与团队配置已更新')).not.toBeInTheDocument()
       failRefresh = false
-      await userEvent.click(screen.getByRole('button', { name: '重试' }))
+      await userEvent.click(screen.getByLabelText('重试'))
       expect(await screen.findByText('当前身份：Viewer')).toBeVisible()
       expect(fixture.writes).toHaveBeenCalledTimes(1)
     },
@@ -91,7 +89,7 @@ describe('ProjectsPage', () => {
     try {
       await submitSelfRole('viewer')
       await waitFor(() => expect(fixture.refreshes).toHaveBeenCalled())
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       expect(screen.getByLabelText('项目用户 ID')).toBeDisabled()
       expect(screen.queryByText('成员与团队配置已更新')).not.toBeInTheDocument()
       await act(async () => {
@@ -111,7 +109,7 @@ describe('ProjectsPage', () => {
     await waitFor(() => expect(screen.getByText('项目至少需要保留一名 Owner')).toBeVisible())
     expect(screen.getByText('当前身份：项目 Owner')).toBeVisible()
     expect(screen.getByLabelText('项目用户 ID')).toHaveValue(user.id)
-    expect(screen.getByRole('button', { name: /添加成员/ })).toBeEnabled()
+    expect(getButtonByText('添加成员')).toBeEnabled()
     expect(fixture.writes).toHaveBeenCalledTimes(1)
   })
 
@@ -142,7 +140,7 @@ describe('ProjectsPage', () => {
       await submitSelfRole('viewer')
       await waitFor(() => expect(queryClient.getQueryState(['projects'])?.status).toBe('error'))
       await act(async () => {})
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       expect(screen.getByLabelText('项目用户 ID')).toBeDisabled()
       expect(queryClient.isMutating()).toBe(1)
       expect(fixture.writes).toHaveBeenCalledTimes(1)
@@ -195,7 +193,7 @@ describe('ProjectsPage', () => {
       await waitFor(() => expect(queryClient.getQueryState(inactiveKey)?.status).toBe('error'))
       expect(refreshReads).toBe(2)
       await act(async () => {})
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       expect(screen.getByLabelText('项目用户 ID')).toBeDisabled()
       expect(queryClient.isMutating()).toBe(1)
       await act(async () => release())
@@ -227,8 +225,8 @@ describe('ProjectsPage', () => {
     )
     renderPage()
     expect(await screen.findByText(/项目治理数据暂不可用/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /保存安全策略/ })).toBeDisabled()
+    expect(screen.getByLabelText('重试')).toBeEnabled()
+    expect(getButtonByText('保存安全策略')).toBeDisabled()
   })
 
   it('shows the permission matrix, updates network policy and renders audit trace', async () => {
@@ -339,7 +337,7 @@ describe('ProjectsPage', () => {
     const hosts = await screen.findByLabelText('允许域名（每行一个）')
     await browser.clear(hosts)
     await browser.type(hosts, 'api.example.com{enter}*.internal.example.com')
-    await browser.click(screen.getByRole('button', { name: '保存安全策略' }))
+    await browser.click(getButtonByText('保存安全策略'))
     await waitFor(() =>
       expect(saved).toHaveBeenCalledWith({
         enabled: true,
@@ -347,15 +345,15 @@ describe('ProjectsPage', () => {
         allowed_private_cidrs: ['10.20.0.0/16'],
       }),
     )
-    const retention = await screen.findByRole('spinbutton', { name: '保留天数' })
+    const retention = await screen.findByLabelText('保留天数')
     await browser.clear(retention)
     await browser.type(retention, '120')
-    await browser.click(screen.getByRole('button', { name: '保存保留策略' }))
+    await browser.click(getButtonByText('保存保留策略'))
     await waitFor(() => expect(savedRetention).toHaveBeenCalledWith({ retention_days: 120 }))
-    const concurrency = await screen.findByRole('spinbutton', { name: '同时请求上限' })
+    const concurrency = await screen.findByLabelText('同时请求上限')
     await browser.clear(concurrency)
     await browser.type(concurrency, '3')
-    await browser.click(screen.getByRole('button', { name: '保存出站限额' }))
+    await browser.click(getButtonByText('保存出站限额'))
     await waitFor(() =>
       expect(savedOutbound).toHaveBeenCalledWith({
         outbound_concurrency_limit: 3,
@@ -363,10 +361,20 @@ describe('ProjectsPage', () => {
       }),
     )
     expect(screen.getByText('来源：安装默认')).toBeVisible()
-    await browser.click(screen.getByRole('switch', { name: '开启项目脱敏' }))
+    await browser.click(screen.getByLabelText('开启项目脱敏'))
     await waitFor(() => expect(savedRedaction).toHaveBeenCalledWith({ mode: 'on' }))
   })
 })
+
+function queryButtonByText(label: string): HTMLButtonElement | null {
+  return screen.queryByText(label)?.closest('button') ?? null
+}
+
+function getButtonByText(label: string): HTMLButtonElement {
+  const button = screen.getByText(label).closest('button')
+  if (!button) throw new Error(`Missing button: ${label}`)
+  return button
+}
 
 function renderPage(
   queryClient = new QueryClient({
@@ -498,12 +506,12 @@ function accessRefreshFixture(
 async function submitSelfRole(role: 'viewer' | 'editor') {
   expect(await screen.findByText('当前身份：项目 Owner')).toBeVisible()
   const browser = userEvent.setup()
-  await browser.click(screen.getByRole('button', { name: '按 ID 输入' }))
+  await browser.click(getButtonByText('按 ID 输入'))
   await browser.click(screen.getByLabelText('项目用户 ID'))
   await browser.paste(user.id)
   if (role === 'editor') {
-    await browser.click(screen.getByRole('combobox', { name: '项目成员角色' }))
+    await browser.click(screen.getByLabelText('项目成员角色'))
     await browser.click(screen.getByText('editor', { selector: '.ant-select-item-option-content' }))
   }
-  await browser.click(screen.getByRole('button', { name: /添加成员/ }))
+  await browser.click(getButtonByText('添加成员'))
 }

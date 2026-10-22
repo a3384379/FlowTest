@@ -39,6 +39,7 @@ import {
   type WorkflowDraftKey,
 } from './workflow-draft-store'
 import { useRouteScopedSelection, useRouteScopedState } from '../../lib/use-route-scoped-state'
+import { useQueryInvalidated } from '../../lib/use-query-invalidated'
 import {
   createWorkflow,
   deleteWorkflow,
@@ -92,7 +93,11 @@ export function useWorkflows(initialWorkflowId?: string, initialExecutionId?: st
     queryFn: () => getProjectPermission(requiredId(projectId)),
     enabled: Boolean(projectId),
   })
-  const canEdit = permissions.isSuccess && permissions.data.capabilities.includes('edit')
+  const permissionsInvalidated = useQueryInvalidated(['project-permissions', projectId])
+  const canEdit =
+    !permissionsInvalidated &&
+    permissions.isSuccess &&
+    permissions.data.capabilities.includes('edit')
   const draftScope = `${userId ?? 'anonymous'}:${projectId ?? 'global'}`
   const [workflowSearch, setWorkflowSearchValue] = useRouteScopedState(projectId, null, '')
   const [workflowPage, setWorkflowPage] = useRouteScopedState(projectId, null, 1)
