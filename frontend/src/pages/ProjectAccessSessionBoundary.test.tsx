@@ -87,18 +87,16 @@ describe('Project access session boundary', () => {
       renderAccess(client)
       if (returnStatus) {
         expect((await screen.findAllByText('权限重读失败'))[0]).toBeVisible()
-        await waitFor(() =>
-          expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument(),
-        )
-        expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+        await waitFor(() => expect(queryButtonByText('添加成员')).not.toBeInTheDocument())
+        expect(getButtonByText('保存安全策略')).toBeDisabled()
         expect(screen.getByTestId('capability-consumer')).toHaveTextContent('readonly')
         fixture.allowReads()
-        await userEvent.click(screen.getByRole('button', { name: '重试' }))
+        await userEvent.click(screen.getByLabelText('重试'))
       }
       expect(await screen.findByText('当前身份：Viewer')).toBeVisible()
-      expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /新建目录/ })).not.toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+      expect(queryButtonByText('添加成员')).not.toBeInTheDocument()
+      expect(queryButtonByText('新建目录')).not.toBeInTheDocument()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       await waitFor(() =>
         expect(screen.getByTestId('capability-consumer')).toHaveTextContent('readonly'),
       )
@@ -144,13 +142,13 @@ describe('Project access session boundary', () => {
           .toHaveTextContent('readonly')
         expect.soft(screen.getByTestId('assets-capability-consumer')).toHaveTextContent('readonly')
         expect.soft(screen.getByTestId('reports-capability-consumer')).toHaveTextContent('readonly')
-        expect.soft(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
-        expect.soft(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+        expect.soft(queryButtonByText('添加成员')).not.toBeInTheDocument()
+        expect.soft(getButtonByText('保存安全策略')).toBeDisabled()
         await act(async () => fixture.releasePermission())
         if (returnStatus) {
           expect((await screen.findAllByText('权限重读失败'))[0]).toBeVisible()
-          expect(screen.queryByRole('button', { name: /添加成员/ })).not.toBeInTheDocument()
-          expect(screen.getByRole('button', { name: '保存安全策略' })).toBeDisabled()
+          expect(queryButtonByText('添加成员')).not.toBeInTheDocument()
+          expect(getButtonByText('保存安全策略')).toBeDisabled()
           fixture.allowReads()
           await act(async () => {
             await Promise.all(
@@ -197,8 +195,8 @@ describe('Project access session boundary', () => {
       }
       for (const id of permissionConsumerIds())
         expect(screen.getByTestId(id)).toHaveTextContent('editable')
-      expect(screen.getByRole('button', { name: /添加成员/ })).toBeEnabled()
-      expect(screen.getByRole('button', { name: '保存安全策略' })).toBeEnabled()
+      expect(getButtonByText('添加成员')).toBeEnabled()
+      expect(getButtonByText('保存安全策略')).toBeEnabled()
       await act(async () => {
         fixture.releasePermission()
         await refresh
@@ -240,11 +238,11 @@ describe('Project access session boundary', () => {
     try {
       expect(await screen.findByText('当前身份：项目 Owner')).toBeVisible()
       expect(client.isMutating()).toBe(1)
-      expect(screen.getByRole('combobox', { name: '项目用户' })).toBeDisabled()
-      expect(screen.getByRole('combobox', { name: '项目成员角色' })).toBeDisabled()
+      expect(screen.getByLabelText('项目用户')).toBeDisabled()
+      expect(screen.getByLabelText('项目成员角色')).toBeDisabled()
       const ownRow = (await screen.findByText(user.email)).closest('tr')!
       expect(within(ownRow).getByLabelText('移除项目成员')).toBeDisabled()
-      expect(screen.getByText('保存安全策略').closest('button')).toBeDisabled()
+      expect(getButtonByText('保存安全策略')).toBeDisabled()
       await act(async () => fixture.release())
       await waitFor(() => expect(client.isMutating()).toBe(0))
       expect(await screen.findByText('当前身份：Viewer')).toBeVisible()
@@ -331,7 +329,7 @@ describe('Project access session boundary', () => {
       renderPersistentAccess(client)
       await removeSelf(fixture)
       const browser = userEvent.setup()
-      await browser.click(screen.getByRole('link', { name: '进入组织' }))
+      await browser.click(screen.getByText('进入组织', { selector: 'a' }))
       await screen.findByText('组织边界页')
       await waitFor(() => expect(useAuthStore.getState().organizationId).toBe(otherOrganization))
       await act(async () => fixture.release())
@@ -341,7 +339,7 @@ describe('Project access session boundary', () => {
       )
       fixture.holdRoleReads(roleStatus)
       try {
-        await browser.click(screen.getByRole('link', { name: '返回项目' }))
+        await browser.click(screen.getByText('返回项目', { selector: 'a' }))
         expect(await screen.findByText('当前身份：Viewer')).toBeVisible()
         await waitFor(() => expect(fixture.roleReadsStarted()).toBeGreaterThan(0))
         expect(screen.getByTestId('project-role-consumer')).toHaveTextContent('unknown')
@@ -368,6 +366,16 @@ describe('Project access session boundary', () => {
     },
   )
 })
+
+function queryButtonByText(label: string): HTMLButtonElement | null {
+  return screen.queryByText(label)?.closest('button') ?? null
+}
+
+function getButtonByText(label: string): HTMLButtonElement {
+  const button = screen.getByText(label).closest('button')
+  if (!button) throw new Error(`Missing button: ${label}`)
+  return button
+}
 
 function permissionReadKeys(): QueryKey[] {
   return [
@@ -535,12 +543,13 @@ async function removeSelf(fixture: ReturnType<typeof accessFixture>) {
   expect(await screen.findByText('当前身份：项目 Owner')).toBeVisible()
   const ownRow = (await screen.findByText(user.email)).closest('tr')!
   const browser = userEvent.setup()
-  const remove = within(ownRow).getByRole('button', { name: '移除项目成员' })
+  const remove = within(ownRow).getByLabelText('移除项目成员')
   expect(remove).toBeEnabled()
   remove.focus()
   expect(remove).toHaveFocus()
   await browser.keyboard('{Enter}')
-  const confirm = await screen.findByRole('button', { name: /^OK$/ })
+  await screen.findByText('OK')
+  const confirm = getButtonByText('OK')
   expect(confirm).toBeEnabled()
   confirm.focus()
   expect(confirm).toHaveFocus()

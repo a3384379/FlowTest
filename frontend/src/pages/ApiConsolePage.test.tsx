@@ -181,7 +181,9 @@ describe('ApiConsolePage', () => {
       const browser = userEvent.setup()
       try {
         const tabs = within(screen.getByLabelText('全局对象工作区'))
-        const directory = within(screen.getByRole('complementary', { name: '接口目录' }))
+        const directoryElement = screen.getByLabelText('接口目录')
+        expect(directoryElement).toHaveRole('complementary')
+        const directory = within(directoryElement)
         expect(await tabs.findByRole('tab', { name: '接口 · 接口B原名' })).toBeVisible()
         const draftPath = screen.getByLabelText('请求路径')
         await browser.clear(draftPath)
@@ -197,17 +199,20 @@ describe('ApiConsolePage', () => {
           })
           await waitFor(() => expect(delayedReadStarted).toBe(true))
         }
-        await browser.click(
-          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
-        )
+        const originalEntry = directory.getByLabelText(`选择接口 ${apiDefinition.name}`)
+        expect(originalEntry).toHaveRole('button')
+        await browser.click(originalEntry)
         await tabs.findByRole('tab', { name: `接口 · ${apiDefinition.name}` })
-        expect(
-          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
-        ).toHaveAttribute('aria-pressed', 'true')
+        expect(directory.getByLabelText(`选择接口 ${apiDefinition.name}`)).toHaveAttribute(
+          'aria-pressed',
+          'true',
+        )
         const readsBeforeRename = secondReads
         const unrelated = { ...apiDefinition, name: '另一项目同名接口' }
         client.setQueryData(['api-definition', 'other-project', secondId], unrelated)
-        await browser.click(directory.getByRole('button', { name: '重命名接口 接口B原名' }))
+        const rename = directory.getByLabelText('重命名接口 接口B原名')
+        expect(rename).toHaveRole('button')
+        await browser.click(rename)
         const input = screen.getByLabelText('接口名称')
         const dialog = input.closest<HTMLElement>('[role=dialog]')!
         expect(dialog).toHaveRole('dialog')
@@ -215,11 +220,12 @@ describe('ApiConsolePage', () => {
         await browser.click(input)
         await browser.paste('接口B新名')
         await browser.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
-        await directory.findByRole('button', { name: '选择接口 接口B新名' })
+        expect(await directory.findByLabelText('选择接口 接口B新名')).toHaveRole('button')
         expect(writes).toBe(1)
-        expect(
-          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
-        ).toHaveAttribute('aria-pressed', 'true')
+        expect(directory.getByLabelText(`选择接口 ${apiDefinition.name}`)).toHaveAttribute(
+          'aria-pressed',
+          'true',
+        )
         expect(await tabs.findByRole('tab', { name: /^接口 · 接口B新名(?: ·)?$/ })).toBeVisible()
         if (lateDetail) {
           await act(async () => {
@@ -231,9 +237,10 @@ describe('ApiConsolePage', () => {
         expect(secondReads).toBe(readsBeforeRename)
         expect(client.getQueryData(['api-definition', 'other-project', secondId])).toBe(unrelated)
         await browser.click(tabs.getByRole('tab', { name: /^接口 · 接口B新名(?: ·)?$/ }))
-        expect(
-          await directory.findByRole('button', { name: '选择接口 接口B新名' }),
-        ).toHaveAttribute('aria-pressed', 'true')
+        expect(await directory.findByLabelText('选择接口 接口B新名')).toHaveAttribute(
+          'aria-pressed',
+          'true',
+        )
         expect(screen.getByLabelText('请求路径')).toHaveValue('/local-draft-b')
       } finally {
         release()

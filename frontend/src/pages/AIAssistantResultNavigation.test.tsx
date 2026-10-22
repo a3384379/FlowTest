@@ -131,7 +131,13 @@ it('opens the AI-created workflow using a production-fresh complete catalog in t
   const browser = userEvent.setup()
   await browser.click(screen.getByRole('link', { name: '前往 AI 助手' }))
   const title = await screen.findByText(suggestion.title)
-  await browser.click(within(title.closest('tr')!).getByRole('button', { name: /接受/ }))
+  const acceptButton = within(title.closest('tr')!)
+    .getByText('接受', { exact: true })
+    .closest('button')!
+  expect(acceptButton).toHaveRole('button')
+  expect(acceptButton).toHaveAccessibleName(/接受/)
+  expect(acceptButton).toBeVisible()
+  await browser.click(acceptButton)
   const dialogTitle = await screen.findByText('接受建议', { selector: '.ant-modal-title' })
   await browser.click(
     within(dialogTitle.closest('.ant-modal') as HTMLElement).getByRole('button', {
@@ -270,7 +276,13 @@ it('refreshes the case directory and opens the actual accepted case draft in its
   )
   const browser = userEvent.setup()
   const title = await screen.findByText(suggestion.title)
-  await browser.click(within(title.closest('tr')!).getByRole('button', { name: /接受/ }))
+  const acceptButton = within(title.closest('tr')!)
+    .getByText('接受', { exact: true })
+    .closest('button')!
+  expect(acceptButton).toHaveRole('button')
+  expect(acceptButton).toHaveAccessibleName(/接受/)
+  expect(acceptButton).toBeVisible()
+  await browser.click(acceptButton)
   const dialogTitle = await screen.findByText('接受建议', { selector: '.ant-modal-title' })
   await browser.click(
     within(dialogTitle.closest('.ant-modal') as HTMLElement).getByRole('button', {
