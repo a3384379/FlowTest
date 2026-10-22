@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App, ConfigProvider } from 'antd'
 import { createMemoryRouter, Link, RouterProvider, useLocation } from 'react-router-dom'
@@ -94,7 +94,7 @@ function renderWorkspace(initialEntry = apiHref) {
     ],
     { initialEntries: [initialEntry] },
   )
-  return render(
+  const view = render(
     <ConfigProvider theme={{ token: { motion: false } }}>
       <App>
         <QueryClientProvider client={client}>
@@ -103,6 +103,7 @@ function renderWorkspace(initialEntry = apiHref) {
       </App>
     </ConfigProvider>,
   )
+  return { ...view, client }
 }
 
 function closeTab(name: RegExp) {
@@ -117,6 +118,30 @@ afterEach(() => {
 })
 
 describe('global object workspace tabs', () => {
+  it('updates a stable asset name without changing its pinned detail or saved object location', async () => {
+    const browser = userEvent.setup()
+    const { client } = renderWorkspace()
+    await browser.click(screen.getByRole('link', { name: '打开接口B' }))
+    await screen.findByRole('tab', { name: '接口 · 接口B' })
+    const historical = apiDetail('api-B')
+    historical.version.version = 4
+    historical.version.path = '/history-b'
+    client.setQueryData(['api-detail', project.id, 'api-B', 4], historical)
+    await browser.click(screen.getByRole('link', { name: '打开接口A' }))
+    await act(async () => {
+      client.setQueryData(['api-definition', project.id, 'api-B'], {
+        ...historical.definition,
+        name: '接口B新名',
+      })
+    })
+    await browser.click(await screen.findByRole('tab', { name: '接口 · 接口B新名' }))
+    expect(screen.getByLabelText('当前定位')).toHaveTextContent('focus=api-B&execution=api-run')
+    expect(client.getQueryData(['api-detail', project.id, 'api-B', 4])).toEqual(historical)
+    expect(
+      readWorkspaceTabs(user.id, project.id).tabs.find((tab) => tab.objectId === 'api-B')?.href,
+    ).toContain('focus=api-B&execution=api-run')
+  })
+
   it('opens workflow API and report object tabs and restores their exact contexts after reload', async () => {
     const browser = userEvent.setup()
     const view = renderWorkspace()

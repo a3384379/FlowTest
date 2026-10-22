@@ -10,10 +10,41 @@ import type { Credential, MockRequestLog, MockRoute, MockService } from '../lib/
 import { project, user } from '../test/fixtures'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { server } from '../test/server'
+import { authenticateTestUser } from '../test/auth'
+import { useAuthStore } from '../features/auth/auth-store'
 
 const timestamp = '2026-08-10T00:00:00Z'
 
 describe('DataMockPage', () => {
+  it.each([
+    { role: null, admin: false, editable: false },
+    { role: null, admin: true, editable: true },
+    { role: 'viewer', admin: false, editable: false },
+    { role: 'editor', admin: false, editable: true },
+    { role: 'owner', admin: false, editable: true },
+  ] as const)(
+    'requires a known writable role or system administrator ($role, admin=$admin)',
+    async ({ role, admin, editable }) => {
+      const previous = useAuthStore.getState()
+      authenticateTestUser({ ...user, is_system_admin: admin })
+      installBaseHandlers([])
+      server.use(
+        http.get('/api/v1/projects', () =>
+          HttpResponse.json({ items: [{ ...project, role }], total: 1, page: 1, page_size: 100 }),
+        ),
+        http.get(`/api/v1/projects/${project.id}`, () => HttpResponse.json({ ...project, role })),
+      )
+      try {
+        renderPage()
+        await screen.findByText('Credential 元数据')
+        const save = screen.queryByRole('button', { name: /加密保存/ })
+        if (editable) expect(save).toBeEnabled()
+        else expect(save).not.toBeInTheDocument()
+      } finally {
+        useAuthStore.setState(previous)
+      }
+    },
+  )
   it('reports credential read failures and retries without exposing secret data', async () => {
     let reads = 0
     server.use(

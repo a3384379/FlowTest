@@ -422,22 +422,25 @@ function EventTable({
       size="small"
       dataSource={events}
       pagination={false}
+      scroll={{ x: 1000 }}
       locale={{ emptyText: '暂无 Lease / Fencing 事件' }}
       columns={[
         { title: '时间', dataIndex: 'created_at', render: formatTime },
         { title: 'Runner', dataIndex: 'runner_id', render: shortId },
         {
           title: '任务',
-          dataIndex: 'task_id',
-          render: (id: string | null) =>
-            id ? (
+          render: (_, event) => {
+            const id = event.resolved_task_id === undefined ? event.task_id : event.resolved_task_id
+            return id ? (
               <Button type="link" onClick={() => onSelectTask(id)}>
                 {shortId(id)}
               </Button>
             ) : (
               '—'
-            ),
+            )
+          },
         },
+        { title: 'Lease', dataIndex: 'lease_id', render: (id: string | null) => id ?? '—' },
         { title: '事件', dataIndex: 'message' },
         {
           title: 'Fencing Token',

@@ -3,15 +3,16 @@ from datetime import date, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models.access import Project, ProjectMember
+from app.models.access import Project
 from app.models.api_assets import APIDefinition
 from app.models.executions import APICallExecution
 from app.models.workflows import Workflow, WorkflowExecution
+from app.repositories.access import ProjectRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,17 +54,14 @@ class DashboardRepository:
         system_admin: bool,
         organization_id: UUID | None = None,
     ) -> list[UUID]:
-        query = select(Project.id)
-        if not system_admin:
-            query = query.join(ProjectMember).where(ProjectMember.user_id == user_id)
-        if organization_id is not None:
-            query = query.where(
-                or_(
-                    Project.organization_id == organization_id,
-                    Project.organization_id.is_(None),
-                )
-            )
-        return list((await self._session.scalars(query)).all())
+        projects, _total = await ProjectRepository(self._session).list_for_user(
+            user_id=user_id,
+            system_admin=system_admin,
+            organization_id=organization_id,
+            offset=0,
+            limit=None,
+        )
+        return [project.id for project, _role in projects]
 
     async def counts(self, project_ids: list[UUID]) -> DashboardCounts:
         if not project_ids:

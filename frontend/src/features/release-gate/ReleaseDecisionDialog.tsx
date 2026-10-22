@@ -106,6 +106,7 @@ export default function ReleaseDecisionDialog({
       <QueryFailureNotice queries={[state.featureFlags]} />
       <Form
         form={form}
+        disabled={state.evaluating}
         layout="vertical"
         onFinish={async (input) => {
           if (association.mismatch || association.unresolved) return
@@ -142,6 +143,7 @@ export default function ReleaseDecisionDialog({
               </Tag>
               <Form.Item name={item.field} label={item.label}>
                 <ReleaseEvidencePicker
+                  disabled={state.evaluating}
                   key={`${state.projectId}:${item.kind}`}
                   projectId={state.projectId!}
                   kind={item.kind}

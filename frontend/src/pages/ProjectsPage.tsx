@@ -1,5 +1,5 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
   App,
@@ -82,6 +82,7 @@ function useProjectsPageState() {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const { projects, projectId, selectProject } = useProjectContext()
+  const accessPending = useIsMutating({ mutationKey: ['project-access', projectId] }) > 0
   const [form] = Form.useForm<PolicyForm>()
   const permission = useQuery({
     queryKey: ['project-permissions', projectId],
@@ -109,6 +110,7 @@ function useProjectsPageState() {
     enabled: Boolean(projectId),
   })
   const canManageSecurity =
+    !accessPending &&
     permission.isSuccess &&
     hasCapability(permission.data, 'manage_security') &&
     governanceReadComplete([policy, outbound, retention, redaction])

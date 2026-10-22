@@ -101,6 +101,262 @@ describe('OrganizationGovernancePage', () => {
     expect(screen.queryByText('ftsa_one-time-governance-token')).not.toBeInTheDocument()
   })
 
+  it.each([403, 409, 503])(
+    'retains account inputs after %s and clears them only after an explicit successful retry',
+    async (status) => {
+      let release!: () => void
+      const response = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let releaseSuccess!: () => void
+      const successResponse = new Promise<void>((resolve) => {
+        releaseSuccess = resolve
+      })
+      const submitted: unknown[] = []
+      server.use(
+        http.post(
+          `/api/v1/organizations/${organizationId}/service-accounts`,
+          async ({ request }) => {
+            submitted.push(await request.json())
+            if (submitted.length === 1) {
+              await response
+              return HttpResponse.json(
+                {
+                  error: {
+                    code: 'ACCOUNT_UNAVAILABLE',
+                    message: '账号签发暂不可用',
+                    trace_id: 'account-failure',
+                  },
+                },
+                { status },
+              )
+            }
+            await successResponse
+            return HttpResponse.json(
+              { ...account, token: 'ftsa_synthetic-retry-token' },
+              { status: 201 },
+            )
+          },
+        ),
+      )
+      const rendered = renderPage()
+      async function reloadAccounts(): Promise<void> {
+        let releaseRead!: () => void
+        const read = new Promise<void>((resolve) => {
+          releaseRead = resolve
+        })
+        server.use(
+          http.get(`/api/v1/organizations/${organizationId}/service-accounts`, async () => {
+            await read
+            return HttpResponse.json([account])
+          }),
+        )
+        let completed!: Promise<void>
+        act(() => {
+          completed = rendered.queryClient.refetchQueries({
+            queryKey: ['organization-service-accounts', organizationId],
+          })
+        })
+        try {
+          await screen.findByLabelText('正在加载服务账号')
+          expect(screen.queryByPlaceholderText('回归机器人')).not.toBeInTheDocument()
+        } finally {
+          await act(async () => {
+            releaseRead()
+            await completed
+          })
+        }
+        await screen.findByPlaceholderText('回归机器人')
+      }
+      const browser = userEvent.setup()
+      await screen.findByText('组织与角色')
+      await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+      const panel = screen.getByRole('tabpanel')
+      await fillAccountForm(browser, panel, 'Synthetic bot', 'synthetic-bot')
+      const submit = () => within(panel).getByRole('button', { name: /签发令牌$/ })
+      await browser.click(submit())
+      await waitFor(() => expect(submitted).toHaveLength(1))
+      try {
+        if (status === 503) await reloadAccounts()
+        expect(within(panel).getByPlaceholderText('回归机器人')).toHaveValue('Synthetic bot')
+        expect(within(panel).getByPlaceholderText('regression-bot')).toHaveValue('synthetic-bot')
+        expect(within(panel).getByPlaceholderText('回归机器人')).toBeDisabled()
+        expect(within(panel).getByPlaceholderText('regression-bot')).toBeDisabled()
+        expect(within(panel).getByRole('combobox')).toBeDisabled()
+        await browser.click(within(panel).getByPlaceholderText('回归机器人'))
+        await browser.keyboard('{End}x')
+        await browser.click(submit())
+        expect(submitted).toHaveLength(1)
+      } finally {
+        release()
+      }
+      expect(
+        await within(panel).findByText('账号签发暂不可用（Trace ID: account-failure）'),
+      ).toBeVisible()
+      expect(within(panel).getByPlaceholderText('回归机器人')).toHaveValue('Synthetic bot')
+      expect(within(panel).getByPlaceholderText('regression-bot')).toHaveValue('synthetic-bot')
+      expect(
+        within(panel).getByText('mcp:evidence:write', {
+          selector: '.ant-select-selection-item-content',
+        }),
+      ).toBeVisible()
+      expect(within(panel).getByPlaceholderText('回归机器人')).toBeEnabled()
+      expect(screen.queryByText('令牌只显示一次')).not.toBeInTheDocument()
+      expect(submitted).toEqual([
+        {
+          name: 'Synthetic bot',
+          account_key: 'synthetic-bot',
+          scopes: ['mcp:evidence:write'],
+          metadata: {},
+        },
+      ])
+      await browser.click(submit())
+      await waitFor(() => expect(submitted).toHaveLength(2))
+      try {
+        if (status === 503) await reloadAccounts()
+        expect(within(panel).getByPlaceholderText('回归机器人')).toHaveValue('Synthetic bot')
+        expect(within(panel).getByPlaceholderText('regression-bot')).toHaveValue('synthetic-bot')
+        expect(within(panel).getByPlaceholderText('回归机器人')).toBeDisabled()
+        expect(screen.queryByText('令牌只显示一次')).not.toBeInTheDocument()
+      } finally {
+        releaseSuccess()
+      }
+      expect(await screen.findByText('ftsa_synthetic-retry-token')).toBeVisible()
+      const refreshed = screen.getByRole('tabpanel')
+      expect(within(refreshed).getByPlaceholderText('回归机器人')).toHaveValue('')
+      expect(within(refreshed).getByPlaceholderText('regression-bot')).toHaveValue('')
+      expect(
+        within(refreshed).queryByText('mcp:evidence:write', {
+          selector: '.ant-select-selection-item-content',
+        }),
+      ).not.toBeInTheDocument()
+      expect(submitted).toHaveLength(2)
+      expect(submitted[1]).toEqual(submitted[0])
+      await browser.click(screen.getByRole('button', { name: '我已安全保存' }))
+      expect(screen.queryByText('ftsa_synthetic-retry-token')).not.toBeInTheDocument()
+    },
+  )
+
+  it.each(
+    (['create', 'rotate', 'revoke'] as const).flatMap((command) =>
+      (['organization', 'unmount'] as const).map((change) => ({ command, change })),
+    ),
+  )(
+    'invalidates the original account catalog without revealing a late $command receipt after $change changes',
+    async ({ command, change }) => {
+      const otherId = '00000000-0000-4000-8000-000000000799'
+      let release!: () => void
+      const response = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let writes = 0
+      let applied = false
+      let originalReads = 0
+      const updated = changedServiceAccount(command)
+      const endpoint = `/api/v1/organizations/${organizationId}/service-accounts`
+      server.use(
+        http.get('/api/v1/organizations', () =>
+          HttpResponse.json([
+            organization,
+            { ...organization, id: otherId, name: '另一个组织', slug: 'other' },
+          ]),
+        ),
+        http.get(endpoint, () => {
+          originalReads += 1
+          return HttpResponse.json(applied ? [updated] : [account])
+        }),
+        http.get(`/api/v1/organizations/${otherId}/members`, () => HttpResponse.json([])),
+        http.get(`/api/v1/organizations/${otherId}/service-accounts`, () => HttpResponse.json([])),
+        http.get(`/api/v1/organizations/${otherId}/governance`, () =>
+          HttpResponse.json({ ...governance, organization_id: otherId }),
+        ),
+        ...['runner-governance', 'security', 'support-bundle/redaction'].map((path) =>
+          http.get(`/api/v1/organizations/${otherId}/${path}`, () =>
+            HttpResponse.json(readResponse(path)),
+          ),
+        ),
+        http.post(
+          command === 'create' ? endpoint : `${endpoint}/${account.id}/${command}`,
+          async () => {
+            writes += 1
+            await response
+            applied = true
+            return accountCommandReceipt(command, updated)
+          },
+        ),
+      )
+      const rendered = renderPage(15_000)
+      const browser = userEvent.setup()
+      await screen.findByText('组织与角色')
+      await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+      const originalPanel = screen.getByRole('tabpanel')
+      await within(originalPanel).findByText(account.name)
+      const originalKey = ['organization-service-accounts', organizationId]
+      expect(rendered.queryClient.getQueryState(originalKey)?.isInvalidated).toBe(false)
+      expect(originalReads).toBe(1)
+      await submitAccountCommand(browser, originalPanel, command)
+      await waitFor(() => expect(writes).toBe(1))
+      if (change === 'unmount') rendered.unmount()
+      else {
+        await browser.click(screen.getByRole('combobox', { name: '治理组织' }))
+        await browser.click(
+          await screen.findByText('另一个组织 · other', {
+            selector: '.ant-select-item-option-content',
+          }),
+        )
+        await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+        await fillAccountForm(browser, screen.getByRole('tabpanel'), 'Current bot', 'current-bot')
+      }
+      await act(async () => {
+        release()
+        await response
+      })
+      await waitFor(() =>
+        expect(
+          rendered.queryClient
+            .getMutationCache()
+            .getAll()
+            .every((mutation) => mutation.state.status !== 'pending'),
+        ).toBe(true),
+      )
+      expect.soft(rendered.queryClient.getQueryState(originalKey)?.isInvalidated).toBe(true)
+      expect(screen.queryByText('ftsa_synthetic-old-receipt')).not.toBeInTheDocument()
+      for (const text of [
+        'Service Account 已创建，令牌只显示一次',
+        'Service Account 令牌已轮换',
+        'Service Account 已撤销',
+        'Service Account 创建失败',
+        'Service Account 轮换失败',
+        'Service Account 撤销失败',
+      ])
+        expect(screen.queryByText(text)).not.toBeInTheDocument()
+      if (change === 'organization') {
+        expect(
+          rendered.queryClient.getQueryState(['organization-service-accounts', otherId])
+            ?.isInvalidated,
+        ).toBe(false)
+        const panel = screen.getByRole('tabpanel')
+        expect(within(panel).getByPlaceholderText('回归机器人')).toHaveValue('Current bot')
+        expect(within(panel).getByPlaceholderText('regression-bot')).toHaveValue('current-bot')
+        await browser.click(screen.getByRole('combobox', { name: '治理组织' }))
+        await browser.click(
+          await screen.findByText('Governed Organization · governed-org', {
+            selector: '.ant-select-item-option-content',
+          }),
+        )
+        await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+        await waitFor(() => expect(originalReads).toBe(2))
+        const refreshed = await screen.findByRole('tabpanel')
+        if (command === 'create')
+          expect(await within(refreshed).findByText(updated.name)).toBeVisible()
+        else if (command === 'rotate')
+          expect(await within(refreshed).findByText(updated.token_prefix)).toBeVisible()
+        else expect(await within(refreshed).findByText('已撤销')).toBeVisible()
+      }
+      expect(writes).toBe(1)
+    },
+  )
+
   it('prepares a key rotation plan from the security tab', async () => {
     let submitted: Record<string, unknown> | undefined
     server.use(
@@ -669,6 +925,24 @@ describe('OrganizationGovernancePage', () => {
   )
 })
 
+async function fillAccountForm(
+  browser: ReturnType<typeof userEvent.setup>,
+  panel: HTMLElement,
+  name: string,
+  key: string,
+) {
+  await browser.click(within(panel).getByPlaceholderText('回归机器人'))
+  await browser.paste(name)
+  await browser.click(within(panel).getByPlaceholderText('regression-bot'))
+  await browser.paste(key)
+  const scope = within(panel).getByRole('combobox')
+  await browser.click(scope)
+  await browser.type(scope, 'mcp:evidence:write')
+  await browser.click(
+    await screen.findByText('mcp:evidence:write', { selector: '.ant-select-item-option-content' }),
+  )
+}
+
 function auditEntry(page: number) {
   return {
     id: `audit-${page}`,
@@ -840,15 +1114,59 @@ const governance = {
   updated_at: '2026-08-22T00:00:00Z',
 }
 
-function renderPage() {
+function renderPage(staleTime = 0) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false, staleTime }, mutations: { retry: false } },
   })
-  return render(
-    <AntdApp>
-      <QueryClientProvider client={queryClient}>
-        <OrganizationGovernancePage />
-      </QueryClientProvider>
-    </AntdApp>,
+  return {
+    queryClient,
+    ...render(
+      <AntdApp>
+        <QueryClientProvider client={queryClient}>
+          <OrganizationGovernancePage />
+        </QueryClientProvider>
+      </AntdApp>,
+    ),
+  }
+}
+
+function changedServiceAccount(command: 'create' | 'rotate' | 'revoke'): typeof account {
+  return {
+    ...account,
+    id: command === 'create' ? 'new-account' : account.id,
+    name: command === 'create' ? 'Late created bot' : account.name,
+    token_prefix: command === 'rotate' ? 'ftsa_synthetic_rotated' : account.token_prefix,
+    enabled: command !== 'revoke',
+  }
+}
+
+function accountCommandReceipt(
+  command: 'create' | 'rotate' | 'revoke',
+  updated: typeof account,
+): Response {
+  return HttpResponse.json(
+    command === 'revoke' ? updated : { ...updated, token: 'ftsa_synthetic-old-receipt' },
+    { status: command === 'create' ? 201 : 200 },
   )
+}
+
+async function submitAccountCommand(
+  browser: ReturnType<typeof userEvent.setup>,
+  panel: HTMLElement,
+  command: 'create' | 'rotate' | 'revoke',
+): Promise<void> {
+  if (command === 'create') {
+    await fillAccountForm(browser, panel, 'Original bot', 'original-bot')
+    await browser.click(within(panel).getByRole('button', { name: '签发令牌' }))
+  } else {
+    const row = within(panel).getByText(account.name).closest('tr') as HTMLElement
+    const label = command === 'rotate' ? /轮\s*换/ : /撤\s*销/
+    const text = within(row).getByText(label, { selector: 'button span' })
+    const action = text.closest('button') as HTMLButtonElement
+    expect(action).toHaveRole('button')
+    expect(action).toHaveAccessibleName(label)
+    expect(action).toBeVisible()
+    expect(action.closest('[aria-hidden="true"]')).toBeNull()
+    await browser.click(action)
+  }
 }

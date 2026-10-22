@@ -10,6 +10,7 @@ import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import ApiConsolePage from './ApiConsolePage'
+import WorkspaceObjectTabs from '../features/navigation/WorkspaceObjectTabs'
 import { apiDefinition, environment, executionDetail, project, user } from '../test/fixtures'
 import type { ExecutionDetail } from '../lib/api'
 import { server } from '../test/server'
@@ -75,6 +76,171 @@ afterEach(() => {
 })
 
 describe('ApiConsolePage', () => {
+  it.each(['directory', 'detail', 'both'] as const)(
+    'does not use an old owner role after the %s project summary fails',
+    async (failure) => {
+      authenticateTestUser({ ...authenticatedUser, is_system_admin: false })
+      const { queryClient } = renderPage()
+      const create = await screen.findByRole('button', { name: '新建接口' })
+      await waitFor(() => expect(create).toBeEnabled())
+      const error = () =>
+        HttpResponse.json(
+          { error: { code: 'UNAVAILABLE', message: '项目摘要暂不可用', trace_id: 'role-refresh' } },
+          { status: 503 },
+        )
+      server.use(
+        http.get('/api/v1/projects', () =>
+          failure === 'detail'
+            ? HttpResponse.json({
+                items: [{ ...project, role: 'viewer' }],
+                total: 1,
+                page: 1,
+                page_size: 100,
+              })
+            : error(),
+        ),
+        http.get(`/api/v1/projects/${project.id}`, () =>
+          failure === 'directory' ? HttpResponse.json({ ...project, role: 'viewer' }) : error(),
+        ),
+      )
+      await act(async () => {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['projects'] }),
+          queryClient.invalidateQueries({ queryKey: ['project', project.id] }),
+        ])
+      })
+      await waitFor(() => expect(create).toBeDisabled())
+    },
+  )
+  it.each([false, true])(
+    'updates an inactive opened object tab after renaming that API from the real directory (late detail=%s)',
+    async (lateDetail) => {
+      const secondId = '00000000-0000-4000-8000-000000000998'
+      let second = { ...apiDefinition, id: secondId, name: '接口B原名' }
+      let writes = 0
+      let secondReads = 0
+      let delayNextRead = false
+      let delayedReadStarted = false
+      let release!: () => void
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const detailFor = (definition: typeof apiDefinition) => ({
+        definition,
+        version: {
+          id: `version-${definition.id}`,
+          api_definition_id: definition.id,
+          version: 1,
+          method: 'GET',
+          path: '/users/me',
+          query_parameters: [],
+          headers: {},
+          body_kind: 'none',
+          body: null,
+          auth_kind: 'none',
+          auth_config: {},
+          extraction_rules: [],
+          assertions: [],
+          created_at: '2026-08-09T00:00:00Z',
+        },
+      })
+      server.use(
+        http.get(`/api/v1/projects/${project.id}/apis`, () =>
+          HttpResponse.json({ items: [apiDefinition, second], total: 2, page: 1, page_size: 50 }),
+        ),
+        http.post(`/api/v1/projects/${project.id}/apis/${secondId}/preview`, () =>
+          HttpResponse.json({
+            url: `${environment.base_url}/users/me`,
+            target: { environment_name: environment.name },
+          }),
+        ),
+        http.get(`/api/v1/projects/${project.id}/apis/${secondId}/versions`, () =>
+          HttpResponse.json([{ version: 1 }]),
+        ),
+        http.get(`/api/v1/projects/${project.id}/apis/${secondId}`, async () => {
+          secondReads += 1
+          const snapshot = detailFor(second)
+          if (delayNextRead) {
+            delayNextRead = false
+            delayedReadStarted = true
+            await pending
+          }
+          return HttpResponse.json(snapshot)
+        }),
+        http.patch(`/api/v1/projects/${project.id}/apis/${secondId}`, async ({ request }) => {
+          expect(await request.json()).toEqual({ name: '接口B新名' })
+          writes += 1
+          second = { ...second, name: '接口B新名' }
+          return HttpResponse.json(second)
+        }),
+      )
+      const { queryClient: client } = renderPage(
+        `/projects/${project.id}/apis?focus=${secondId}`,
+        true,
+      )
+      const browser = userEvent.setup()
+      try {
+        const tabs = within(screen.getByLabelText('全局对象工作区'))
+        const directory = within(screen.getByRole('complementary', { name: '接口目录' }))
+        expect(await tabs.findByRole('tab', { name: '接口 · 接口B原名' })).toBeVisible()
+        const draftPath = screen.getByLabelText('请求路径')
+        await browser.clear(draftPath)
+        await browser.click(draftPath)
+        await browser.paste('/local-draft-b')
+        let delayedRead = Promise.resolve()
+        if (lateDetail) {
+          delayNextRead = true
+          await act(async () => {
+            delayedRead = client.invalidateQueries({
+              queryKey: ['api-detail', project.id, secondId],
+            })
+          })
+          await waitFor(() => expect(delayedReadStarted).toBe(true))
+        }
+        await browser.click(
+          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
+        )
+        await tabs.findByRole('tab', { name: `接口 · ${apiDefinition.name}` })
+        expect(
+          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
+        ).toHaveAttribute('aria-pressed', 'true')
+        const readsBeforeRename = secondReads
+        const unrelated = { ...apiDefinition, name: '另一项目同名接口' }
+        client.setQueryData(['api-definition', 'other-project', secondId], unrelated)
+        await browser.click(directory.getByRole('button', { name: '重命名接口 接口B原名' }))
+        const input = screen.getByLabelText('接口名称')
+        const dialog = input.closest<HTMLElement>('[role=dialog]')!
+        expect(dialog).toHaveRole('dialog')
+        await browser.clear(input)
+        await browser.click(input)
+        await browser.paste('接口B新名')
+        await browser.click(within(dialog).getByRole('button', { name: /保\s*存/ }))
+        await directory.findByRole('button', { name: '选择接口 接口B新名' })
+        expect(writes).toBe(1)
+        expect(
+          directory.getByRole('button', { name: `选择接口 ${apiDefinition.name}` }),
+        ).toHaveAttribute('aria-pressed', 'true')
+        expect(await tabs.findByRole('tab', { name: /^接口 · 接口B新名(?: ·)?$/ })).toBeVisible()
+        if (lateDetail) {
+          await act(async () => {
+            release()
+            await delayedRead
+          })
+          expect(tabs.queryByRole('tab', { name: /^接口 · 接口B新名(?: ·)?$/ })).toBeVisible()
+        }
+        expect(secondReads).toBe(readsBeforeRename)
+        expect(client.getQueryData(['api-definition', 'other-project', secondId])).toBe(unrelated)
+        await browser.click(tabs.getByRole('tab', { name: /^接口 · 接口B新名(?: ·)?$/ }))
+        expect(
+          await directory.findByRole('button', { name: '选择接口 接口B新名' }),
+        ).toHaveAttribute('aria-pressed', 'true')
+        expect(screen.getByLabelText('请求路径')).toHaveValue('/local-draft-b')
+      } finally {
+        release()
+      }
+    },
+  )
+
   it('explains the whole project export scope before downloading', async () => {
     renderPage()
     const button = screen.getByRole('button', { name: '导出接口' })
@@ -618,7 +784,7 @@ describe('ApiConsolePage', () => {
   })
 })
 
-function renderPage(initialEntry?: string) {
+function renderPage(initialEntry?: string, showTabs = false) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -627,6 +793,7 @@ function renderPage(initialEntry?: string) {
       <AntdApp>
         <QueryClientProvider client={queryClient}>
           <ProjectTestProvider section="apis" initialEntry={initialEntry}>
+            {showTabs && <WorkspaceObjectTabs userId={user.id} projectId={project.id} />}
             <ApiConsolePage />
           </ProjectTestProvider>
         </QueryClientProvider>

@@ -1,5 +1,11 @@
 import { DeleteOutlined, TeamOutlined, UserAddOutlined } from '@ant-design/icons'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query'
 import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Table, Tabs, Tag } from 'antd'
 import { useLayoutEffect, useRef, useState } from 'react'
 
@@ -92,15 +98,22 @@ function useAccessManagement(projectId: string) {
     enabled: Boolean(selectedTeamId) && isAdministrator && activeTab === 'organization',
   })
   const mutation = useMutation({
+    mutationKey: ['project-access', projectId],
     mutationFn: async (operation: () => Promise<unknown>) => operation(),
     onSuccess: async () => {
-      await Promise.all([
+      const refreshes = await Promise.allSettled([
         queryClient.invalidateQueries({ queryKey: ['project-members', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['project-team-grants', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['team-members'] }),
         queryClient.invalidateQueries({ queryKey: ['access-directory'] }),
         queryClient.invalidateQueries({ queryKey: ['project-audit', projectId] }),
+        ...refreshAccessReads(queryClient, ['project-permissions', projectId]),
+        ...refreshAccessReads(queryClient, ['project-permission', projectId]),
+        ...refreshAccessReads(queryClient, ['project', projectId]),
+        ...refreshAccessReads(queryClient, ['projects'], 'active'),
       ])
+      const failed = refreshes.find((result) => result.status === 'rejected')
+      if (failed) throw failed.reason
       if (!active.current) return
       void message.success('成员与团队配置已更新')
     },
@@ -145,6 +158,23 @@ function useAccessManagement(projectId: string) {
   }
 }
 
+function refreshAccessReads(
+  client: QueryClient,
+  queryKey: QueryKey,
+  type: 'all' | 'active' = 'all',
+): Promise<void>[] {
+  const queries = client.getQueryCache().findAll({ queryKey, type })
+  return [
+    client.invalidateQueries({ queryKey, refetchType: 'none' }),
+    ...queries.map((query) =>
+      client.refetchQueries(
+        { queryKey: query.queryKey, exact: true, type },
+        { throwOnError: true },
+      ),
+    ),
+  ]
+}
+
 type AccessState = ReturnType<typeof useAccessManagement>
 
 function ProjectMembers({ state, canManage }: { state: AccessState; canManage: boolean }) {
@@ -154,6 +184,7 @@ function ProjectMembers({ state, canManage }: { state: AccessState; canManage: b
       {canManage && (
         <Form
           form={form}
+          disabled={state.pending}
           layout="inline"
           initialValues={{ role: 'viewer' }}
           onFinish={(values) =>

@@ -13,15 +13,18 @@ type CatalogRead = {
 export default function CatalogPagination({
   query,
   label = '目录',
+  disabled = false,
 }: {
   query: CatalogRead
   label?: string
+  disabled?: boolean
 }) {
   return (
     <Space orientation="vertical" className="full-width">
       <QueryFailureNotice queries={[query]} />
       {query.data && (
         <Pagination
+          disabled={disabled}
           size="small"
           current={query.page}
           pageSize={query.data.page_size}

@@ -28,13 +28,7 @@ export function useDashboard() {
 
 function useDashboardEvidence(projectId: string | null) {
   const hasProject = projectId !== null
-  const flags = useQuery({
-    queryKey: ['v3-feature-flags'],
-    queryFn: getV3FeatureFlags,
-    enabled: hasProject,
-  })
-  const qualityEnabled = flags.data?.quality_intelligence === true
-  const impactEnabled = flags.data?.impact_engine === true
+  const { flags, qualityEnabled, impactEnabled } = useDashboardFlags(hasProject)
   const risks = useQuery({
     queryKey: ['release-risks', projectId],
     queryFn: () => listReleaseRisks(required(projectId)),
@@ -44,7 +38,7 @@ function useDashboardEvidence(projectId: string | null) {
   const risk = useQuery({
     queryKey: ['release-risk', projectId, latestRiskId],
     queryFn: () => getReleaseRisk(required(projectId), required(latestRiskId ?? null)),
-    enabled: latestRiskId !== undefined,
+    enabled: hasProject && qualityEnabled && latestRiskId !== undefined,
   })
   const impactRuns = useQuery({
     queryKey: ['impact-runs', projectId],
@@ -95,6 +89,20 @@ function useDashboardEvidence(projectId: string | null) {
     evidenceLoading,
     qualityEnabled,
     impactEnabled,
+  }
+}
+
+function useDashboardFlags(enabled: boolean) {
+  const flags = useQuery({
+    queryKey: ['v3-feature-flags'],
+    queryFn: getV3FeatureFlags,
+    enabled,
+  })
+  const ready = flags.isSuccess && !flags.isFetching
+  return {
+    flags,
+    qualityEnabled: ready && flags.data.quality_intelligence === true,
+    impactEnabled: ready && flags.data.impact_engine === true,
   }
 }
 

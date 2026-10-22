@@ -14,9 +14,11 @@ export function useProjectCapabilities() {
   })
   return {
     permissions,
-    canEdit: permissions.data?.capabilities.includes('edit') ?? false,
-    canExecute: permissions.data?.capabilities.includes('execute') ?? false,
-    canManageSecurity: permissions.data?.capabilities.includes('manage_security') ?? false,
-    canManageTokens: permissions.data?.capabilities.includes('manage_members') ?? false,
+    canEdit: permissions.isSuccess && permissions.data.capabilities.includes('edit'),
+    canExecute: permissions.isSuccess && permissions.data.capabilities.includes('execute'),
+    canManageSecurity:
+      permissions.isSuccess && permissions.data.capabilities.includes('manage_security'),
+    canManageTokens:
+      permissions.isSuccess && permissions.data.capabilities.includes('manage_members'),
   }
 }

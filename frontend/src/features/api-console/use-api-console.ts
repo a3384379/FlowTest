@@ -201,13 +201,24 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     },
   })
   const renameMutation = useMutation({
-    mutationFn: ({ apiId: targetApiId, name }: { apiId: string; name: string }) =>
-      updateApiDefinition(requiredId(projectId), targetApiId, { name }),
-    onSuccess: async (_definition, variables) => {
+    mutationFn: ({
+      projectId: targetProjectId,
+      apiId: targetApiId,
+      name,
+    }: {
+      projectId: string
+      apiId: string
+      name: string
+    }) => updateApiDefinition(targetProjectId, targetApiId, { name }),
+    onSuccess: async (definition, variables) => {
+      await queryClient.cancelQueries({
+        queryKey: ['api-detail', variables.projectId, variables.apiId],
+      })
+      queryClient.setQueryData(apiDefinitionKey(variables.projectId, variables.apiId), definition)
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['apis', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['apis', variables.projectId] }),
         queryClient.invalidateQueries({
-          queryKey: ['api-detail', projectId, variables.apiId],
+          queryKey: ['api-detail', variables.projectId, variables.apiId],
         }),
         queryClient.invalidateQueries({ queryKey: ['global-search'] }),
       ])
@@ -368,7 +379,7 @@ export function useApiConsole(initialApiId?: string, initialExecutionId?: string
     saveVersion: versionMutation.mutateAsync,
     savingVersion: versionMutation.isPending,
     renameApi: (targetApiId: string, name: string) =>
-      renameMutation.mutateAsync({ apiId: targetApiId, name }),
+      renameMutation.mutateAsync({ projectId: requiredId(projectId), apiId: targetApiId, name }),
     renamingApi: renameMutation.isPending,
     previewRequest: previewMutation.mutateAsync,
     previewing: previewMutation.isPending,
@@ -400,12 +411,14 @@ function useApiVersionQueries(
   })
   const apiDetail = useQuery({
     queryKey: apiDetailKey(projectId, apiId, selectedVersion),
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const detail = await getApiDetail(
         requiredId(projectId),
         requiredId(apiId),
         selectedVersion ?? undefined,
+        signal,
       )
+      signal.throwIfAborted()
       client.setQueryData(
         apiDefinitionKey(requiredId(projectId), requiredId(apiId)),
         detail.definition,

@@ -95,6 +95,147 @@ const decision: ReleaseDecision = {
 }
 
 describe('ReleaseGatePage', () => {
+  it('locks submitted decision inputs and evidence controls until failure or completion', async () => {
+    handlers()
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let releaseRefresh!: () => void
+    const pendingRefresh = new Promise<void>((resolve) => {
+      releaseRefresh = resolve
+    })
+    let refreshStarted = false
+    const writes: unknown[] = []
+    const performancePages: number[] = []
+    const missingReasons: ReleaseDecision['reasons'] = (
+      [
+        ['quality_gate', 'QUALITY_GATE_EVIDENCE_MISSING'],
+        ['contract_compatibility', 'CONTRACT_EVIDENCE_MISSING'],
+        ['impact', 'IMPACT_EVIDENCE_MISSING'],
+        ['release_risk', 'RELEASE_RISK_EVIDENCE_MISSING'],
+        ['performance', 'PERFORMANCE_EVIDENCE_MISSING'],
+        ['runner', 'RUNNER_EVIDENCE_MISSING'],
+      ] as const
+    ).map(([evidence_type, code]) => ({
+      code,
+      evidence_type,
+      status: 'blocked' as const,
+      message: '必需证据未提供',
+      actual: null,
+      expected: 'required',
+    }))
+    const blocked: ReleaseDecision = {
+      ...decision,
+      id: '00000000-0000-4000-8000-000000000399',
+      candidate_ref: 'candidate-A',
+      status: 'block',
+      reasons: missingReasons,
+      test_plan_run_id: null,
+      deployment_check_id: null,
+      impact_run_id: null,
+      release_risk_id: null,
+      performance_run_id: null,
+      runner_task_id: null,
+    }
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/performance-runs`, ({ request }) => {
+        performancePages.push(Number(new URL(request.url).searchParams.get('page') ?? '1'))
+        return HttpResponse.json({
+          ...page([{ id: performanceRunId, status: 'passed', scenario_version: 3 }]),
+          total: 21,
+          page_size: 20,
+        })
+      }),
+      http.get(`/api/v1/projects/${project.id}/release-runner-evidence/${runnerTaskId}`, () =>
+        HttpResponse.json({
+          id: runnerTaskId,
+          project_id: project.id,
+          status: 'succeeded',
+          fencing_token: 7,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-decisions/${blocked.id}`, () =>
+        HttpResponse.json(blocked),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-decisions`, async () => {
+        if (writes.length > 1) {
+          refreshStarted = true
+          await pendingRefresh
+        }
+        return HttpResponse.json(page([writes.length > 1 ? blocked : decision]))
+      }),
+      http.post(`/api/v1/projects/${project.id}/release-decisions`, async ({ request }) => {
+        writes.push(await request.json())
+        if (writes.length === 1) {
+          await pending
+          return HttpResponse.json(
+            {
+              error: {
+                code: 'RELEASE_UNAVAILABLE',
+                message: '判断服务暂不可用',
+                trace_id: 'synthetic-decision-retry',
+              },
+            },
+            { status: 503 },
+          )
+        }
+        return HttpResponse.json(blocked, { status: 201 })
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    try {
+      await browser.click(await screen.findByRole('button', { name: '生成发布判断' }))
+      const dialog = await screen.findByRole('dialog', { name: '生成发布判断' })
+      await chooseOption(browser, dialog, '发布策略', policy.name)
+      const candidate = within(dialog).getByLabelText('候选版本')
+      await browser.click(candidate)
+      await browser.paste('candidate-A')
+      const lookup = within(dialog).getByRole('searchbox', { name: 'Runner 任务精确ID' })
+      await browser.click(lookup)
+      await browser.paste(runnerTaskId)
+      await browser.keyboard('{Enter}')
+      const useVerified = await within(dialog).findByRole('button', { name: '使用已核对证据' })
+      await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
+      await waitFor(() => expect(writes).toHaveLength(1))
+      expect(candidate).toBeDisabled()
+      for (const input of within(dialog).getAllByRole('combobox')) expect(input).toBeDisabled()
+      for (const input of within(dialog).getAllByRole('searchbox')) expect(input).toBeDisabled()
+      expect(useVerified).toBeDisabled()
+      await browser.type(candidate, '-unsent-B')
+      await browser.click(useVerified)
+      await browser.click(within(dialog).getByTitle('2'))
+      expect(candidate).toHaveValue('candidate-A')
+      expect(performancePages).not.toContain(2)
+      expect(writes).toEqual([{ release_policy_id: policyId, candidate_ref: 'candidate-A' }])
+      await act(async () => release())
+      expect(await screen.findByText(/判断服务暂不可用/)).toBeVisible()
+      await waitFor(() => expect(candidate).toBeEnabled())
+      expect(candidate).toHaveValue('candidate-A')
+      expect(within(dialog).getByLabelText('发布策略')).toBeEnabled()
+      expect(writes).toHaveLength(1)
+      await browser.click(within(dialog).getByRole('button', { name: 'OK' }))
+      await waitFor(() => expect(refreshStarted).toBe(true))
+      expect(candidate).toBeDisabled()
+      await browser.type(candidate, '-during-refresh')
+      expect(candidate).toHaveValue('candidate-A')
+      expect(writes).toHaveLength(2)
+      await act(async () => releaseRefresh())
+      await screen.findByRole('dialog', { name: '发布判断证据' })
+      expect(writes).toEqual(
+        Array.from({ length: 2 }, () => ({
+          release_policy_id: policyId,
+          candidate_ref: 'candidate-A',
+        })),
+      )
+      expect(screen.queryByRole('dialog', { name: '生成发布判断' })).not.toBeInTheDocument()
+    } finally {
+      release()
+      releaseRefresh()
+    }
+  })
+
   it.each(['性能运行', 'Runner 任务'])(
     'shows the retained %s search after closing and reopening the decision dialog',
     async (label) => {

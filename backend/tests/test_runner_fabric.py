@@ -13,7 +13,7 @@ import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient, Request, Response
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request as StarletteRequest
@@ -1354,6 +1354,107 @@ async def test_admin_inspection_counts_all_tasks_and_pages_exact_evidence(
 
 
 @pytest.mark.asyncio
+async def test_admin_http_resolves_real_progress_task_without_rewriting_the_event(
+    fabric_api_context: FabricApiContext,
+) -> None:
+    from app.core.context import reset_tenant_context, set_tenant_context
+    from app.domain.tenant import TenantContext
+    from app.models.organizations import Organization
+
+    context = fabric_api_context
+    async with context.sessions() as session:
+        actor = await session.get(User, context.actor.id)
+        project = await session.scalar(select(Project))
+        assert actor is not None and project is not None
+        organizations = [
+            Organization(name=name, slug=name, created_by_id=actor.id)
+            for name in ("progress-read-a", "progress-read-b")
+        ]
+        session.add_all(organizations)
+        await session.flush()
+        project.organization_id = organizations[1].id
+        await session.commit()
+        service = RunnerFabricService(session, enabled=True)
+        pool = await service.create_pool(actor=actor, payload=_pool_payload())
+        token = await _register_runner(service, actor, pool.id, "progress-read-runner")
+        plan, _execution = await _seed_execution_plan(session, actor, project)
+        task = await service.enqueue(plan)
+        lease = await service.claim(runner_token=token)
+        assert lease is not None
+        await service.progress(
+            runner_token=token,
+            lease_id=lease.lease_id,
+            payload=RunnerProgressRequest(
+                fencing_token=lease.task.fencing_token,
+                progress_percent=42,
+                message="原租约进度与只读任务定位",
+            ),
+        )
+        progress = await session.scalar(
+            select(RunnerEvent).where(RunnerEvent.kind == "lease_renewed")
+        )
+        assert progress is not None and progress.task_id is None
+        event_id, task_id, lease_id = progress.id, task.id, lease.lease_id
+        organization_a, organization_b = [item.id for item in organizations]
+        events_before = await session.scalar(select(func.count()).select_from(RunnerEvent))
+        await service.event_page(actor=actor, page=1, limit=20, task_id=task_id)
+        assert progress.task_id is None and progress not in session.dirty
+
+    response = await context.client.get(
+        "/api/v1/execution-fabric/events", params={"task_id": str(task_id)}
+    )
+    assert response.status_code == 200, response.text
+    records = response.json()["items"]
+    receipt = next(item for item in records if item["id"] == str(event_id))
+    assert receipt["task_id"] is None and receipt["lease_id"] == str(lease_id)
+    assert receipt["resolved_task_id"] == str(task_id)
+    direct = next(item for item in records if item["kind"] == "lease_acquired")
+    assert direct["task_id"] == direct["resolved_task_id"] == str(task_id)
+    task_detail = await context.client.get(f"/api/v1/execution-fabric/tasks/{task_id}")
+    leases = await context.client.get(
+        "/api/v1/execution-fabric/leases", params={"task_id": str(task_id)}
+    )
+    assert task_detail.json()["last_lease_id"] == leases.json()["items"][0]["id"] == str(lease_id)
+    assert task_detail.json()["fencing_token"] == leases.json()["items"][0]["fencing_token"]
+    for organization_id, expected in ((organization_a, 1), (organization_b, 3), (None, 3)):
+        tenant_token = (
+            set_tenant_context(
+                TenantContext(
+                    organization_id=organization_id,
+                    actor_id=context.actor.id,
+                    role=None,
+                    is_system_admin=True,
+                )
+            )
+            if organization_id is not None
+            else None
+        )
+        try:
+            result = await context.client.get("/api/v1/execution-fabric/events")
+            assert result.status_code == 200 and result.json()["total"] == expected
+            items = result.json()["items"]
+            pure_pool = next(item for item in items if item["kind"] == "registered")
+            assert pure_pool["resolved_task_id"] is None and pure_pool["lease_id"] is None
+            assert (str(event_id) in {item["id"] for item in items}) == (expected == 3)
+        finally:
+            if tenant_token is not None:
+                reset_tenant_context(tenant_token)
+    pages = [
+        await context.client.get(
+            "/api/v1/execution-fabric/events",
+            params={"task_id": str(task_id), "page": page, "limit": 1},
+        )
+        for page in (1, 2)
+    ]
+    assert [page.json()["total"] for page in pages] == [2, 2]
+    assert len({page.json()["items"][0]["id"] for page in pages}) == 2
+    async with context.sessions() as session:
+        stored = await session.get(RunnerEvent, event_id)
+        assert stored is not None and stored.task_id is None
+        assert await session.scalar(select(func.count()).select_from(RunnerEvent)) == events_before
+
+
+@pytest.mark.asyncio
 async def test_pool_inspection_pages_beyond_one_hundred_and_reads_exact_worker(
     fabric_api_context: FabricApiContext,
 ) -> None:
@@ -1548,6 +1649,12 @@ async def test_unresolved_task_or_lease_does_not_become_a_shared_pool_event(
             organization_id=uuid4(), page=1, limit=20, task_id=None
         )
         assert events == [] and total == 0
+        unscoped, unscoped_total = await RunnerFabricRepository(session).event_page(
+            organization_id=None, page=1, limit=20, task_id=None
+        )
+        assert unscoped_total == len(unscoped) == 2
+        assert all(event.resolved_task_id is None for event in unscoped)
+        assert sum(event.task_id is not None for event in unscoped) == 1
 
 
 @pytest.mark.asyncio

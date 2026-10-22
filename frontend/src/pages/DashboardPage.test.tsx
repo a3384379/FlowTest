@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -10,6 +10,12 @@ import DashboardPage from './DashboardPage'
 import { project } from '../test/fixtures'
 import ProjectTestProvider from '../test/ProjectTestProvider'
 import { server } from '../test/server'
+import {
+  getReleaseRisk,
+  listReleaseRisks,
+  type ReleaseRiskSummary,
+  type ReleaseRiskDetail,
+} from '../features/quality/quality-service'
 
 describe('DashboardPage', () => {
   beforeEach(() => {
@@ -468,6 +474,160 @@ describe('DashboardPage', () => {
     expect(impactRequest).not.toHaveBeenCalled()
   })
 
+  it.each(['off', 'failed'] as const)(
+    'does not reopen gated details from authorized warm evidence when feature reads are %s',
+    async (mode) => {
+      let enabled = true
+      const riskReads = vi.fn()
+      const detailReads = vi.fn()
+      const impactReads = vi.fn()
+      const independentReads = vi.fn()
+      const risk = cachedRisk()
+      server.use(
+        http.get('/api/v1/v3/features', () =>
+          mode === 'failed'
+            ? HttpResponse.json(
+                {
+                  error: {
+                    code: 'UNAVAILABLE',
+                    message: '功能开关读取失败',
+                    trace_id: 'dashboard-flag-trace',
+                  },
+                },
+                { status: 503 },
+              )
+            : HttpResponse.json(dashboardFlags(false)),
+        ),
+        http.get(`/api/v1/projects/${project.id}/release-risks`, () => {
+          riskReads()
+          return HttpResponse.json({ items: [risk], total: 1, page: 1, page_size: 100 })
+        }),
+        http.get(`/api/v1/projects/${project.id}/release-risks/${risk.id}`, () => {
+          detailReads()
+          return enabled
+            ? HttpResponse.json(cachedRiskDetail())
+            : HttpResponse.json(
+                {
+                  error: {
+                    code: 'QUALITY_INTELLIGENCE_DISABLED',
+                    message: '质量智能未启用',
+                    trace_id: 'warm-off-trace',
+                  },
+                },
+                { status: 503 },
+              )
+        }),
+        http.get(`/api/v1/projects/${project.id}/impact/runs`, () => {
+          impactReads()
+          return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })
+        }),
+        http.get(`/api/v1/projects/${project.id}/release-decisions`, () => {
+          independentReads()
+          return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })
+        }),
+      )
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
+      })
+      await queryClient.fetchQuery({
+        queryKey: ['release-risks', project.id],
+        queryFn: () => listReleaseRisks(project.id),
+      })
+      await queryClient.fetchQuery({
+        queryKey: ['release-risk', project.id, risk.id],
+        queryFn: () => getReleaseRisk(project.id, risk.id),
+      })
+      queryClient.setQueryData(['v3-feature-flags'], dashboardFlags(true))
+      await queryClient.invalidateQueries({ queryKey: ['v3-feature-flags'] })
+      enabled = false
+      const view = renderDashboard(undefined, queryClient)
+      if (mode === 'failed') expect(await screen.findByText(/dashboard-flag-trace/)).toBeVisible()
+      else expect((await screen.findAllByText('质量智能能力未启用'))[0]).toBeVisible()
+      await waitFor(() => expect(independentReads).toHaveBeenCalledOnce())
+      const queue = screen.getByRole('region', { name: '优先处理的问题' })
+      expect(within(queue).queryByText('旧风险失败簇')).not.toBeInTheDocument()
+      expect(screen.queryByText('64 / 100')).not.toBeInTheDocument()
+      expect(riskReads).toHaveBeenCalledOnce()
+      expect(detailReads).toHaveBeenCalledOnce()
+      expect(impactReads).not.toHaveBeenCalled()
+      view.unmount()
+      renderDashboard(undefined, queryClient)
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+        await queryClient.invalidateQueries({ queryKey: ['v3-feature-flags'] })
+      })
+      expect(detailReads).toHaveBeenCalledOnce()
+      expect(riskReads).toHaveBeenCalledOnce()
+      expect(impactReads).not.toHaveBeenCalled()
+    },
+  )
+
+  it('reads enabled quality detail once then stops gated requests after ON changes to OFF', async () => {
+    let enabled = true
+    const detailReads = vi.fn()
+    const riskReads = vi.fn()
+    server.use(
+      http.get('/api/v1/v3/features', () => HttpResponse.json(dashboardFlags(enabled))),
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () => {
+        riskReads()
+        return HttpResponse.json({ items: [cachedRisk()], total: 1, page: 1, page_size: 100 })
+      }),
+      http.get(`/api/v1/projects/${project.id}/release-risks/${cachedRisk().id}`, () => {
+        detailReads()
+        return HttpResponse.json(cachedRiskDetail())
+      }),
+    )
+    const { queryClient } = renderDashboard()
+    expect(await screen.findByText('64 / 100')).toBeVisible()
+    expect(detailReads).toHaveBeenCalledOnce()
+    enabled = false
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['v3-feature-flags'] })
+    })
+    expect((await screen.findAllByText('质量智能能力未启用'))[0]).toBeVisible()
+    const queue = screen.getByRole('region', { name: '优先处理的问题' })
+    expect(within(queue).queryByText('旧风险失败簇')).not.toBeInTheDocument()
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['release-risk', project.id] })
+    })
+    expect(detailReads).toHaveBeenCalledOnce()
+    expect(riskReads).toHaveBeenCalledOnce()
+  })
+
+  it('does not use another project risk from a previously authorized warm directory', async () => {
+    const detailReads = vi.fn()
+    const ownListReads = vi.fn()
+    server.use(
+      http.get('/api/v1/projects/other-project/release-risks', () =>
+        HttpResponse.json({
+          items: [{ ...cachedRisk(), project_id: 'other-project' }],
+          total: 1,
+          page: 1,
+          page_size: 100,
+        }),
+      ),
+      http.get(`/api/v1/projects/${project.id}/release-risks`, () => {
+        ownListReads()
+        return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })
+      }),
+      http.get('/api/v1/projects/:projectId/release-risks/:riskId', () => {
+        detailReads()
+        return HttpResponse.json(cachedRiskDetail())
+      }),
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 15_000 } },
+    })
+    await queryClient.fetchQuery({
+      queryKey: ['release-risks', 'other-project'],
+      queryFn: () => listReleaseRisks('other-project'),
+    })
+    renderDashboard(undefined, queryClient)
+    await waitFor(() => expect(ownListReads).toHaveBeenCalledOnce())
+    expect(detailReads).not.toHaveBeenCalled()
+    expect(screen.queryByText('已授权缓存的风险快照')).not.toBeInTheDocument()
+  })
+
   it('links recent failed API and workflow runs to their exact evidence and states the loaded window', async () => {
     server.use(
       http.get('/api/v1/dashboard/recent-executions', () =>
@@ -578,10 +738,12 @@ function recentExecution(id: string, kind: 'api' | 'workflow', status: string, n
   }
 }
 
-function renderDashboard(initialEntry?: string) {
-  const queryClient = new QueryClient({
+function renderDashboard(
+  initialEntry?: string,
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
+  }),
+) {
   const view = render(
     <AntdApp>
       <QueryClientProvider client={queryClient}>
@@ -593,6 +755,73 @@ function renderDashboard(initialEntry?: string) {
     </AntdApp>,
   )
   return { ...view, queryClient }
+}
+
+function dashboardFlags(enabled: boolean) {
+  return {
+    capability_sdk: true,
+    plugin_registry: true,
+    runner_fabric: true,
+    multi_protocol: true,
+    event_protocols: true,
+    performance_lab: true,
+    environment_lab: true,
+    contract_hub: true,
+    impact_engine: enabled,
+    quality_intelligence: enabled,
+    pact_broker: false,
+  }
+}
+
+function cachedRisk(): ReleaseRiskSummary {
+  return {
+    id: 'risk-previous',
+    project_id: project.id,
+    impact_run_id: 'impact-previous',
+    title: '已授权缓存的风险快照',
+    algorithm_version: 'release_risk_v1',
+    window_days: 7,
+    score: 64,
+    quality_score: 72,
+    risk_level: 'high',
+    fingerprint: 'a'.repeat(64),
+    created_by_id: 'user-1',
+    created_at: '2026-08-15T08:00:00Z',
+  }
+}
+
+function cachedRiskDetail(): ReleaseRiskDetail {
+  return {
+    ...cachedRisk(),
+    window_started_at: '2026-08-08T00:00:00Z',
+    window_ended_at: '2026-08-15T00:00:00Z',
+    baseline_started_at: '2026-08-01T00:00:00Z',
+    baseline_ended_at: '2026-08-08T00:00:00Z',
+    factors: [],
+    evidence_snapshot: {},
+    quality_trend: [],
+    recommended_tests: [],
+    failure_clusters: [
+      {
+        id: 'cluster-previous',
+        release_risk_id: cachedRisk().id,
+        fingerprint: 'cluster-previous-fingerprint',
+        title: '旧风险失败簇',
+        failure_category: 'http',
+        error_code: null,
+        node_type: 'api',
+        occurrence_count: 1,
+        baseline_count: 0,
+        affected_workflow_ids: [],
+        affected_workflow_names: [],
+        confidence: 1,
+        sample_execution_ids: [],
+        recommendation: '核对冻结风险',
+        regression_percent: null,
+        created_at: cachedRisk().created_at,
+      },
+    ],
+  }
 }
 
 function insightHandlers() {

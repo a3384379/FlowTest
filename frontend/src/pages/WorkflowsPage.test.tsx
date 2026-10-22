@@ -2,7 +2,7 @@ import { useAuthStore } from '../features/auth/auth-store'
 import { authenticateTestUser } from '../test/auth'
 import { user as authenticatedUser } from '../test/fixtures'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import { http, HttpResponse } from 'msw'
@@ -31,6 +31,29 @@ afterEach(() => {
 })
 
 describe('WorkflowsPage', () => {
+  it('closes workflow draft writes after a failed permission refresh with owner cache', async () => {
+    const { queryClient } = renderPage()
+    const save = await screen.findByRole('button', { name: /保存草稿/ })
+    await waitFor(() => expect(save).toBeEnabled())
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'UNAVAILABLE',
+              message: '权限重读失败',
+              trace_id: 'workflow-permission',
+            },
+          },
+          { status: 503 },
+        ),
+      ),
+    )
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['project-permissions', project.id] })
+    })
+    await waitFor(() => expect(save).toBeDisabled())
+  })
   beforeEach(() => {
     let currentWorkflow = workflow
     server.use(
@@ -636,7 +659,7 @@ function renderPage(initialEntry?: string) {
       </AntdApp>
     </ConfigProvider>,
   )
-  return { ...rendered, router }
+  return { ...rendered, router, queryClient }
 }
 
 const debugResult = {

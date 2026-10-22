@@ -294,12 +294,33 @@ class RunnerLeaseAdminResponse(BaseModel):
 
 
 class RunnerEventResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "00000000-0000-4000-8000-000000000101",
+                    "pool_id": "00000000-0000-4000-8000-000000000102",
+                    "runner_id": "00000000-0000-4000-8000-000000000103",
+                    "task_id": None,
+                    "resolved_task_id": "00000000-0000-4000-8000-000000000104",
+                    "lease_id": "00000000-0000-4000-8000-000000000105",
+                    "kind": "lease_renewed",
+                    "message": "合成进度示例",
+                    "details": {"progress_percent": 42},
+                    "created_at": "2026-10-22T00:00:00Z",
+                }
+            ]
+        },
+    )
 
     id: UUID
     pool_id: UUID
     runner_id: UUID | None
     task_id: UUID | None
+    resolved_task_id: UUID | None = Field(
+        description="经当前授权范围解析的任务 ID。无法解析时为空。原始 task_id 保持不变。"
+    )
     lease_id: UUID | None
     kind: str
     message: str

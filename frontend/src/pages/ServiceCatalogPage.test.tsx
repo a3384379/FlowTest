@@ -315,6 +315,53 @@ describe('ServiceCatalogPage', () => {
     await waitFor(() => expect(createButton).toHaveAttribute('title', '当前权限不能登记服务'))
     expect(await screen.findByText('暂无匹配服务')).toBeVisible()
   })
+
+  it('disables the real registration form after warm capabilities fail to refresh', async () => {
+    installCatalogReads(() => [])
+    let unavailable = false
+    let writes = 0
+    server.use(
+      http.get(`/api/v1/projects/${project.id}/permissions`, () =>
+        unavailable
+          ? HttpResponse.json(
+              {
+                error: {
+                  code: 'UNAVAILABLE',
+                  message: '权限读取失败',
+                  trace_id: 'capability-refresh-trace',
+                },
+              },
+              { status: 503 },
+            )
+          : HttpResponse.json({
+              effective_role: 'owner',
+              capabilities: ['read', 'edit'],
+              matrix: {},
+            }),
+      ),
+      http.post(`/api/v1/projects/${project.id}/contract-hub/services`, () => {
+        writes += 1
+        return HttpResponse.json({})
+      }),
+    )
+    const { queryClient } = renderPage()
+    const browser = userEvent.setup()
+    const open = screen.getByRole('button', { name: /新建服务/ })
+    await waitFor(() => expect(open).toBeEnabled())
+    await browser.click(open)
+    const dialog = within(screen.getByRole('dialog', { name: '新建服务' }))
+    await browser.click(dialog.getByLabelText('显示名称'))
+    await browser.paste('等待权限重读的服务')
+    unavailable = true
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['project-permissions', project.id] })
+    })
+    await waitFor(() => expect(dialog.getByRole('button', { name: '登记服务' })).toBeDisabled())
+    expect(dialog.getByLabelText('显示名称')).toHaveValue('等待权限重读的服务')
+    expect(dialog.getByLabelText('显示名称')).toBeDisabled()
+    await browser.click(dialog.getByRole('button', { name: '登记服务' }))
+    expect(writes).toBe(0)
+  })
 })
 
 function installCatalogReads(read: () => ServiceCatalogEntry[], searches?: string[]) {

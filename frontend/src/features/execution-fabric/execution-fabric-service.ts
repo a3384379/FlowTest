@@ -82,6 +82,7 @@ export type FabricEvent = {
   pool_id: string
   runner_id: string | null
   task_id: string | null
+  resolved_task_id?: string | null
   lease_id: string | null
   kind: string
   message: string

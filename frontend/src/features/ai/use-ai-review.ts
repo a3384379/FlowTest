@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App } from 'antd'
 import { useContext, useLayoutEffect, useMemo, useRef } from 'react'
 import { UNSAFE_DataRouterContext, useLocation, useSearchParams } from 'react-router-dom'
-import { apiErrorWithTrace } from '../../lib/api'
+import { apiErrorWithTrace, SessionBoundaryError } from '../../lib/api'
 import { useProjectCapabilities } from '../projects/use-project-capabilities'
 import { useProjectContext } from '../projects/use-project-context'
 import {
@@ -72,13 +72,35 @@ export function useAIReview() {
   })
   const createMutation = useMutation({ mutationFn: createAIJob })
   const reviewMutation = useMutation({
-    mutationFn: ({ input, job }: { input: SuggestionReviewInput; job: string }) =>
+    mutationFn: ({
+      input,
+      job,
+    }: {
+      input: SuggestionReviewInput
+      job: string
+      project: string
+      suggestionType: AISuggestion['suggestion_type']
+    }) =>
       reviewAISuggestion(
         input.id,
         input.decision,
         { content: input.content, note: input.note },
         job,
       ),
+    onSuccess: (suggestion, { project }) =>
+      invalidateAcceptedResource(queryClient, project, suggestion),
+    onError: async (error, { project, job, input, suggestionType }) => {
+      if (!(error instanceof SessionBoundaryError)) return
+      await Promise.all([
+        input.decision === 'accept'
+          ? invalidateSuggestionResource(queryClient, project, suggestionType, 'none')
+          : Promise.resolve(),
+        queryClient.invalidateQueries({
+          queryKey: ['ai-suggestions', project, job],
+          refetchType: 'none',
+        }),
+      ])
+    },
   })
   const settingsMutation = useMutation({
     mutationFn: ({ project, enabled }: { project: string; enabled: boolean }) =>
@@ -129,18 +151,19 @@ export function useAIReview() {
     }
   }
   async function review(input: SuggestionReviewInput): Promise<AISuggestion | null> {
-    if (
-      !projectId ||
-      !activeJobId ||
-      !canReview ||
-      !commandCurrent() ||
-      !suggestions.data?.some((item) => item.id === input.id && item.review_status === 'pending')
+    const suggestion = suggestions.data?.find(
+      (item) => item.id === input.id && item.review_status === 'pending',
     )
-      return null
+    if (!projectId || !activeJobId || !canReview || !commandCurrent() || !suggestion) return null
     const project = projectId,
       job = activeJobId
     try {
-      const result = await reviewMutation.mutateAsync({ input, job })
+      const result = await reviewMutation.mutateAsync({
+        input,
+        job,
+        project,
+        suggestionType: suggestion.suggestion_type,
+      })
       queryClient.setQueryData<AISuggestion[]>(
         ['ai-suggestions', project, job, 'completed'],
         (current) => current?.map((item) => (item.id === result.id ? result : item)),
@@ -194,6 +217,41 @@ export function useAIReview() {
     selectSuggestion,
   }
 }
+
+async function invalidateAcceptedResource(
+  client: ReturnType<typeof useQueryClient>,
+  projectId: string,
+  suggestion: AISuggestion,
+): Promise<void> {
+  if (suggestion.review_status !== 'accepted' || !suggestion.accepted_resource_id) return
+  await invalidateSuggestionResource(client, projectId, suggestion.accepted_resource_type)
+}
+
+async function invalidateSuggestionResource(
+  client: ReturnType<typeof useQueryClient>,
+  projectId: string,
+  type: string | null,
+  refetchType: 'active' | 'none' = 'active',
+): Promise<void> {
+  const keys =
+    type === 'workflow'
+      ? ['workflows', 'workflow']
+      : type === 'test_case'
+        ? [
+            'test-cases',
+            'test-asset',
+            'test-case-versions',
+            'test-case-options',
+            'asset-directory-counts',
+            'asset-environment-options',
+            'asset-environment-selected',
+          ]
+        : []
+  await Promise.all(
+    keys.map((key) => client.invalidateQueries({ queryKey: [key, projectId], refetchType })),
+  )
+}
+
 function useAICommandContext(projectId: string | null) {
   const location = useLocation(),
     router = useContext(UNSAFE_DataRouterContext)

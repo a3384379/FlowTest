@@ -254,6 +254,34 @@ it('uses project capabilities for view-only asset access', async () => {
   expect(writes).not.toHaveBeenCalled()
 })
 
+it('closes asset edit and execution actions after a failed permission refresh with owner cache', async () => {
+  const { writes } = mockWorkspace(false, 0)
+  const queryClient = renderWorkspace(
+    root.replace('/api/v1', '') + '/assets?type=case&focus=' + baseCase.id,
+  )
+  const drawer = await screen.findByRole('dialog', { name: '测试资产详情' })
+  await within(drawer).findByText('published-2')
+  await waitFor(() =>
+    expect(within(drawer).getByRole('button', { name: '编辑当前草稿' })).toBeEnabled(),
+  )
+  server.use(
+    http.get(root + '/permissions', () =>
+      HttpResponse.json(
+        { error: { code: 'UNAVAILABLE', message: '权限重读失败', trace_id: 'asset-permission' } },
+        { status: 503 },
+      ),
+    ),
+  )
+  await act(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['project-permission', project.id] })
+  })
+  await waitFor(() =>
+    expect(within(drawer).getByRole('button', { name: '编辑当前草稿' })).toBeDisabled(),
+  )
+  expect(within(drawer).getByRole('button', { name: '执行' })).toBeDisabled()
+  expect(writes).not.toHaveBeenCalled()
+})
+
 it('links only matching case-run evidence to the report and frozen workflow', async () => {
   mockWorkspace()
   const run = {

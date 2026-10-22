@@ -15,6 +15,7 @@ import {
   Descriptions,
   Empty,
   Form,
+  type FormInstance,
   Input,
   InputNumber,
   Modal,
@@ -27,7 +28,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import {
@@ -56,7 +57,7 @@ import {
   type ServiceAccount,
 } from '../features/organizations/organization-service'
 import DirectoryPicker from '../features/projects/DirectoryPicker'
-import { apiErrorWithTrace, setOrganizationId } from '../lib/api'
+import { apiErrorWithTrace, SessionBoundaryError, setOrganizationId } from '../lib/api'
 import OrganizationAuditPanel from './OrganizationAuditPanel'
 import OrganizationQueryBoundary from './OrganizationQueryBoundary'
 import { rotationAction, type SecurityKeyVersion } from './organization-governance-rotation'
@@ -165,6 +166,7 @@ function OrganizationGovernanceContent({
   onSelect: (id: string) => void
 }) {
   const { message } = App.useApp()
+  const actor = useAuthStore((state) => `${state.user?.id}:${state.epoch}`)
   const selected = organizations.find((organization) => organization.id === selectedId) ?? null
 
   if (isLoading) return <div className="page-loading">加载组织治理...</div>
@@ -173,7 +175,7 @@ function OrganizationGovernanceContent({
   if (!selected) return <div className="page-loading">正在选择组织...</div>
   return (
     <OrganizationGovernanceSelected
-      key={selected.id}
+      key={`${selected.id}:${actor}`}
       isSystemAdmin={isSystemAdmin}
       organizations={organizations}
       selected={selected}
@@ -387,11 +389,13 @@ function OrganizationTabs({
             <OrganizationQueryBoundary label="服务账号" query={workspace.accounts}>
               {(accounts) => (
                 <ServiceAccountsTab
+                  form={workspace.accountForm}
                   accounts={accounts}
                   canManage={canManage}
                   issuedToken={issuedToken}
                   onClearToken={() => setIssuedToken(null)}
-                  onCreate={(input) => workspace.accountMutation.mutate(input)}
+                  onCreate={workspace.issueAccount}
+                  error={workspace.accountMutation.error}
                   onRotate={(id) => workspace.rotateMutation.mutate(id)}
                   onRevoke={(id) => workspace.revokeMutation.mutate(id)}
                   pending={accountPending}
@@ -469,6 +473,14 @@ function useOrganizationWorkspace({
   onMessage: (type: 'success' | 'error', text: string) => void
 }) {
   const queryClient = useQueryClient()
+  const [accountForm] = Form.useForm<ServiceAccountFormValues>()
+  const active = useRef(true)
+  useLayoutEffect(() => {
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
   const governance = useQuery({
     queryKey: ['organization-governance', organization.id],
     queryFn: () => getOrganizationGovernance(organization.id),
@@ -512,28 +524,31 @@ function useOrganizationWorkspace({
   const accountMutation = useMutation({
     mutationFn: (input: ServiceAccountFormValues) => createServiceAccount(organization.id, input),
     onSuccess: async (issued) => {
-      setIssuedToken(issued.token)
       await invalidate('organization-service-accounts')
+      if (!active.current) return
+      accountForm.resetFields()
+      setIssuedToken(issued.token)
       onMessage('success', 'Service Account 已创建，令牌只显示一次')
     },
-    onError: () => onMessage('error', 'Service Account 创建失败'),
+    onError: (error) => accountFailure(error, 'Service Account 创建失败'),
   })
   const rotateMutation = useMutation({
     mutationFn: (accountId: string) => rotateServiceAccount(organization.id, accountId),
     onSuccess: async (issued) => {
-      setIssuedToken(issued.token)
       await invalidate('organization-service-accounts')
+      if (!active.current) return
+      setIssuedToken(issued.token)
       onMessage('success', 'Service Account 令牌已轮换')
     },
-    onError: () => onMessage('error', 'Service Account 轮换失败'),
+    onError: (error) => accountFailure(error, 'Service Account 轮换失败'),
   })
   const revokeMutation = useMutation({
     mutationFn: (accountId: string) => revokeServiceAccount(organization.id, accountId),
     onSuccess: async () => {
       await invalidate('organization-service-accounts')
-      onMessage('success', 'Service Account 已撤销')
+      if (active.current) onMessage('success', 'Service Account 已撤销')
     },
-    onError: () => onMessage('error', 'Service Account 撤销失败'),
+    onError: (error) => accountFailure(error, 'Service Account 撤销失败'),
   })
   const governanceMutation = useMutation({
     mutationFn: (input: GovernanceFormValues) =>
@@ -568,6 +583,24 @@ function useOrganizationWorkspace({
     },
     onError: () => onMessage('error', '密钥轮换 Rollback 失败'),
   })
+  async function accountFailure(error: unknown, text: string): Promise<void> {
+    if (error instanceof SessionBoundaryError) {
+      await queryClient.invalidateQueries({
+        queryKey: ['organization-service-accounts', organization.id],
+        refetchType: 'none',
+      })
+      return
+    }
+    if (active.current) onMessage('error', text)
+  }
+  async function issueAccount(input: ServiceAccountFormValues): Promise<boolean> {
+    try {
+      await accountMutation.mutateAsync(input)
+      return active.current
+    } catch {
+      return false
+    }
+  }
   return {
     governance,
     members,
@@ -577,6 +610,8 @@ function useOrganizationWorkspace({
     supportBundle,
     memberMutation,
     accountMutation,
+    accountForm,
+    issueAccount,
     rotateMutation,
     revokeMutation,
     governanceMutation,
@@ -774,6 +809,7 @@ function OrganizationMemberPicker({
 }
 
 function ServiceAccountsTab({
+  form,
   accounts,
   canManage,
   issuedToken,
@@ -782,17 +818,19 @@ function ServiceAccountsTab({
   onRotate,
   onRevoke,
   pending,
+  error,
 }: {
+  form: FormInstance<ServiceAccountFormValues>
   accounts: ServiceAccount[]
   canManage: boolean
   issuedToken: string | null
   onClearToken: () => void
-  onCreate: (input: ServiceAccountFormValues) => void
+  onCreate: (input: ServiceAccountFormValues) => Promise<boolean>
   onRotate: (id: string) => void
   onRevoke: (id: string) => void
   pending: boolean
+  error: unknown
 }) {
-  const [form] = Form.useForm<ServiceAccountFormValues>()
   return (
     <Space orientation="vertical" size="large" style={{ width: '100%' }}>
       {issuedToken && (
@@ -814,12 +852,21 @@ function ServiceAccountsTab({
       )}
       {canManage && (
         <Card title="签发最小权限 Service Account">
+          {error ? (
+            <Alert
+              type="error"
+              showIcon
+              title="Service Account 创建失败"
+              description={apiErrorWithTrace(error)}
+            />
+          ) : null}
           <Form
             form={form}
             layout="vertical"
-            onFinish={(values) => {
-              onCreate(values)
-              form.resetFields()
+            disabled={pending}
+            onFinish={async (values) => {
+              if (pending) return
+              await onCreate(values)
             }}
           >
             <Row gutter={12}>

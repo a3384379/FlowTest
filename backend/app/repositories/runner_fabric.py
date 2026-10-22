@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import JsonValue
 from sqlalchemy import Select, and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -15,6 +17,37 @@ from app.models.runner_fabric import (
     RunnerTask,
 )
 from app.models.workflows import WorkflowExecution
+
+
+@dataclass(frozen=True, slots=True)
+class RunnerEventInspection:
+    id: UUID
+    pool_id: UUID
+    runner_id: UUID | None
+    task_id: UUID | None
+    resolved_task_id: UUID | None
+    lease_id: UUID | None
+    kind: str
+    message: str
+    details: dict[str, JsonValue]
+    created_at: datetime
+
+    @classmethod
+    def from_event(
+        cls, event: RunnerEvent, resolved_task_id: UUID | None
+    ) -> "RunnerEventInspection":
+        return cls(
+            id=event.id,
+            pool_id=event.pool_id,
+            runner_id=event.runner_id,
+            task_id=event.task_id,
+            resolved_task_id=resolved_task_id,
+            lease_id=event.lease_id,
+            kind=event.kind,
+            message=event.message,
+            details=cast(dict[str, JsonValue], event.details),
+            created_at=event.created_at,
+        )
 
 
 class RunnerFabricRepository:
@@ -314,10 +347,10 @@ class RunnerFabricRepository:
 
     async def event_page(
         self, *, organization_id: UUID | None, page: int, limit: int, task_id: UUID | None
-    ) -> tuple[list[RunnerEvent], int]:
+    ) -> tuple[list[RunnerEventInspection], int]:
         event_task_id = func.coalesce(RunnerEvent.task_id, RunnerLeaseRecord.task_id)
         statement = (
-            select(RunnerEvent)
+            select(RunnerEvent, RunnerTask.id)
             .join(RunnerPool, RunnerPool.id == RunnerEvent.pool_id)
             .outerjoin(RunnerLeaseRecord, RunnerLeaseRecord.id == RunnerEvent.lease_id)
             .outerjoin(RunnerTask, RunnerTask.id == event_task_id)
@@ -342,9 +375,17 @@ class RunnerFabricRepository:
             )
         if task_id is not None:
             statement = statement.where(event_task_id == task_id)
-        return await self._inspection_page(
-            statement.order_by(RunnerEvent.created_at.desc(), RunnerEvent.id), page, limit
+        total = int(
+            await self._session.scalar(select(func.count()).select_from(statement.subquery())) or 0
         )
+        rows = await self._session.execute(
+            statement.order_by(RunnerEvent.created_at.desc(), RunnerEvent.id)
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+        return [
+            RunnerEventInspection.from_event(event, resolved) for event, resolved in rows
+        ], total
 
     async def queue_groups(
         self, *, organization_id: UUID | None

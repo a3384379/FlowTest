@@ -1,10 +1,11 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { expect, it } from 'vitest'
 import type { ReactNode } from 'react'
 import { useAIReview } from '../../features/ai/use-ai-review'
+import { listWorkflows } from '../workflows/workflow-service'
 import ProjectTestProvider from '../../test/ProjectTestProvider'
 import { authenticateTestUser } from '../../test/auth'
 import { project, user } from '../../test/fixtures'
@@ -116,7 +117,9 @@ it.each(['create', 'review'] as const)(
         return response
       }),
     )
-    const { wrapper } = harness('ai')
+    const { wrapper, client } = harness('ai')
+    client.setQueryData(['workflows', project.id, 'catalog'], [])
+    client.setQueryData(['workflows', 'another-project', 'catalog'], [])
     const { result } = renderHook(() => useAIReview(), { wrapper })
     await waitFor(() => expect(result.current.suggestions.isSuccess).toBe(true))
     await waitFor(() => expect(result.current.canEdit).toBe(true))
@@ -139,12 +142,90 @@ it.each(['create', 'review'] as const)(
         HttpResponse.json(
           command === 'create'
             ? { ...first, id: 'new-job' }
-            : { ...suggestion, content: {}, review_status: 'accepted', review_note: '' },
+            : {
+                ...suggestion,
+                content: {},
+                review_status: 'accepted',
+                review_note: '',
+                accepted_resource_type: 'workflow',
+                accepted_resource_id: 'new-draft',
+              },
         ),
       )
       outcome = await completion
     })
     expect(outcome).toBe(command === 'create' ? false : null)
     expect(result.current.selectedJobId).toBe('other')
+    if (command === 'review')
+      expect(client.getQueryState(['workflows', project.id, 'catalog'])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(['workflows', 'another-project', 'catalog'])?.isInvalidated).toBe(
+      false,
+    )
   },
 )
+
+it('keeps review pending until the original asset cache finishes refreshing', async () => {
+  let release!: () => void
+  const refresh = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let refreshing = false
+  let accepted = false
+  const job = { id: 'review-job', project_id: project.id, status: 'completed' }
+  const suggestion = { id: 'review-suggestion', job_id: job.id, review_status: 'pending' }
+  server.use(
+    http.get('/api/v1/ai/status', () => HttpResponse.json({ enabled: true })),
+    http.get('/api/v1/ai/jobs', () =>
+      HttpResponse.json({ items: [job], total: 1, page: 1, page_size: 20 }),
+    ),
+    http.get(`/api/v1/ai/jobs/${job.id}`, () => HttpResponse.json(job)),
+    http.get(`/api/v1/ai/jobs/${job.id}/suggestions`, () => HttpResponse.json([suggestion])),
+    http.post(`/api/v1/ai/suggestions/${suggestion.id}/accept`, () => {
+      accepted = true
+      return HttpResponse.json({
+        ...suggestion,
+        content: {},
+        review_status: 'accepted',
+        review_note: '',
+        accepted_resource_type: 'workflow',
+        accepted_resource_id: 'new-workflow',
+      })
+    }),
+    http.get(`/api/v1/projects/${project.id}/workflows`, async () => {
+      if (accepted) {
+        refreshing = true
+        await refresh
+      }
+      return HttpResponse.json({ items: [], total: 0, page: 1, page_size: 100 })
+    }),
+  )
+  const { wrapper } = harness('ai')
+  const { result } = renderHook(
+    () => {
+      useQuery({
+        queryKey: ['workflows', project.id, 'catalog'],
+        queryFn: () => listWorkflows(project.id),
+      })
+      return useAIReview()
+    },
+    { wrapper },
+  )
+  await waitFor(() => expect(result.current.suggestions.isSuccess).toBe(true))
+  await waitFor(() => expect(result.current.canReview).toBe(true))
+  let completion!: Promise<unknown>
+  act(() => {
+    completion = result.current.review({ id: suggestion.id, decision: 'accept', note: '' })
+  })
+  await waitFor(() => expect(refreshing).toBe(true))
+  try {
+    expect.soft(result.current.reviewing).toBe(true)
+    expect.soft(result.current.suggestions.data?.[0].review_status).toBe('pending')
+  } finally {
+    await act(async () => {
+      release()
+      await completion
+    })
+  }
+  await waitFor(() => expect(result.current.reviewing).toBe(false))
+  expect(result.current.suggestions.data?.[0].review_status).toBe('accepted')
+})

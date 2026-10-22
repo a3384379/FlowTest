@@ -3,7 +3,7 @@ import { render, screen, within, waitFor, act, fireEvent } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from '../features/auth/auth-store'
@@ -217,6 +217,102 @@ describe('ExecutionFabricPage', () => {
     ).toBeVisible()
     expect(screen.queryByText('当前有效 Lease')).not.toBeInTheDocument()
     expect(screen.getAllByText('有效性待刷新核对')).toHaveLength(2)
+  })
+
+  it('opens the resolved task and exact Lease from a lease-only progress event without writes', async () => {
+    installHandlers()
+    const leaseId = '00000000-0000-4000-8000-000000000699'
+    const current = {
+      ...tasks[1],
+      last_lease_id: leaseId,
+      fencing_token: 7,
+      selected_runner_id: pool.runners[0].id,
+    }
+    const progress = {
+      ...event('lease_renewed', '真实 Lease-only 进度', 7),
+      task_id: null,
+      resolved_task_id: current.id,
+      lease_id: leaseId,
+      details: { progress_percent: 42 },
+    }
+    const purePool = {
+      ...event('registered', '纯 Pool 注册事件', 0),
+      task_id: null,
+      resolved_task_id: null,
+      lease_id: null,
+    }
+    const unresolved = {
+      ...event('lease_renewed', '无法解析的历史事件', 0),
+      task_id: 'missing-task',
+      resolved_task_id: null,
+    }
+    const direct = {
+      ...event('lease_acquired', '原始 Task 事件', 7),
+      task_id: current.id,
+      resolved_task_id: current.id,
+    }
+    let writes = 0
+    const exactReads: string[] = []
+    server.use(
+      http.get('/api/v1/execution-fabric/tasks', () => page([])),
+      http.get('/api/v1/execution-fabric/tasks/:id', ({ params }) => {
+        exactReads.push(String(params.id))
+        return HttpResponse.json(current)
+      }),
+      http.get('/api/v1/execution-fabric/events', ({ request }) => {
+        const taskId = new URL(request.url).searchParams.get('task_id')
+        if (taskId) expect(taskId).toBe(current.id)
+        return page(taskId ? [progress, direct] : [progress, purePool, unresolved, direct])
+      }),
+      http.get('/api/v1/execution-fabric/leases', ({ request }) => {
+        expect(new URL(request.url).searchParams.get('task_id')).toBe(current.id)
+        return page([
+          {
+            id: leaseId,
+            task_id: current.id,
+            runner_id: current.selected_runner_id,
+            fencing_token: 7,
+            status: 'active',
+            acquired_at: '2026-10-22T01:00:00Z',
+            expires_at: '2099-10-22T01:00:00Z',
+            last_renewed_at: '2026-10-22T01:01:00Z',
+            completed_at: null,
+          },
+        ])
+      }),
+      http.post('/api/v1/execution-fabric/*', () => {
+        writes++
+        return HttpResponse.json({})
+      }),
+    )
+    renderPage()
+    const progressRow = (await screen.findByText(progress.message)).closest('tr')!
+    const taskLink = within(progressRow).getByRole('button')
+    expect(taskLink).toBeVisible()
+    expect(
+      within(screen.getByText(purePool.message).closest('tr')!).queryByRole('button'),
+    ).toBeNull()
+    expect(
+      within(screen.getByText(unresolved.message).closest('tr')!).queryByRole('button'),
+    ).toBeNull()
+    expect(
+      within(screen.getByText(direct.message).closest('tr')!).getByRole('button'),
+    ).toBeVisible()
+    await userEvent.setup().click(taskLink)
+    const drawer = (await screen.findByText('任务与 Lease 只读证据')).closest<HTMLElement>(
+      '[role="dialog"]',
+    )!
+    expect(drawer).toHaveRole('dialog')
+    expect(drawer).toBeVisible()
+    await waitFor(() => expect(within(drawer).getByText('当前有效 Lease')).toBeVisible())
+    const taskIdCell = within(drawer).getByText('任务 ID').closest('td')!
+    expect(within(taskIdCell).getByText(current.id)).toBeVisible()
+    expect(within(drawer).getAllByText(leaseId).length).toBeGreaterThan(0)
+    const leaseRow = within(drawer).getByText('当前有效 Lease').closest('tr')!
+    expect(within(leaseRow).getByText('7')).toBeVisible()
+    expect(screen.getByTestId('fabric-location')).toHaveTextContent(`task=${current.id}`)
+    expect(exactReads).toEqual([current.id])
+    expect(writes).toBe(0)
   })
 
   it('retains old data on refresh failure without performing a state action', async () => {
@@ -464,9 +560,18 @@ function renderPage(entry = '/execution-fabric') {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={[entry]}>
           <ExecutionFabricPage />
+          <FabricLocation />
         </MemoryRouter>
       </QueryClientProvider>
     </AntdApp>,
   )
   return { ...view, queryClient }
+}
+
+function FabricLocation() {
+  return (
+    <span data-testid="fabric-location" hidden>
+      {useLocation().search}
+    </span>
+  )
 }

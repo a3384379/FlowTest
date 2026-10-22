@@ -139,7 +139,14 @@ export function useReleaseGate(loadEvidence = false) {
   const createDecision = useMutation({
     mutationFn: (input: { projectId: string; definition: ReleaseDecisionInput }) =>
       createReleaseDecision(input.projectId, input.definition),
+    onSuccess: async (_decision, input) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['release-decisions', input.projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['release-latest-decision', input.projectId] }),
+      ])
+    },
   })
+  const evaluating = useRef(false)
 
   async function addPolicy(input: ReleasePolicyInput): Promise<boolean> {
     if (!canEdit || !isCurrent()) return false
@@ -156,16 +163,13 @@ export function useReleaseGate(loadEvidence = false) {
   }
 
   async function evaluate(input: ReleaseDecisionInput): Promise<boolean> {
-    if (!canEdit || !isCurrent()) return false
+    if (!canEdit || !isCurrent() || evaluating.current) return false
+    evaluating.current = true
     try {
       const decision = await createDecision.mutateAsync({
         projectId: required(projectId),
         definition: input,
       })
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['release-decisions', projectId] }),
-        queryClient.invalidateQueries({ queryKey: ['release-latest-decision', projectId] }),
-      ])
       if (!isCurrent()) return false
       selectDecision(decision.id)
       void message.success(decision.status === 'pass' ? '发布判断：PASS' : '发布判断：BLOCK')
@@ -173,6 +177,8 @@ export function useReleaseGate(loadEvidence = false) {
     } catch (error) {
       if (isCurrent()) void message.error(apiErrorWithTrace(error))
       return false
+    } finally {
+      evaluating.current = false
     }
   }
 
