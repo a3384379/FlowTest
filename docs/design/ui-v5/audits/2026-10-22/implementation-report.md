@@ -6,7 +6,7 @@
 
 本次针对已确认的11项问题实施修复。范围包含旧Standalone兼容、资产结果消费、项目权限及缓存、功能开关、提交期间输入状态和执行证据下钻。原2026-10-19审计及方案保持冻结；本文件记录后续实现，不能用原基线CI结果代替整改后的验证。
 
-**11项整改、三组独立 max 源码复审、具名回归及完整本地检查均已完成。** 本地具名验证、完整本地检查、最新提交的远程门禁、合并及部署验收分别记录；未运行的项目不标记通过。
+**11项整改、三组独立 max 源码复审、具名回归及首轮完整本地检查已完成；首轮远程发现两项测试超时，补修与验证见5.3。** 本地具名验证、完整本地检查、最新提交的远程门禁、合并及部署验收分别记录；最终提交与门禁状态统一以[PR #148](https://github.com/a3384379/FlowTest/pull/148)的验证记录为准，未运行的项目不标记通过。
 
 ## 2. 逐项实现与验收映射
 
@@ -62,7 +62,9 @@
 
 ### 5.2 完整检查、独立复审和交付
 
-`CI=true make check`已在最终48个产品/正式测试文件的SHA-256快照上完整通过，退出码0，总用时2055.55秒。2026-10-22北京时间10:07:46开始、10:42:01结束，运行前后源码一致。完整日志`make-check.log`；退出状态、时间及源码一致性见`make-check-result.json`、`full-check-source-before.json`与`full-check-source-after.json`。
+`CI=true make check`已在首轮48个产品/正式测试文件的SHA-256快照上完整通过，退出码0，总用时2055.55秒。2026-10-22北京时间10:07:46开始、10:42:01结束，运行前后源码一致。完整日志`make-check.log`；退出状态、时间及源码一致性见`make-check-result.json`、`full-check-source-before.json`与`full-check-source-after.json`。
+
+此轮检查随后绑定提交`1a4d8a78a42628152c6b7f4ca6840c9b7f5fba27`，48个提交内文件校验值均一致。5.3的测试交互补修必须在新提交上重新验证，不能沿用此Head的完整检查或远程结果。
 
 - 后端：658个Python文件格式检查、Ruff、445源文件mypy均通过；完整pytest为**1955 passed、14 skipped，覆盖率91.22%**，达到90%门槛，用时263.12秒。保留两项既有测试类收集warning，未改写历史类或测试发现规则。
 - 前端：完整Prettier、ESLint及TypeScript检查通过；Vitest为**185文件、1403项全部通过**，用时1759.78秒。覆盖率Statements 86.56%、Branches 82.75%、Functions 86.49%、Lines 89.12%，达到原80%门槛；生产构建通过。未修改测试配置或覆盖率阈值。
@@ -72,6 +74,15 @@
 修复前main的历史绿色CI不计为本轮整改证据。此记录随实现提交，本地完整检查通过时尚未创建本轮PR；本次提交的远程门禁、合并及发布状态另以实际PR和CI记录为准。
 
 本轮本地尚未另行运行Compose浏览器、Windows打包/实体旧包安装、整包历史升级，也未连接真实LLM、MCP、Runner或KMS执行外部集成验收；容量、稳定性RC及生产部署未执行。本次适用的Compose、Windows和历史升级必须由最新提交的远程integration门禁分别验证，不能由本地SQLite/ASGI、MSW或源码复审代替。现有QA13078仍运行较早源码，未作为本轮整改实页验收。
+
+### 5.3 首轮远程结果与测试交互补修
+
+[首次PR运行39712988493](https://github.com/a3384379/FlowTest/actions/runs/39712988493)对应上述Head。Quick、完整后端及基础设施集成、Compose、安全、Windows、历史升级作业通过；前端185文件中184通过，1403项中1401通过，两项组织账号身份边界用例因60000ms超时失败，完整门禁失败，未合并。完整失败日志保留为`pr148-frontend-full-first.log`。
+
+- 失败场景为`rotate/organization`与`revoke/unmount`，未出现业务断言失败。已有本地27.17秒CPU采样中，约89.3%时间处于jsdom CSS继承计算，可见性断言及userEvent指针命中检查各约12秒；这是耗时路径的诊断依据，不把本地采样当成远程失败栈。
+- 补修仅调整`submitAccountCommand`中的轮换/撤销准备动作：保留原按钮role、accessible name、可见及aria-hidden断言，增加enabled和focus断言，通过原生Enter激活按钮。已核对真实AntD Button及安装的user-event实现，仍经过原onClick、mutation、HTTP、组织身份拦截器及MSW；未mock业务入口，未改变生产代码、CSS、指针检查配置、超时、重试或覆盖率。键盘路径不单独证明鼠标布局命中。
+- 补修后`make test-frontend-targeted TARGETS='["src/pages/OrganizationGovernancePage.test.tsx"]'`为**39项全部通过，用时96.03秒**，日志`org-ci-keyboard-targeted.log`；该文件Prettier及ESLint通过。额外独立max源码复审无剩余可操作问题，记录`ci-keyboard-review-max.md`；诊断记录`ci-org-diagnostic.md`。补修后的完整本地检查、新Head的远程作业与正式Required Gate结果统一追加在[PR #148验证与状态](https://github.com/a3384379/FlowTest/pull/148)，本文件保留逐轮历史结果。
+- 首次Compose日志确认：浏览器主套件67项，另setup、Runner及S47前后隔离运维段分别通过；不将重复执行合计作唯一场景数，也不推断累计零重试。五个独立容量步骤均skipped；隔离卷备份、恢复、校验均为7个对象。Windows通过覆盖新便携包、preflight、MCP工具、首次启动、verify及探针，不能代表实体旧安装升级。首次结果仅归属原Head，补修后必须重验适用门禁。
 
 ## 6. 原始证据归档
 

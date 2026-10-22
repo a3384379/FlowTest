@@ -1167,6 +1167,9 @@ async function submitAccountCommand(
     expect(action).toHaveAccessibleName(label)
     expect(action).toBeVisible()
     expect(action.closest('[aria-hidden="true"]')).toBeNull()
-    await browser.click(action)
+    expect(action).toBeEnabled()
+    action.focus()
+    expect(action).toHaveFocus()
+    await browser.keyboard('{Enter}')
   }
 }
