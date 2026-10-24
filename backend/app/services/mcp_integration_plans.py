@@ -66,6 +66,8 @@ class MCPIntegrationPlanService:
                     OperationPlanSelection(
                         definition_id=item.definition_id,
                         scenario_id=item.scenario_id,
+                        api_version=item.api_version,
+                        contract_fingerprint=item.contract_fingerprint,
                     )
                     for item in payload.operations
                 ),

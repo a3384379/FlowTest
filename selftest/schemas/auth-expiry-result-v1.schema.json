@@ -1,0 +1,331 @@
+{
+  "$defs": {
+    "AuthExpiryEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_monotonic_seconds": {
+          "maximum": 600,
+          "minimum": 0,
+          "title": "Elapsed Monotonic Seconds",
+          "type": "number"
+        },
+        "expired": {
+          "$ref": "#/$defs/ExpiryHTTPObservation"
+        },
+        "expires_in": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Expires In",
+          "type": "integer"
+        },
+        "http_attempts": {
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Http Attempts",
+          "type": "integer"
+        },
+        "initial": {
+          "$ref": "#/$defs/ExpiryHTTPObservation"
+        },
+        "logout": {
+          "$ref": "#/$defs/ExpiryHTTPObservation"
+        },
+        "minted_response_at": {
+          "format": "date-time",
+          "title": "Minted Response At",
+          "type": "string"
+        },
+        "rejected_attempts": {
+          "minimum": 0,
+          "title": "Rejected Attempts",
+          "type": "integer"
+        },
+        "token_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Token Digest",
+          "type": "string"
+        },
+        "user_id": {
+          "format": "uuid",
+          "title": "User Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_id",
+        "token_digest",
+        "expires_in",
+        "minted_response_at",
+        "initial",
+        "expired",
+        "elapsed_monotonic_seconds",
+        "logout",
+        "http_attempts",
+        "rejected_attempts"
+      ],
+      "title": "AuthExpiryEvidence",
+      "type": "object"
+    },
+    "AuthExpiryManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "const": "ST-API-001",
+          "default": "ST-API-001",
+          "title": "Acceptance Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "deadline": {
+          "format": "date-time",
+          "title": "Deadline",
+          "type": "string"
+        },
+        "expected_error": {
+          "const": "ACCESS_TOKEN_EXPIRED",
+          "default": "ACCESS_TOKEN_EXPIRED",
+          "title": "Expected Error",
+          "type": "string"
+        },
+        "expected_expires_in": {
+          "const": 60,
+          "default": 60,
+          "title": "Expected Expires In",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "pack_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Pack Digest",
+          "type": "string"
+        },
+        "pack_id": {
+          "const": "auth-expiry-v1",
+          "default": "auth-expiry-v1",
+          "title": "Pack Id",
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/TargetAuthPolicy"
+        },
+        "policy_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Digest",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "default": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "runtime_profile": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "scenario_id": {
+          "const": "ST-SECURITY-access-expired",
+          "default": "ST-SECURITY-access-expired",
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-auth-expiry-v1",
+          "default": "flowtest-auth-expiry-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pack_digest",
+        "project_name",
+        "nonce",
+        "runtime_profile",
+        "target_container_id",
+        "target_image",
+        "source_digest",
+        "policy",
+        "policy_digest",
+        "created_at",
+        "deadline"
+      ],
+      "title": "AuthExpiryManifest",
+      "type": "object"
+    },
+    "ExpiryHTTPObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "response_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Digest",
+          "type": "string"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Status",
+          "type": "integer"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "status",
+        "response_digest",
+        "observed_at"
+      ],
+      "title": "ExpiryHTTPObservation",
+      "type": "object"
+    },
+    "TargetAuthPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "owned_target_authentication_fixture",
+          "default": "owned_target_authentication_fixture",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-owned-target-auth-v1",
+          "default": "flowtest-owned-target-auth-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "target_access_token_minutes": {
+          "maximum": 60,
+          "minimum": 1,
+          "title": "Target Access Token Minutes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_name",
+        "nonce",
+        "target_access_token_minutes"
+      ],
+      "title": "TargetAuthPolicy",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_verdict": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Batch Verdict",
+      "type": "string"
+    },
+    "evidence": {
+      "$ref": "#/$defs/AuthExpiryEvidence"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "manifest": {
+      "$ref": "#/$defs/AuthExpiryManifest"
+    },
+    "reason_codes": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "manifest",
+    "evidence",
+    "batch_verdict",
+    "exit_code",
+    "reason_codes"
+  ],
+  "title": "AuthExpiryResult",
+  "type": "object"
+}

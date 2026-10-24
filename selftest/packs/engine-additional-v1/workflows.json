@@ -1,0 +1,4452 @@
+{
+  "workflows": [
+    {
+      "scenario_id": "ST-ADD-poll-time-budget",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "poll_task",
+            "type": "api",
+            "name": "poll_task",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "bb541214-6d83-5cc9-a1f0-6ff433360e2f",
+              "api_version": 1,
+              "polling": {
+                "expression": "body.actual",
+                "expected": 2,
+                "max_attempts": 20,
+                "interval_seconds": 2,
+                "timeout_seconds": 1
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-poll_task",
+            "source": "start",
+            "target": "poll_task",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "poll_task-end",
+            "source": "poll_task",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "poll_task",
+            "type": "api",
+            "name": "poll_task",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "bb541214-6d83-5cc9-a1f0-6ff433360e2f",
+              "api_version": 1,
+              "polling": {
+                "expression": "body.actual",
+                "expected": 2,
+                "max_attempts": 20,
+                "interval_seconds": 2,
+                "timeout_seconds": 1
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-poll_task",
+            "source": "start",
+            "target": "poll_task",
+            "mappings": []
+          },
+          {
+            "id": "poll_task-end",
+            "source": "poll_task",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "first",
+            "type": "api",
+            "name": "first",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1605f6f7-a3c4-5e19-9751-43d961f6feca",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "first",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "forbidden_second",
+            "type": "api",
+            "name": "forbidden_second",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1605f6f7-a3c4-5e19-9751-43d961f6feca",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "must-not-send",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-first",
+            "source": "start",
+            "target": "first",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "first-forbidden_second",
+            "source": "first",
+            "target": "forbidden_second",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "forbidden_second-end",
+            "source": "forbidden_second",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 1,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "first",
+            "type": "api",
+            "name": "first",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1605f6f7-a3c4-5e19-9751-43d961f6feca",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "first",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "forbidden_second",
+            "type": "api",
+            "name": "forbidden_second",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1605f6f7-a3c4-5e19-9751-43d961f6feca",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "must-not-send",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-first",
+            "source": "start",
+            "target": "first",
+            "mappings": []
+          },
+          {
+            "id": "first-forbidden_second",
+            "source": "first",
+            "target": "forbidden_second",
+            "mappings": []
+          },
+          {
+            "id": "forbidden_second-end",
+            "source": "forbidden_second",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 1,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-finally-failure",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "try_block",
+            "type": "capability",
+            "name": "try_block",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.try",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "try_body": {
+                "kind": "inline",
+                "region_id": "try_region"
+              },
+              "catches": [],
+              "finally_body": {
+                "kind": "inline",
+                "region_id": "finally_region"
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-try_block",
+            "source": "start",
+            "target": "try_block",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "try_block-end",
+            "source": "try_block",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "try_region",
+            "owner_node_id": "try_block",
+            "role": "try",
+            "nodes": [
+              {
+                "id": "try_request",
+                "type": "api",
+                "name": "try_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "697a0bd3-9911-58fa-8eb1-8c92136b8b55",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "try",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "try_request",
+            "exit_node_ids": [
+              "try_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "finally_region",
+            "owner_node_id": "try_block",
+            "role": "finally",
+            "nodes": [
+              {
+                "id": "finally_request",
+                "type": "api",
+                "name": "finally_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "697a0bd3-9911-58fa-8eb1-8c92136b8b55",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "finally",
+                        "branch": "finally",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "finally_assert",
+                "type": "assert",
+                "name": "finally_assert",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "source_node_id": "finally_request",
+                  "expression": "body.actual",
+                  "expected": 2
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "finally_request-finally_assert",
+                "source": "finally_request",
+                "target": "finally_assert",
+                "condition": null,
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "finally_request",
+            "exit_node_ids": [
+              "finally_assert"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "try_block",
+            "type": "capability",
+            "name": "try_block",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.try",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "try_body": {
+                "kind": "inline",
+                "region_id": "try_region"
+              },
+              "catches": [],
+              "finally_body": {
+                "kind": "inline",
+                "region_id": "finally_region"
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-try_block",
+            "source": "start",
+            "target": "try_block",
+            "mappings": []
+          },
+          {
+            "id": "try_block-end",
+            "source": "try_block",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "try_region",
+            "owner_node_id": "try_block",
+            "role": "try",
+            "nodes": [
+              {
+                "id": "try_request",
+                "type": "api",
+                "name": "try_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "697a0bd3-9911-58fa-8eb1-8c92136b8b55",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "try",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "try_request",
+            "exit_node_ids": [
+              "try_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "finally_region",
+            "owner_node_id": "try_block",
+            "role": "finally",
+            "nodes": [
+              {
+                "id": "finally_request",
+                "type": "api",
+                "name": "finally_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "697a0bd3-9911-58fa-8eb1-8c92136b8b55",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "finally",
+                        "branch": "finally",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "finally_assert",
+                "type": "assert",
+                "name": "finally_assert",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "source_node_id": "finally_request",
+                  "expression": "body.actual",
+                  "expected": 2
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "finally_request-finally_assert",
+                "source": "finally_request",
+                "target": "finally_assert",
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "finally_request",
+            "exit_node_ids": [
+              "finally_assert"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "parallel",
+            "type": "capability",
+            "name": "parallel",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.parallel",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "branches": [
+                {
+                  "id": "first",
+                  "label": "first",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "first"
+                  }
+                },
+                {
+                  "id": "second",
+                  "label": "second",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "second"
+                  }
+                },
+                {
+                  "id": "third",
+                  "label": "third",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "third"
+                  }
+                },
+                {
+                  "id": "fourth",
+                  "label": "fourth",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "fourth"
+                  }
+                }
+              ],
+              "policy": {
+                "concurrency": 2,
+                "on_error": "collect_all",
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-parallel",
+            "source": "start",
+            "target": "parallel",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "parallel-end",
+            "source": "parallel",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "first",
+            "owner_node_id": "parallel",
+            "role": "branch:first",
+            "nodes": [
+              {
+                "id": "request_first",
+                "type": "api",
+                "name": "request_first",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "first",
+                        "branch": "first",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_first",
+            "exit_node_ids": [
+              "request_first"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "second",
+            "owner_node_id": "parallel",
+            "role": "branch:second",
+            "nodes": [
+              {
+                "id": "request_second",
+                "type": "api",
+                "name": "request_second",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "second",
+                        "branch": "second",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_second",
+            "exit_node_ids": [
+              "request_second"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "third",
+            "owner_node_id": "parallel",
+            "role": "branch:third",
+            "nodes": [
+              {
+                "id": "request_third",
+                "type": "api",
+                "name": "request_third",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "third",
+                        "branch": "third",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_third",
+            "exit_node_ids": [
+              "request_third"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "fourth",
+            "owner_node_id": "parallel",
+            "role": "branch:fourth",
+            "nodes": [
+              {
+                "id": "request_fourth",
+                "type": "api",
+                "name": "request_fourth",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "fourth",
+                        "branch": "fourth",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_fourth",
+            "exit_node_ids": [
+              "request_fourth"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "parallel",
+            "type": "capability",
+            "name": "parallel",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.parallel",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "branches": [
+                {
+                  "id": "first",
+                  "label": "first",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "first"
+                  }
+                },
+                {
+                  "id": "second",
+                  "label": "second",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "second"
+                  }
+                },
+                {
+                  "id": "third",
+                  "label": "third",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "third"
+                  }
+                },
+                {
+                  "id": "fourth",
+                  "label": "fourth",
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "fourth"
+                  }
+                }
+              ],
+              "policy": {
+                "concurrency": 2,
+                "on_error": "collect_all",
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-parallel",
+            "source": "start",
+            "target": "parallel",
+            "mappings": []
+          },
+          {
+            "id": "parallel-end",
+            "source": "parallel",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "first",
+            "owner_node_id": "parallel",
+            "role": "branch:first",
+            "nodes": [
+              {
+                "id": "request_first",
+                "type": "api",
+                "name": "request_first",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "first",
+                        "branch": "first",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_first",
+            "exit_node_ids": [
+              "request_first"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "second",
+            "owner_node_id": "parallel",
+            "role": "branch:second",
+            "nodes": [
+              {
+                "id": "request_second",
+                "type": "api",
+                "name": "request_second",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "second",
+                        "branch": "second",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_second",
+            "exit_node_ids": [
+              "request_second"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "third",
+            "owner_node_id": "parallel",
+            "role": "branch:third",
+            "nodes": [
+              {
+                "id": "request_third",
+                "type": "api",
+                "name": "request_third",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "third",
+                        "branch": "third",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_third",
+            "exit_node_ids": [
+              "request_third"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "fourth",
+            "owner_node_id": "parallel",
+            "role": "branch:fourth",
+            "nodes": [
+              {
+                "id": "request_fourth",
+                "type": "api",
+                "name": "request_fourth",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "fourth",
+                        "branch": "fourth",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "request_fourth",
+            "exit_node_ids": [
+              "request_fourth"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-nested-break",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "outer",
+            "type": "capability",
+            "name": "outer",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": [
+                  10,
+                  20
+                ]
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "outer_body"
+              },
+              "policy": {
+                "max_iterations": 2,
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-outer",
+            "source": "start",
+            "target": "outer",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "outer-end",
+            "source": "outer",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "outer_body",
+            "owner_node_id": "outer",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner",
+                "type": "capability",
+                "name": "inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                  "collection": {
+                    "kind": "literal",
+                    "value": [
+                      1,
+                      2
+                    ]
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "inner_body"
+                  },
+                  "policy": {
+                    "max_iterations": 2,
+                    "timeout_seconds": 15
+                  }
+                },
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "after_inner",
+                "type": "api",
+                "name": "after_inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "after",
+                        "branch": "outer",
+                        "iteration_key": "outer-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner-after_inner",
+                "source": "inner",
+                "target": "after_inner",
+                "condition": null,
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner",
+            "exit_node_ids": [
+              "after_inner"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "inner_body",
+            "owner_node_id": "inner",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner_request",
+                "type": "api",
+                "name": "inner_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "inner",
+                        "branch": "inner",
+                        "iteration_key": "inner-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "signal",
+                "type": "capability",
+                "name": "signal",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.break",
+                "capability_version": "1.0.0",
+                "configuration": {},
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "must_not_run",
+                "type": "api",
+                "name": "must_not_run",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner_request-signal",
+                "source": "inner_request",
+                "target": "signal",
+                "condition": null,
+                "mappings": []
+              },
+              {
+                "id": "signal-must_not_run",
+                "source": "signal",
+                "target": "must_not_run",
+                "condition": null,
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner_request",
+            "exit_node_ids": [
+              "must_not_run"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "outer",
+            "type": "capability",
+            "name": "outer",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": [
+                  10,
+                  20
+                ]
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "outer_body"
+              },
+              "policy": {
+                "max_iterations": 2,
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-outer",
+            "source": "start",
+            "target": "outer",
+            "mappings": []
+          },
+          {
+            "id": "outer-end",
+            "source": "outer",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "outer_body",
+            "owner_node_id": "outer",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner",
+                "type": "capability",
+                "name": "inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                  "collection": {
+                    "kind": "literal",
+                    "value": [
+                      1,
+                      2
+                    ]
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "inner_body"
+                  },
+                  "policy": {
+                    "max_iterations": 2,
+                    "timeout_seconds": 15
+                  }
+                },
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "after_inner",
+                "type": "api",
+                "name": "after_inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "after",
+                        "branch": "outer",
+                        "iteration_key": "outer-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner-after_inner",
+                "source": "inner",
+                "target": "after_inner",
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner",
+            "exit_node_ids": [
+              "after_inner"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "inner_body",
+            "owner_node_id": "inner",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner_request",
+                "type": "api",
+                "name": "inner_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "inner",
+                        "branch": "inner",
+                        "iteration_key": "inner-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "signal",
+                "type": "capability",
+                "name": "signal",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.break",
+                "capability_version": "1.0.0",
+                "configuration": {},
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "must_not_run",
+                "type": "api",
+                "name": "must_not_run",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner_request-signal",
+                "source": "inner_request",
+                "target": "signal",
+                "mappings": []
+              },
+              {
+                "id": "signal-must_not_run",
+                "source": "signal",
+                "target": "must_not_run",
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner_request",
+            "exit_node_ids": [
+              "must_not_run"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-nested-continue",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "outer",
+            "type": "capability",
+            "name": "outer",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": [
+                  10,
+                  20
+                ]
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "outer_body"
+              },
+              "policy": {
+                "max_iterations": 2,
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-outer",
+            "source": "start",
+            "target": "outer",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "outer-end",
+            "source": "outer",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "outer_body",
+            "owner_node_id": "outer",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner",
+                "type": "capability",
+                "name": "inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                  "collection": {
+                    "kind": "literal",
+                    "value": [
+                      1,
+                      2
+                    ]
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "inner_body"
+                  },
+                  "policy": {
+                    "max_iterations": 2,
+                    "timeout_seconds": 15
+                  }
+                },
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "after_inner",
+                "type": "api",
+                "name": "after_inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "after",
+                        "branch": "outer",
+                        "iteration_key": "outer-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner-after_inner",
+                "source": "inner",
+                "target": "after_inner",
+                "condition": null,
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner",
+            "exit_node_ids": [
+              "after_inner"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "inner_body",
+            "owner_node_id": "inner",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner_request",
+                "type": "api",
+                "name": "inner_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "inner",
+                        "branch": "inner",
+                        "iteration_key": "inner-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "signal",
+                "type": "capability",
+                "name": "signal",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.continue",
+                "capability_version": "1.0.0",
+                "configuration": {},
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "must_not_run",
+                "type": "api",
+                "name": "must_not_run",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner_request-signal",
+                "source": "inner_request",
+                "target": "signal",
+                "condition": null,
+                "mappings": []
+              },
+              {
+                "id": "signal-must_not_run",
+                "source": "signal",
+                "target": "must_not_run",
+                "condition": null,
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner_request",
+            "exit_node_ids": [
+              "must_not_run"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "outer",
+            "type": "capability",
+            "name": "outer",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": [
+                  10,
+                  20
+                ]
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "outer_body"
+              },
+              "policy": {
+                "max_iterations": 2,
+                "timeout_seconds": 15
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-outer",
+            "source": "start",
+            "target": "outer",
+            "mappings": []
+          },
+          {
+            "id": "outer-end",
+            "source": "outer",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "outer_body",
+            "owner_node_id": "outer",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner",
+                "type": "capability",
+                "name": "inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.foreach",
+                "capability_version": "1.0.0",
+                "configuration": {
+                  "collection": {
+                    "kind": "literal",
+                    "value": [
+                      1,
+                      2
+                    ]
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "inner_body"
+                  },
+                  "policy": {
+                    "max_iterations": 2,
+                    "timeout_seconds": 15
+                  }
+                },
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "after_inner",
+                "type": "api",
+                "name": "after_inner",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "after",
+                        "branch": "outer",
+                        "iteration_key": "outer-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner-after_inner",
+                "source": "inner",
+                "target": "after_inner",
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner",
+            "exit_node_ids": [
+              "after_inner"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "inner_body",
+            "owner_node_id": "inner",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "inner_request",
+                "type": "api",
+                "name": "inner_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "inner",
+                        "branch": "inner",
+                        "iteration_key": "inner-{{loop.index}}"
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "signal",
+                "type": "capability",
+                "name": "signal",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {},
+                "capability_id": "flow.control.continue",
+                "capability_version": "1.0.0",
+                "configuration": {},
+                "bindings": [],
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              },
+              {
+                "id": "must_not_run",
+                "type": "api",
+                "name": "must_not_run",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [
+              {
+                "id": "inner_request-signal",
+                "source": "inner_request",
+                "target": "signal",
+                "mappings": []
+              },
+              {
+                "id": "signal-must_not_run",
+                "source": "signal",
+                "target": "must_not_run",
+                "mappings": []
+              }
+            ],
+            "entry_node_id": "inner_request",
+            "exit_node_ids": [
+              "must_not_run"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-return-outside-call",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "return_value",
+            "type": "capability",
+            "name": "return_value",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.return",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "outputs": {
+                "result": {
+                  "kind": "literal",
+                  "value": 42
+                }
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "must_not_run",
+            "type": "api",
+            "name": "must_not_run",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "6668f7c8-6c2d-5c5c-87b9-3d1ffc024ea9",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "forbidden",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-return_value",
+            "source": "start",
+            "target": "return_value",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "return_value-must_not_run",
+            "source": "return_value",
+            "target": "must_not_run",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "must_not_run-end",
+            "source": "must_not_run",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "return_value",
+            "type": "capability",
+            "name": "return_value",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.return",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "outputs": {
+                "result": {
+                  "kind": "literal",
+                  "value": 42
+                }
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "must_not_run",
+            "type": "api",
+            "name": "must_not_run",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "6668f7c8-6c2d-5c5c-87b9-3d1ffc024ea9",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "forbidden",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-return_value",
+            "source": "start",
+            "target": "return_value",
+            "mappings": []
+          },
+          {
+            "id": "return_value-must_not_run",
+            "source": "return_value",
+            "target": "must_not_run",
+            "mappings": []
+          },
+          {
+            "id": "must_not_run-end",
+            "source": "must_not_run",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-switch-hit",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "choose",
+            "type": "capability",
+            "name": "choose",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.switch",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "mode": "value",
+              "value": {
+                "kind": "literal",
+                "value": "MATCH"
+              },
+              "branches": [
+                {
+                  "id": "match",
+                  "label": "match",
+                  "match": {
+                    "kind": "literal",
+                    "value": "MATCH"
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "match"
+                  }
+                }
+              ],
+              "default": {
+                "behavior": "run",
+                "body": {
+                  "kind": "inline",
+                  "region_id": "default"
+                }
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-choose",
+            "source": "start",
+            "target": "choose",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "choose-end",
+            "source": "choose",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "match",
+            "owner_node_id": "choose",
+            "role": "case:match",
+            "nodes": [
+              {
+                "id": "match_request",
+                "type": "api",
+                "name": "match_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "35c031b2-4be7-56d0-b048-761fc2bcf5b5",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "selected",
+                        "branch": "match",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "match_request",
+            "exit_node_ids": [
+              "match_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "default",
+            "owner_node_id": "choose",
+            "role": "default",
+            "nodes": [
+              {
+                "id": "default_request",
+                "type": "api",
+                "name": "default_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "35c031b2-4be7-56d0-b048-761fc2bcf5b5",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "default",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "default_request",
+            "exit_node_ids": [
+              "default_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "choose",
+            "type": "capability",
+            "name": "choose",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.switch",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "mode": "value",
+              "value": {
+                "kind": "literal",
+                "value": "MATCH"
+              },
+              "branches": [
+                {
+                  "id": "match",
+                  "label": "match",
+                  "match": {
+                    "kind": "literal",
+                    "value": "MATCH"
+                  },
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "match"
+                  }
+                }
+              ],
+              "default": {
+                "behavior": "run",
+                "body": {
+                  "kind": "inline",
+                  "region_id": "default"
+                }
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-choose",
+            "source": "start",
+            "target": "choose",
+            "mappings": []
+          },
+          {
+            "id": "choose-end",
+            "source": "choose",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "match",
+            "owner_node_id": "choose",
+            "role": "case:match",
+            "nodes": [
+              {
+                "id": "match_request",
+                "type": "api",
+                "name": "match_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "35c031b2-4be7-56d0-b048-761fc2bcf5b5",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "selected",
+                        "branch": "match",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "match_request",
+            "exit_node_ids": [
+              "match_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "default",
+            "owner_node_id": "choose",
+            "role": "default",
+            "nodes": [
+              {
+                "id": "default_request",
+                "type": "api",
+                "name": "default_request",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "35c031b2-4be7-56d0-b048-761fc2bcf5b5",
+                  "api_version": 1,
+                  "timeout_seconds": 10,
+                  "request_overrides": {
+                    "body": {
+                      "kind": "json",
+                      "value": {
+                        "marker": "engine-additional-v1",
+                        "value": "forbidden",
+                        "branch": "default",
+                        "iteration_key": ""
+                      }
+                    }
+                  }
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "default_request",
+            "exit_node_ids": [
+              "default_request"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "slow_request",
+            "type": "api",
+            "name": "slow_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "f15c6275-5117-5424-a562-cf6bcae29f63",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "slow",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-slow_request",
+            "source": "start",
+            "target": "slow_request",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "slow_request-end",
+            "source": "slow_request",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 1,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "slow_request",
+            "type": "api",
+            "name": "slow_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "f15c6275-5117-5424-a562-cf6bcae29f63",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "slow",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-slow_request",
+            "source": "start",
+            "target": "slow_request",
+            "mappings": []
+          },
+          {
+            "id": "slow_request-end",
+            "source": "slow_request",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 1,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "parent_request",
+            "type": "api",
+            "name": "parent_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1a7b53ae-8a61-55b3-bfc1-6eb2d0eaa38f",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "parent",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "call_child",
+            "type": "subflow",
+            "name": "call_child",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "workflow_id": "f81fc54b-a409-57ac-931a-7ac6f54f68a5",
+              "workflow_version": 1
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_return",
+            "type": "assert",
+            "name": "assert_return",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "call_child",
+              "expression": "return.result",
+              "expected": 42
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-parent_request",
+            "source": "start",
+            "target": "parent_request",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "parent_request-call_child",
+            "source": "parent_request",
+            "target": "call_child",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "call_child-assert_return",
+            "source": "call_child",
+            "target": "assert_return",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "assert_return-end",
+            "source": "assert_return",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "parent_request",
+            "type": "api",
+            "name": "parent_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "1a7b53ae-8a61-55b3-bfc1-6eb2d0eaa38f",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": "parent",
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "call_child",
+            "type": "subflow",
+            "name": "call_child",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "workflow_id": "f81fc54b-a409-57ac-931a-7ac6f54f68a5",
+              "workflow_version": 1
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_return",
+            "type": "assert",
+            "name": "assert_return",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "call_child",
+              "expression": "return.result",
+              "expected": 42
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-parent_request",
+            "source": "start",
+            "target": "parent_request",
+            "mappings": []
+          },
+          {
+            "id": "parent_request-call_child",
+            "source": "parent_request",
+            "target": "call_child",
+            "mappings": []
+          },
+          {
+            "id": "call_child-assert_return",
+            "source": "call_child",
+            "target": "assert_return",
+            "mappings": []
+          },
+          {
+            "id": "assert_return-end",
+            "source": "assert_return",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "dataset",
+            "type": "dataset",
+            "name": "dataset",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "artifact_id": "e38e03dc-bb12-5730-9068-3d448a81224c",
+              "format": "json"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "row_request",
+            "type": "api",
+            "name": "row_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "fc2ea187-623a-57a5-b312-37664da444fd",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": null,
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_row_status",
+            "type": "assert",
+            "name": "assert_row_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "row_request",
+              "expression": "status_code",
+              "expected": 200
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-dataset",
+            "source": "start",
+            "target": "dataset",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "dataset-row_request",
+            "source": "dataset",
+            "target": "row_request",
+            "condition": null,
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "dataset",
+                  "path": "row.value"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "row_request",
+                  "location": "body",
+                  "key": "value"
+                }
+              },
+              {
+                "source": {
+                  "node_id": "dataset",
+                  "path": "row.row"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "row_request",
+                  "location": "body",
+                  "key": "branch"
+                }
+              }
+            ]
+          },
+          {
+            "id": "row_request-assert_row_status",
+            "source": "row_request",
+            "target": "assert_row_status",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "assert_row_status-end",
+            "source": "assert_row_status",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "dataset",
+            "type": "dataset",
+            "name": "dataset",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "artifact_id": "e38e03dc-bb12-5730-9068-3d448a81224c",
+              "format": "json"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "row_request",
+            "type": "api",
+            "name": "row_request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "fc2ea187-623a-57a5-b312-37664da444fd",
+              "api_version": 1,
+              "timeout_seconds": 10,
+              "request_overrides": {
+                "body": {
+                  "kind": "json",
+                  "value": {
+                    "marker": "engine-additional-v1",
+                    "value": null,
+                    "branch": "",
+                    "iteration_key": ""
+                  }
+                }
+              }
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_row_status",
+            "type": "assert",
+            "name": "assert_row_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "row_request",
+              "expression": "status_code",
+              "expected": 200
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "start-dataset",
+            "source": "start",
+            "target": "dataset",
+            "mappings": []
+          },
+          {
+            "id": "dataset-row_request",
+            "source": "dataset",
+            "target": "row_request",
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "dataset",
+                  "path": "row.value"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "row_request",
+                  "location": "body",
+                  "key": "value"
+                }
+              },
+              {
+                "source": {
+                  "node_id": "dataset",
+                  "path": "row.row"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "row_request",
+                  "location": "body",
+                  "key": "branch"
+                }
+              }
+            ]
+          },
+          {
+            "id": "row_request-assert_row_status",
+            "source": "row_request",
+            "target": "assert_row_status",
+            "mappings": []
+          },
+          {
+            "id": "assert_row_status-end",
+            "source": "assert_row_status",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 16,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 4,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    }
+  ]
+}

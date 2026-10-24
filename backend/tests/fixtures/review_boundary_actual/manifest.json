@@ -1,0 +1,80 @@
+{
+  "batch_key": "flowtest-review-recovery-20261024-probe22-contract102-attempt6",
+  "claim": "review_recovery_and_preview_only",
+  "created_at": "2026-10-23T17:44:42.007094Z",
+  "expires_at": "2026-10-23T17:54:42.007094Z",
+  "nonce": "1e330c2f96d561990a4a1ec8e5b22d1a",
+  "pack_digest": "9fa68419854abf34e4398fe0d289ceef57100ebbbd4e3d0fcb3e1e4a73dd2ff2",
+  "reviewer_id": "6c088579-96bb-4ac1-9e0a-0efba5ba1d8e",
+  "scenarios": [
+    {
+      "action": "preview_cancel",
+      "scenario_id": "REVIEW-preview_cancel-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "unknown_publish",
+      "scenario_id": "REVIEW-unknown_publish-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "stale_proposal",
+      "scenario_id": "REVIEW-stale_proposal-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "stale_approval",
+      "scenario_id": "REVIEW-stale_approval-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "concurrent_accept",
+      "scenario_id": "REVIEW-concurrent_accept-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "partial_resume",
+      "scenario_id": "REVIEW-partial_resume-stdio",
+      "transport": "stdio"
+    },
+    {
+      "action": "preview_cancel",
+      "scenario_id": "REVIEW-preview_cancel-streamable-http",
+      "transport": "streamable-http"
+    },
+    {
+      "action": "unknown_publish",
+      "scenario_id": "REVIEW-unknown_publish-streamable-http",
+      "transport": "streamable-http"
+    },
+    {
+      "action": "stale_proposal",
+      "scenario_id": "REVIEW-stale_proposal-streamable-http",
+      "transport": "streamable-http"
+    },
+    {
+      "action": "stale_approval",
+      "scenario_id": "REVIEW-stale_approval-streamable-http",
+      "transport": "streamable-http"
+    },
+    {
+      "action": "concurrent_accept",
+      "scenario_id": "REVIEW-concurrent_accept-streamable-http",
+      "transport": "streamable-http"
+    },
+    {
+      "action": "partial_resume",
+      "scenario_id": "REVIEW-partial_resume-streamable-http",
+      "transport": "streamable-http"
+    }
+  ],
+  "scope": {
+    "fixture_environment_id": "d026e01f-5b86-492d-aa54-3831c46c0a18",
+    "fixture_service_id": "c0366028-b8d4-4032-b1af-ed10fa3dc529",
+    "production_environment_id": "f27f3ce0-3bf9-4ae8-ac41-aa26f77d27c5",
+    "project_id": "7be8208c-deef-474c-814b-44d830f8a207"
+  },
+  "source_digest": "53aca9c9f4a913ea6de9b8c3d9794b7c4aec91c3b50d020f71b25ea2322120c9",
+  "trust": "local_untrusted",
+  "writer_machine_id": "1df8507e-866b-4a36-ad2a-b98560a2db7f"
+}

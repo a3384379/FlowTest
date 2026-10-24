@@ -361,6 +361,8 @@ def _commit_response(
     run: ImportRun,
 ) -> MCPCommitContractImportResponse:
     items = [_item_from_json(item) for item in run.results]
+    applied_keys = set(run.applied_keys)
+    applied_items = [item for item in items if item.import_key in applied_keys]
     return MCPCommitContractImportResponse(
         organization_id=organization_id,
         project_id=run.project_id,
@@ -369,17 +371,17 @@ def _commit_response(
         applied_keys=list(run.applied_keys),
         created_definition_ids=[
             item.definition_id
-            for item in items
+            for item in applied_items
             if item.definition_id is not None and item.change == ImportChange.ADDED.value
         ],
         changed_definition_ids=[
             item.definition_id
-            for item in items
+            for item in applied_items
             if item.definition_id is not None and item.change == ImportChange.CHANGED.value
         ],
         deleted_definition_ids=[
             item.definition_id
-            for item in items
+            for item in applied_items
             if item.definition_id is not None and item.change == ImportChange.DELETED.value
         ],
         source_sha256=run.source_sha256,

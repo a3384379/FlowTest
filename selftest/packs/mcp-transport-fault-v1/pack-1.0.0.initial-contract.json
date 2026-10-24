@@ -1,0 +1,233 @@
+{
+  "schema_version": "flowtest-mcp-transport-fault-v1",
+  "pack_id": "mcp-transport-fault-v1",
+  "pack_version": "1.0.0",
+  "sdk_version": "2.2.0",
+  "max_requests": 500,
+  "max_tool_calls": 100,
+  "max_runtime_seconds": 600,
+  "normalized_design_digest": "dd958e1e2be520d514eaa07df36151a76e0c33b8e0e9cda601fc34f3d69a27a0",
+  "scenarios": [
+    {
+      "scenario_id": "MCP-FAULT-bad_json-streamable-http",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "bad_jsonrpc",
+      "transport": "streamable-http",
+      "fault": "bad_json",
+      "expected": {
+        "rpc_error_code": -32700,
+        "server_http_status": 400,
+        "server_rpc_error": -32700
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-bad_version-streamable-http",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "bad_jsonrpc",
+      "transport": "streamable-http",
+      "fault": "bad_version",
+      "expected": {
+        "rpc_error_code": -32600,
+        "server_http_status": 400,
+        "server_rpc_error": -32600
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-oversized_field-stdio",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "oversized",
+      "transport": "stdio",
+      "fault": "oversized_field",
+      "expected": {
+        "sdk_complete": true,
+        "tool_error": true,
+        "text_marker": "invalid_arguments"
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-timeout-stdio",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "timeout",
+      "transport": "stdio",
+      "fault": "timeout",
+      "expected": {
+        "rpc_error_code": -32001
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-server_crash-stdio",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "server_crash",
+      "transport": "stdio",
+      "fault": "server_crash",
+      "expected": {
+        "rpc_error_code": -32000,
+        "server_killed": true
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-unknown_mutation-stdio",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "unknown_mutation",
+      "transport": "stdio",
+      "fault": "unknown_mutation",
+      "expected": {
+        "rpc_error_code": -32000,
+        "mutation_count": 1
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-inactive_account_creator-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "inactive",
+      "transport": "stdio",
+      "fault": "inactive_account_creator",
+      "expected": {
+        "sdk_complete": true,
+        "tool_error": true,
+        "business_code": "MCP_AUTHENTICATION_REQUIRED"
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-oversized_field-streamable-http",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "oversized",
+      "transport": "streamable-http",
+      "fault": "oversized_field",
+      "expected": {
+        "sdk_complete": true,
+        "tool_error": true,
+        "text_marker": "invalid_arguments",
+        "server_http_status": 200
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-timeout-streamable-http",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "timeout",
+      "transport": "streamable-http",
+      "fault": "timeout",
+      "expected": {
+        "rpc_error_code": -32001,
+        "server_http_status": 200
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-server_crash-streamable-http",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "server_crash",
+      "transport": "streamable-http",
+      "fault": "server_crash",
+      "expected": {
+        "server_killed": true,
+        "transport_error": "remote_protocol_error",
+        "server_http_status": 200
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-unknown_mutation-streamable-http",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "unknown_mutation",
+      "transport": "streamable-http",
+      "fault": "unknown_mutation",
+      "expected": {
+        "mutation_count": 1,
+        "transport_error": "remote_protocol_error",
+        "server_http_status": 200
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-inactive_account_creator-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "inactive",
+      "transport": "streamable-http",
+      "fault": "inactive_account_creator",
+      "expected": {
+        "sdk_complete": true,
+        "tool_error": true,
+        "business_code": "MCP_AUTHENTICATION_REQUIRED",
+        "server_http_status": 200
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-pipe_break-stdio",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "pipe_break",
+      "transport": "stdio",
+      "fault": "pipe_break",
+      "expected": {
+        "rpc_error_code": -32000
+      }
+    },
+    {
+      "scenario_id": "MCP-FAULT-socket_break-streamable-http",
+      "acceptance_id": "ST-MCP-008",
+      "variant_key": "socket_break",
+      "transport": "streamable-http",
+      "fault": "socket_break",
+      "expected": {
+        "transport_error": "remote_protocol_error",
+        "server_http_status": 200
+      }
+    }
+  ],
+  "catalog_fingerprint": "3e46d4cb48d9d5cf754111af184cf0d65d77cc27fd02977c4ce9d1f57d30ca38",
+  "tool_names": [
+    "flowtest.analyze_test_coverage",
+    "flowtest.begin_test_context",
+    "flowtest.cancel_preview",
+    "flowtest.check_service_target",
+    "flowtest.close_test_context",
+    "flowtest.commit_contract_import",
+    "flowtest.compile_integration_flowspec",
+    "flowtest.compile_test_design",
+    "flowtest.diagnose_failure",
+    "flowtest.diff_flowspec",
+    "flowtest.discover_control_capabilities",
+    "flowtest.discover_services",
+    "flowtest.ensure_project",
+    "flowtest.ensure_service_target",
+    "flowtest.ensure_test_environment",
+    "flowtest.explain_compiler_diagnostics",
+    "flowtest.export_flowspec",
+    "flowtest.find_assets",
+    "flowtest.generate_test_design",
+    "flowtest.ingest_database_evidence",
+    "flowtest.ingest_external_evidence",
+    "flowtest.ingest_java_evidence",
+    "flowtest.ingest_java_source_snapshot",
+    "flowtest.inspect_affected_flows",
+    "flowtest.inspect_change_impact",
+    "flowtest.inspect_change_regression",
+    "flowtest.inspect_connection",
+    "flowtest.inspect_context_diff",
+    "flowtest.inspect_context_requirements",
+    "flowtest.inspect_contract",
+    "flowtest.inspect_data_profile",
+    "flowtest.inspect_entity_mapping",
+    "flowtest.inspect_flow",
+    "flowtest.inspect_flow_proposal",
+    "flowtest.inspect_project",
+    "flowtest.inspect_project_readiness",
+    "flowtest.inspect_run_evidence",
+    "flowtest.inspect_source_evidence",
+    "flowtest.inspect_test_context",
+    "flowtest.inspect_test_evidence",
+    "flowtest.list_projects",
+    "flowtest.plan_integration_test",
+    "flowtest.prepare_change_regression",
+    "flowtest.preview_contract_import",
+    "flowtest.preview_flow_proposal",
+    "flowtest.propose_control_block",
+    "flowtest.propose_control_workflow",
+    "flowtest.propose_flow_draft",
+    "flowtest.propose_maintenance",
+    "flowtest.propose_repair",
+    "flowtest.propose_simple_flow",
+    "flowtest.propose_test_design",
+    "flowtest.propose_test_plan_update",
+    "flowtest.validate_flowspec",
+    "flowtest.validate_integration_plan"
+  ],
+  "proposed_source_fingerprint": "9ef2e81e6cc094eb3b640d5ebca7e424f1d6d3cc18d04145a26415fbacbdfd2d"
+}

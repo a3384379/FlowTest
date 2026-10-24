@@ -1,0 +1,179 @@
+{
+  "schema_version": "flowtest-runtime-fault-golden-v1",
+  "pack_id": "runtime-faults-v1",
+  "pack_version": "1.0.0-draft",
+  "max_requests": 100,
+  "max_runtime_seconds": 600,
+  "variants": [
+    {
+      "scenario_id": "ST-RUN-001",
+      "variant": "manual",
+      "native_status": "passed",
+      "trigger": "manual",
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-001",
+      "variant": "ci",
+      "native_status": "passed",
+      "trigger": "ci",
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-002",
+      "variant": "same-key",
+      "native_status": "passed",
+      "same_operation_ids": 1,
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-002",
+      "variant": "concurrent",
+      "native_status": "passed",
+      "same_operation_ids": 1,
+      "allowed_conflict": "IDEMPOTENCY_IN_PROGRESS",
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-002",
+      "variant": "lost-response",
+      "native_status": "passed",
+      "same_operation_ids": 1,
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-002",
+      "variant": "changed-payload",
+      "native_status": "passed",
+      "same_operation_ids": 1,
+      "required_conflict": "IDEMPOTENCY_KEY_REUSED",
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-003",
+      "variant": "queued",
+      "native_status": "cancelled",
+      "stage": "queued",
+      "markers": []
+    },
+    {
+      "scenario_id": "ST-RUN-003",
+      "variant": "running",
+      "native_status": "cancelled",
+      "stage": "running",
+      "markers": [
+        "first",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-003",
+      "variant": "force-keep-cleanup",
+      "native_status": "cancelled",
+      "stage": "running",
+      "force": true,
+      "skip_cleanup": false,
+      "markers": [
+        "first",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-003",
+      "variant": "force-skip-cleanup",
+      "native_status": "cancelled",
+      "stage": "running",
+      "force": true,
+      "skip_cleanup": true,
+      "markers": [
+        "first"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-005",
+      "variant": "deadline",
+      "native_status": "cancelled",
+      "stage": "running",
+      "observer_status": "incomplete",
+      "observer_exit_code": 2,
+      "required_reason": "OBSERVER_DEADLINE_EXCEEDED",
+      "markers": [
+        "first",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-005",
+      "variant": "crash-watchdog",
+      "native_status": "cancelled",
+      "stage": "running",
+      "observer_status": "error",
+      "observer_exit_code": 70,
+      "required_reason": "OBSERVER_PROCESS_CRASHED",
+      "markers": [
+        "first",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-006",
+      "variant": "unpinned-control",
+      "native_status": "passed",
+      "characterization_only": true,
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ],
+      "expected_api_version": 1
+    },
+    {
+      "scenario_id": "ST-RUN-006",
+      "variant": "pinned-old-api",
+      "native_status": "passed",
+      "expected_api_version": 1,
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ]
+    },
+    {
+      "scenario_id": "ST-RUN-006",
+      "variant": "environment-drift",
+      "native_status": "passed",
+      "required_reason": "ENVIRONMENT_SNAPSHOT_DRIFT",
+      "expected_independent_status": "blocked",
+      "markers": [
+        "first",
+        "follow",
+        "cleanup"
+      ],
+      "actual_environment_value": "changed-v2"
+    }
+  ]
+}

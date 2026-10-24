@@ -1,0 +1,170 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "RequiredDisposal": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce"
+      ],
+      "title": "RequiredDisposal",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "binding_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Binding Fingerprint",
+      "type": "string"
+    },
+    "binding_nonce": {
+      "title": "Binding Nonce",
+      "type": "string"
+    },
+    "builds": {
+      "$ref": "#/$defs/Builds"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "environment_id": {
+      "format": "uuid",
+      "title": "Environment Id",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "mcp_account_id": {
+      "format": "uuid",
+      "title": "Mcp Account Id",
+      "type": "string"
+    },
+    "mcp_actor_id": {
+      "format": "uuid",
+      "title": "Mcp Actor Id",
+      "type": "string"
+    },
+    "nonce": {
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "required_disposal": {
+      "$ref": "#/$defs/RequiredDisposal"
+    },
+    "reviewer_id": {
+      "format": "uuid",
+      "title": "Reviewer Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "nonce",
+    "pack_digest",
+    "binding_fingerprint",
+    "binding_nonce",
+    "builds",
+    "project_id",
+    "environment_id",
+    "reviewer_id",
+    "mcp_account_id",
+    "mcp_actor_id",
+    "created_at",
+    "expires_at",
+    "required_disposal"
+  ],
+  "title": "NativeControlManifest",
+  "type": "object"
+}

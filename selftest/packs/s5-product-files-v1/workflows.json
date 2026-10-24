@@ -1,0 +1,921 @@
+{
+  "workflows": [
+    {
+      "scenario_id": "ST-API-008-product-files",
+      "target_kind": "product",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "login",
+            "type": "api",
+            "name": "login",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "f1071e07-f710-59fc-814f-ff413ec6f529",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ]
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_token",
+            "type": "extract",
+            "name": "extract_token",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "login",
+              "expression": "body.access_token",
+              "variable": "token"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "upload_file",
+            "type": "api",
+            "name": "upload_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "7c4be67b-941c-5d30-91ee-60409c3b0bb3",
+              "api_version": 1,
+              "expected_statuses": [
+                201
+              ]
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_upload_status",
+            "type": "assert",
+            "name": "assert_upload_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "status_code",
+              "operator": "equals",
+              "expected": 201
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_upload_sha",
+            "type": "assert",
+            "name": "assert_upload_sha",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "body.sha256",
+              "operator": "equals",
+              "expected": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_file",
+            "type": "extract",
+            "name": "extract_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "body.id",
+              "variable": "uploaded_file_id"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "download_file",
+            "type": "api",
+            "name": "download_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "d442f257-2363-5fb8-a695-d0ab5efd1fd5",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ]
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_download_status",
+            "type": "assert",
+            "name": "assert_download_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "status_code",
+              "operator": "equals",
+              "expected": 200
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_content",
+            "type": "assert",
+            "name": "assert_file_content",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "body",
+              "operator": "equals",
+              "expected": "flowtest-download"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_size",
+            "type": "assert",
+            "name": "assert_file_size",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "size_bytes",
+              "operator": "equals",
+              "expected": 17
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_header",
+            "type": "assert",
+            "name": "assert_file_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/octet-stream"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "login",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "login",
+            "target": "extract_token",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "extract_token",
+            "target": "upload_file",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "upload_file",
+            "target": "assert_upload_status",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_upload_status",
+            "target": "assert_upload_sha",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e5",
+            "source": "assert_upload_sha",
+            "target": "extract_file",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e6",
+            "source": "extract_file",
+            "target": "download_file",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e7",
+            "source": "download_file",
+            "target": "assert_download_status",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e8",
+            "source": "assert_download_status",
+            "target": "assert_file_content",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e9",
+            "source": "assert_file_content",
+            "target": "assert_file_size",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e10",
+            "source": "assert_file_size",
+            "target": "assert_file_header",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e11",
+            "source": "assert_file_header",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "auth-upload_file",
+            "source": "login",
+            "target": "upload_file",
+            "condition": null,
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "login",
+                  "path": "body.access_token"
+                },
+                "transform": {
+                  "kind": "template",
+                  "template": "Bearer {{value}}"
+                },
+                "target": {
+                  "node_id": "upload_file",
+                  "location": "header",
+                  "key": "Authorization"
+                }
+              }
+            ]
+          },
+          {
+            "id": "auth-download_file",
+            "source": "login",
+            "target": "download_file",
+            "condition": null,
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "login",
+                  "path": "body.access_token"
+                },
+                "transform": {
+                  "kind": "template",
+                  "template": "Bearer {{value}}"
+                },
+                "target": {
+                  "node_id": "download_file",
+                  "location": "header",
+                  "key": "Authorization"
+                }
+              }
+            ]
+          },
+          {
+            "id": "file-id",
+            "source": "extract_file",
+            "target": "download_file",
+            "condition": null,
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "extract_file",
+                  "path": "value"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "download_file",
+                  "location": "variable",
+                  "key": "uploaded_file_id"
+                }
+              }
+            ]
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 2,
+          "default_timeout_seconds": 15
+        },
+        "run_policy": {
+          "request_budget": 3,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 1,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "login",
+            "type": "api",
+            "name": "login",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "f1071e07-f710-59fc-814f-ff413ec6f529",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ]
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_token",
+            "type": "extract",
+            "name": "extract_token",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "login",
+              "expression": "body.access_token",
+              "variable": "token"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "upload_file",
+            "type": "api",
+            "name": "upload_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "7c4be67b-941c-5d30-91ee-60409c3b0bb3",
+              "api_version": 1,
+              "expected_statuses": [
+                201
+              ]
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_upload_status",
+            "type": "assert",
+            "name": "assert_upload_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "status_code",
+              "operator": "equals",
+              "expected": 201
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_upload_sha",
+            "type": "assert",
+            "name": "assert_upload_sha",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "body.sha256",
+              "operator": "equals",
+              "expected": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_file",
+            "type": "extract",
+            "name": "extract_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "upload_file",
+              "expression": "body.id",
+              "variable": "uploaded_file_id"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "download_file",
+            "type": "api",
+            "name": "download_file",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "d442f257-2363-5fb8-a695-d0ab5efd1fd5",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ]
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_download_status",
+            "type": "assert",
+            "name": "assert_download_status",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "status_code",
+              "operator": "equals",
+              "expected": 200
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_content",
+            "type": "assert",
+            "name": "assert_file_content",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "body",
+              "operator": "equals",
+              "expected": "flowtest-download"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_size",
+            "type": "assert",
+            "name": "assert_file_size",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "size_bytes",
+              "operator": "equals",
+              "expected": 17
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_header",
+            "type": "assert",
+            "name": "assert_file_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "download_file",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/octet-stream"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "login",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "login",
+            "target": "extract_token",
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "extract_token",
+            "target": "upload_file",
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "upload_file",
+            "target": "assert_upload_status",
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_upload_status",
+            "target": "assert_upload_sha",
+            "mappings": []
+          },
+          {
+            "id": "e5",
+            "source": "assert_upload_sha",
+            "target": "extract_file",
+            "mappings": []
+          },
+          {
+            "id": "e6",
+            "source": "extract_file",
+            "target": "download_file",
+            "mappings": []
+          },
+          {
+            "id": "e7",
+            "source": "download_file",
+            "target": "assert_download_status",
+            "mappings": []
+          },
+          {
+            "id": "e8",
+            "source": "assert_download_status",
+            "target": "assert_file_content",
+            "mappings": []
+          },
+          {
+            "id": "e9",
+            "source": "assert_file_content",
+            "target": "assert_file_size",
+            "mappings": []
+          },
+          {
+            "id": "e10",
+            "source": "assert_file_size",
+            "target": "assert_file_header",
+            "mappings": []
+          },
+          {
+            "id": "e11",
+            "source": "assert_file_header",
+            "target": "end",
+            "mappings": []
+          },
+          {
+            "id": "auth-upload_file",
+            "source": "login",
+            "target": "upload_file",
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "login",
+                  "path": "body.access_token"
+                },
+                "transform": {
+                  "kind": "template",
+                  "template": "Bearer {{value}}"
+                },
+                "target": {
+                  "node_id": "upload_file",
+                  "location": "header",
+                  "key": "Authorization"
+                }
+              }
+            ]
+          },
+          {
+            "id": "auth-download_file",
+            "source": "login",
+            "target": "download_file",
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "login",
+                  "path": "body.access_token"
+                },
+                "transform": {
+                  "kind": "template",
+                  "template": "Bearer {{value}}"
+                },
+                "target": {
+                  "node_id": "download_file",
+                  "location": "header",
+                  "key": "Authorization"
+                }
+              }
+            ]
+          },
+          {
+            "id": "file-id",
+            "source": "extract_file",
+            "target": "download_file",
+            "mappings": [
+              {
+                "source": {
+                  "node_id": "extract_file",
+                  "path": "value"
+                },
+                "transform": {
+                  "kind": "identity",
+                  "template": "{{value}}"
+                },
+                "target": {
+                  "node_id": "download_file",
+                  "location": "variable",
+                  "key": "uploaded_file_id"
+                }
+              }
+            ]
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 2,
+          "default_timeout_seconds": 15
+        },
+        "run_policy": {
+          "request_budget": 3,
+          "max_runtime_seconds": 60,
+          "cleanup_request_budget": 1,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    }
+  ]
+}

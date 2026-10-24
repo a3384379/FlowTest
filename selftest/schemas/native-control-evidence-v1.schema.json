@@ -1,0 +1,1245 @@
+{
+  "$defs": {
+    "ApiSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_definition_id": {
+          "format": "uuid",
+          "title": "Api Definition Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_definition_id",
+        "api_version",
+        "contract_fingerprint"
+      ],
+      "title": "ApiSource",
+      "type": "object"
+    },
+    "AssertionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "mode": {
+          "const": "value",
+          "default": "value",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "expected",
+        "actual"
+      ],
+      "title": "AssertionEvidence",
+      "type": "object"
+    },
+    "CleanupStatus": {
+      "enum": [
+        "pending",
+        "completed",
+        "failed",
+        "needs_review"
+      ],
+      "type": "string"
+    },
+    "DatasetBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "row_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "row_count"
+      ],
+      "title": "DatasetBinding",
+      "type": "object"
+    },
+    "DatasetChildReference": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "row_index": {
+          "maximum": 499,
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "row_index",
+        "status"
+      ],
+      "title": "DatasetChildReference",
+      "type": "object"
+    },
+    "DigestAssertionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Actual Digest",
+          "type": "string"
+        },
+        "expected_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Digest",
+          "type": "string"
+        },
+        "mode": {
+          "const": "digest",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "passed",
+        "expected_digest",
+        "actual_digest"
+      ],
+      "title": "DigestAssertionEvidence",
+      "type": "object"
+    },
+    "ExecutionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DatasetChildReference"
+          },
+          "maxItems": 500,
+          "title": "Children",
+          "type": "array"
+        },
+        "children_complete": {
+          "default": true,
+          "title": "Children Complete",
+          "type": "boolean"
+        },
+        "cleanup_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Status"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "dataset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatasetBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dataset_row_index": {
+          "anyOf": [
+            {
+              "maximum": 499,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Row Index"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "main_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Main Status"
+        },
+        "nested_nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeEvidence"
+          },
+          "maxItems": 1000,
+          "title": "Nested Nodes",
+          "type": "array"
+        },
+        "nested_nodes_complete": {
+          "default": true,
+          "title": "Nested Nodes Complete",
+          "type": "boolean"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeEvidence"
+          },
+          "maxItems": 5000,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "parent_execution_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Execution Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_purpose": {
+          "default": "standard",
+          "enum": [
+            "standard",
+            "preview"
+          ],
+          "title": "Run Purpose",
+          "type": "string"
+        },
+        "snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshot Digest",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "subflows": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SubflowBinding"
+          },
+          "maxItems": 100,
+          "title": "Subflows",
+          "type": "array"
+        },
+        "subflows_complete": {
+          "default": true,
+          "title": "Subflows Complete",
+          "type": "boolean"
+        },
+        "workflow_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Workflow Fingerprint",
+          "type": "string"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version_id": {
+          "format": "uuid",
+          "title": "Workflow Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "workflow_version_id",
+        "environment_id",
+        "status",
+        "snapshot_digest",
+        "workflow_fingerprint",
+        "started_at"
+      ],
+      "title": "ExecutionEvidence",
+      "type": "object"
+    },
+    "FrozenPlanCase": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "target_snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Snapshot Digest",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "case_id",
+        "version",
+        "target_snapshot_digest"
+      ],
+      "title": "FrozenPlanCase",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "NativeControlFreeze": {
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "before_execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Before Execution Ids",
+          "type": "array"
+        },
+        "before_workflow_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Before Workflow Ids",
+          "type": "array"
+        },
+        "case": {
+          "$ref": "#/$defs/NativePublishedCase"
+        },
+        "draft": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        },
+        "pending": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "pending_execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Pending Execution Ids",
+          "type": "array"
+        },
+        "pending_workflow_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Pending Workflow Ids",
+          "type": "array"
+        },
+        "plan": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "published": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "replay": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "request": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "selection": {
+          "$ref": "#/$defs/PlanSelection"
+        },
+        "suite": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "request",
+        "proposal",
+        "replay",
+        "pending",
+        "accepted",
+        "draft",
+        "published",
+        "case",
+        "suite",
+        "plan",
+        "selection",
+        "before_workflow_ids",
+        "pending_workflow_ids",
+        "pending_execution_ids",
+        "before_execution_ids",
+        "frozen_at"
+      ],
+      "title": "NativeControlFreeze",
+      "type": "object"
+    },
+    "NativeExportObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "after_definition_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Definition Digest",
+          "type": "string"
+        },
+        "after_execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "After Execution Ids",
+          "type": "array"
+        },
+        "before_definition_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Definition Digest",
+          "type": "string"
+        },
+        "before_execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Before Execution Ids",
+          "type": "array"
+        },
+        "error_code": {
+          "title": "Error Code",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "integer"
+        },
+        "trace_present": {
+          "title": "Trace Present",
+          "type": "boolean"
+        },
+        "variant": {
+          "enum": [
+            "regions4_draft",
+            "regions4_published"
+          ],
+          "title": "Variant",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "workflow_id",
+        "path",
+        "status",
+        "error_code",
+        "trace_present",
+        "before_definition_digest",
+        "after_definition_digest",
+        "before_execution_ids",
+        "after_execution_ids"
+      ],
+      "title": "NativeExportObservation",
+      "type": "object"
+    },
+    "NativePublishedCase": {
+      "additionalProperties": false,
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "version": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "case",
+        "version"
+      ],
+      "title": "NativePublishedCase",
+      "type": "object"
+    },
+    "NodeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "assertions": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "digest": "#/$defs/DigestAssertionEvidence",
+                "value": "#/$defs/AssertionEvidence"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AssertionEvidence"
+              },
+              {
+                "$ref": "#/$defs/DigestAssertionEvidence"
+              }
+            ]
+          },
+          "maxItems": 500,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "attempts": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Type",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "passed",
+            "failed",
+            "skipped",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "phase",
+        "status",
+        "attempts"
+      ],
+      "title": "NodeEvidence",
+      "type": "object"
+    },
+    "PlanSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/FrozenPlanCase"
+          },
+          "title": "Cases",
+          "type": "array"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        },
+        "plan_id": {
+          "format": "uuid",
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "suite_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Suite Fingerprint",
+          "type": "string"
+        },
+        "suite_id": {
+          "format": "uuid",
+          "title": "Suite Id",
+          "type": "string"
+        },
+        "suite_version": {
+          "title": "Suite Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "suite_id",
+        "suite_version",
+        "suite_fingerprint",
+        "plan_id",
+        "cases",
+        "frozen_at"
+      ],
+      "title": "PlanSelection",
+      "type": "object"
+    },
+    "PlanStopReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "cancel_requested": {
+          "default": false,
+          "title": "Cancel Requested",
+          "type": "boolean"
+        },
+        "launch_requested": {
+          "default": false,
+          "title": "Launch Requested",
+          "type": "boolean"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reason_codes": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        },
+        "status": {
+          "$ref": "#/$defs/CleanupStatus",
+          "default": "completed"
+        }
+      },
+      "required": [
+        "project_id"
+      ],
+      "title": "PlanStopReceipt",
+      "type": "object"
+    },
+    "SubflowBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "path": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Path",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "workflow_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Workflow Fingerprint",
+          "type": "string"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        },
+        "workflow_version_id": {
+          "format": "uuid",
+          "title": "Workflow Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "project_id",
+        "workflow_id",
+        "workflow_version_id",
+        "workflow_version",
+        "workflow_fingerprint",
+        "api_sources"
+      ],
+      "title": "SubflowBinding",
+      "type": "object"
+    },
+    "TargetDisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "containers_absent": {
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "TargetDisposalReceipt",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "admitted_request_upper_bound": {
+      "default": 0,
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Admitted Request Upper Bound",
+      "type": "integer"
+    },
+    "admitted_tool_calls": {
+      "default": 0,
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Admitted Tool Calls",
+      "type": "integer"
+    },
+    "calls": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/McpCallReceipt"
+      },
+      "maxItems": 100,
+      "title": "Calls",
+      "type": "array"
+    },
+    "cleanup": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PlanStopReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "collected_at": {
+      "format": "date-time",
+      "title": "Collected At",
+      "type": "string"
+    },
+    "control_details": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/JsonObject"
+      },
+      "maxItems": 2,
+      "title": "Control Details",
+      "type": "array"
+    },
+    "control_page": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonObject"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "disposal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TargetDisposalReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ExecutionEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "exports": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/NativeExportObservation"
+      },
+      "maxItems": 2,
+      "title": "Exports",
+      "type": "array"
+    },
+    "failure_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Failure Code"
+    },
+    "frozen": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NativeControlFreeze"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "plan_run": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonObject"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "raw_execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JsonObject"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "rejected_requests": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Rejected Requests",
+      "type": "integer"
+    },
+    "rejected_tool_calls": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Rejected Tool Calls",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "manifest_digest",
+    "collected_at"
+  ],
+  "title": "NativeControlEvidence",
+  "type": "object"
+}

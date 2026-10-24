@@ -1,0 +1,52 @@
+{
+  "format": "flowtest-selftest-mutations",
+  "format_version": 1,
+  "fixtures": [
+    {
+      "id": "assertion-negative",
+      "response_status": 200,
+      "response_body": { "actual": 1, "code": 0 },
+      "assertion_expected": 2,
+      "expected_raw_status": "failed",
+      "expected_error_code": "WORKFLOW_ASSERTION_FAILED"
+    },
+    {
+      "id": "assertion-positive",
+      "response_status": 200,
+      "response_body": { "actual": 1, "code": 0 },
+      "assertion_expected": 1,
+      "expected_raw_status": "passed"
+    },
+    {
+      "id": "business-error-200",
+      "response_status": 200,
+      "response_body": { "actual": 1, "code": 500 },
+      "assertion_expected_code": 0,
+      "expected_raw_status": "failed",
+      "expected_error_code": "WORKFLOW_ASSERTION_FAILED"
+    }
+  ],
+  "observer_faults": [
+    "empty_actual_set",
+    "missing_required",
+    "duplicate_scenario",
+    "unexpected_scenario",
+    "quarantined_item",
+    "nonterminal_item",
+    "truncated_page",
+    "missing_receipt",
+    "duplicate_receipt",
+    "wrong_build",
+    "old_ci_attempt",
+    "expired_nonce",
+    "wrong_node",
+    "wrong_phase",
+    "timeout_instead_of_assertion",
+    "assertion_removed",
+    "wrong_api_version",
+    "fake_materialized_id",
+    "preview_without_formal_run",
+    "cleanup_failed",
+    "observer_crash"
+  ]
+}

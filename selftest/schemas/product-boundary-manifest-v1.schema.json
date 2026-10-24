@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "RequiredDisposal": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce"
+      ],
+      "title": "RequiredDisposal",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "builds": {
+      "$ref": "#/$defs/Builds"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "deadline": {
+      "format": "date-time",
+      "title": "Deadline",
+      "type": "string"
+    },
+    "disposal": {
+      "$ref": "#/$defs/RequiredDisposal"
+    },
+    "expected_keys": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Expected Keys",
+      "type": "array"
+    },
+    "ownership_nonce": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Ownership Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "profile": {
+      "enum": [
+        "full",
+        "compact",
+        "standalone"
+      ],
+      "title": "Profile",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "project_name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Project Name",
+      "type": "string"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_digest",
+    "source_digest",
+    "builds",
+    "profile",
+    "expected_keys",
+    "project_id",
+    "project_name",
+    "ownership_nonce",
+    "created_at",
+    "deadline",
+    "disposal"
+  ],
+  "title": "ProductBoundaryManifest",
+  "type": "object"
+}

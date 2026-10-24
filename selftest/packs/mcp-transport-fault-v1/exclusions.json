@@ -1,0 +1,18 @@
+{
+  "message_byte_limit": {
+    "status": "unsupported",
+    "reason": "仅冻结 expected_contract_version max80 字段边界，不声称 MCP 消息总字节上限。"
+  },
+  "inactive_machine_without_revocation": {
+    "status": "unsupported",
+    "reason": "公开 API 无单独机器 suspend；inactive 场景实际停用专属 creator user，机器本身未 revoke。"
+  },
+  "pipe_break_http": {
+    "status": "not_applicable",
+    "reason": "标准输入输出管道专属。"
+  },
+  "socket_break_stdio": {
+    "status": "not_applicable",
+    "reason": "HTTP TCP 连接专属。"
+  }
+}

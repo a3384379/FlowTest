@@ -1,0 +1,1163 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-EXT-if-miss",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-switch-default",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-foreach-empty",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 0,
+        "fixture_responses": []
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-loop-not-array",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 0,
+        "fixture_responses": [],
+        "error_code": "LOOP_INPUT_NOT_ARRAY",
+        "node_id": "loop_guard",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-loop-min-items",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 0,
+        "fixture_responses": [],
+        "error_code": "LOOP_MIN_ITEMS_NOT_MET",
+        "node_id": "loop_guard",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-loop-max-items",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 0,
+        "fixture_responses": [],
+        "error_code": "LOOP_LIMIT_EXCEEDED",
+        "node_id": "loop_guard",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-loop-break",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-loop-continue",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-while",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-while-limit",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "LOOP_LIMIT_EXCEEDED",
+        "node_id": "loop_guard",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-retry-three",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "fixture_responses": [
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-retry-exhausted",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "HTTP_5XX",
+        "node_id": "request",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-poll-terminal",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "POLLING_TERMINAL_FAILURE",
+        "node_id": "poll_task",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-poll-budget",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "POLLING_BUDGET_EXHAUSTED",
+        "node_id": "poll_task",
+        "phase": "main"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-main-cleanup-failure",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "WORKFLOW_ASSERTION_FAILED",
+        "node_id": "assert_main",
+        "phase": "main",
+        "assertions": [
+          {
+            "node_id": "assert_main",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 2,
+            "actual": 1,
+            "phase": "main"
+          },
+          {
+            "node_id": "assert_cleanup",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 3,
+            "actual": 1,
+            "phase": "cleanup"
+          }
+        ],
+        "main_status": "failed",
+        "cleanup_status": "failed"
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-parallel-branches",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-try-caught",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [
+          {
+            "node_id": "__nested_request__:d4eded39a6ef63bd46b5d8d26e46f9ca6bdec8b18c2f2fcd33ae69a991b7c7a6",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 2,
+            "actual": 1,
+            "phase": "main"
+          }
+        ],
+        "nested_nodes": [
+          {
+            "node_id": "__nested_request__:263ee6e0072a33f6c41c28cf1ba342041c08b2769eba22e8f8f5607fef2ab1c3",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:d4eded39a6ef63bd46b5d8d26e46f9ca6bdec8b18c2f2fcd33ae69a991b7c7a6",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "WORKFLOW_ASSERTION_FAILED",
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:5390f7ba0ad210d433c5970df95181f5d2084343e6e6e0f29b17386e7b5b39af",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:972e79d0fb0737f1a9d68919fb862d89c6da5c4f9abf147a207c56f4c611cfdd",
+            "phase": "cleanup",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-try-unmatched",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "WORKFLOW_ASSERTION_FAILED",
+        "node_id": "try_block",
+        "phase": "main",
+        "assertions": [
+          {
+            "node_id": "__nested_request__:d4eded39a6ef63bd46b5d8d26e46f9ca6bdec8b18c2f2fcd33ae69a991b7c7a6",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 2,
+            "actual": 1,
+            "phase": "main"
+          }
+        ],
+        "nested_nodes": [
+          {
+            "node_id": "__nested_request__:263ee6e0072a33f6c41c28cf1ba342041c08b2769eba22e8f8f5607fef2ab1c3",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:d4eded39a6ef63bd46b5d8d26e46f9ca6bdec8b18c2f2fcd33ae69a991b7c7a6",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "WORKFLOW_ASSERTION_FAILED",
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:972e79d0fb0737f1a9d68919fb862d89c6da5c4f9abf147a207c56f4c611cfdd",
+            "phase": "cleanup",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-EXT-submit-poll",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [
+          {
+            "node_id": "assert_poll",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 3,
+            "actual": 3,
+            "phase": "main"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-EXT-if-miss",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "false",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-switch-default",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "default",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-foreach-empty",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-not-array",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-min-items",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-max-items",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-break",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "iteration",
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-continue",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "iteration",
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "iteration",
+          "branch": "",
+          "iteration_key": "i-1",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "iteration",
+          "branch": "",
+          "iteration_key": "i-2",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-while",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "while",
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "while",
+          "branch": "",
+          "iteration_key": "i-1",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-while-limit",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "while",
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "while",
+          "branch": "",
+          "iteration_key": "i-1",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-retry-three",
+      "fixture": {
+        "response_statuses": [
+          503,
+          503,
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-retry-exhausted",
+      "fixture": {
+        "response_statuses": [
+          503,
+          503
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-poll-terminal",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-poll-budget",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-main-cleanup-failure",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "main",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "cleanup",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-parallel-branches",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "first",
+          "branch": "first",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "second",
+          "branch": "second",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "third",
+          "branch": "third",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "parallel",
+        "kind": "branch",
+        "total": 3
+      },
+      "wire_order": "unordered"
+    },
+    {
+      "scenario_id": "ST-EXT-try-caught",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "try",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "catch",
+          "branch": "catch",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "finally",
+          "branch": "finally",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-try-unmatched",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "try",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "finally",
+          "branch": "finally",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-EXT-submit-poll",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "submit",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    }
+  ]
+}

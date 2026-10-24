@@ -5,6 +5,8 @@ import { App as AntdApp } from 'antd'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it } from 'vitest'
 
+import { useAuthStore } from '../features/auth/auth-store'
+import { setOrganizationId } from '../lib/api'
 import { authenticateTestUser } from '../test/auth'
 import { user } from '../test/fixtures'
 import { server } from '../test/server'
@@ -15,7 +17,64 @@ const organizationId = '00000000-0000-4000-8000-000000000701'
 describe('OrganizationGovernancePage', () => {
   beforeEach(() => {
     authenticateTestUser(user)
+    setOrganizationId(null)
     installHandlers()
+  })
+
+  it('keeps the account scope while opening the default governance organization', async () => {
+    renderPage()
+    await screen.findByRole('combobox', { name: '治理组织' })
+    await screen.findByText('组织与角色')
+    expect(useAuthStore.getState().organizationId).toBeNull()
+  })
+
+  it('retains the explicitly selected organization after leaving governance', async () => {
+    setOrganizationId(organizationId)
+    const view = renderPage()
+    await screen.findByRole('combobox', { name: '治理组织' })
+    await waitFor(() => expect(useAuthStore.getState().organizationId).toBe(organizationId))
+    view.unmount()
+    expect(useAuthStore.getState().organizationId).toBe(organizationId)
+  })
+
+  it('changes the account scope only after an explicit governance selection', async () => {
+    const nextId = '00000000-0000-4000-8000-000000000702'
+    server.use(
+      http.get('/api/v1/organizations', () =>
+        HttpResponse.json([
+          organization,
+          { ...organization, id: nextId, name: '第二组织', slug: 'second' },
+        ]),
+      ),
+      http.get(`/api/v1/organizations/${nextId}/:section`, ({ params }) =>
+        HttpResponse.json(
+          params.section === 'governance'
+            ? { ...governance, organization_id: nextId }
+            : ['members', 'service-accounts'].includes(String(params.section))
+              ? []
+              : readResponse(String(params.section)),
+        ),
+      ),
+    )
+    const view = renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: '治理组织' }))
+    await browser.click(screen.getByText('第二组织 · second'))
+    expect(useAuthStore.getState().organizationId).toBe(nextId)
+    view.unmount()
+    expect(useAuthStore.getState().organizationId).toBe(nextId)
+  })
+
+  it('activates the displayed default organization when explicitly selecting the same option', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: '治理组织' }))
+    await browser.click(
+      screen.getByText(`${organization.name} · ${organization.slug}`, {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(useAuthStore.getState().organizationId).toBe(organizationId)
   })
 
   it('renders organization roles, quota governance, security and redacted support bundle', async () => {
@@ -100,6 +159,82 @@ describe('OrganizationGovernancePage', () => {
     expect(screen.queryByText('令牌只显示一次')).not.toBeInTheDocument()
     expect(screen.queryByText('ftsa_one-time-governance-token')).not.toBeInTheDocument()
   })
+
+  it('offers supported MCP scopes and submits only explicitly selected compilation scopes', async () => {
+    let submitted: Record<string, unknown> | undefined
+    server.use(
+      http.post(`/api/v1/organizations/${organizationId}/service-accounts`, async ({ request }) => {
+        submitted = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(
+          { ...account, token: 'ftsa_scoped-compilation-fixture' },
+          { status: 201 },
+        )
+      }),
+    )
+    renderPage()
+    const browser = userEvent.setup()
+    await screen.findByText('组织与角色')
+    await browser.click(screen.getByRole('tab', { name: 'Service Account' }))
+    const panel = screen.getByRole('tabpanel')
+    await browser.type(within(panel).getByPlaceholderText('回归机器人'), '固定设计编译')
+    await browser.type(within(panel).getByPlaceholderText('regression-bot'), 'design-compiler')
+    await browser.click(within(panel).getByRole('button', { name: '签发令牌' }))
+    expect(submitted).toBeUndefined()
+    const scopeInput = within(panel).getByRole('combobox', { name: '权限范围' })
+    for (const scope of [
+      'org:key_rotate',
+      'mcp:preview:execute',
+      'mcp:project:bootstrap',
+      'mcp:contract:import',
+      'mcp:regression:prepare',
+      'mcp:test-plan:propose',
+    ]) {
+      await browser.clear(scopeInput)
+      fireEvent.mouseDown(scopeInput)
+      await browser.type(scopeInput, scope, { skipClick: true })
+      expect(
+        await screen.findByText(scope, { selector: '.ant-select-item-option-content' }),
+      ).toBeInTheDocument()
+    }
+    for (const scope of ['mcp:read', 'mcp:flow:propose']) {
+      await browser.clear(scopeInput)
+      await browser.type(scopeInput, scope)
+      await browser.click(
+        await screen.findByText(scope, { selector: '.ant-select-item-option-content' }),
+      )
+    }
+    await browser.keyboard('{Escape}')
+    expect(submitted).toBeUndefined()
+    await browser.click(within(panel).getByRole('button', { name: '签发令牌' }))
+    await screen.findByText('令牌只显示一次')
+    expect(submitted).toMatchObject({
+      name: '固定设计编译',
+      account_key: 'design-compiler',
+      scopes: ['mcp:read', 'mcp:flow:propose'],
+    })
+  })
+
+  it.each(['member', 'viewer'] as const)(
+    'does not expose service-account scope grants to organization %s',
+    async (role) => {
+      authenticateTestUser({ ...user, is_system_admin: false })
+      let writes = 0
+      server.use(
+        http.get('/api/v1/organizations', () => HttpResponse.json([{ ...organization, role }])),
+        http.post(`/api/v1/organizations/${organizationId}/service-accounts`, () => {
+          writes += 1
+          return HttpResponse.json({ ...account, token: 'ftsa_unreachable' }, { status: 201 })
+        }),
+      )
+      renderPage()
+      await screen.findByText('组织与角色')
+      await userEvent.click(screen.getByRole('tab', { name: 'Service Account' }))
+      expect(await screen.findByText(account.name)).toBeVisible()
+      expect(screen.queryByRole('combobox', { name: '权限范围' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '签发令牌' })).not.toBeInTheDocument()
+      expect(writes).toBe(0)
+    },
+  )
 
   it.each([403, 409, 503])(
     'retains account inputs after %s and clears them only after an explicit successful retry',

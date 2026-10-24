@@ -1,0 +1,319 @@
+{
+  "$defs": {
+    "Golden": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_environment_value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual Environment Value"
+        },
+        "allowed_conflict": {
+          "anyOf": [
+            {
+              "const": "IDEMPOTENCY_IN_PROGRESS",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allowed Conflict"
+        },
+        "characterization_only": {
+          "default": false,
+          "title": "Characterization Only",
+          "type": "boolean"
+        },
+        "expected_api_version": {
+          "anyOf": [
+            {
+              "const": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Api Version"
+        },
+        "expected_independent_status": {
+          "anyOf": [
+            {
+              "const": "blocked",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Independent Status"
+        },
+        "force": {
+          "default": false,
+          "title": "Force",
+          "type": "boolean"
+        },
+        "markers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Markers",
+          "type": "array"
+        },
+        "native_status": {
+          "enum": [
+            "passed",
+            "failed",
+            "cancelled",
+            "quarantined"
+          ],
+          "title": "Native Status",
+          "type": "string"
+        },
+        "observer_exit_code": {
+          "anyOf": [
+            {
+              "enum": [
+                2,
+                70
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observer Exit Code"
+        },
+        "observer_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "incomplete",
+                "error"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observer Status"
+        },
+        "required_conflict": {
+          "anyOf": [
+            {
+              "const": "IDEMPOTENCY_KEY_REUSED",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Conflict"
+        },
+        "required_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Reason"
+        },
+        "same_operation_ids": {
+          "anyOf": [
+            {
+              "const": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Same Operation Ids"
+        },
+        "scenario_id": {
+          "enum": [
+            "ST-RUN-001",
+            "ST-RUN-002",
+            "ST-RUN-003",
+            "ST-RUN-005",
+            "ST-RUN-006"
+          ],
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "skip_cleanup": {
+          "default": false,
+          "title": "Skip Cleanup",
+          "type": "boolean"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "running"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "trigger": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "ci"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger"
+        },
+        "variant": {
+          "pattern": "^[a-z][a-z-]{0,50}$",
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "variant",
+        "native_status",
+        "markers"
+      ],
+      "title": "Golden",
+      "type": "object"
+    },
+    "RuntimeBuilds": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate",
+          "type": "string"
+        },
+        "fixture": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Fixture",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate",
+        "fixture"
+      ],
+      "title": "RuntimeBuilds",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "pattern": "^runtime-[0-9a-f]{20}$",
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "builds": {
+      "$ref": "#/$defs/RuntimeBuilds"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "deadline": {
+      "format": "date-time",
+      "title": "Deadline",
+      "type": "string"
+    },
+    "driver_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Driver Digest",
+      "type": "string"
+    },
+    "expected_variants": {
+      "items": {
+        "$ref": "#/$defs/Golden"
+      },
+      "maxItems": 15,
+      "minItems": 15,
+      "title": "Expected Variants",
+      "type": "array"
+    },
+    "nonce": {
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "profile": {
+      "enum": [
+        "full",
+        "compact",
+        "standalone"
+      ],
+      "title": "Profile",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "flowtest-runtime-fault-batch-v1",
+      "default": "flowtest-runtime-fault-batch-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "pack_digest",
+    "driver_digest",
+    "expected_variants",
+    "builds",
+    "source_digest",
+    "profile",
+    "nonce",
+    "created_at",
+    "deadline"
+  ],
+  "title": "FrozenRuntimeBatch",
+  "type": "object"
+}

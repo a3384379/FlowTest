@@ -1,0 +1,1602 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "DispatchReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Arguments Digest",
+          "type": "string"
+        },
+        "fault_applied": {
+          "title": "Fault Applied",
+          "type": "boolean"
+        },
+        "forwarded_bytes": {
+          "maximum": 262144,
+          "minimum": 1,
+          "title": "Forwarded Bytes",
+          "type": "integer"
+        },
+        "forwarded_count": {
+          "const": 1,
+          "title": "Forwarded Count",
+          "type": "integer"
+        },
+        "forwarded_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Forwarded Digest",
+          "type": "string"
+        },
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "process": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "process_cleanup_complete": {
+          "title": "Process Cleanup Complete",
+          "type": "boolean"
+        },
+        "proposal_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposal Id"
+        },
+        "removal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProcessRemovalProof"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          ],
+          "title": "Request Id"
+        },
+        "response_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Digest"
+        },
+        "response_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Id"
+        },
+        "response_result_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Result Digest"
+        },
+        "sdk_frame_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sdk Frame Digest",
+          "type": "string"
+        },
+        "server_http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Server Http Status"
+        },
+        "server_killed": {
+          "default": false,
+          "title": "Server Killed",
+          "type": "boolean"
+        },
+        "server_rpc_error": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Server Rpc Error"
+        },
+        "tool_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nonce",
+        "observed_at",
+        "request_id",
+        "tool_name",
+        "arguments_digest",
+        "sdk_frame_digest",
+        "forwarded_digest",
+        "forwarded_bytes",
+        "forwarded_count",
+        "fault_applied",
+        "process_cleanup_complete"
+      ],
+      "title": "DispatchReceipt",
+      "type": "object"
+    },
+    "DisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "containers_absent": {
+          "const": true,
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "const": true,
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "const": true,
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "binding_nonce",
+        "runner_volume",
+        "target_volume",
+        "candidate_image_digest",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "DisposalReceipt",
+      "type": "object"
+    },
+    "FaultObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "before": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "catalog_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Fingerprint",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "dispatch": {
+          "$ref": "#/$defs/DispatchReceipt"
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/FrameReceipt"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "title": "Frames",
+          "type": "array"
+        },
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/RpcRequest"
+          },
+          "maxItems": 10,
+          "minItems": 1,
+          "title": "Requests",
+          "type": "array"
+        },
+        "responses": {
+          "items": {
+            "$ref": "#/$defs/RpcResponse"
+          },
+          "maxItems": 10,
+          "title": "Responses",
+          "type": "array"
+        },
+        "result": {
+          "$ref": "#/$defs/FaultResult"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "const": "2.2.0",
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "tool_names": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 300,
+          "minItems": 1,
+          "title": "Tool Names",
+          "type": "array"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "transport",
+        "sdk_version",
+        "started_at",
+        "completed_at",
+        "catalog_fingerprint",
+        "tool_names",
+        "requests",
+        "responses",
+        "frames",
+        "dispatch",
+        "result",
+        "before",
+        "after"
+      ],
+      "title": "FaultObservation",
+      "type": "object"
+    },
+    "FaultResult": {
+      "additionalProperties": false,
+      "properties": {
+        "business_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Code"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "result_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Digest"
+        },
+        "rpc_error_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rpc Error Code"
+        },
+        "text_marker": {
+          "anyOf": [
+            {
+              "const": "invalid_arguments",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Marker"
+        },
+        "tool_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Error"
+        },
+        "trace_present": {
+          "default": false,
+          "title": "Trace Present",
+          "type": "boolean"
+        },
+        "transport_error": {
+          "anyOf": [
+            {
+              "const": "remote_protocol_error",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transport Error"
+        }
+      },
+      "required": [
+        "complete"
+      ],
+      "title": "FaultResult",
+      "type": "object"
+    },
+    "FrameReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Frame Digest",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          ],
+          "title": "Request Id"
+        }
+      },
+      "required": [
+        "request_id",
+        "frame_digest"
+      ],
+      "title": "FrameReceipt",
+      "type": "object"
+    },
+    "InactiveFixture": {
+      "additionalProperties": false,
+      "properties": {
+        "account_response_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Account Response Digest",
+          "type": "string"
+        },
+        "creator_id": {
+          "format": "uuid",
+          "title": "Creator Id",
+          "type": "string"
+        },
+        "creator_is_active": {
+          "const": false,
+          "title": "Creator Is Active",
+          "type": "boolean"
+        },
+        "machine_enabled": {
+          "const": true,
+          "title": "Machine Enabled",
+          "type": "boolean"
+        },
+        "machine_id": {
+          "format": "uuid",
+          "title": "Machine Id",
+          "type": "string"
+        },
+        "machine_revoked": {
+          "const": false,
+          "title": "Machine Revoked",
+          "type": "boolean"
+        },
+        "mechanism": {
+          "const": "public_user_patch_and_service_account_list",
+          "title": "Mechanism",
+          "type": "string"
+        },
+        "user_response_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "User Response Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "creator_id",
+        "machine_id",
+        "creator_is_active",
+        "machine_enabled",
+        "machine_revoked",
+        "user_response_digest",
+        "account_response_digest",
+        "mechanism"
+      ],
+      "title": "InactiveFixture",
+      "type": "object"
+    },
+    "ProbeDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "document_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Document Digest",
+          "type": "string"
+        },
+        "intent_key_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Key Digest",
+          "type": "string"
+        },
+        "objective_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Objective Digest",
+          "type": "string"
+        },
+        "oracles": {
+          "items": {
+            "$ref": "#/$defs/ProbeOracle"
+          },
+          "maxItems": 200,
+          "title": "Oracles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "document_digest",
+        "intent_key_digest",
+        "objective_digest",
+        "oracles"
+      ],
+      "title": "ProbeDesign",
+      "type": "object"
+    },
+    "ProbeFixture": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "organization_id"
+      ],
+      "title": "ProbeFixture",
+      "type": "object"
+    },
+    "ProbeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "item_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Item Type",
+          "type": "string"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Id"
+        },
+        "materialized_resource_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Type"
+        },
+        "proposed_document_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed Document Digest"
+        },
+        "review_status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Review Status",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reviewed By Id"
+        }
+      },
+      "required": [
+        "id",
+        "item_type",
+        "action",
+        "review_status",
+        "reviewed_by_id",
+        "materialized_resource_type",
+        "materialized_resource_id"
+      ],
+      "title": "ProbeItem",
+      "type": "object"
+    },
+    "ProbeOracle": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Digest",
+          "type": "string"
+        },
+        "expression_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expression Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "operator": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "expression_digest",
+        "operator",
+        "expected_digest"
+      ],
+      "title": "ProbeOracle",
+      "type": "object"
+    },
+    "ProbePage": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binding Fingerprint",
+          "type": "string"
+        },
+        "binding_id": {
+          "format": "uuid",
+          "title": "Binding Id",
+          "type": "string"
+        },
+        "builds": {
+          "$ref": "#/$defs/Builds"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "covered_kinds": {
+          "items": {
+            "enum": [
+              "workflow",
+              "workflow_version",
+              "test_case",
+              "test_case_version",
+              "test_plan",
+              "test_plan_run",
+              "workflow_execution",
+              "ai_change_set",
+              "test_design",
+              "change_set_approval"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 10,
+          "title": "Covered Kinds",
+          "type": "array"
+        },
+        "covered_projects": {
+          "items": {
+            "$ref": "#/$defs/ProbeFixture"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Covered Projects",
+          "type": "array"
+        },
+        "execution_scope": {
+          "const": "governance_negative_only",
+          "title": "Execution Scope",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "has_more": {
+          "title": "Has More",
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ProbeResource"
+          },
+          "maxItems": 100,
+          "title": "Items",
+          "type": "array"
+        },
+        "manifest_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Digest",
+          "type": "string"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}\\.[0-9]{1,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Cursor"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "probe_id": {
+          "format": "uuid",
+          "title": "Probe Id",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "mcp_governance_negative",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "compose",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshot Digest",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "probe_id",
+        "purpose",
+        "execution_scope",
+        "provenance",
+        "binding_id",
+        "binding_fingerprint",
+        "manifest_digest",
+        "source_digest",
+        "runtime_profile",
+        "builds",
+        "covered_projects",
+        "covered_kinds",
+        "items",
+        "total",
+        "next_cursor",
+        "has_more",
+        "complete",
+        "reason_codes",
+        "snapshot_digest",
+        "observed_at",
+        "expires_at"
+      ],
+      "title": "ProbePage",
+      "type": "object"
+    },
+    "ProbeResource": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Type"
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fingerprint"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProbeItem"
+          },
+          "maxItems": 500,
+          "title": "Items",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "workflow",
+            "workflow_version",
+            "test_case",
+            "test_case_version",
+            "test_plan",
+            "test_plan_run",
+            "workflow_execution",
+            "ai_change_set",
+            "test_design",
+            "change_set_approval"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By Id"
+        },
+        "source_change_set_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Change Set Id"
+        },
+        "status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "project_id",
+        "status"
+      ],
+      "title": "ProbeResource",
+      "type": "object"
+    },
+    "ProbeSnapshot": {
+      "additionalProperties": false,
+      "description": "All raw pages retained, so O can repeat every completeness and digest check.",
+      "properties": {
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/ProbePage"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pages"
+      ],
+      "title": "ProbeSnapshot",
+      "type": "object"
+    },
+    "ProcessIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "pid": {
+          "minimum": 1,
+          "title": "Pid",
+          "type": "integer"
+        },
+        "start_ticks": {
+          "pattern": "^[0-9]+$",
+          "title": "Start Ticks",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nonce",
+        "pid",
+        "start_ticks"
+      ],
+      "title": "ProcessIdentity",
+      "type": "object"
+    },
+    "ProcessRemovalProof": {
+      "additionalProperties": false,
+      "properties": {
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "process": {
+          "$ref": "#/$defs/ProcessIdentity"
+        },
+        "removed": {
+          "const": true,
+          "title": "Removed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "process",
+        "removed",
+        "observed_at"
+      ],
+      "title": "ProcessRemovalProof",
+      "type": "object"
+    },
+    "RpcRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arguments Digest"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          ],
+          "title": "Id"
+        },
+        "method": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        }
+      },
+      "required": [
+        "session_id",
+        "id",
+        "method",
+        "observed_at"
+      ],
+      "title": "RpcRequest",
+      "type": "object"
+    },
+    "RpcResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            }
+          ],
+          "title": "Id"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "result_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result Digest"
+        },
+        "session_id": {
+          "format": "uuid",
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "id",
+        "observed_at"
+      ],
+      "title": "RpcResponse",
+      "type": "object"
+    },
+    "StackSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "candidate_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Source"
+        },
+        "dependency_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dependency Digest",
+          "type": "string"
+        },
+        "fixture_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image",
+          "type": "string"
+        },
+        "fixture_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image Digest",
+          "type": "string"
+        },
+        "fixture_internal_url": {
+          "const": "http://mock-target:8080",
+          "title": "Fixture Internal Url",
+          "type": "string"
+        },
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "observer_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Container Id",
+          "type": "string"
+        },
+        "observer_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Url",
+          "type": "string"
+        },
+        "private_subnet": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Private Subnet",
+          "type": "string"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "runner_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Container Id",
+          "type": "string"
+        },
+        "runner_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Url",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-selftest-binding-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_internal_url": {
+          "const": "http://target:8000",
+          "title": "Target Internal Url",
+          "type": "string"
+        },
+        "target_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Url",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_name",
+        "nonce",
+        "runtime_profile",
+        "runner_url",
+        "target_url",
+        "observer_url",
+        "target_internal_url",
+        "fixture_internal_url",
+        "private_subnet",
+        "candidate_image",
+        "candidate_image_digest",
+        "fixture_image",
+        "fixture_image_digest",
+        "source_digest",
+        "candidate_source",
+        "dependency_digest",
+        "runner_container_id",
+        "target_container_id",
+        "observer_container_id",
+        "runner_volume",
+        "target_volume"
+      ],
+      "title": "StackSnapshot",
+      "type": "object"
+    }
+  },
+  "$id": "https://flowtest.local/selftest/schemas/mcp-transport-fault-evidence-v1.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "authority_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Digest",
+      "type": "string"
+    },
+    "batch_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "claim": {
+      "const": "transport_fault_negative_only",
+      "default": "transport_fault_negative_only",
+      "title": "Claim",
+      "type": "string"
+    },
+    "collected_at": {
+      "format": "date-time",
+      "title": "Collected At",
+      "type": "string"
+    },
+    "disposal_receipt": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisposalReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "http_admitted": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Http Admitted",
+      "type": "integer"
+    },
+    "http_rejected": {
+      "minimum": 0,
+      "title": "Http Rejected",
+      "type": "integer"
+    },
+    "inactive_fixture": {
+      "$ref": "#/$defs/InactiveFixture"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "nonce": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "process_cleanup_complete": {
+      "title": "Process Cleanup Complete",
+      "type": "boolean"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/FaultObservation"
+      },
+      "maxItems": 30,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    },
+    "stack": {
+      "$ref": "#/$defs/StackSnapshot"
+    },
+    "tools_admitted": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Tools Admitted",
+      "type": "integer"
+    },
+    "tools_rejected": {
+      "minimum": 0,
+      "title": "Tools Rejected",
+      "type": "integer"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "nonce",
+    "pack_digest",
+    "source_digest",
+    "manifest_digest",
+    "authority_digest",
+    "stack",
+    "inactive_fixture",
+    "scenarios",
+    "http_admitted",
+    "http_rejected",
+    "tools_admitted",
+    "tools_rejected",
+    "process_cleanup_complete",
+    "disposal_receipt",
+    "collected_at"
+  ],
+  "title": "FaultEvidence",
+  "type": "object"
+}

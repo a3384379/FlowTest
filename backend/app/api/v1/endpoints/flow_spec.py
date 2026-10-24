@@ -455,6 +455,11 @@ def flow_spec_change_set_detail(
 ) -> FlowSpecChangeSetDetailResponse:
     return FlowSpecChangeSetDetailResponse(
         **_summary(view).model_dump(),
+        materialized_workflow_id=(
+            view.item.materialized_resource_id
+            if view.item.materialized_resource_type == "workflow"
+            else None
+        ),
         spec=view.pipeline.spec,
         validation=view.pipeline.validation,
         compatibility=view.pipeline.compatibility,

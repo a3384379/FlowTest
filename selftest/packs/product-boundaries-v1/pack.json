@@ -1,0 +1,394 @@
+{
+  "pack_id": "product-boundaries-v1",
+  "version": "1.0.0",
+  "scenarios": [
+    {
+      "key": "clean_install",
+      "group": "installation",
+      "acceptance_variants": [
+        "ST-INIT-001/clean_install"
+      ],
+      "requests": []
+    },
+    {
+      "key": "same_key_reinstall",
+      "group": "installation",
+      "acceptance_variants": [
+        "ST-INIT-002/same_key_reinstall"
+      ],
+      "requests": []
+    },
+    {
+      "key": "new_run",
+      "group": "new_run",
+      "acceptance_variants": [
+        "ST-INIT-002/new_run",
+        "ST-RUN-001/manual"
+      ],
+      "requests": []
+    },
+    {
+      "key": "two_batch_isolation",
+      "group": "new_run",
+      "acceptance_variants": [
+        "ST-SEC-004/two_batch_isolation"
+      ],
+      "requests": []
+    },
+    {
+      "key": "readonly_scope",
+      "group": "projection",
+      "acceptance_variants": [
+        "ST-SEC-001/readonly_scope",
+        "ST-MCP-027/readonly_projection"
+      ],
+      "requests": [
+        {
+          "operation": "read_run",
+          "status": 200,
+          "code": null
+        }
+      ]
+    },
+    {
+      "key": "pagination",
+      "group": "projection",
+      "acceptance_variants": [
+        "ST-SEC-001/pagination"
+      ],
+      "requests": [
+        {
+          "operation": "page_1",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_2",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_3",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_4",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_5",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_6",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_7",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "page_8",
+          "status": 200,
+          "code": null
+        }
+      ]
+    },
+    {
+      "key": "seal_idempotent",
+      "group": "projection",
+      "acceptance_variants": [
+        "ST-CAN-004/seal_idempotent"
+      ],
+      "requests": [
+        {
+          "operation": "same_receipt",
+          "status": 200,
+          "code": null
+        }
+      ]
+    },
+    {
+      "key": "a_b_isolation",
+      "group": "projection",
+      "acceptance_variants": [
+        "ST-SEC-004/a_b_isolation"
+      ],
+      "requests": []
+    },
+    {
+      "key": "cross_project",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-001/cross_project"
+      ],
+      "requests": [
+        {
+          "operation": "foreign_project",
+          "status": 401,
+          "code": "INVALID_SERVICE_TOKEN"
+        }
+      ]
+    },
+    {
+      "key": "cross_run",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-001/cross_run"
+      ],
+      "requests": [
+        {
+          "operation": "own_run",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "foreign_run",
+          "status": 404,
+          "code": "SELFTEST_EVIDENCE_NOT_IN_BATCH"
+        }
+      ]
+    },
+    {
+      "key": "denied_mutations",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-001/denied_mutations"
+      ],
+      "requests": [
+        {
+          "operation": "start_plan",
+          "status": 401,
+          "code": "INVALID_SERVICE_TOKEN"
+        }
+      ]
+    },
+    {
+      "key": "revoked_token",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-001/revoked"
+      ],
+      "requests": [
+        {
+          "operation": "revoked",
+          "status": 401,
+          "code": "INVALID_SERVICE_TOKEN"
+        }
+      ]
+    },
+    {
+      "key": "expired_token",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-001/expired"
+      ],
+      "requests": [
+        {
+          "operation": "before_expiry",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "after_expiry",
+          "status": 401,
+          "code": "INVALID_SERVICE_TOKEN"
+        }
+      ]
+    },
+    {
+      "key": "unauthorized_binding",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-INIT-004/unauthorized_binding"
+      ],
+      "requests": [
+        {
+          "operation": "unknown_binding",
+          "status": 404,
+          "code": "SELFTEST_BINDING_NOT_FOUND"
+        }
+      ]
+    },
+    {
+      "key": "wrong_target",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-INIT-004/wrong_target",
+        "ST-SEC-004/wrong_target"
+      ],
+      "requests": [
+        {
+          "operation": "drift_preview",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "create_batch",
+          "status": 409,
+          "code": "SELFTEST_ENVIRONMENT_MAPPING_INVALID"
+        }
+      ]
+    },
+    {
+      "key": "environment_drift",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-INIT-004/drift"
+      ],
+      "requests": [
+        {
+          "operation": "drift_preview",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "create_batch",
+          "status": 409,
+          "code": "SELFTEST_ENVIRONMENT_MAPPING_INVALID"
+        }
+      ]
+    },
+    {
+      "key": "recursive_target",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-SEC-004/recursive_target"
+      ],
+      "requests": [
+        {
+          "operation": "recursive_preview",
+          "status": 200,
+          "code": null
+        },
+        {
+          "operation": "recursive_install",
+          "status": 409,
+          "code": "SELFTEST_PREVIEW_CHANGED"
+        }
+      ]
+    },
+    {
+      "key": "seal_conflict",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-CAN-004/seal_conflict"
+      ],
+      "requests": [
+        {
+          "operation": "changed_receipt",
+          "status": 409,
+          "code": "SELFTEST_RECEIPT_CONFLICT"
+        }
+      ]
+    },
+    {
+      "key": "seal_build",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-CAN-004/build"
+      ],
+      "requests": [
+        {
+          "operation": "changed_receipt",
+          "status": 409,
+          "code": "SELFTEST_RECEIPT_CONFLICT"
+        }
+      ]
+    },
+    {
+      "key": "seal_manifest",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-CAN-004/manifest"
+      ],
+      "requests": [
+        {
+          "operation": "changed_receipt",
+          "status": 409,
+          "code": "SELFTEST_RECEIPT_CONFLICT"
+        }
+      ]
+    },
+    {
+      "key": "seal_attempt",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-CAN-004/ci_attempt"
+      ],
+      "requests": [
+        {
+          "operation": "changed_receipt",
+          "status": 409,
+          "code": "SELFTEST_RECEIPT_CONFLICT"
+        }
+      ]
+    },
+    {
+      "key": "nonce_expiry",
+      "group": "refusal",
+      "acceptance_variants": [
+        "ST-CAN-004/nonce_expiry",
+        "ST-RUN-005/watchdog_cleanup"
+      ],
+      "requests": [
+        {
+          "operation": "expired_receipt",
+          "status": 409,
+          "code": "SELFTEST_BATCH_EXPIRED"
+        },
+        {
+          "operation": "watchdog",
+          "status": 200,
+          "code": null
+        }
+      ]
+    },
+    {
+      "key": "success_failure_cleanup",
+      "group": "cleanup",
+      "acceptance_variants": [
+        "ST-RET-001/success_cleanup",
+        "ST-RET-001/failure_cleanup"
+      ],
+      "requests": []
+    },
+    {
+      "key": "cancel_cleanup",
+      "group": "cleanup",
+      "acceptance_variants": [
+        "ST-RET-001/cancel_cleanup"
+      ],
+      "requests": []
+    },
+    {
+      "key": "retention",
+      "group": "retention",
+      "acceptance_variants": [
+        "ST-RET-001/retention"
+      ],
+      "requests": []
+    },
+    {
+      "key": "expiry",
+      "group": "retention",
+      "acceptance_variants": [
+        "ST-RET-001/expiry"
+      ],
+      "requests": []
+    },
+    {
+      "key": "foreign_key",
+      "group": "retention",
+      "acceptance_variants": [
+        "ST-RET-001/foreign_key"
+      ],
+      "requests": []
+    }
+  ]
+}

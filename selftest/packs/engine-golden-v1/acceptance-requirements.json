@@ -1,0 +1,66 @@
+{
+  "schema_version": "flowtest-selftest-acceptance-requirements-v1",
+  "pack_id": "engine-golden-v1",
+  "pack_digest": "d6b237d1bb5f51e7b8b6b6856c1688924015029f04c79b1c843bf6a64fbb7a10",
+  "deployment_status": "not_run",
+  "required_scenario_ids": [
+    "ST-GOLDEN-schema",
+    "ST-GOLDEN-header-json",
+    "ST-GOLDEN-file",
+    "ST-GOLDEN-explicit-status",
+    "ST-GOLDEN-min-items"
+  ],
+  "scenario_count": 5,
+  "request_count": 5,
+  "coverage": [
+    {
+      "scenario_id": "ST-GOLDEN-schema",
+      "acceptance_ids": [
+        "ST-ENG-001"
+      ],
+      "variant": "json_schema",
+      "independent_oracle": "固定 JSON Schema 与完整边界值对象；精确断言实际值及期望值摘要"
+    },
+    {
+      "scenario_id": "ST-GOLDEN-header-json",
+      "acceptance_ids": [
+        "ST-ENG-001"
+      ],
+      "variant": "header_json_extraction",
+      "independent_oracle": "固定 Content-Type 与 Extract 输出对象；精确断言实际值摘要"
+    },
+    {
+      "scenario_id": "ST-GOLDEN-file",
+      "acceptance_ids": [
+        "ST-ENG-001"
+      ],
+      "variant": "file_content_length_sha",
+      "independent_oracle": "原生 Workflow 文件内容、长度、类型断言；O 标准库 SHA-256 对照 M 二进制回执；未宣称 APIAssertionSpec.FILE_SHA256"
+    },
+    {
+      "scenario_id": "ST-GOLDEN-explicit-status",
+      "acceptance_ids": [
+        "ST-ENG-008"
+      ],
+      "variant": "explicit_status",
+      "independent_oracle": "HTTP_UNEXPECTED_STATUS / retry_api / main / attempts=2，真实目标503两次"
+    },
+    {
+      "scenario_id": "ST-GOLDEN-min-items",
+      "acceptance_ids": [
+        "ST-ENG-004"
+      ],
+      "variant": "min_items_0_and_1",
+      "independent_oracle": "guard_0 passed；guard_1 LOOP_MIN_ITEMS_NOT_MET；真实目标0次"
+    }
+  ],
+  "limits": {
+    "max_runtime_seconds": 600,
+    "max_requests": 500
+  },
+  "notes": [
+    "独立补充黄金包，不改旧 core8/extended19/engine11 摘要。",
+    "原始失败与独立核验匹配分开记录。",
+    "ASGI 回归不等价于 Full/Compact/Standalone 部署验收。"
+  ]
+}

@@ -1,0 +1,1010 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-P0-API001-session",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "login_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "login_has_token",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": true,
+            "actual": true
+          },
+          {
+            "node_id": "refresh_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "refresh_has_token",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": true,
+            "actual": true
+          },
+          {
+            "node_id": "logout_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          },
+          {
+            "node_id": "refresh_replay_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 401,
+            "actual": 401
+          },
+          {
+            "node_id": "refresh_replay_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "INVALID_REFRESH_TOKEN",
+            "actual": "INVALID_REFRESH_TOKEN"
+          },
+          {
+            "node_id": "refresh_replay_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API001-session-refresh_replay",
+            "actual": "$BATCH-ST-P0-API001-session-refresh_replay"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "refresh_replay",
+            "status_code": 401,
+            "error_code": "INVALID_REFRESH_TOKEN",
+            "trace_id": "$BATCH-ST-P0-API001-session-refresh_replay"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-access",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 401,
+            "actual": 401
+          },
+          {
+            "node_id": "request_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "INVALID_ACCESS_TOKEN",
+            "actual": "INVALID_ACCESS_TOKEN"
+          },
+          {
+            "node_id": "request_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API001-invalid-access-request",
+            "actual": "$BATCH-ST-P0-API001-invalid-access-request"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "request",
+            "status_code": 401,
+            "error_code": "INVALID_ACCESS_TOKEN",
+            "trace_id": "$BATCH-ST-P0-API001-invalid-access-request"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-refresh",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 401,
+            "actual": 401
+          },
+          {
+            "node_id": "request_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "INVALID_REFRESH_TOKEN",
+            "actual": "INVALID_REFRESH_TOKEN"
+          },
+          {
+            "node_id": "request_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API001-invalid-refresh-request",
+            "actual": "$BATCH-ST-P0-API001-invalid-refresh-request"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "request",
+            "status_code": 401,
+            "error_code": "INVALID_REFRESH_TOKEN",
+            "trace_id": "$BATCH-ST-P0-API001-invalid-refresh-request"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API001-missing-refresh",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 401,
+            "actual": 401
+          },
+          {
+            "node_id": "request_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "INVALID_REFRESH_TOKEN",
+            "actual": "INVALID_REFRESH_TOKEN"
+          },
+          {
+            "node_id": "request_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API001-missing-refresh-request",
+            "actual": "$BATCH-ST-P0-API001-missing-refresh-request"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "request",
+            "status_code": 401,
+            "error_code": "INVALID_REFRESH_TOKEN",
+            "trace_id": "$BATCH-ST-P0-API001-missing-refresh-request"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API001-logout-no-cookie",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          }
+        ],
+        "error_envelopes": []
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API002-nonmember",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "login_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 404,
+            "actual": 404
+          },
+          {
+            "node_id": "request_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "PROJECT_NOT_FOUND",
+            "actual": "PROJECT_NOT_FOUND"
+          },
+          {
+            "node_id": "request_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API002-nonmember-request",
+            "actual": "$BATCH-ST-P0-API002-nonmember-request"
+          }
+        ],
+        "error_envelopes": []
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API002-cross",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "login_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 404,
+            "actual": 404
+          },
+          {
+            "node_id": "request_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "PROJECT_NOT_FOUND",
+            "actual": "PROJECT_NOT_FOUND"
+          },
+          {
+            "node_id": "request_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API002-cross-request",
+            "actual": "$BATCH-ST-P0-API002-cross-request"
+          }
+        ],
+        "error_envelopes": []
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API006-auth-disabled",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          }
+        ],
+        "error_envelopes": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API006-header-suppressed",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          }
+        ],
+        "error_envelopes": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API006-cookie-suppressed",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          }
+        ],
+        "error_envelopes": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API007-nested",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "echo_value",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": {
+              "batch": "$BATCH",
+              "deep": {
+                "zero": 0,
+                "false": false,
+                "empty": "",
+                "null": null
+              }
+            },
+            "actual": {
+              "batch": "$BATCH",
+              "deep": {
+                "zero": 0,
+                "false": false,
+                "empty": "",
+                "null": null
+              }
+            }
+          }
+        ],
+        "error_envelopes": [],
+        "expected_request_value_presence": [
+          true
+        ],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API007-omitted",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "echo_value",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": null,
+            "actual": null
+          }
+        ],
+        "error_envelopes": [],
+        "expected_request_value_presence": [
+          false
+        ],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API007-explicit-null",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "request_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "echo_value",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": null,
+            "actual": null
+          }
+        ],
+        "error_envelopes": [],
+        "expected_request_value_presence": [
+          true
+        ],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API009-history",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "login_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "create_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "publish_one_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "version_one",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 1,
+            "actual": 1
+          },
+          {
+            "node_id": "update_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "publish_two_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "version_two",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 2,
+            "actual": 2
+          },
+          {
+            "node_id": "versions_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "historical_name",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "frozen-v1",
+            "actual": "frozen-v1"
+          },
+          {
+            "node_id": "latest_name",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "current-v2",
+            "actual": "current-v2"
+          },
+          {
+            "node_id": "archive_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          }
+        ],
+        "error_envelopes": []
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API009-conflict",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "login_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "create_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "publish_one_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "version_one",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 1,
+            "actual": 1
+          },
+          {
+            "node_id": "update_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "stale_update_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 409,
+            "actual": 409
+          },
+          {
+            "node_id": "stale_update_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "WORKFLOW_DRAFT_CONFLICT",
+            "actual": "WORKFLOW_DRAFT_CONFLICT"
+          },
+          {
+            "node_id": "stale_update_trace",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-ST-P0-API009-conflict-stale_update",
+            "actual": "$BATCH-ST-P0-API009-conflict-stale_update"
+          },
+          {
+            "node_id": "archive_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          }
+        ],
+        "error_envelopes": []
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "postcondition",
+        "fixture_journal"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-P0-API001-session",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-access",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-refresh",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API001-missing-refresh",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API001-logout-no-cookie",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API002-nonmember",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API002-cross",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API006-auth-disabled",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API006-header-suppressed",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API006-cookie-suppressed",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API007-nested",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": {
+            "batch": "$BATCH",
+            "deep": {
+              "zero": 0,
+              "false": false,
+              "empty": "",
+              "null": null
+            }
+          },
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API007-omitted",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API007-explicit-null",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API009-history",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-P0-API009-conflict",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    }
+  ]
+}

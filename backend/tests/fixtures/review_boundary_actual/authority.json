@@ -1,0 +1,37 @@
+{
+  "binding_fingerprint": "a7b2eb9be4d2e9850fde79021e60827743972682f4e4f417af3bccf6f20551b1",
+  "binding_id": "3a3983bf-d4a7-5538-bbab-265f30d3cfb3",
+  "builds": {
+    "fixture": "c4108d4cb0179c27dd5005d7024ef978b02591c0b2f9346882b445e8cc024792",
+    "runner": "sha256:01beeb8132546475aa4df105741de74d49bfa21b9ebb801943ba9954abae93b0",
+    "target": "sha256:01beeb8132546475aa4df105741de74d49bfa21b9ebb801943ba9954abae93b0",
+    "verifier": "30d6b7eee2e05e48dc69f0a223edbdb35642268946612349a1cccc70b479bd3e"
+  },
+  "expires_at": "2026-10-23T17:54:42.007094Z",
+  "fixtures": [
+    {
+      "organization_id": "02597a35-707c-4be6-af69-856ac68b5533",
+      "project_id": "7be8208c-deef-474c-814b-44d830f8a207"
+    },
+    {
+      "organization_id": "ef011747-5353-4263-9ae8-c57c43c83d28",
+      "project_id": "161fdf30-1230-4f70-a19f-96dbf64ca813"
+    }
+  ],
+  "issued_at": "2026-10-23T17:44:42.007094Z",
+  "machine_account_ids": [
+    "aaea9f2c-8c55-4e74-ac09-d87771678818",
+    "e8b732e5-639a-434a-8d92-b86add8c4307",
+    "9a9d6152-9059-40f2-839a-46607d6c51b7",
+    "be666bcb-7334-429b-b770-85ab9651ef4e",
+    "015d224c-7a50-4ca5-a70d-8956beb7f640",
+    "4a33cd04-c5c9-40aa-b5a7-7c6db3a616cb",
+    "1df8507e-866b-4a36-ad2a-b98560a2db7f"
+  ],
+  "manifest_digest": "4c9844935cfe8b5a622ebc09d69689f28ed026a52eeadf95ed66ddff11d341d7",
+  "owner_user_id": "e0a778e0-810b-4b80-884a-7dc7bdff9f3c",
+  "probe_id": "1e330c2f-96d5-6199-0a4a-1ec8e5b22d1a",
+  "reviewer_user_id": "6c088579-96bb-4ac1-9e0a-0efba5ba1d8e",
+  "runtime_profile": "standalone",
+  "source_digest": "53aca9c9f4a913ea6de9b8c3d9794b7c4aec91c3b50d020f71b25ea2322120c9"
+}

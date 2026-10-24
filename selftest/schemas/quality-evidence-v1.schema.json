@@ -1,0 +1,1455 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "CredentialEndpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "secret_ref_count": {
+          "minimum": 0,
+          "title": "Secret Ref Count",
+          "type": "integer"
+        },
+        "service_id": {
+          "format": "uuid",
+          "title": "Service Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "environment_id",
+        "service_id",
+        "secret_ref_count"
+      ],
+      "title": "CredentialEndpoint",
+      "type": "object"
+    },
+    "CredentialProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "$ref": "#/$defs/CredentialEndpoint"
+        },
+        "metadata_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Metadata Digest",
+          "type": "string"
+        },
+        "reference_count": {
+          "minimum": 0,
+          "title": "Reference Count",
+          "type": "integer"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "sentinel_leaked": {
+          "title": "Sentinel Leaked",
+          "type": "boolean"
+        },
+        "verified": {
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reference_count",
+        "verified",
+        "sentinel_leaked",
+        "result_digest",
+        "metadata_digest",
+        "endpoint"
+      ],
+      "title": "CredentialProjection",
+      "type": "object"
+    },
+    "DisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "containers_absent": {
+          "const": true,
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "const": true,
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "const": true,
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "binding_nonce",
+        "runner_volume",
+        "target_volume",
+        "candidate_image_digest",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "DisposalReceipt",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "ProbeDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "document_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Document Digest",
+          "type": "string"
+        },
+        "intent_key_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Key Digest",
+          "type": "string"
+        },
+        "objective_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Objective Digest",
+          "type": "string"
+        },
+        "oracles": {
+          "items": {
+            "$ref": "#/$defs/ProbeOracle"
+          },
+          "maxItems": 200,
+          "title": "Oracles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "document_digest",
+        "intent_key_digest",
+        "objective_digest",
+        "oracles"
+      ],
+      "title": "ProbeDesign",
+      "type": "object"
+    },
+    "ProbeFixture": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "organization_id"
+      ],
+      "title": "ProbeFixture",
+      "type": "object"
+    },
+    "ProbeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "item_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Item Type",
+          "type": "string"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Id"
+        },
+        "materialized_resource_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Type"
+        },
+        "proposed_document_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed Document Digest"
+        },
+        "review_status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Review Status",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reviewed By Id"
+        }
+      },
+      "required": [
+        "id",
+        "item_type",
+        "action",
+        "review_status",
+        "reviewed_by_id",
+        "materialized_resource_type",
+        "materialized_resource_id"
+      ],
+      "title": "ProbeItem",
+      "type": "object"
+    },
+    "ProbeOracle": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Digest",
+          "type": "string"
+        },
+        "expression_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expression Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "operator": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "expression_digest",
+        "operator",
+        "expected_digest"
+      ],
+      "title": "ProbeOracle",
+      "type": "object"
+    },
+    "ProbePage": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binding Fingerprint",
+          "type": "string"
+        },
+        "binding_id": {
+          "format": "uuid",
+          "title": "Binding Id",
+          "type": "string"
+        },
+        "builds": {
+          "$ref": "#/$defs/Builds"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "covered_kinds": {
+          "items": {
+            "enum": [
+              "workflow",
+              "workflow_version",
+              "test_case",
+              "test_case_version",
+              "test_plan",
+              "test_plan_run",
+              "workflow_execution",
+              "ai_change_set",
+              "test_design",
+              "change_set_approval"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 10,
+          "title": "Covered Kinds",
+          "type": "array"
+        },
+        "covered_projects": {
+          "items": {
+            "$ref": "#/$defs/ProbeFixture"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Covered Projects",
+          "type": "array"
+        },
+        "execution_scope": {
+          "const": "governance_negative_only",
+          "title": "Execution Scope",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "has_more": {
+          "title": "Has More",
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ProbeResource"
+          },
+          "maxItems": 100,
+          "title": "Items",
+          "type": "array"
+        },
+        "manifest_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Digest",
+          "type": "string"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}\\.[0-9]{1,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Cursor"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "probe_id": {
+          "format": "uuid",
+          "title": "Probe Id",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "mcp_governance_negative",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "compose",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshot Digest",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "probe_id",
+        "purpose",
+        "execution_scope",
+        "provenance",
+        "binding_id",
+        "binding_fingerprint",
+        "manifest_digest",
+        "source_digest",
+        "runtime_profile",
+        "builds",
+        "covered_projects",
+        "covered_kinds",
+        "items",
+        "total",
+        "next_cursor",
+        "has_more",
+        "complete",
+        "reason_codes",
+        "snapshot_digest",
+        "observed_at",
+        "expires_at"
+      ],
+      "title": "ProbePage",
+      "type": "object"
+    },
+    "ProbeResource": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Type"
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fingerprint"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProbeItem"
+          },
+          "maxItems": 500,
+          "title": "Items",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "workflow",
+            "workflow_version",
+            "test_case",
+            "test_case_version",
+            "test_plan",
+            "test_plan_run",
+            "workflow_execution",
+            "ai_change_set",
+            "test_design",
+            "change_set_approval"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By Id"
+        },
+        "source_change_set_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Change Set Id"
+        },
+        "status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "project_id",
+        "status"
+      ],
+      "title": "ProbeResource",
+      "type": "object"
+    },
+    "ProbeSnapshot": {
+      "additionalProperties": false,
+      "description": "All raw pages retained, so O can repeat every completeness and digest check.",
+      "properties": {
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/ProbePage"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pages"
+      ],
+      "title": "ProbeSnapshot",
+      "type": "object"
+    },
+    "QualityCaseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "api_id": {
+          "title": "Api Id",
+          "type": "string"
+        },
+        "api_version": {
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "compilation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "compilation_envelope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "context": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "contract_fingerprint": {
+          "title": "Contract Fingerprint",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/QualityDecision"
+        },
+        "design": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "design_fingerprint": {
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "generation": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "generation_envelope": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "policy": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposal Id"
+        },
+        "proposed_case_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed Case Count"
+        },
+        "variant": {
+          "enum": [
+            "positive_control",
+            "empty_cases",
+            "needs_review",
+            "truncated",
+            "coverage_missing"
+          ],
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "api_id",
+        "api_version",
+        "contract_fingerprint",
+        "design",
+        "design_fingerprint",
+        "policy",
+        "generation",
+        "generation_envelope",
+        "compilation_envelope",
+        "context",
+        "compilation",
+        "decision"
+      ],
+      "title": "QualityCaseResult",
+      "type": "object"
+    },
+    "QualityDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "executable_count": {
+          "title": "Executable Count",
+          "type": "integer"
+        },
+        "readiness": {
+          "enum": [
+            "ready",
+            "blocked",
+            "needs_review",
+            "incomplete"
+          ],
+          "title": "Readiness",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "required_count": {
+          "title": "Required Count",
+          "type": "integer"
+        },
+        "selected_count": {
+          "title": "Selected Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "readiness",
+        "required_count",
+        "selected_count",
+        "executable_count",
+        "reason_codes"
+      ],
+      "title": "QualityDecision",
+      "type": "object"
+    },
+    "QualityObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "attack_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attack Id"
+        },
+        "before": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "maxItems": 15,
+          "minItems": 1,
+          "title": "Calls",
+          "type": "array"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "credential": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CredentialProjection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "generated": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityCaseResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Result"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "started_at",
+        "completed_at",
+        "before",
+        "after",
+        "calls"
+      ],
+      "title": "QualityObservation",
+      "type": "object"
+    },
+    "Result": {
+      "additionalProperties": false,
+      "properties": {
+        "business_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Code"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Http Status"
+        },
+        "is_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Error"
+        },
+        "persisted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persisted"
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preview"
+        },
+        "proposal_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposal Id"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "text_marker": {
+          "anyOf": [
+            {
+              "const": "unknown_tool",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Marker"
+        },
+        "trace_present": {
+          "default": false,
+          "title": "Trace Present",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "result_digest"
+      ],
+      "title": "Result",
+      "type": "object"
+    },
+    "StackSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "candidate_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Source"
+        },
+        "dependency_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dependency Digest",
+          "type": "string"
+        },
+        "fixture_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image",
+          "type": "string"
+        },
+        "fixture_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image Digest",
+          "type": "string"
+        },
+        "fixture_internal_url": {
+          "const": "http://mock-target:8080",
+          "title": "Fixture Internal Url",
+          "type": "string"
+        },
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "observer_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Container Id",
+          "type": "string"
+        },
+        "observer_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Url",
+          "type": "string"
+        },
+        "private_subnet": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Private Subnet",
+          "type": "string"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "runner_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Container Id",
+          "type": "string"
+        },
+        "runner_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Url",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-selftest-binding-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_internal_url": {
+          "const": "http://target:8000",
+          "title": "Target Internal Url",
+          "type": "string"
+        },
+        "target_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Url",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_name",
+        "nonce",
+        "runtime_profile",
+        "runner_url",
+        "target_url",
+        "observer_url",
+        "target_internal_url",
+        "fixture_internal_url",
+        "private_subnet",
+        "candidate_image",
+        "candidate_image_digest",
+        "fixture_image",
+        "fixture_image_digest",
+        "source_digest",
+        "candidate_source",
+        "dependency_digest",
+        "runner_container_id",
+        "target_container_id",
+        "observer_container_id",
+        "runner_volume",
+        "target_volume"
+      ],
+      "title": "StackSnapshot",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Digest",
+      "type": "string"
+    },
+    "collected_at": {
+      "format": "date-time",
+      "title": "Collected At",
+      "type": "string"
+    },
+    "disposal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisposalReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "http_admitted": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Http Admitted",
+      "type": "integer"
+    },
+    "http_rejected": {
+      "minimum": 0,
+      "title": "Http Rejected",
+      "type": "integer"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/QualityObservation"
+      },
+      "maxItems": 18,
+      "title": "Observations",
+      "type": "array"
+    },
+    "protocol_cleanup_complete": {
+      "title": "Protocol Cleanup Complete",
+      "type": "boolean"
+    },
+    "request_budget_mode": {
+      "const": "conservative_public_api_plus_sdk_and_candidate_rpc",
+      "default": "conservative_public_api_plus_sdk_and_candidate_rpc",
+      "title": "Request Budget Mode",
+      "type": "string"
+    },
+    "stack": {
+      "$ref": "#/$defs/StackSnapshot"
+    },
+    "tool_attempts": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Tool Attempts",
+      "type": "integer"
+    },
+    "tools_rejected": {
+      "minimum": 0,
+      "title": "Tools Rejected",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "manifest_digest",
+    "authority_digest",
+    "stack",
+    "observations",
+    "http_admitted",
+    "http_rejected",
+    "tool_attempts",
+    "tools_rejected",
+    "protocol_cleanup_complete",
+    "collected_at"
+  ],
+  "title": "QualityEvidence",
+  "type": "object"
+}

@@ -19,6 +19,8 @@ jobs:
     uses: ./.github/workflows/frontend-ci.yml
   compose:
     uses: ./.github/workflows/compose-ci.yml
+    with:
+      run_selftest: true
   security:
     uses: ./.github/workflows/security-ci.yml
   windows:

@@ -1,0 +1,169 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "attempt_id": {
+      "format": "uuid",
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "phase": {
+      "enum": ["workflow", "case"],
+      "title": "Phase",
+      "type": "string"
+    },
+    "status": {
+      "enum": ["NOT_RUN", "blocked", "error", "waiting_for_review"],
+      "title": "Status",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "host": {
+      "title": "Host",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "cli_version": {
+      "title": "Cli Version",
+      "type": "string"
+    },
+    "skill_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Skill Digest",
+      "type": "string"
+    },
+    "prompt_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Prompt Digest",
+      "type": "string"
+    },
+    "authorized_budget_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Authorized Budget Digest"
+    },
+    "actual_tool_calls": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Actual Tool Calls",
+      "type": "integer"
+    },
+    "catalog_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Catalog Digest"
+    },
+    "started_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Started At"
+    },
+    "completed_at": {
+      "format": "date-time",
+      "title": "Completed At",
+      "type": "string"
+    },
+    "exit_code": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Exit Code"
+    },
+    "input_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Input Tokens"
+    },
+    "output_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Tokens"
+    },
+    "billed_cost": {
+      "const": "unknown",
+      "default": "unknown",
+      "title": "Billed Cost",
+      "type": "string"
+    },
+    "proposal_ids": {
+      "default": [],
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Proposal Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "attempt_id",
+    "phase",
+    "status",
+    "reason_codes",
+    "host",
+    "model",
+    "cli_version",
+    "skill_digest",
+    "prompt_digest",
+    "authorized_budget_digest",
+    "actual_tool_calls",
+    "catalog_digest",
+    "started_at",
+    "completed_at",
+    "exit_code"
+  ],
+  "title": "HostAttemptResult",
+  "type": "object"
+}

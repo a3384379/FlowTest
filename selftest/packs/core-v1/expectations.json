@@ -1,0 +1,578 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-CORE-echo-boundaries",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 5,
+        "assertions": [
+          {
+            "node_id": "assert_value_0",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 0,
+            "actual": 0
+          },
+          {
+            "node_id": "assert_value_1",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": false,
+            "actual": false
+          },
+          {
+            "node_id": "assert_value_2",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": null,
+            "actual": null
+          },
+          {
+            "node_id": "assert_value_3",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "",
+            "actual": ""
+          },
+          {
+            "node_id": "assert_value_4",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "中文",
+            "actual": "中文"
+          }
+        ],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": true,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": true,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": true,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": true,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": true,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-business-failure",
+      "expected": {
+        "execution_status": "failed",
+        "error_code": "WORKFLOW_ASSERTION_FAILED",
+        "node_id": "assert_business",
+        "phase": "main",
+        "request_count": 1,
+        "assertions": [
+          {
+            "node_id": "assert_business",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 2,
+            "actual": 1
+          }
+        ],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-timeout",
+      "expected": {
+        "execution_status": "failed",
+        "error_code": "NODE_TIMEOUT",
+        "node_id": "request",
+        "phase": "main",
+        "request_count": 1,
+        "assertions": [],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": ["execution", "fixture_journal", "postcondition"],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-if",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "assertions": [],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": ["execution", "fixture_journal", "postcondition"],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-foreach",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "assertions": [],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-repeat",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 2,
+        "assertions": [],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-retry",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 2,
+        "assertions": [
+          {
+            "node_id": "assert_retry",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 2,
+            "actual": 2
+          }
+        ],
+        "fixture_responses": [
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ],
+      "cleanup_required": true
+    },
+    {
+      "scenario_id": "ST-CORE-poll",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 3,
+        "assertions": [
+          {
+            "node_id": "assert_poll",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 3,
+            "actual": 3
+          }
+        ],
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ],
+      "cleanup_required": true
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-CORE-echo-boundaries",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": 0,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": true
+        },
+        {
+          "value": false,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": true
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": true
+        },
+        {
+          "value": "",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": true
+        },
+        {
+          "value": "中文",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": true
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-CORE-business-failure",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-CORE-timeout",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 2000
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-CORE-if",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "true",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-CORE-foreach",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": 0,
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": false,
+          "branch": "",
+          "iteration_key": "i-1",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "中文",
+          "branch": "",
+          "iteration_key": "i-2",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "control",
+        "kind": "iteration",
+        "total": 3
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-repeat",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "i-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "i-1",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "control",
+        "kind": "iteration",
+        "total": 2
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-retry",
+      "fixture": {
+        "response_statuses": [503, 200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-CORE-poll",
+      "fixture": {
+        "response_statuses": [200],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    }
+  ]
+}

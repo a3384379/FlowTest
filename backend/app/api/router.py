@@ -8,6 +8,7 @@ from app.api.v1.endpoints.artifacts import router as artifacts_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.capabilities import router as capabilities_router
 from app.api.v1.endpoints.change_regression import router as change_regression_router
+from app.api.v1.endpoints.ci_evidence import router as ci_evidence_router
 from app.api.v1.endpoints.context_inspector import router as context_inspector_router
 from app.api.v1.endpoints.contract_hub import router as contract_hub_router
 from app.api.v1.endpoints.contracts import router as contracts_router
@@ -47,6 +48,12 @@ from app.api.v1.endpoints.reporting import router as reporting_router
 from app.api.v1.endpoints.runner_fabric import admin_router as runner_fabric_admin_router
 from app.api.v1.endpoints.runner_fabric import runner_router as runner_control_router
 from app.api.v1.endpoints.search import router as search_router
+from app.api.v1.endpoints.self_test_evidence import router as self_test_evidence_router
+from app.api.v1.endpoints.self_test_probes import router as self_test_probes_router
+from app.api.v1.endpoints.self_test_watchdog import router as self_test_watchdog_router
+from app.api.v1.endpoints.self_tests import agent_router as self_test_agent_router
+from app.api.v1.endpoints.self_tests import router as self_tests_router
+from app.api.v1.endpoints.self_tests import verification_router as self_test_verification_router
 from app.api.v1.endpoints.service_targets import router as service_targets_router
 from app.api.v1.endpoints.tasking import router as tasking_router
 from app.api.v1.endpoints.teams import router as teams_router
@@ -104,6 +111,13 @@ api_router.include_router(release_gate_router, tags=["release-gate"])
 api_router.include_router(search_router, tags=["search"])
 api_router.include_router(organizations_router, tags=["organizations"])
 api_router.include_router(tasking_router, tags=["tasking"])
+api_router.include_router(ci_evidence_router, tags=["ci-execution-evidence"])
+api_router.include_router(self_tests_router, tags=["self-tests"])
+api_router.include_router(self_test_agent_router, tags=["self-test-agents"])
+api_router.include_router(self_test_evidence_router, tags=["self-test-task-evidence"])
+api_router.include_router(self_test_probes_router, tags=["self-test-negative-probes"])
+api_router.include_router(self_test_watchdog_router, tags=["self-test-agents"])
+api_router.include_router(self_test_verification_router, tags=["self-test-verification"])
 api_router.include_router(teams_router, tags=["teams"])
 api_router.include_router(test_assets_router, tags=["test-assets"])
 api_router.include_router(test_engineering_router, tags=["test-engineering"])

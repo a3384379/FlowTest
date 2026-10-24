@@ -3,7 +3,16 @@ run-name: ${{ (github.event.action == 'labeled' || github.event.action == 'unlab
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+    types:
+      [
+        opened,
+        synchronize,
+        reopened,
+        ready_for_review,
+        labeled,
+        unlabeled,
+        edited,
+      ]
 
 # Only ignored metadata events use a separate group. Effective label changes and
 # new heads replace the active run for the same PR.
@@ -66,9 +75,10 @@ jobs:
       - name: Static checks
         working-directory: backend
         run: |
-          uv run ruff format --check . ../scripts/*.py
-          uv run ruff check . ../scripts/*.py
-          uv run mypy app ../scripts/*.py
+          uv run ruff format --check . ../scripts/*.py ../scripts/selftest
+          uv run ruff check . ../scripts/*.py ../scripts/selftest
+          uv run mypy app ../scripts --exclude '(^|/)selftest(/|_ci[.]py$)'
+          MYPYPATH=..:. uv run mypy --explicit-package-bases ../scripts/selftest ../scripts/selftest_ci.py
           uv run lint-imports
       - name: Affected tests (full side when mapping is unknown)
         working-directory: backend
@@ -127,6 +137,8 @@ jobs:
     needs: plan
     if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'compose') }}
     uses: ./.github/workflows/compose-ci.yml
+    with:
+      run_selftest: ${{ contains(fromJSON(needs.plan.outputs.plan).domains, 'selftest') || fromJSON(needs.plan.outputs.plan).tier == 'full' }}
   security:
     needs: plan
     if: ${{ !fromJSON(needs.plan.outputs.plan).governance_change && contains(fromJSON(needs.plan.outputs.plan).required, 'security') }}
@@ -181,7 +193,21 @@ jobs:
   shadow:
     name: PR Validation Shadow ${{ github.sha }} ${{ needs.plan.outputs.fingerprint }}
     if: ${{ always() && (github.event.action != 'labeled' && github.event.action != 'unlabeled' && github.event.action != 'edited' || github.event.label.name == 'ci:light' || github.event.label.name == 'ci:milestone' || github.event.changes.base) }}
-    needs: [plan, quick, backend-standard, backend-full, frontend-standard, frontend-full, compose, security, windows, upgrade, skills, compact]
+    needs:
+      [
+        plan,
+        quick,
+        backend-standard,
+        backend-full,
+        frontend-standard,
+        frontend-full,
+        compose,
+        security,
+        windows,
+        upgrade,
+        skills,
+        compact,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

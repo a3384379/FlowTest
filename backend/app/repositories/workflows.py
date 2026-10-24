@@ -168,6 +168,30 @@ class WorkflowRepository:
     async def get_execution(self, execution_id: UUID) -> WorkflowExecution | None:
         return await self._session.get(WorkflowExecution, execution_id)
 
+    async def lock_execution_state(self, execution_id: UUID) -> None:
+        await self._session.execute(
+            update(WorkflowExecution)
+            .where(WorkflowExecution.id == execution_id)
+            .values(updated_at=WorkflowExecution.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def reserve_runtime_completion(self, execution_id: UUID) -> bool:
+        result = await self._session.execute(
+            update(WorkflowExecution)
+            .where(
+                WorkflowExecution.id == execution_id,
+                or_(
+                    WorkflowExecution.error_code.is_(None),
+                    WorkflowExecution.error_code != "TEST_PLAN_WORKER_LOST",
+                ),
+            )
+            .values(updated_at=WorkflowExecution.updated_at)
+            .execution_options(synchronize_session=False)
+            .returning(WorkflowExecution.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def get_execution_report(
         self, *, project_id: UUID, execution_id: UUID
     ) -> WorkflowExecutionReport | None:

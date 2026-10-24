@@ -770,6 +770,7 @@ async def test_mcp_sdk_registration_and_transports() -> None:
             "flowtest.close_test_context",
             "flowtest.commit_contract_import",
             "flowtest.compile_integration_flowspec",
+            "flowtest.compile_test_design",
             "flowtest.diagnose_failure",
             "flowtest.diff_flowspec",
             "flowtest.discover_control_capabilities",

@@ -1,3 +1,4 @@
+import SelfTestProposalBacklink from '../features/self-test/SelfTestProposalBacklink'
 import { AuditOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -165,6 +166,7 @@ function MCPChangeSetWorkspace({ scope }: { scope: string }) {
         <Alert showIcon type="info" title="请从资源发现结果打开一个 MCP 变更集。" />
       ) : null}
       <QueryFailureNotice queries={[changeSet, permissions]} />
+      <SelfTestChangeBacklink projectId={projectId} data={data} />
       <ActionFailure error={actionError} onRead={readAfterFailure} />
       <ReadStaleNotice hasData={Boolean(data)} failed={changeSet.isError} />
 
@@ -545,4 +547,17 @@ type ControlBlockEdit = {
 function required(value: string | null): string {
   if (!value) throw new Error('缺少 ChangeSet ID')
   return value
+}
+
+function SelfTestChangeBacklink({
+  projectId,
+  data,
+}: {
+  projectId: string | null
+  data: MCPChangeSet | undefined
+}) {
+  if (!projectId || !data) return null
+  return (
+    <SelfTestProposalBacklink projectId={projectId} proposalId={data.id} route="controlled_write" />
+  )
 }

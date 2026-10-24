@@ -1,11 +1,15 @@
 import asyncio
+import os
+import stat
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.config import Config as ClientConfig
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.core.config import settings
 from app.domain.runtime_profiles import RuntimeProfile
@@ -14,13 +18,14 @@ if TYPE_CHECKING:
     from mypy_boto3_s3.client import S3Client
 
 
-def create_s3_client() -> "S3Client":
+def create_s3_client(*, config: ClientConfig | None = None) -> "S3Client":
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         region_name="us-east-1",
+        config=config,
     )
 
 
@@ -56,7 +61,29 @@ class StoredObject:
     content_type: str
 
 
+class ObjectAvailability(StrEnum):
+    AVAILABLE = "available"
+    MISSING = "missing"
+    UNAVAILABLE = "unavailable"
+
+
 class ObjectStorage:
+    async def availability(self, *, key: str) -> ObjectAvailability:
+        """Probe existence only; neither download content nor assert its SHA-256."""
+        try:
+            client = create_s3_client(
+                config=ClientConfig(connect_timeout=1, read_timeout=1, retries={"max_attempts": 0})
+            )
+            await asyncio.to_thread(client.head_object, Bucket=settings.s3_bucket, Key=key)
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return ObjectAvailability.MISSING
+            return ObjectAvailability.UNAVAILABLE
+        except (BotoCoreError, OSError):
+            return ObjectAvailability.UNAVAILABLE
+        return ObjectAvailability.AVAILABLE
+
     async def put(self, *, key: str, content: bytes, content_type: str) -> None:
         client = create_s3_client()
         await asyncio.to_thread(
@@ -89,6 +116,26 @@ class LocalObjectStorage(ObjectStorage):
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = (root or _local_storage_root()).resolve()
+
+    async def availability(self, *, key: str) -> ObjectAvailability:
+        return await asyncio.to_thread(self._availability_sync, key)
+
+    def _availability_sync(self, key: str) -> ObjectAvailability:
+        try:
+            descriptor = os.open(
+                self._path_for_key(key), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            )
+        except FileNotFoundError:
+            return ObjectAvailability.MISSING
+        except OSError:
+            return ObjectAvailability.UNAVAILABLE
+        try:
+            regular = stat.S_ISREG(os.fstat(descriptor).st_mode)
+            return ObjectAvailability.AVAILABLE if regular else ObjectAvailability.MISSING
+        except OSError:
+            return ObjectAvailability.UNAVAILABLE
+        finally:
+            os.close(descriptor)
 
     async def put(self, *, key: str, content: bytes, content_type: str) -> None:
         await asyncio.to_thread(self._put_sync, key, content, content_type)

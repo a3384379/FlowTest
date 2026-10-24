@@ -28,7 +28,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import {
@@ -80,6 +80,7 @@ const serviceAccountScopes = [
   'org:read',
   'org:governance',
   'org:audit',
+  'org:key_rotate',
   'project:read',
   'project:write',
   'execution:trigger',
@@ -91,7 +92,35 @@ const serviceAccountScopes = [
   'mcp:write',
   'mcp:evidence:write',
   'mcp:flow:propose',
-]
+  'mcp:preview:execute',
+  'mcp:project:bootstrap',
+  'mcp:contract:import',
+  'mcp:regression:prepare',
+  'mcp:test-plan:propose',
+] as const
+
+const serviceAccountScopeLabels: Readonly<Record<(typeof serviceAccountScopes)[number], string>> = {
+  'org:read': '读取组织',
+  'org:governance': '管理组织治理',
+  'org:audit': '读取组织审计',
+  'org:key_rotate': '轮换组织加密密钥',
+  'project:read': '读取项目',
+  'project:write': '写入项目',
+  'execution:trigger': '触发执行',
+  'artifact:read': '读取制品',
+  'runner:read': '读取执行器',
+  'runner:manage': '管理执行器',
+  'audit:read': '读取审计记录',
+  'mcp:read': 'MCP 只读访问',
+  'mcp:write': 'MCP 受控写入提案',
+  'mcp:evidence:write': 'MCP 写入外部证据',
+  'mcp:flow:propose': 'MCP 提交流程提案',
+  'mcp:preview:execute': 'MCP 执行已批准的沙箱预览',
+  'mcp:project:bootstrap': 'MCP 初始化专用测试资产',
+  'mcp:contract:import': 'MCP 导入已预览的契约',
+  'mcp:regression:prepare': 'MCP 准备变更回归',
+  'mcp:test-plan:propose': 'MCP 提交测试计划更新建议',
+}
 
 type MemberFormValues = { user_id: string; role: OrganizationRole }
 type ServiceAccountFormValues = { name: string; account_key: string; scopes: string[] }
@@ -129,14 +158,11 @@ type RunnerGovernanceData = {
 export default function OrganizationGovernancePage() {
   const user = useAuthStore((state) => state.user)
   const isSystemAdmin = Boolean(user?.is_system_admin)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => useAuthStore.getState().organizationId,
+  )
   const organizations = useQuery({ queryKey: ['organizations'], queryFn: listOrganizations })
   const effectiveSelectedId = selectedId ?? organizations.data?.[0]?.id ?? null
-
-  useEffect(() => {
-    setOrganizationId(effectiveSelectedId)
-    return () => setOrganizationId(null)
-  }, [effectiveSelectedId])
 
   return (
     <OrganizationGovernanceContent
@@ -145,7 +171,10 @@ export default function OrganizationGovernancePage() {
       isError={organizations.isError}
       organizations={organizations.data ?? []}
       selectedId={effectiveSelectedId}
-      onSelect={setSelectedId}
+      onSelect={(id) => {
+        setSelectedId(id)
+        setOrganizationId(id)
+      }}
     />
   )
 }
@@ -225,7 +254,7 @@ function OrganizationGovernanceSelected({
           <Select
             aria-label="治理组织"
             value={selected.id}
-            onChange={onSelect}
+            onSelect={onSelect}
             options={organizations.map((organization) => ({
               value: organization.id,
               label: `${organization.name} · ${organization.slug}`,
@@ -881,10 +910,19 @@ function ServiceAccountsTab({
                 </Form.Item>
               </Col>
               <Col xs={24} md={8}>
-                <Form.Item name="scopes" label="Scope" rules={[{ required: true }]}>
+                <Form.Item
+                  name="scopes"
+                  label="权限范围"
+                  rules={[{ required: true }]}
+                  extra="按需选择权限；沙箱预览仍需独立的一次性人工批准。"
+                >
                   <Select
                     mode="multiple"
-                    options={serviceAccountScopes.map((scope) => ({ value: scope }))}
+                    options={serviceAccountScopes.map((scope) => ({
+                      value: scope,
+                      label: scope,
+                      title: serviceAccountScopeLabels[scope],
+                    }))}
                   />
                 </Form.Item>
               </Col>

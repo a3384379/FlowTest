@@ -1,0 +1,29 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "supplemental-api-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-P0-API001-session",
+    "ST-P0-API001-invalid-access",
+    "ST-P0-API001-invalid-refresh",
+    "ST-P0-API001-missing-refresh",
+    "ST-P0-API001-logout-no-cookie",
+    "ST-P0-API002-nonmember",
+    "ST-P0-API002-cross",
+    "ST-P0-API006-auth-disabled",
+    "ST-P0-API006-header-suppressed",
+    "ST-P0-API006-cookie-suppressed",
+    "ST-P0-API007-nested",
+    "ST-P0-API007-omitted",
+    "ST-P0-API007-explicit-null",
+    "ST-P0-API009-history",
+    "ST-P0-API009-conflict"
+  ],
+  "files": {
+    "api-definitions.json": "a26be01091c4ceb60d4b3edbfa1b792b06d2267c3c2d4c6fd08502baa7c8793b",
+    "workflows.json": "11342fccb17b3425caf103aeaa47eca447f71513655f50a89105e14bfb931e90",
+    "expectations.json": "d422aec88a6bc6d2d59ce336fbd1886064d1f351da557f2252172c3e24ae2999"
+  }
+}

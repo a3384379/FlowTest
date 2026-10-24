@@ -1,0 +1,819 @@
+{
+  "$defs": {
+    "ApiSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_definition_id": {
+          "format": "uuid",
+          "title": "Api Definition Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_definition_id",
+        "api_version",
+        "contract_fingerprint"
+      ],
+      "title": "ApiSource",
+      "type": "object"
+    },
+    "DesignSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "design_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "operation_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation Ref",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_source",
+        "operation_ref",
+        "scenario_id",
+        "design_fingerprint"
+      ],
+      "title": "DesignSource",
+      "type": "object"
+    },
+    "HostEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_tool_calls": {
+          "minimum": 1,
+          "title": "Actual Tool Calls",
+          "type": "integer"
+        },
+        "authorized_budget_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorized Budget Digest",
+          "type": "string"
+        },
+        "host": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prompt Digest",
+          "type": "string"
+        },
+        "skill_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Skill Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "model",
+        "skill_digest",
+        "prompt_digest",
+        "authorized_budget_digest",
+        "actual_tool_calls"
+      ],
+      "title": "HostEvidence",
+      "type": "object"
+    },
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "OracleBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Assertion Name",
+          "type": "string"
+        },
+        "expected_value_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Value Digest",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "oracle_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Oracle Id",
+          "type": "string"
+        },
+        "phase": {
+          "default": "main",
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oracle_id",
+        "node_id",
+        "assertion_name",
+        "expression",
+        "expected_value_digest"
+      ],
+      "title": "OracleBinding",
+      "type": "object"
+    },
+    "PlanRunSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "maximum": 4,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "expected_target_snapshot_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Target Snapshot Digest"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_item_id": {
+          "format": "uuid",
+          "title": "Run Item Id",
+          "type": "string"
+        },
+        "source_suite": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SuiteReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled",
+            "quarantined"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_id": {
+          "format": "uuid",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Snapshot Digest",
+          "type": "string"
+        },
+        "target_type": {
+          "const": "case",
+          "default": "case",
+          "title": "Target Type",
+          "type": "string"
+        },
+        "target_version": {
+          "minimum": 1,
+          "title": "Target Version",
+          "type": "integer"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "run_id",
+        "run_item_id",
+        "target_id",
+        "target_version",
+        "workflow_id",
+        "workflow_version",
+        "environment_id",
+        "execution_id",
+        "attempts",
+        "status",
+        "target_snapshot_digest"
+      ],
+      "title": "PlanRunSnapshot",
+      "type": "object"
+    },
+    "ProposalEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "content_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Fingerprint",
+          "type": "string"
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Materialized Resource Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "format": "uuid",
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "review_mode": {
+          "enum": [
+            "ci_fixture",
+            "human"
+          ],
+          "title": "Review Mode",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": [
+            "accepted",
+            "pending",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "format": "uuid",
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "route": {
+          "enum": [
+            "flow_spec",
+            "controlled_write"
+          ],
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "proposal_id",
+        "route",
+        "review_status",
+        "content_fingerprint",
+        "review_mode",
+        "reviewer_id"
+      ],
+      "title": "ProposalEvidence",
+      "type": "object"
+    },
+    "PublishedCase": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version",
+        "fingerprint",
+        "workflow_id",
+        "workflow_version",
+        "environment_id"
+      ],
+      "title": "PublishedCase",
+      "type": "object"
+    },
+    "PublishedSuite": {
+      "additionalProperties": false,
+      "properties": {
+        "case_versions": {
+          "items": {
+            "$ref": "#/$defs/SuiteCaseVersion"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Case Versions",
+          "type": "array"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version",
+        "fingerprint",
+        "case_versions"
+      ],
+      "title": "PublishedSuite",
+      "type": "object"
+    },
+    "PublishedWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "assertions": {
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "version_id": {
+          "format": "uuid",
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version_id",
+        "version",
+        "fingerprint",
+        "assertions"
+      ],
+      "title": "PublishedWorkflow",
+      "type": "object"
+    },
+    "SuiteCaseVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "case_id",
+        "version"
+      ],
+      "title": "SuiteCaseVersion",
+      "type": "object"
+    },
+    "SuiteReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "SuiteReference",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_source": {
+      "$ref": "#/$defs/ApiSource"
+    },
+    "assisted": {
+      "default": false,
+      "title": "Assisted",
+      "type": "boolean"
+    },
+    "batch_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "calls": {
+      "items": {
+        "$ref": "#/$defs/McpCallReceipt"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Calls",
+      "type": "array"
+    },
+    "case": {
+      "$ref": "#/$defs/PublishedCase"
+    },
+    "case_proposal": {
+      "$ref": "#/$defs/ProposalEvidence"
+    },
+    "catalog_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Catalog Digest",
+      "type": "string"
+    },
+    "combined_design_fingerprint": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Combined Design Fingerprint"
+    },
+    "compilation_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Compilation Fingerprint",
+      "type": "string"
+    },
+    "design_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Design Fingerprint",
+      "type": "string"
+    },
+    "design_sources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/DesignSource"
+      },
+      "maxItems": 100,
+      "title": "Design Sources",
+      "type": "array"
+    },
+    "frozen_at": {
+      "format": "date-time",
+      "title": "Frozen At",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "generation_mode": {
+      "enum": [
+        "deterministic_mcp",
+        "host_llm_mcp"
+      ],
+      "title": "Generation Mode",
+      "type": "string"
+    },
+    "host": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/HostEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "oracle_bindings": {
+      "items": {
+        "$ref": "#/$defs/OracleBinding"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Oracle Bindings",
+      "type": "array"
+    },
+    "run": {
+      "$ref": "#/$defs/PlanRunSnapshot"
+    },
+    "scenario_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "suite": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PublishedSuite"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "workflow": {
+      "$ref": "#/$defs/PublishedWorkflow"
+    },
+    "workflow_proposal": {
+      "$ref": "#/$defs/ProposalEvidence"
+    }
+  },
+  "required": [
+    "batch_key",
+    "scenario_id",
+    "generation_mode",
+    "api_source",
+    "design_fingerprint",
+    "compilation_fingerprint",
+    "catalog_digest",
+    "oracle_bindings",
+    "calls",
+    "workflow_proposal",
+    "case_proposal",
+    "workflow",
+    "case",
+    "run",
+    "generated_at",
+    "frozen_at"
+  ],
+  "title": "GenerationProvenance",
+  "type": "object"
+}

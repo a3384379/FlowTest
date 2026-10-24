@@ -1,0 +1,30 @@
+{
+  "format": "flowtest-selftest-golden-contracts",
+  "format_version": 1,
+  "scenarios": {
+    "ST-MCP-025": {
+      "status": 200,
+      "schema": {
+        "type": "object",
+        "required": ["actual", "code"],
+        "properties": {
+          "actual": { "type": "integer", "const": 2 },
+          "code": { "type": "integer", "const": 0 }
+        }
+      },
+      "oracle_ids": ["oracle_success_status", "oracle_response_schema_200"]
+    },
+    "ST-MCP-026": {
+      "status": 200,
+      "schema": {
+        "type": "object",
+        "required": ["actual", "code"],
+        "properties": {
+          "actual": { "type": "integer", "const": 1 },
+          "code": { "type": "integer", "const": 0 }
+        }
+      },
+      "oracle_ids": ["oracle_success_status", "oracle_response_schema_200"]
+    }
+  }
+}

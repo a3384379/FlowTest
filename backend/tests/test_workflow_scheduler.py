@@ -1060,3 +1060,40 @@ def test_contract_rejects_unreachable_and_dangling_nodes() -> None:
                 {"id": "s-d", "source": "start", "target": "dead"},
             ],
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("main_fails", [False, True])
+async def test_explicit_cleanup_edge_preserves_preceding_cleanup_output(main_fails: bool) -> None:
+    """A cleanup assertion must observe its predecessor even after main failure."""
+    cleanup_request = cleanup_node("cleanup-request", cleanup_for=["main"])
+    cleanup_assertion = cleanup_node("cleanup-assert", cleanup_for=["main"])
+    definition = workflow(
+        middle_nodes=[api_node("main"), cleanup_request, cleanup_assertion],
+        edges=[
+            {"id": "start-main", "source": "start", "target": "main"},
+            {"id": "main-end", "source": "main", "target": "end"},
+            {"id": "cleanup-link", "source": "cleanup-request", "target": "cleanup-assert"},
+        ],
+        run_policy={"cleanup_request_budget": 2},
+    )
+
+    class CleanupChainExecutor(ControlledExecutor):
+        async def execute(self, node: WorkflowNode, context: ExecutionContext) -> JsonValue:
+            if node.id == "cleanup-request":
+                await asyncio.sleep(0.01)
+                return {"actual": 1}
+            if node.id == "cleanup-assert":
+                actual = context.output_of("cleanup-request")
+                if actual != {"actual": 1}:
+                    raise NodeExecutionError("MISSING_CLEANUP_OUTPUT", "前序清理结果缺失")
+                return {"actual": actual}
+            return await super().execute(node, context)
+
+    executor = CleanupChainExecutor({"main": {"permanent_failure": main_fails}})
+    result = await WorkflowScheduler(executor).run(definition)
+    assert result.main_status == ("failed" if main_fails else "passed")
+    assert result.cleanup_status == "passed"
+    request_record = next(item for item in result.records if item.node_id == "cleanup-request")
+    assertion_record = next(item for item in result.records if item.node_id == "cleanup-assert")
+    assert request_record.completed_at <= assertion_record.started_at

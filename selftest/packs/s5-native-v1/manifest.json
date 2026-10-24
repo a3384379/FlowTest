@@ -1,0 +1,17 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "s5-native-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-S5-file-upload",
+    "ST-S5-file-download",
+    "ST-S5-parallel-cookies"
+  ],
+  "files": {
+    "api-definitions.json": "ed79a0914d3517696b591ab20b949c57d5b1b40f7332308482cc58898195e8d3",
+    "workflows.json": "0076450c9a2a82910275dd2f98eae5c89edfdf2bf0b0c9b16286586fb4124d39",
+    "expectations.json": "858f70c84bb364f9303a980e973177b1957a07f4f2d28aeabb0c1fa295f510fc"
+  }
+}

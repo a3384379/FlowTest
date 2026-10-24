@@ -49,6 +49,8 @@ _SECRET_TEMPLATE = re.compile(r"\{\{secret\.([A-Za-z0-9_.-]{1,160})\}\}")
 class OperationPlanSelection:
     definition_id: UUID
     scenario_id: str | None = None
+    api_version: int | None = None
+    contract_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +177,9 @@ class IntegrationPlanAssetService:
         definition = await self._definition(project_id, selection.definition_id)
         version = await self._assets.get_version(
             definition_id=definition.id,
-            version=definition.current_version,
+            version=selection.api_version
+            if selection.api_version is not None
+            else definition.current_version,
         )
         if version is None:
             raise AppError(
@@ -195,6 +199,15 @@ class IntegrationPlanAssetService:
             raise AppError(
                 code="API_CONTRACT_FINGERPRINT_MISMATCH",
                 message="API Version 的 Canonical Contract Fingerprint 不一致",
+                status_code=409,
+            )
+        if (
+            selection.contract_fingerprint is not None
+            and selection.contract_fingerprint != fingerprint_contract(contract)
+        ):
+            raise AppError(
+                code="DESIGN_COMPILATION_SOURCE_MISMATCH",
+                message="所选固定 API 版本的契约 Fingerprint 不匹配",
                 status_code=409,
             )
         design = TestEngineeringEngine().generate(
@@ -227,7 +240,7 @@ class IntegrationPlanAssetService:
             for oracle in design.oracles
             if oracle.deterministic
             and not oracle.requires_review
-            and (not oracle.applies_to or scenario.id in oracle.applies_to)
+            and scenario.id in oracle.applies_to
         ]
         return SelectedOperationEvidence(
             operation_ref=contract.operation,

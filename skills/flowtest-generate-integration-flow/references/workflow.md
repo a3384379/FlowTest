@@ -58,3 +58,28 @@ If there is no existing authorized workflow or safe main edge, use the separate 
 ## Failure reporting
 
 Return the failed stage, FlowTest error code and trace ID, relevant safe object IDs, and the missing evidence or user action. Do not include request bodies, response bodies, tokens, Secret values, cookies, connection strings, or raw external MCP output.
+
+## Frozen generated Design handoff
+
+`generate_test_design` accepts optional positive `api_version`. Its existing read envelope contains
+`data.design`, `data.fingerprint`, `data.persisted=false`, and `data.origin` with the actual API ID,
+version, canonical contract fingerprint, generation policy, evidence fingerprints, and generator
+implementation digest. This implementation digest is not a deployment/build attestation.
+
+For a fixed Design, call `compile_test_design(request={...})` using the exact returned design,
+fingerprint and origin, selected unique scenario IDs, environment, current `context_binding` and
+bounded budget. Both `mcp:read` and `mcp:flow:propose` are required. The typed direct response has
+`schema_version=flowtest-design-compilation-v1`, `persisted=false`, `execution_status=not_run`,
+resolved sources, per-scenario diagnostics and compilation fingerprint. Retain every selected
+scenario; `unsupported`, `blocked`, `needs_review`, and `needs_input` are incomplete outcomes.
+
+The supported payload is `scenarios[].executable_payload.kind=flow_spec`: use `spec`,
+`operation_mappings`, and `operation_version_mappings` unchanged with `propose_flow_draft` and
+its current Context IDs. `native_definition` supports semantic comparison, not a second runtime.
+Case templates have a `workflow_slot`, never a fabricated Workflow UUID. Human review, explicit
+publication, and read-back determine the real Workflow ID/version before a formal Case proposal.
+The compiler rejects changed Design/evidence/source identities and preserves negative statuses,
+request overrides and all supported Oracle assertions. Native control regions, Quick lowering,
+root body null/omission, duplicate parameters, path mutations, fixture bindings and auth-subflow
+bindings are explicitly unsupported. A missing Context is `needs_input`; no target is called and no
+proposal/asset/execution is persisted. Existing REST proposal stale/review/apply rules still apply.

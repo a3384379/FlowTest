@@ -59,6 +59,21 @@ async def initialize_standalone_database() -> None:
 async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     """Keep an existing offline SQLite installation bootable after an upgrade."""
 
+    await _add_column_if_missing(
+        connection, table="test_plan_runs", column="worker_lease_owner", definition="VARCHAR(36)"
+    )
+    await _add_column_if_missing(
+        connection, table="test_plan_runs", column="worker_lease_expires_at", definition="DATETIME"
+    )
+    run_columns = await connection.execute(text("PRAGMA table_info(test_plan_runs)"))
+    if run_columns.fetchall():
+        await connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_test_plan_runs_worker_lease_expires_at "
+                "ON test_plan_runs (worker_lease_expires_at)"
+            )
+        )
+
     await _ensure_organization_tables(connection)
     await _ensure_governance_tables(connection)
     await _ensure_test_context_tables(connection)
@@ -163,6 +178,12 @@ async def _ensure_incremental_columns(connection: AsyncConnection) -> None:
     await _ensure_api_version_service_identity(connection)
     await _ensure_s61b_schema(connection)
     await _ensure_experience_policy_columns(connection)
+    await _add_column_if_missing(
+        connection,
+        table="self_test_installations",
+        column="registered_capabilities",
+        definition="JSON NOT NULL DEFAULT '[]'",
+    )
     await connection.execute(
         text(
             "UPDATE flowtest_standalone_meta SET value = :revision "

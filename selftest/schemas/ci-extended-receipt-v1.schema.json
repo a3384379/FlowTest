@@ -1,0 +1,186 @@
+{
+  "$defs": {
+    "PackSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_image_digest": {
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "exit_code": {
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "title": "Exit Code",
+          "type": "integer"
+        },
+        "expected_count": {
+          "title": "Expected Count",
+          "type": "integer"
+        },
+        "fixture_image_digest": {
+          "title": "Fixture Image Digest",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "observed_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Observed Ids",
+          "type": "array"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "report_sha256": {
+          "title": "Report Sha256",
+          "type": "string"
+        },
+        "runtime_profile": {
+          "enum": [
+            "standalone",
+            "full",
+            "compact"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "source_digest": {
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "trust": {
+          "const": "local_untrusted",
+          "default": "local_untrusted",
+          "title": "Trust",
+          "type": "string"
+        },
+        "verifier_digest": {
+          "title": "Verifier Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "expected_count",
+        "observed_ids",
+        "exit_code",
+        "reason_codes",
+        "report_sha256",
+        "source_digest",
+        "candidate_image_digest",
+        "fixture_image_digest",
+        "verifier_digest",
+        "runtime_profile"
+      ],
+      "title": "PackSummary",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "auth_cleanup": {
+      "enum": [
+        "completed",
+        "failed",
+        "not_started"
+      ],
+      "title": "Auth Cleanup",
+      "type": "string"
+    },
+    "cleanup": {
+      "enum": [
+        "completed",
+        "failed",
+        "not_started"
+      ],
+      "title": "Cleanup",
+      "type": "string"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "model_calls": {
+      "const": 0,
+      "default": 0,
+      "title": "Model Calls",
+      "type": "integer"
+    },
+    "product_cleanup": {
+      "default": "not_started",
+      "enum": [
+        "completed",
+        "failed",
+        "not_started"
+      ],
+      "title": "Product Cleanup",
+      "type": "string"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "runtime_profile": {
+      "enum": [
+        "standalone",
+        "full",
+        "compact"
+      ],
+      "title": "Runtime Profile",
+      "type": "string"
+    },
+    "summaries": {
+      "items": {
+        "$ref": "#/$defs/PackSummary"
+      },
+      "title": "Summaries",
+      "type": "array"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    },
+    "worker_cleanup": {
+      "default": "not_started",
+      "enum": [
+        "completed",
+        "failed",
+        "not_started",
+        "not_applicable"
+      ],
+      "title": "Worker Cleanup",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtime_profile",
+    "exit_code",
+    "summaries",
+    "reason_codes",
+    "cleanup",
+    "auth_cleanup"
+  ],
+  "title": "ExtendedReceipt",
+  "type": "object"
+}

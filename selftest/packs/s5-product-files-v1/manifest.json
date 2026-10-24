@@ -1,0 +1,15 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "s5-product-files-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-API-008-product-files"
+  ],
+  "files": {
+    "api-definitions.json": "04828d2bb05762efddb4b7a868414de0b1cb542d2ce7b7e110eb89787ff581c4",
+    "workflows.json": "6089c9390c23b059f8f0fae754c7d761e8e939d988a580558e0bc100d3866e8e",
+    "expectations.json": "a0c771dd53b2fdc27fde153ed329b3898205f6563ec466f8ced135421dfe2f3a"
+  }
+}

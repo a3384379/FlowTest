@@ -1,0 +1,1681 @@
+{
+  "workflows": [
+    {
+      "scenario_id": "ST-GOLDEN-schema",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "57d7cfb2-29ca-5e39-aebc-2a474b1d7131",
+              "api_version": 1
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_schema",
+            "type": "assert",
+            "name": "assert_schema",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body.value",
+              "operator": "equals",
+              "expected": {
+                "type": "object",
+                "required": [
+                  "zero",
+                  "flag",
+                  "empty",
+                  "text",
+                  "nullable"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "zero": {
+                    "const": 0
+                  },
+                  "flag": {
+                    "const": false
+                  },
+                  "empty": {
+                    "const": ""
+                  },
+                  "text": {
+                    "const": "中文"
+                  },
+                  "nullable": {
+                    "type": "null"
+                  }
+                }
+              },
+              "assertion_type": "json_schema"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "assert_schema",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "assert_schema",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "57d7cfb2-29ca-5e39-aebc-2a474b1d7131",
+              "api_version": 1
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_schema",
+            "type": "assert",
+            "name": "assert_schema",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body.value",
+              "operator": "equals",
+              "expected": {
+                "type": "object",
+                "required": [
+                  "zero",
+                  "flag",
+                  "empty",
+                  "text",
+                  "nullable"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "zero": {
+                    "const": 0
+                  },
+                  "flag": {
+                    "const": false
+                  },
+                  "empty": {
+                    "const": ""
+                  },
+                  "text": {
+                    "const": "中文"
+                  },
+                  "nullable": {
+                    "type": "null"
+                  }
+                }
+              },
+              "assertion_type": "json_schema"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "assert_schema",
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "assert_schema",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-header-json",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "3338a1ea-c8ce-54d5-a842-8df470d9f92a",
+              "api_version": 1
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_json",
+            "type": "extract",
+            "name": "extract_json",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body.value",
+              "variable": "golden_payload"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_extracted",
+            "type": "assert",
+            "name": "assert_extracted",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "extract_json",
+              "expression": "value",
+              "operator": "equals",
+              "expected": {
+                "zero": 0,
+                "flag": false,
+                "empty": "",
+                "text": "中文",
+                "nullable": null
+              },
+              "assertion_type": "comparison"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_header",
+            "type": "assert",
+            "name": "assert_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/json",
+              "assertion_type": "comparison"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "extract_json",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "extract_json",
+            "target": "assert_extracted",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "assert_extracted",
+            "target": "assert_header",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_header",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "3338a1ea-c8ce-54d5-a842-8df470d9f92a",
+              "api_version": 1
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "extract_json",
+            "type": "extract",
+            "name": "extract_json",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body.value",
+              "variable": "golden_payload"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_extracted",
+            "type": "assert",
+            "name": "assert_extracted",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "extract_json",
+              "expression": "value",
+              "operator": "equals",
+              "expected": {
+                "zero": 0,
+                "flag": false,
+                "empty": "",
+                "text": "中文",
+                "nullable": null
+              },
+              "assertion_type": "comparison"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_header",
+            "type": "assert",
+            "name": "assert_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/json",
+              "assertion_type": "comparison"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "extract_json",
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "extract_json",
+            "target": "assert_extracted",
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "assert_extracted",
+            "target": "assert_header",
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_header",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-file",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "e9a05e76-4773-59ca-88bf-555342ee6ae0",
+              "api_version": 1
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_content",
+            "type": "assert",
+            "name": "assert_file_content",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body",
+              "operator": "equals",
+              "expected": "flowtest-download",
+              "assertion_type": "comparison"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_size",
+            "type": "assert",
+            "name": "assert_file_size",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "size_bytes",
+              "operator": "equals",
+              "expected": 17,
+              "assertion_type": "comparison"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_header",
+            "type": "assert",
+            "name": "assert_file_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/octet-stream",
+              "assertion_type": "comparison"
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "assert_file_content",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "assert_file_content",
+            "target": "assert_file_size",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "assert_file_size",
+            "target": "assert_file_header",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_file_header",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "request",
+            "type": "api",
+            "name": "request",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "e9a05e76-4773-59ca-88bf-555342ee6ae0",
+              "api_version": 1
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_content",
+            "type": "assert",
+            "name": "assert_file_content",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "body",
+              "operator": "equals",
+              "expected": "flowtest-download",
+              "assertion_type": "comparison"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_size",
+            "type": "assert",
+            "name": "assert_file_size",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "size_bytes",
+              "operator": "equals",
+              "expected": 17,
+              "assertion_type": "comparison"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "assert_file_header",
+            "type": "assert",
+            "name": "assert_file_header",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "source_node_id": "request",
+              "expression": "headers.\"content-type\"",
+              "operator": "equals",
+              "expected": "application/octet-stream",
+              "assertion_type": "comparison"
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "request",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "request",
+            "target": "assert_file_content",
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "assert_file_content",
+            "target": "assert_file_size",
+            "mappings": []
+          },
+          {
+            "id": "e3",
+            "source": "assert_file_size",
+            "target": "assert_file_header",
+            "mappings": []
+          },
+          {
+            "id": "e4",
+            "source": "assert_file_header",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-explicit-status",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "retry_api",
+            "type": "api",
+            "name": "retry_api",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "d03bee37-b97d-53e9-aeac-e2144377ed00",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ],
+              "max_retries": 1,
+              "retry_on": [
+                "5xx"
+              ]
+            },
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "retry_api",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "retry_api",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "retry_api",
+            "type": "api",
+            "name": "retry_api",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {
+              "api_definition_id": "d03bee37-b97d-53e9-aeac-e2144377ed00",
+              "api_version": 1,
+              "expected_statuses": [
+                200
+              ],
+              "max_retries": 1,
+              "retry_on": [
+                "5xx"
+              ]
+            },
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "retry_api",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "retry_api",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-min-items",
+      "definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "guard_0",
+            "type": "capability",
+            "name": "guard_0",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": []
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "body0"
+              },
+              "min_items": 0,
+              "policy": {
+                "max_iterations": 1,
+                "timeout_seconds": 5
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "guard_1",
+            "type": "capability",
+            "name": "guard_1",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": []
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "body1"
+              },
+              "min_items": 1,
+              "policy": {
+                "max_iterations": 1,
+                "timeout_seconds": 5
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": null,
+            "capability_version": null,
+            "configuration": null,
+            "bindings": null,
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "guard_0",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "guard_0",
+            "target": "guard_1",
+            "condition": null,
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "guard_1",
+            "target": "end",
+            "condition": null,
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "body0",
+            "owner_node_id": "guard_0",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "unused_0",
+                "type": "api",
+                "name": "unused_0",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "3ea2c920-3f8c-5d56-8794-6615fdd414d6",
+                  "api_version": 1
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "unused_0",
+            "exit_node_ids": [
+              "unused_0"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "body1",
+            "owner_node_id": "guard_1",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "unused_1",
+                "type": "api",
+                "name": "unused_1",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "3ea2c920-3f8c-5d56-8794-6615fdd414d6",
+                  "api_version": 1
+                },
+                "capability_id": null,
+                "capability_version": null,
+                "configuration": null,
+                "bindings": null,
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "unused_1",
+            "exit_node_ids": [
+              "unused_1"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      },
+      "published_definition": {
+        "schema_version": "4.0",
+        "variables": {},
+        "runtime_inputs": [],
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "name": "start",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "guard_0",
+            "type": "capability",
+            "name": "guard_0",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": []
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "body0"
+              },
+              "min_items": 0,
+              "policy": {
+                "max_iterations": 1,
+                "timeout_seconds": 5
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "guard_1",
+            "type": "capability",
+            "name": "guard_1",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "capability_id": "flow.control.foreach",
+            "capability_version": "1.0.0",
+            "configuration": {
+              "collection": {
+                "kind": "literal",
+                "value": []
+              },
+              "body": {
+                "kind": "inline",
+                "region_id": "body1"
+              },
+              "min_items": 1,
+              "policy": {
+                "max_iterations": 1,
+                "timeout_seconds": 5
+              }
+            },
+            "bindings": [],
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "name": "end",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "config": {},
+            "phase": "main",
+            "run_when": "always",
+            "cleanup_for": [],
+            "best_effort": false,
+            "cleanup_timeout_seconds": 30,
+            "cleanup_retry_budget": 0
+          }
+        ],
+        "edges": [
+          {
+            "id": "e0",
+            "source": "start",
+            "target": "guard_0",
+            "mappings": []
+          },
+          {
+            "id": "e1",
+            "source": "guard_0",
+            "target": "guard_1",
+            "mappings": []
+          },
+          {
+            "id": "e2",
+            "source": "guard_1",
+            "target": "end",
+            "mappings": []
+          }
+        ],
+        "regions": [
+          {
+            "id": "body0",
+            "owner_node_id": "guard_0",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "unused_0",
+                "type": "api",
+                "name": "unused_0",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "3ea2c920-3f8c-5d56-8794-6615fdd414d6",
+                  "api_version": 1
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "unused_0",
+            "exit_node_ids": [
+              "unused_0"
+            ],
+            "inputs": {},
+            "outputs": {}
+          },
+          {
+            "id": "body1",
+            "owner_node_id": "guard_1",
+            "role": "body",
+            "nodes": [
+              {
+                "id": "unused_1",
+                "type": "api",
+                "name": "unused_1",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "config": {
+                  "api_definition_id": "3ea2c920-3f8c-5d56-8794-6615fdd414d6",
+                  "api_version": 1
+                },
+                "phase": "main",
+                "run_when": "always",
+                "cleanup_for": [],
+                "best_effort": false,
+                "cleanup_timeout_seconds": 30,
+                "cleanup_retry_budget": 0
+              }
+            ],
+            "edges": [],
+            "entry_node_id": "unused_1",
+            "exit_node_ids": [
+              "unused_1"
+            ],
+            "inputs": {},
+            "outputs": {}
+          }
+        ],
+        "settings": {
+          "fail_fast": true,
+          "concurrency": 20,
+          "default_timeout_seconds": 30
+        },
+        "run_policy": {
+          "request_budget": 8,
+          "max_runtime_seconds": 45,
+          "cleanup_request_budget": 2,
+          "force_cancel_skips_cleanup": false
+        }
+      }
+    }
+  ]
+}

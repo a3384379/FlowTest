@@ -1,0 +1,111 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-GOLDEN-schema",
+      "source_id": "57d7cfb2-29ca-5e39-aebc-2a474b1d7131",
+      "name": "引擎黄金 schema",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-GOLDEN-schema/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-golden-v1",
+          "value": {
+            "zero": 0,
+            "flag": false,
+            "empty": "",
+            "text": "中文",
+            "nullable": null
+          },
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-header-json",
+      "source_id": "3338a1ea-c8ce-54d5-a842-8df470d9f92a",
+      "name": "引擎黄金 header-json",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-GOLDEN-header-json/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-golden-v1",
+          "value": {
+            "zero": 0,
+            "flag": false,
+            "empty": "",
+            "text": "中文",
+            "nullable": null
+          },
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-file",
+      "source_id": "e9a05e76-4773-59ca-88bf-555342ee6ae0",
+      "name": "引擎黄金 file",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-GOLDEN-file/download",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-explicit-status",
+      "source_id": "d03bee37-b97d-53e9-aeac-e2144377ed00",
+      "name": "引擎黄金 explicit-status",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-GOLDEN-explicit-status/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-golden-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-GOLDEN-min-items",
+      "source_id": "3ea2c920-3f8c-5d56-8794-6615fdd414d6",
+      "name": "引擎黄金 min-items",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-GOLDEN-min-items/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-golden-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    }
+  ]
+}

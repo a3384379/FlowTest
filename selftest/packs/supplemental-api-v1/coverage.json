@@ -1,0 +1,97 @@
+{
+  "schema_version": "flowtest-supplemental-coverage-v1",
+  "scenarios": [
+    {
+      "scenario_id": "ST-P0-API001-session",
+      "acceptance_id": "ST-API-001",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-access",
+      "acceptance_id": "ST-API-001",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-refresh",
+      "acceptance_id": "ST-API-001",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API001-missing-refresh",
+      "acceptance_id": "ST-API-001",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API001-logout-no-cookie",
+      "acceptance_id": "ST-API-001",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API002-nonmember",
+      "acceptance_id": "ST-API-002",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API002-cross",
+      "acceptance_id": "ST-API-002",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API006-auth-disabled",
+      "acceptance_id": "ST-API-006",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API006-header-suppressed",
+      "acceptance_id": "ST-API-006",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API006-cookie-suppressed",
+      "acceptance_id": "ST-API-006",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API007-nested",
+      "acceptance_id": "ST-API-007",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API007-omitted",
+      "acceptance_id": "ST-API-007",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API007-explicit-null",
+      "acceptance_id": "ST-API-007",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API009-history",
+      "acceptance_id": "ST-API-009",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-P0-API009-conflict",
+      "acceptance_id": "ST-API-009",
+      "scope": "native_case_suite_plan_run",
+      "raw_status": "passed"
+    }
+  ],
+  "scope": "selected_native_variants_only",
+  "claim_all_api001_variants_complete": false
+}

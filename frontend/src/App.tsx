@@ -21,6 +21,8 @@ import LoginPage from './features/auth/LoginPage'
 import PasswordChangePage from './features/auth/PasswordChangePage'
 import { useAuthStore } from './features/auth/auth-store'
 import ProjectProvider from './features/projects/ProjectProvider'
+import OrganizationScopeProvider from './features/organizations/OrganizationScopeProvider'
+import OrganizationSelector from './features/organizations/OrganizationSelector'
 import ProjectEmptyState from './features/projects/ProjectEmptyState'
 import {
   isGlobalAdministrationSection,
@@ -106,6 +108,7 @@ function SessionContent({
   notice: string | null
   initialize: () => Promise<void>
 }) {
+  const epoch = useAuthStore((state) => state.epoch)
   if (!token || !user) {
     if (phase !== 'temporarily-unavailable') return <LoginPage />
     return (
@@ -121,9 +124,11 @@ function SessionContent({
       {phase === 'temporarily-unavailable' && (
         <Alert type="warning" title={notice ?? '认证服务暂时不可用'} />
       )}
-      <ProjectProvider>
-        <AuthenticatedShell />
-      </ProjectProvider>
+      <OrganizationScopeProvider key={`${user.id}:${epoch}`}>
+        <ProjectProvider>
+          <AuthenticatedShell />
+        </ProjectProvider>
+      </OrganizationScopeProvider>
     </>
   )
 }
@@ -153,6 +158,7 @@ function AuthenticatedShell() {
             <Typography.Text strong className="shell-platform-title">
               接口自动化测试平台
             </Typography.Text>
+            <OrganizationSelector />
             <Select
               aria-label="全局项目"
               className="global-project-select"

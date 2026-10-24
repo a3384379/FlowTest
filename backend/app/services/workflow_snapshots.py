@@ -24,8 +24,10 @@ from app.engine.contracts import (
     ApiNodeConfig,
     ConditionLoopConfig,
     ControlSignalConfig,
+    ExtractNodeConfig,
     FailControlConfig,
     ForEachNodeConfig,
+    MappingTargetLocation,
     NodeType,
     RedisNodeConfig,
     ReturnControlConfig,
@@ -578,7 +580,7 @@ class WorkflowSnapshotBuilder:
                 dataset_variables=_template_variables(dataset_variables),
                 runtime_variables={
                     **runtime_variables,
-                    **_control_template_variables(definition, node),
+                    **_control_template_variables(definition, node, api_path=api_version.path),
                 },
                 runtime_headers=runtime_headers,
                 config=config,
@@ -893,24 +895,57 @@ def _template_variables(values: dict[str, JsonValue]) -> dict[str, str]:
 
 
 def _control_template_variables(
-    definition: WorkflowDefinition, node: WorkflowNode
+    definition: WorkflowDefinition, node: WorkflowNode, *, api_path: str | None = None
 ) -> dict[str, str]:
+    path_variables = _path_template_variables(definition, node, api_path=api_path)
     region = next((region for region in definition.regions if node in region.nodes), None)
     if region is None:
-        return {}
+        return path_variables
     owner = next((item for item in definition.all_nodes() if item.id == region.owner_node_id), None)
     if owner is None:
-        return {}
+        return path_variables
     config = parse_control_config(owner)
     if isinstance(config, (ControlSignalConfig, FailControlConfig, ReturnControlConfig)):
-        return {}
+        return path_variables
     names = {f"input.{name}" for name in (*config.inputs, *region.inputs)}
     names.update({"loop.item", "loop.index", "loop.iteration", "loop.total"})
     if isinstance(config, ConditionLoopConfig):
         names.update(f"state.{name}" for name in config.state)
     if isinstance(config, TryControlConfig) and region.role.startswith("catch:"):
         names.update({"error.code", "error.message"})
-    return {name: control_placeholder(node.id, name) for name in names}
+    return {**path_variables, **{name: control_placeholder(node.id, name) for name in names}}
+
+
+def _path_template_variables(
+    definition: WorkflowDefinition, node: WorkflowNode, *, api_path: str | None
+) -> dict[str, str]:
+    if api_path is None:
+        return {}
+    sources = {
+        item.id: item for item in definition.all_nodes() if item.effective_type is NodeType.EXTRACT
+    }
+    mappings = (
+        mapping
+        for edge in (
+            *definition.edges,
+            *(edge for region in definition.regions for edge in region.edges),
+        )
+        if edge.target == node.id
+        for mapping in edge.mappings
+        if mapping.target.location is MappingTargetLocation.VARIABLE
+        and mapping.target.node_id == node.id
+        and mapping.source.node_id in sources
+    )
+    variables: dict[str, str] = {}
+    for mapping in mappings:
+        config = parse_node_config(
+            legacy_node_adapter.as_legacy_node(sources[mapping.source.node_id])
+        )
+        if isinstance(config, ExtractNodeConfig) and (
+            f"{{{mapping.target.key}}}" in api_path or f"{{{{{mapping.target.key}}}}}" in api_path
+        ):
+            variables[mapping.target.key] = control_placeholder(node.id, mapping.target.key)
+    return variables
 
 
 def _environment_snapshot(

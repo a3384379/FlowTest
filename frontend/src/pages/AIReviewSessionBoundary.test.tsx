@@ -132,6 +132,11 @@ it.each(
         }),
       )
       await screen.findByText('组织与角色')
+      expect(useAuthStore.getState().organizationId).toBeNull()
+      await browser.click(screen.getByRole('combobox', { name: '治理组织' }))
+      await browser.click(
+        screen.getByText('合成组织 · synthetic', { selector: '.ant-select-item-option-content' }),
+      )
       await waitFor(() => expect(useAuthStore.getState().organizationId).toBe(organizationId))
     } finally {
       await act(async () => {

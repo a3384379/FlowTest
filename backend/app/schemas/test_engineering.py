@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.evidence import EvidenceBundle, EvidenceSourceType
 from app.domain.test_design import TestDesignDocument
+from app.domain.test_design_compilation import FrozenGenerationOrigin
 from app.domain.test_engineering import GenerationPolicy, OperationContract
 
 MAX_ADDITIONAL_EVIDENCE_BYTES = 2 * 1024 * 1024
@@ -16,6 +17,7 @@ class TestEngineeringGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_definition_id: UUID | None = None
+    api_version: int | None = Field(default=None, ge=1, strict=True)
     contract: OperationContract | None = None
     generation_policy: GenerationPolicy = Field(default_factory=GenerationPolicy)
     additional_evidence: list[EvidenceBundle] = Field(default_factory=list, max_length=10)
@@ -24,6 +26,8 @@ class TestEngineeringGenerateRequest(BaseModel):
     def require_one_source(self) -> TestEngineeringGenerateRequest:
         if (self.api_definition_id is None) == (self.contract is None):
             raise ValueError("exactly one of api_definition_id or contract is required")
+        if self.api_version is not None and self.api_definition_id is None:
+            raise ValueError("api_version requires api_definition_id")
         _validate_evidence_input_budget(self.additional_evidence)
         return self
 
@@ -45,6 +49,7 @@ class TestEngineeringGenerateResponse(BaseModel):
 
     fingerprint: str
     design: TestDesignDocument
+    origin: FrozenGenerationOrigin | None = None
     persisted: bool = False
     contract_completeness: str
     contract_fingerprint: str

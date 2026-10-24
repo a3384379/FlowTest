@@ -65,7 +65,7 @@ async def _run_test_plan(run_id: UUID) -> None:
         events = RedisExecutionEventBus(
             client, retention_seconds=settings.workflow_event_retention_seconds
         )
-        await TestPlanRunCoordinator(session_factory, events).run(run_id)
+        await TestPlanRunCoordinator(session_factory, events, lease_seconds=60).run(run_id)
         await _deliver_test_plan_notification(run_id)
     finally:
         await client.aclose()
@@ -74,6 +74,18 @@ async def _run_test_plan(run_id: UUID) -> None:
 @celery_app.task(name="flowtest.enqueue_due_test_plans")  # type: ignore[untyped-decorator]
 def enqueue_due_test_plans() -> None:
     _run_async(_enqueue_due_test_plans)
+
+
+@celery_app.task(name="flowtest.recover_test_plan_workers")  # type: ignore[untyped-decorator]
+def recover_test_plan_workers() -> None:
+    _run_async(_recover_test_plan_workers)
+
+
+async def _recover_test_plan_workers() -> None:
+    from app.services.test_plan_recovery import TestPlanRecoveryService
+
+    async with session_factory() as session:
+        await TestPlanRecoveryService(session).recover_expired(datetime.now(UTC))
 
 
 async def _enqueue_due_test_plans() -> None:

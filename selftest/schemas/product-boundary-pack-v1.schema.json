@@ -1,0 +1,116 @@
+{
+  "$defs": {
+    "ProductBoundaryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "operation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operation",
+        "status"
+      ],
+      "title": "ProductBoundaryRequest",
+      "type": "object"
+    },
+    "ProductBoundarySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_variants": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Acceptance Variants",
+          "type": "array"
+        },
+        "group": {
+          "enum": [
+            "installation",
+            "refusal",
+            "new_run",
+            "projection",
+            "cleanup",
+            "retention"
+          ],
+          "title": "Group",
+          "type": "string"
+        },
+        "key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "requests": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProductBoundaryRequest"
+          },
+          "title": "Requests",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "group",
+        "acceptance_variants"
+      ],
+      "title": "ProductBoundarySpec",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "pack_id": {
+      "const": "product-boundaries-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/ProductBoundarySpec"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "version": {
+      "const": "1.0.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_id",
+    "version",
+    "scenarios"
+  ],
+  "title": "ProductBoundaryPack",
+  "type": "object"
+}

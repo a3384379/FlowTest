@@ -1,0 +1,126 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "host_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Host Id",
+      "type": "string"
+    },
+    "cli_executable": {
+      "format": "path",
+      "title": "Cli Executable",
+      "type": "string"
+    },
+    "cli_version": {
+      "title": "Cli Version",
+      "type": "string"
+    },
+    "credential_home": {
+      "format": "path",
+      "title": "Credential Home",
+      "type": "string"
+    },
+    "workspace": {
+      "format": "path",
+      "title": "Workspace",
+      "type": "string"
+    },
+    "relay_executable": {
+      "format": "path",
+      "title": "Relay Executable",
+      "type": "string"
+    },
+    "relay_prefix_args": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 3,
+      "title": "Relay Prefix Args",
+      "type": "array"
+    },
+    "skill_directory": {
+      "format": "path",
+      "title": "Skill Directory",
+      "type": "string"
+    },
+    "task_file": {
+      "format": "path",
+      "title": "Task File",
+      "type": "string"
+    },
+    "authorization_file": {
+      "format": "path",
+      "title": "Authorization File",
+      "type": "string"
+    },
+    "approval_key_file": {
+      "format": "path",
+      "title": "Approval Key File",
+      "type": "string"
+    },
+    "approval_algorithm": {
+      "enum": ["RS256", "EdDSA"],
+      "title": "Approval Algorithm",
+      "type": "string"
+    },
+    "approval_issuer": {
+      "title": "Approval Issuer",
+      "type": "string"
+    },
+    "approval_audience": {
+      "title": "Approval Audience",
+      "type": "string"
+    },
+    "allowed_authorization_digests": {
+      "items": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Allowed Authorization Digests",
+      "type": "array"
+    },
+    "tool_isolation_attestation": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Tool Isolation Attestation",
+      "type": "string"
+    },
+    "provider_cap_verified": {
+      "default": false,
+      "title": "Provider Cap Verified",
+      "type": "boolean"
+    },
+    "archived_authorization_files": {
+      "default": [],
+      "items": {
+        "format": "path",
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Archived Authorization Files",
+      "type": "array"
+    }
+  },
+  "required": [
+    "host_id",
+    "cli_executable",
+    "cli_version",
+    "credential_home",
+    "workspace",
+    "relay_executable",
+    "skill_directory",
+    "task_file",
+    "authorization_file",
+    "approval_key_file",
+    "approval_algorithm",
+    "approval_issuer",
+    "approval_audience",
+    "allowed_authorization_digests",
+    "tool_isolation_attestation"
+  ],
+  "title": "HostRuntimeConfig",
+  "type": "object"
+}

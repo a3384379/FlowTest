@@ -32,6 +32,8 @@ SKILL_DEEP_TOOLS = (
     "flowtest.plan_integration_test",
     "flowtest.validate_integration_plan",
     "flowtest.compile_integration_flowspec",
+    "flowtest.compile_test_design",
+    "flowtest.generate_test_design",
     "flowtest.explain_compiler_diagnostics",
     "flowtest.validate_flowspec",
     "flowtest.propose_flow_draft",

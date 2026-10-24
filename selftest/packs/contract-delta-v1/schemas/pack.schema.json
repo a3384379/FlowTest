@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "DeltaPhaseGolden": {
+      "additionalProperties": false,
+      "properties": {
+        "absent_mutations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Absent Mutations",
+          "type": "array"
+        },
+        "api_version": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "marker": {
+          "enum": ["", "delta-v2"],
+          "title": "Marker",
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["v1", "v2"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "request_schema": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "required_mutations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Mutations",
+          "type": "array"
+        },
+        "response_schema": {
+          "$ref": "#/$defs/JsonObject"
+        }
+      },
+      "required": [
+        "phase",
+        "api_version",
+        "marker",
+        "request_schema",
+        "response_schema",
+        "required_mutations",
+        "absent_mutations"
+      ],
+      "title": "DeltaPhaseGolden",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "expected_codes": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "propertyNames": {
+        "enum": [
+          "contract_delta",
+          "regenerate_delta",
+          "preview_freeze",
+          "slot_foreign",
+          "slot_unpublished",
+          "slot_drift",
+          "slot_positive"
+        ]
+      },
+      "title": "Expected Codes",
+      "type": "object"
+    },
+    "format": {
+      "const": "flowtest-contract-delta-v1",
+      "title": "Format",
+      "type": "string"
+    },
+    "max_requests": {
+      "const": 500,
+      "title": "Max Requests",
+      "type": "integer"
+    },
+    "max_seconds": {
+      "const": 600,
+      "title": "Max Seconds",
+      "type": "integer"
+    },
+    "max_tool_calls": {
+      "const": 100,
+      "title": "Max Tool Calls",
+      "type": "integer"
+    },
+    "pack_id": {
+      "const": "contract-delta-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "phases": {
+      "items": {
+        "$ref": "#/$defs/DeltaPhaseGolden"
+      },
+      "title": "Phases",
+      "type": "array"
+    },
+    "variants": {
+      "items": {
+        "enum": [
+          "contract_delta",
+          "regenerate_delta",
+          "preview_freeze",
+          "slot_foreign",
+          "slot_unpublished",
+          "slot_drift",
+          "slot_positive"
+        ],
+        "type": "string"
+      },
+      "title": "Variants",
+      "type": "array"
+    },
+    "version": {
+      "const": "1.0.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "format",
+    "pack_id",
+    "version",
+    "variants",
+    "phases",
+    "expected_codes",
+    "max_tool_calls",
+    "max_requests",
+    "max_seconds"
+  ],
+  "title": "DeltaPack",
+  "type": "object"
+}

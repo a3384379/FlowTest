@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
@@ -353,20 +353,32 @@ class WorkflowNodeExecutor:
                 code="INVALID_API_CONFIG", message=f"节点 {node.name} 的 API 配置无效"
             )
         prepared = self._requests[node.id]
-        base_request = _apply_control_templates(prepared.request, node.id, context)
-        redacted_base = _apply_control_templates(prepared.redacted_request, node.id, context)
+        base_request = prepared.request
+        redacted_base = prepared.redacted_request
         try:
             resolved_mappings = resolve_field_mappings(
                 self._mappings.get(node.id, ()),
                 context,
             )
+            path_inputs = _path_mapping_values(base_request, node.id, resolved_mappings)
+            redacted_inputs = _path_mapping_values(
+                redacted_base, node.id, resolved_mappings, redacted=True
+            )
+            bound_request = _apply_control_templates(
+                _apply_bound_path_templates(base_request, node.id, path_inputs), node.id, context
+            )
+            redacted_bound = _apply_control_templates(
+                _apply_bound_path_templates(redacted_base, node.id, redacted_inputs),
+                node.id,
+                context,
+            )
             request, mapping_trace = _apply_mappings(
-                base_request,
+                bound_request,
                 resolved_mappings,
                 context,
             )
             redacted_request = _apply_redacted_mappings(
-                redacted_base,
+                redacted_bound,
                 resolved_mappings,
             )
         except MappingResolutionError as error:
@@ -1102,6 +1114,75 @@ def _mappings_by_target(
         if edge.mappings:
             grouped.setdefault(edge.target, []).extend(edge.mappings)
     return {node_id: tuple(items) for node_id, items in grouped.items()}
+
+
+def _path_markers(request: PreparedRequest, node_id: str) -> dict[str, str]:
+    return {
+        item.name: item.value
+        for item in request.variables
+        if item.value == control_placeholder(node_id, item.name)
+        and not item.name.startswith(("input.", "loop.", "state.", "error."))
+    }
+
+
+def _path_mapping_values(
+    request: PreparedRequest,
+    node_id: str,
+    mappings: tuple[ResolvedFieldMapping, ...],
+    *,
+    redacted: bool = False,
+) -> dict[str, JsonValue]:
+    values: dict[str, JsonValue] = {}
+    for name in _path_markers(request, node_id):
+        selected = [
+            mapping
+            for mapping in mappings
+            if mapping.location is MappingTargetLocation.VARIABLE and mapping.key == name
+        ]
+        if len(selected) != 1:
+            raise NodeExecutionError(
+                code="PATH_BINDING_INPUT_AMBIGUOUS" if selected else "PATH_BINDING_INPUT_MISSING",
+                message="路径参数必须具有唯一的目标节点输入映射",
+            )
+        values[name] = _redacted_mapping_value(selected[0]) if redacted else selected[0].value
+    return values
+
+
+def _apply_bound_path_templates(
+    request: PreparedRequest, node_id: str, path_inputs: Mapping[str, JsonValue]
+) -> PreparedRequest:
+    markers = _path_markers(request, node_id)
+    if not markers:
+        return request
+    parsed = urlsplit(request.url)
+    path = parsed.path
+    for name, marker in markers.items():
+        tokens = (marker, f"{{{name}}}", f"%7B{name}%7D", f"%7b{name}%7d")
+        if any(
+            token in component
+            for token in tokens
+            for component in (parsed.scheme, parsed.netloc, parsed.query, parsed.fragment)
+        ):
+            raise NodeExecutionError(
+                code="PATH_BINDING_CONTEXT_INVALID", message="路径变量不能改变目标地址或查询参数"
+            )
+        if not any(token in path for token in tokens):
+            raise NodeExecutionError(
+                code="PATH_BINDING_PARAMETER_MISSING", message="路径绑定未对应目标路径参数"
+            )
+        value = path_inputs.get(name)
+        if value is None or isinstance(value, (dict, list)):
+            raise NodeExecutionError(
+                code="PATH_BINDING_INPUT_MISSING", message="路径参数缺少明确的标量输入"
+            )
+        segment = quote(_string_value(value), safe="")
+        if segment in {".", ".."}:
+            segment = segment.replace(".", "%2E")
+        for token in tokens:
+            path = path.replace(token, segment)
+    return replace(
+        request, url=urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+    )
 
 
 def _apply_control_templates(

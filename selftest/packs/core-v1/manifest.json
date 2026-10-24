@@ -1,0 +1,22 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "core-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-CORE-echo-boundaries",
+    "ST-CORE-business-failure",
+    "ST-CORE-timeout",
+    "ST-CORE-if",
+    "ST-CORE-foreach",
+    "ST-CORE-repeat",
+    "ST-CORE-retry",
+    "ST-CORE-poll"
+  ],
+  "files": {
+    "api-definitions.json": "2e42a62f53c813c9a9fadbdbacddd16a3a9a6e943856ee5c25003c3a7a2f858c",
+    "workflows.json": "df96d697d9cca650863db4a4098a481cd6ed384f61ac948c10e833b57af77e14",
+    "expectations.json": "7ff9c33ade911cacfaaeb1741a597825c1a29cfde47a7e3bb2568f98b5822199"
+  }
+}
