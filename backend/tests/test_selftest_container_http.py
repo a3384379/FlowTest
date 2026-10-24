@@ -192,3 +192,134 @@ async def test_deployed_http_uses_owned_byte_gateway_and_per_request_bearer(
             "output_dir": tmp_path,
         },
     ]
+
+
+@pytest.mark.parametrize("remaining", [60.0, 0.05])
+async def test_gateway_allows_delayed_start_without_extending_frozen_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remaining: float
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.selftest import mcp_container_http as subject
+
+    deadline = datetime.now(UTC) + timedelta(seconds=remaining)
+    stopped = []
+
+    class Child:
+        returncode = None
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    async def process(*_, **__):
+        return Child()
+
+    async def delayed(container, nonce, child):
+        await asyncio.sleep(16)
+        return GatewayProcess(
+            nonce=nonce, pid=42, start_ticks="1", port=8766, alive=True, listening=True
+        )
+
+    async def stop(relay):
+        assert relay.deadline == deadline
+        stopped.append(True)
+        return (ProcessRemoval(nonce=relay.nonce, key="gateway", removed=True),)
+
+    monkeypatch.setattr(subject, "verify_binding", lambda *_: None)
+    monkeypatch.setattr(subject, "_process", process)
+    monkeypatch.setattr(subject, "_ready", delayed)
+    monkeypatch.setattr(subject.GatewayRelay, "stop", stop)
+    binding = SimpleNamespace(runner_container_id="a" * 64)
+    context = subject.container_http_gateway(
+        binding, tmp_path, tmp_path / "public", deadline=deadline
+    )
+    if remaining > 16:
+        async with context as endpoint:
+            assert endpoint.process.listening is True
+            assert datetime.now(UTC) < deadline
+    else:
+        with pytest.raises(HarnessError, match="GATEWAY_START_TIMEOUT"):
+            async with context:
+                pytest.fail("a caller deadline cannot be extended for startup")
+    assert stopped == [True]
+
+
+async def test_gateway_control_cancellation_reaps_its_own_cli_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.selftest import mcp_container_http as subject
+
+    started = asyncio.Event()
+    killed = []
+    waited = []
+
+    class Child:
+        async def communicate(self):
+            started.set()
+            await asyncio.Event().wait()
+
+        def kill(self):
+            killed.append(True)
+
+        async def wait(self):
+            waited.append(True)
+            return -9
+
+    async def process(*_, **__):
+        return Child()
+
+    monkeypatch.setattr(subject, "_process", process)
+    task = asyncio.create_task(subject._control("a" * 64, "probe", "b" * 32))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert killed == waited == [True]
+
+
+async def test_gateway_exit_timeout_reaps_cli_and_preserves_incomplete_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from scripts.selftest import mcp_container_http as subject
+    from scripts.selftest.io import read_json
+
+    killed: list[bool] = []
+    waited: list[bool] = []
+
+    class Child:
+        async def wait(self) -> int:
+            waited.append(True)
+            if not killed:
+                await asyncio.Event().wait()
+            return -9
+
+        def kill(self) -> None:
+            killed.append(True)
+
+    async def process(*args: object, **kwargs: object) -> Child:
+        return Child()
+
+    async def ready(container: str, nonce: str, child: Child) -> GatewayProcess:
+        return GatewayProcess(
+            nonce=nonce, pid=42, start_ticks="1", port=8766, alive=True, listening=True
+        )
+
+    async def stop(relay: GatewayRelay) -> tuple[ProcessRemoval, ...]:
+        return (ProcessRemoval(nonce=relay.nonce, key="gateway", removed=True),)
+
+    monkeypatch.setattr(subject, "verify_binding", lambda *_: None)
+    monkeypatch.setattr(subject, "_process", process)
+    monkeypatch.setattr(subject, "_ready", ready)
+    monkeypatch.setattr(subject.GatewayRelay, "stop", stop)
+    binding = SimpleNamespace(runner_container_id="a" * 64)
+    output = tmp_path / "public"
+    with pytest.raises(HarnessError, match="GATEWAY_EXIT_TIMEOUT"):
+        async with subject.container_http_gateway(
+            binding, tmp_path, output, deadline=datetime.now(UTC) + timedelta(seconds=60)
+        ):
+            pass
+    assert killed == [True] and waited == [True, True]
+    assert read_json(output / "gateway-cleanup.json")["completed"] is False

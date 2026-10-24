@@ -36,6 +36,16 @@ Linux Chromium 1.62.1 导航与编辑器两份原有 E2E 共 13 项通过，包�
 
 新 H/O 的真实 Compact 配置组另完成 14 个故障、18 个质量、12 个审核场景，共 44 个，均由独立 O 匹配。处置前保持待清理退出码 2，精确处置后原 CLI finalizer 退出码 0；所属基础栈和 Compact 栈均清理完成。该 `selected_suites` 补验位于本地 `output/selftest-validation-20261024-s5/frozen49/public/`，不冒充完整三形态远程运行。
 
+## 网关启动与取消回收补修
+
+提交 `7737f84`、tested merge `d372b3dab5028e13e0ec79674bbaeff2f6d353a4` 的 Bootstrap `40076837078` 已通过后端全量（3391 passed、20 skipped、91.64%）、数据库集成、安全、Windows、升级回退、Quick、Skill、Compose 业务与浏览器验收及 Standalone 完整自测。Standalone 公开工件的外层 SHA、10 批基线、12 包扩展、来源身份、双 JUnit 和精确处置已下载核对；核对不等于在本地重算未公开的原始证据。
+
+该轮 Compact 的新安全失败报告明确为 `SELFTEST_TIMEOUTERROR`，发生于协议阶段，整步耗时约 353 秒，不能归因于 600 秒批次截止时间。检查剩余超时路径并新增先失败的回归，确认旧网关的 15 秒冷启动限制会截断 16 秒启动，启动取消也没有回收控制子进程。冷启动改为最多 45 秒且重新取原冻结截止时间的剩余值，降低就绪探测频率；控制子进程取消时精确 kill/wait。退出等待仍为 5 秒，超时后回收所属 CLI，保持清理未完成；启动和退出超时分别输出明确错误码。没有延长包截止时间、重放写入或放宽独立核验。
+
+网关、CI 信任、协议归档和配置组共 70 项本地测试通过；再加入实际协议传输、独立 O、配置取消、CI 扩展和读取器回归，最终联合 143 项通过（25.55 秒）。H/O mypy 211 文件、backend/H 全部 1041 文件格式与 Ruff 通过。新增回归涵盖延迟启动、已冻结的短截止时间、取消回收和退出超时不能记作清理成功。该回归证明真实缺陷存在，但不能仅凭它断言旧远程超时的唯一原因；修复后的远程整轮仍须单独完成。应用摘要保持不变；此轮新 H/O 摘要为 Standalone `b7d8ffba71321ddc284e87512739f0c5f06e27c3325a241c42d4c5390d0f1f2e`、Full/Compact `42bc908f4254a8ca7c027f30abc523f6cf817dd3e0e69dc3cc636042dc5542d3`。
+
+新 H/O 的真实隔离 Compact 栈已通过协议 34、治理 42，共 76 场景；处置前仅因待清理保持退出码 2，精确处置后原 CI finalizer 重算均为 0，网关及基础/Profile 栈清理完整，模型调用 0。本地安全投影位于 `output/selftest-validation-20261024-s5/frozen50/public/`，范围为 `selected_suites`，未用补验冒充完整远程运行。
+
 ## 验收边界
 
 [冻结 45](current-validation.md) 和 Git 账本保留当时来源与原始结果。后续补验按新的应用、H/O、镜像和 PR head/tested merge SHA 单独归档。真实模型按用户要求 NOT_RUN；治理文件按 `AGENTS.md` 要求仍需维护者受控 Bootstrap 审查，诊断成功不发布正式 Required Gate、不自动合并或调整规则集。合并后 CI、真人审核和完整发布验收仍是不同边界。

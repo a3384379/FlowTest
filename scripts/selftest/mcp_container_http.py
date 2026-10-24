@@ -207,6 +207,11 @@ async def _control(
         process.kill()
         await process.wait()
         raise HarnessError("SELFTEST_CONTAINER_GATEWAY_CONTROL_TIMEOUT") from None
+    except asyncio.CancelledError:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        await process.wait()
+        raise
     if process.returncode or len(output) > 2048:
         raise HarnessError("SELFTEST_CONTAINER_GATEWAY_CONTROL_FAILED")
     value = json.loads(output)
@@ -216,13 +221,13 @@ async def _control(
 
 
 async def _ready(container: str, nonce: str, child: asyncio.subprocess.Process) -> GatewayProcess:
-    for _ in range(50):
+    for _ in range(90):
         if child.returncode is not None:
             raise HarnessError("SELFTEST_CONTAINER_GATEWAY_START_FAILED")
         try:
             receipt = GatewayProcess.model_validate(await _control(container, "probe", nonce))
         except (HarnessError, ValueError):
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
         else:
             if receipt.nonce != nonce:
                 raise HarnessError("SELFTEST_CONTAINER_GATEWAY_NONCE_MISMATCH")
@@ -314,8 +319,12 @@ async def container_http_gateway(
     relay = GatewayRelay(binding.runner_container_id, nonce, deadline)
     server: asyncio.Server | None = None
     try:
-        async with asyncio.timeout(min(15, remaining)):
-            receipt = await _ready(binding.runner_container_id, nonce, child)
+        try:
+            remaining = max(0, (deadline - datetime.now(UTC)).total_seconds())
+            async with asyncio.timeout(min(45, remaining)):
+                receipt = await _ready(binding.runner_container_id, nonce, child)
+        except TimeoutError:
+            raise HarnessError("SELFTEST_CONTAINER_GATEWAY_START_TIMEOUT") from None
         write_json(output / "gateway-start.json", receipt)
         server = await asyncio.start_server(relay.accept, "127.0.0.1", 0, limit=65536)
         port = server.sockets[0].getsockname()[1]
@@ -327,7 +336,12 @@ async def container_http_gateway(
             server.close()
             await server.wait_closed()
         removals = await relay.stop()
-        await asyncio.wait_for(child.wait(), timeout=5)
+        try:
+            await asyncio.wait_for(child.wait(), timeout=5)
+        except TimeoutError:
+            child.kill()
+            await child.wait()
+            raise HarnessError("SELFTEST_CONTAINER_GATEWAY_EXIT_TIMEOUT") from None
         write_json(
             output / "gateway-cleanup.json",
             {
