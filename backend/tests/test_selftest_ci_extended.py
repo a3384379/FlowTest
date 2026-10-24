@@ -18,6 +18,82 @@ from test_selftest_ci_runner_lineage import binding
 from test_selftest_review_boundary_verify import FIXTURE, bundle
 
 
+def test_compiler_failure_archives_safe_typed_failure_without_private_files(tmp_path):
+    from scripts.selftest.compile_boundary_contracts import CompileBoundaryReport
+    from scripts.selftest.compile_boundary_verify import keys
+
+    paths = driver.RunPaths.create(tmp_path / "product", "full")
+    source = paths.directory / "compiler"
+    report = CompileBoundaryReport(
+        expected_keys=keys(),
+        matched_keys=(),
+        exit_code=2,
+        reason_codes=("SELFTEST_CONTAINER_GATEWAY_START_TIMEOUT",),
+    )
+    write_json(source / "failure.json", report)
+    (source / "private-sdk.log").write_text("synthetic-private-token")
+    ci_extended._archive_compiler_failure(
+        paths,
+        HarnessError("SELFTEST_EXTENDED_STAGE_FAILED:trace=synthetic-private-token"),
+        [driver.StageResult("compiler-boundaries", -9)],
+    )
+    public = paths.public / "compiler-failure"
+    assert read_json(public / "observed-failure.json") == report.model_dump(mode="json")
+    assert read_json(public / "driver-failure.json")["reason_codes"] == [
+        "SELFTEST_EXTENDED_STAGE_FAILED"
+    ]
+    assert read_json(public / "stage-result.json") == {
+        "stage": "compiler-boundaries",
+        "exit_code": -9,
+    }
+    assert {p.name for p in public.iterdir()} == {
+        "observed-failure.json",
+        "driver-failure.json",
+        "stage-result.json",
+    }
+    assert all("synthetic-private" not in p.read_text() for p in public.iterdir())
+
+
+def test_compiler_driver_failure_cannot_skip_cleanup_or_become_a_pass(tmp_path, monkeypatch):
+    from scripts.selftest.compile_boundary_contracts import CompileBoundaryReport
+    from scripts.selftest.compile_boundary_verify import keys
+
+    paths = driver.RunPaths.create(tmp_path / "product", "full")
+    stopped = []
+    monkeypatch.setattr(ci_extended, "start_wave", lambda *_: None)
+
+    def command(actual, stages, name, args, **kwargs):
+        if name == "compiler-boundaries":
+            write_json(
+                actual.directory / "compiler/failure.json",
+                CompileBoundaryReport(
+                    expected_keys=keys(),
+                    matched_keys=(),
+                    exit_code=2,
+                    reason_codes=("SELFTEST_TIMEOUTERROR",),
+                ),
+            )
+
+    def require(actual, spec):
+        if spec.label == "compiler":
+            raise FileNotFoundError("synthetic-private-path")
+
+    def stop(actual):
+        stopped.append(actual)
+        return "completed"
+
+    monkeypatch.setattr(ci_extended, "_command", command)
+    monkeypatch.setattr(ci_extended, "require_pending", require)
+    monkeypatch.setattr(driver, "stop_owned_stack", stop)
+    with pytest.raises(FileNotFoundError):
+        ci_extended.run_product(paths, tmp_path / "source", [])
+    assert stopped == [paths]
+    public = paths.public / "compiler-failure"
+    assert read_json(public / "driver-failure.json")["exit_code"] == 2
+    assert read_json(public / "observed-failure.json")["reason_codes"] == ["SELFTEST_TIMEOUTERROR"]
+    assert not (paths.public / "compiler-verification.json").exists()
+
+
 def test_configured_failure_archives_only_existing_typed_report_and_safe_codes(tmp_path):
     from scripts.selftest.configured_probes import GroupResult
 

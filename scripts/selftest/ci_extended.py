@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -384,6 +385,40 @@ def run_workers(paths: RunPaths, source: Path, stages: list[StageResult]) -> Pac
     return archive("workers", 4, paths.directory / "workers", paths.public, binding)
 
 
+def _archive_compiler_failure(
+    paths: RunPaths, error: BaseException, stages: Sequence[StageResult] = ()
+) -> None:
+    from scripts.selftest.compile_boundary_contracts import CompileBoundaryReport
+    from scripts.selftest.compile_boundary_verify import keys
+
+    destination = paths.public / "compiler-failure"
+    write_json(
+        destination / "driver-failure.json",
+        CompileBoundaryReport(
+            expected_keys=keys(), matched_keys=(), reason_codes=failure_codes(error), exit_code=2
+        ),
+    )
+    stage = next((row for row in reversed(stages) if row.stage == "compiler-boundaries"), None)
+    if stage is not None:
+        write_json(destination / "stage-result.json", asdict(stage))
+    for name in ("failure", "verification"):
+        source = paths.directory / "compiler" / (name + ".json")
+        if not source.exists():
+            continue
+        try:
+            if source.stat().st_size > 1048576:
+                raise HarnessError("SELFTEST_COMPILER_PUBLIC_REPORT_TOO_LARGE")
+            report = CompileBoundaryReport.model_validate(read_json(source))
+        except (HarnessError, OSError, ValueError) as source_error:
+            report = CompileBoundaryReport(
+                expected_keys=keys(),
+                matched_keys=(),
+                reason_codes=failure_codes(source_error),
+                exit_code=2,
+            )
+        write_json(destination / ("observed-" + name + ".json"), report)
+
+
 def run_product(
     paths: RunPaths, source: Path, stages: list[StageResult]
 ) -> tuple[PackSummary, PackSummary]:
@@ -403,10 +438,14 @@ def run_product(
             "--output",
             str(paths.directory / "compiler"),
         ]
-        _command(paths, stages, "compiler-boundaries", compiler, accepted=(2,))
-        require_pending(
-            paths, JourneySpec("compiler", "scripts.selftest.run_compile_boundaries", 38)
-        )
+        try:
+            _command(paths, stages, "compiler-boundaries", compiler, accepted=(2,))
+            require_pending(
+                paths, JourneySpec("compiler", "scripts.selftest.run_compile_boundaries", 38)
+            )
+        except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as error:
+            _archive_compiler_failure(paths, error, stages)
+            raise
     finally:
         cleanup = stop_owned_stack(paths)
     if cleanup != "completed":

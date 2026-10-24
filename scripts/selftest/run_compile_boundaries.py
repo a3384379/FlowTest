@@ -6,8 +6,10 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from scripts.selftest.bootstrap import bootstrap
 from scripts.selftest.compile_boundary_collect import actors, collect
@@ -19,6 +21,7 @@ from scripts.selftest.compile_boundary_contracts import (
 from scripts.selftest.compile_boundary_verify import keys
 from scripts.selftest.contracts import TargetDisposalReceipt, canonical_digest
 from scripts.selftest.draft_boundary_collect import collect_drafts
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.io import HarnessError, read_json, write_json
 from scripts.selftest.local_stack import ROOT, StackBinding, _verify_removed, verify_binding
 from scripts.selftest.mcp_negative_budget import ProtocolHttpBudget
@@ -148,11 +151,25 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--finalize-disposable", action="store_true")
     args = parser.parse_args()
-    report = (
-        finalize(args.directory, args.output)
-        if args.finalize_disposable
-        else asyncio.run(run(args.directory, args.product, args.output))
-    )
+    try:
+        report = (
+            finalize(args.directory, args.output)
+            if args.finalize_disposable
+            else asyncio.run(run(args.directory, args.product, args.output))
+        )
+    except FileExistsError:
+        print("SELFTEST_COMPILER_OUTPUT_EXISTS_NO_REPLAY")
+        return 1
+    except Exception as error:
+        # Preserve the existing private stderr capture; only safe codes are projected publicly.
+        traceback.print_exception(error)
+        report = CompileBoundaryReport(
+            expected_keys=keys(), matched_keys=(), reason_codes=failure_codes(error), exit_code=2
+        )
+        failure = args.output / "failure.json"
+        if failure.exists():
+            failure = args.output / ("failure-" + uuid4().hex + ".json")
+        write_json(failure, report)
     print(json.dumps(report.model_dump(mode="json")))
     return report.exit_code
 

@@ -18,6 +18,114 @@ from scripts.selftest.compile_boundary_verify import verify
 FIXTURE = Path(__file__).parent / "fixtures/compile_boundary_actual"
 
 
+def test_compiler_cli_failure_exports_safe_codes_without_claiming_matched_rows(
+    tmp_path, monkeypatch, capsys
+):
+    from scripts.selftest import run_compile_boundaries as entry
+    from scripts.selftest.compile_boundary_contracts import CompileBoundaryReport
+    from scripts.selftest.compile_boundary_verify import keys
+    from scripts.selftest.io import HarnessError, read_json
+
+    output = tmp_path / "compiler"
+
+    async def fail(*args):
+        output.mkdir()
+        raise ExceptionGroup(
+            "synthetic-private-sdk-frame",
+            [
+                HarnessError("SELFTEST_HTTP_422_SYNTHETIC:trace=synthetic-private-token"),
+                RuntimeError("synthetic-private-token"),
+            ],
+        )
+
+    monkeypatch.setattr(entry, "run", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "entry",
+            "--directory",
+            str(tmp_path / "owned"),
+            "--product",
+            str(tmp_path / "product"),
+            "--output",
+            str(output),
+        ],
+    )
+    assert entry.main() == 2
+    report = CompileBoundaryReport.model_validate(read_json(output / "failure.json"))
+    assert report.expected_keys == keys() and report.matched_keys == ()
+    assert report.reason_codes == ("SELFTEST_HTTP_422_SYNTHETIC", "SELFTEST_RUNTIMEERROR")
+    assert report.exit_code == 2 and report.model_calls == 0
+    assert "synthetic-private" not in (output / "failure.json").read_text()
+    captured = capsys.readouterr()
+    assert "synthetic-private" not in captured.out
+    assert "synthetic-private-sdk-frame" in captured.err
+
+
+def test_compiler_cli_refuses_output_replay_without_replacing_failure(tmp_path, monkeypatch):
+    from scripts.selftest import run_compile_boundaries as entry
+
+    output = tmp_path / "compiler"
+    output.mkdir()
+    first = output / "failure.json"
+    first.write_bytes(b"first-failure-receipt")
+
+    async def fail(*args):
+        raise FileExistsError("synthetic-private-path")
+
+    monkeypatch.setattr(entry, "run", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "entry",
+            "--directory",
+            str(tmp_path / "owned"),
+            "--product",
+            str(tmp_path / "product"),
+            "--output",
+            str(output),
+        ],
+    )
+    assert entry.main() == 1
+    assert first.read_bytes() == b"first-failure-receipt"
+    assert list(output.iterdir()) == [first]
+
+
+def test_compiler_finalizer_preserves_first_failure_receipt(tmp_path, monkeypatch):
+    from scripts.selftest import run_compile_boundaries as entry
+    from scripts.selftest.io import HarnessError
+
+    output = tmp_path / "compiler"
+    output.mkdir()
+    first = output / "failure.json"
+    first.write_bytes(b"first-failure-receipt")
+
+    def fail(*args):
+        raise HarnessError("SELFTEST_FINAL_DISPOSAL_INCOMPLETE:trace=synthetic-private-token")
+
+    monkeypatch.setattr(entry, "finalize", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "entry",
+            "--directory",
+            str(tmp_path / "owned"),
+            "--product",
+            str(tmp_path / "product"),
+            "--output",
+            str(output),
+            "--finalize-disposable",
+        ],
+    )
+    assert entry.main() == 2
+    assert first.read_bytes() == b"first-failure-receipt"
+    assert len(list(output.glob("failure-*.json"))) == 1
+    assert "synthetic-private" not in next(output.glob("failure-*.json")).read_text()
+
+
 def inputs():
     return json.loads((FIXTURE / "manifest.json").read_text()), json.loads(
         (FIXTURE / "evidence.json").read_text()
