@@ -28,7 +28,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useAuthStore } from '../features/auth/auth-store'
 import {
@@ -164,10 +164,6 @@ export default function OrganizationGovernancePage() {
   const organizations = useQuery({ queryKey: ['organizations'], queryFn: listOrganizations })
   const effectiveSelectedId = selectedId ?? organizations.data?.[0]?.id ?? null
 
-  useEffect(() => {
-    setOrganizationId(effectiveSelectedId)
-  }, [effectiveSelectedId])
-
   return (
     <OrganizationGovernanceContent
       isSystemAdmin={isSystemAdmin}
@@ -175,7 +171,10 @@ export default function OrganizationGovernancePage() {
       isError={organizations.isError}
       organizations={organizations.data ?? []}
       selectedId={effectiveSelectedId}
-      onSelect={setSelectedId}
+      onSelect={(id) => {
+        setSelectedId(id)
+        setOrganizationId(id)
+      }}
     />
   )
 }

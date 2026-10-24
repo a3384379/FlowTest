@@ -2,7 +2,9 @@
 
 2026-10-24。S5 合成文件、B 自身文件、并行 Cookie、worker claim/心跳/失效 fencing 和映射漂移预检已实现。按用户要求，真实 Host/LLM 调用为 0。默认宿主入口另实测返回 `NOT_RUN / HOST_AUTHORIZATION_PENDING`，退出码 2、实际模型调用 0；这是正确阻断，未计作模型验收通过。
 
-## 当前来源与完整本地入口
+依赖和自测镜像的后续 CI 修复及新来源验证见[远程验收修复记录](remote-validation-fixes.md)。下列三形态完整入口与 Git 账本保留为冻结 45 快照，不将后续构建改写到历史收据中。
+
+## 冻结 45 来源与完整本地入口
 
 应用摘要 `568155ed56d189884b121e71e0c07ea2c61e085531fdf7cc8c2a620333b92671`。H/O 摘要：Standalone `bfb71f14d8613b164956bdeaaf5c97b2b7f5578023c24902f49a4b1c5b6a06be`，Full/Compact `d343fb7fcf265b9ff07645caf90d3f7f41e566c5adfe4f578100fa8e2222b8e5`。本地基线提交为 `fb4351d7cdcbfa175f8549f135ec9bab75af027e`，该提交已包含约束名和项目准入锁顺序及强度修正；构建时仅产品文档未提交；以实际应用/H/镜像摘要为准，不能拿该 SHA 代替构建内容。完整逐文件快照位于本地 `output/selftest-validation-20261024-s5/frozen45/sources/source-receipt.json`。
 
@@ -18,7 +20,7 @@
 
 ## 全量与专项检查
 
-- 当前后端全量：3386 passed、20 skipped，覆盖率 91.64%，1102.11 秒，日志 `/tmp/flowtest-s5-backend-pytest-all45.log`。其中 5 个依赖真实 PostgreSQL 的并发测试在默认全量中跳过，已在独立真实 PG 中全部通过。O/产品 126 项、迁移/worker/API 43 项、取消回执 34 项及锁顺序相关 117 项专项分别记录，未与全量相加。
+- 冻结 45 后端全量：3386 passed、20 skipped，覆盖率 91.64%，1102.11 秒，日志 `/tmp/flowtest-s5-backend-pytest-all45.log`。其中 5 个依赖真实 PostgreSQL 的并发测试在默认全量中跳过，已在独立真实 PG 中全部通过。O/产品 126 项、迁移/worker/API 43 项、取消回执 34 项及锁顺序相关 117 项专项分别记录，未与全量相加。
 - 前端全量：194 文件、1539 测试；statements 86.81%、branches 82.70%、functions 86.74%、lines 89.42%；格式、lint、类型、构建通过，此后未改前端源码。Mock 42 项通过。
 - 最新 backend/H 全部格式与 Ruff 通过，app/平铺脚本 mypy 526 文件、命名空间 H/O mypy 211 文件通过；import-linter 1 个边界保持，CI 路由/信任 167 项通过，Skill evaluation `--check` 通过。37 份具名 JSON Schema 与运行时模型同步；另有三形态实际双 SDK 的 55 个工具输入/输出契约与固定 golden 逐项 SHA 匹配、5 个 Skill 包逐字节同步，见本地 `frozen45/public/schema-catalog-sync.json`。仅按 MCP 规范化四个明确的 annotation 字段别名，不忽略其它差异。
 - 新独立 O 反例先复现字段、比较符和来源节点遗漏，再补强固定 API、主流程与图连通性。实际两种 SDK 的编译 38 项匹配；没有发布或执行编译草稿。

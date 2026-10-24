@@ -21,12 +21,48 @@ describe('OrganizationGovernancePage', () => {
     installHandlers()
   })
 
+  it('keeps the account scope while opening the default governance organization', async () => {
+    renderPage()
+    await screen.findByRole('combobox', { name: '治理组织' })
+    await screen.findByText('组织与角色')
+    expect(useAuthStore.getState().organizationId).toBeNull()
+  })
+
   it('retains the explicitly selected organization after leaving governance', async () => {
+    setOrganizationId(organizationId)
     const view = renderPage()
     await screen.findByRole('combobox', { name: '治理组织' })
     await waitFor(() => expect(useAuthStore.getState().organizationId).toBe(organizationId))
     view.unmount()
     expect(useAuthStore.getState().organizationId).toBe(organizationId)
+  })
+
+  it('changes the account scope only after an explicit governance selection', async () => {
+    const nextId = '00000000-0000-4000-8000-000000000702'
+    server.use(
+      http.get('/api/v1/organizations', () =>
+        HttpResponse.json([
+          organization,
+          { ...organization, id: nextId, name: '第二组织', slug: 'second' },
+        ]),
+      ),
+      http.get(`/api/v1/organizations/${nextId}/:section`, ({ params }) =>
+        HttpResponse.json(
+          params.section === 'governance'
+            ? { ...governance, organization_id: nextId }
+            : ['members', 'service-accounts'].includes(String(params.section))
+              ? []
+              : readResponse(String(params.section)),
+        ),
+      ),
+    )
+    const view = renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: '治理组织' }))
+    await browser.click(screen.getByText('第二组织 · second'))
+    expect(useAuthStore.getState().organizationId).toBe(nextId)
+    view.unmount()
+    expect(useAuthStore.getState().organizationId).toBe(nextId)
   })
 
   it('renders organization roles, quota governance, security and redacted support bundle', async () => {

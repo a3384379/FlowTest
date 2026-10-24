@@ -64,7 +64,7 @@ jobs:
         run: |
           docker pull postgres:17.6-alpine
           docker pull redis:8.2.1-alpine
-          docker pull minio/minio:RELEASE.2025-07-23T15-54-02Z
+          docker pull cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1
       - name: Run reviewed Harness and Observer against candidate images
         working-directory: trusted
         env:

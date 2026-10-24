@@ -403,7 +403,10 @@ def start(
     *,
     postgres_image: str = "postgres:17.6-alpine",
     redis_image: str = "redis:8.2.1-alpine",
-    minio_image: str = "minio/minio:RELEASE.2025-07-23T15-54-02Z",
+    minio_image: str = (
+        "cgr.dev/chainguard/minio@sha256:"
+        "bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1"
+    ),
     target_access_token_minutes: int = 15,
 ) -> StackBinding:
     source = StackBinding.model_validate(read_json(source_stack_directory / "stack.json"))

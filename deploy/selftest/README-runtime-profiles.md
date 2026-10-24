@@ -9,7 +9,7 @@
 - 在仓库根目录运行，使用现有 `backend/.venv/bin/python`。
 - 提供已经通过身份校验的独立 Standalone 自测栈目录。
 - Docker 本地已有 `postgres:17.6-alpine`、`redis:8.2.1-alpine` 和
-  `minio/minio:RELEASE.2025-07-23T15-54-02Z`。启动时冻结其实际 image ID。
+  `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1`。启动时冻结其实际 image ID。
 - Full 与 Compact 串行运行，先检查 Docker 内存与其他自测任务。
 - 每次提供全新目录；未知启动结果不能换 nonce 冒充重试。
 
