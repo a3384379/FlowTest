@@ -58,9 +58,11 @@ class ServiceTargetRepository:
         ).one_or_none()
 
     async def list_endpoints(
-        self, *, project_id: UUID, environment_id: UUID | None = None
+        self, *, project_id: UUID, environment_id: UUID | None = None, for_update: bool = False
     ) -> list[ServiceEndpoint]:
         query = select(ServiceEndpoint).where(ServiceEndpoint.project_id == project_id)
         if environment_id is not None:
             query = query.where(ServiceEndpoint.environment_id == environment_id)
+        if for_update:
+            query = query.with_for_update()
         return list((await self._session.scalars(query.order_by(ServiceEndpoint.created_at))).all())

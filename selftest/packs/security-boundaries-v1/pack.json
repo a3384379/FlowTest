@@ -1,0 +1,16 @@
+{
+  "pack_id": "security-boundaries-v1",
+  "version": "1.0.0",
+  "scenario_ids": [
+    "ST-SECURITY-owner-self-sign",
+    "ST-SECURITY-editor-self-sign",
+    "ST-SECURITY-manual-report",
+    "ST-SECURITY-write-only-export",
+    "ST-SECURITY-project-redaction"
+  ],
+  "runtime_seconds": 600,
+  "request_budget": 500,
+  "provenance": "local_untrusted",
+  "claims_native_execution": false,
+  "scope": "普通角色治理拒绝与仅合成值的只写、API/Workflow导出及项目脱敏隔离。"
+}

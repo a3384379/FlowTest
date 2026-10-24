@@ -1,0 +1,1120 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-ADD-poll-time-budget",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "POLLING_BUDGET_EXHAUSTED",
+        "node_id": "poll_task",
+        "phase": "main",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "poll_task",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "POLLING_BUDGET_EXHAUSTED",
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "REQUEST_BUDGET_EXHAUSTED",
+        "node_id": "forbidden_second",
+        "phase": "main",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "first",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "forbidden_second",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "REQUEST_BUDGET_EXHAUSTED",
+            "attempts": 0
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-finally-failure",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "error_code": "FINALLY_FAILED",
+        "node_id": "try_block",
+        "phase": "main",
+        "assertions": [
+          {
+            "node_id": "__nested_request__:d9dfcf53f5f0229a4fde7ae1eeb9375f87a062da94de5b09e466d4f8b6073fdc",
+            "name": "workflow_assertion",
+            "passed": false,
+            "expected": 2,
+            "actual": 1,
+            "phase": "cleanup"
+          }
+        ],
+        "nested_nodes": [
+          {
+            "node_id": "__nested_request__:4c866df4335c0d6bf97572ba880cafdeea2e364357f795799128b3e59cd84ec4",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:972e79d0fb0737f1a9d68919fb862d89c6da5c4f9abf147a207c56f4c611cfdd",
+            "phase": "cleanup",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:d9dfcf53f5f0229a4fde7ae1eeb9375f87a062da94de5b09e466d4f8b6073fdc",
+            "phase": "cleanup",
+            "status": "failed",
+            "error_code": "WORKFLOW_ASSERTION_FAILED",
+            "attempts": 1
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "try_block",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "FINALLY_FAILED",
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 4,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "parallel",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ],
+        "fixture_metrics": {
+          "peak_concurrency": 2,
+          "completed_count": 4,
+          "active_count": 0,
+          "cancelled_count": 0,
+          "failed_count": 0
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-nested-break",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 4,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "outer",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-nested-continue",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 6,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "outer",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-return-outside-call",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 0,
+        "fixture_responses": [],
+        "error_code": "RETURN_OUTSIDE_CALL",
+        "node_id": "return_value",
+        "phase": "main",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "return_value",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "RETURN_OUTSIDE_CALL",
+            "attempts": 1
+          },
+          {
+            "node_id": "must_not_run",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-switch-hit",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "choose",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "expected": {
+        "execution_status": "cancelled",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "main_status": "cancelled",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "slow_request",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [
+          {
+            "node_id": "assert_return",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 42,
+            "actual": 42,
+            "phase": "main"
+          }
+        ],
+        "nested_nodes": [
+          {
+            "node_id": "__nested_request__:d8821ed5efb990660f59b85dba4d361e52cd539468ce3cc2d308df91997c588a",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:e790fc967362465f177ff03b24b8606f63975c384bb69c3a0375f26f15a03611",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:3d2c56cb549927294abe5a1913b2198cbd58d1766abe8f122c6839017a51f100",
+            "phase": "main",
+            "status": "skipped",
+            "error_code": null,
+            "attempts": 0
+          },
+          {
+            "node_id": "__nested_request__:f299b1e3a57b9f9a75a78eb685fbc1e460df5109658cb6d67c92f7a783125e2b",
+            "phase": "main",
+            "status": "skipped",
+            "error_code": null,
+            "attempts": 0
+          },
+          {
+            "node_id": "__nested_request__:2647dcc00ec7b8016fbe7010ecf5cba979179492fdaa4fee49a413bc7a1189d3",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "__nested_request__:a790d527691fa6a9e8be32976ba9a72bc0f9cdd635fbe4266f654f315cfa7061",
+            "phase": "cleanup",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ],
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "parent_request",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "call_child",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "assert_return",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "top_nodes": [],
+        "dataset": {
+          "artifact_id": "e38e03dc-bb12-5730-9068-3d448a81224c",
+          "sha256": "45234737e6854186e1c264140de1c3f03d9101e35a341b0925352107ae50b1f8",
+          "row_count": 2,
+          "row_indices": [
+            0,
+            1
+          ],
+          "nodes": [
+            {
+              "node_id": "start",
+              "phase": "main",
+              "status": "passed",
+              "error_code": null,
+              "attempts": 1
+            },
+            {
+              "node_id": "dataset",
+              "phase": "main",
+              "status": "passed",
+              "error_code": null,
+              "attempts": 1
+            },
+            {
+              "node_id": "row_request",
+              "phase": "main",
+              "status": "passed",
+              "error_code": null,
+              "attempts": 1
+            },
+            {
+              "node_id": "assert_row_status",
+              "phase": "main",
+              "status": "passed",
+              "error_code": null,
+              "attempts": 1
+            },
+            {
+              "node_id": "end",
+              "phase": "main",
+              "status": "passed",
+              "error_code": null,
+              "attempts": 1
+            }
+          ],
+          "assertions": [
+            {
+              "node_id": "assert_row_status",
+              "name": "workflow_assertion",
+              "phase": "main",
+              "passed": true,
+              "expected": 200,
+              "actual": 200
+            }
+          ]
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-ADD-poll-time-budget",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "first",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-finally-failure",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "try",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "finally",
+          "branch": "finally",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 150
+      },
+      "wire": [
+        {
+          "value": "first",
+          "branch": "first",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "second",
+          "branch": "second",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "third",
+          "branch": "third",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "fourth",
+          "branch": "fourth",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "parallel",
+        "kind": "branch",
+        "total": 4
+      },
+      "wire_order": "unordered"
+    },
+    {
+      "scenario_id": "ST-ADD-nested-break",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "after",
+          "branch": "outer",
+          "iteration_key": "outer-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "after",
+          "branch": "outer",
+          "iteration_key": "outer-1",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "outer",
+        "kind": "iteration",
+        "total": 2
+      },
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-nested-continue",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-1",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "after",
+          "branch": "outer",
+          "iteration_key": "outer-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-0",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "inner",
+          "branch": "inner",
+          "iteration_key": "inner-1",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "after",
+          "branch": "outer",
+          "iteration_key": "outer-1",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "outer",
+        "kind": "iteration",
+        "total": 2
+      },
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-return-outside-call",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-switch-hit",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "selected",
+          "branch": "match",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 2000
+      },
+      "wire": [
+        {
+          "value": "slow",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "parent",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "finally",
+          "branch": "finally",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "ordered"
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": 0,
+          "branch": "zero",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": false,
+          "branch": "false",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null,
+      "wire_order": "unordered"
+    }
+  ]
+}

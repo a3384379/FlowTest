@@ -230,13 +230,16 @@ async def test_standalone_transfer_exports_rows_and_artifacts(
     assert exported == {
         "status": "exported",
         "schema_version": "standalone-compact-transfer-v1",
-        "tables": 88,
+        "tables": 91,
         "rows": 7,
         "excluded_tables": 11,
         "artifacts": 1,
     }
     assert validate_bundle(bundle)["status"] == "validated"
     payload = _load_bundle(bundle)
+    assert {"self_test_installations", "self_test_batches", "self_test_scenario_results"} <= set(
+        payload.rows_by_table
+    )
     assert {"outbound_permits", "outbound_rate_windows"} <= {
         item["name"] for item in payload.manifest["database"]["excluded_tables"]
     }

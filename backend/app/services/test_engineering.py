@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from hashlib import sha256
+from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -9,8 +12,10 @@ from pydantic import JsonValue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.domain import test_engineering as generator_module
 from app.domain.evidence import EvidenceBundle, EvidenceFinding
 from app.domain.test_design import TestDesignDocument, fingerprint_design
+from app.domain.test_design_compilation import FrozenGenerationOrigin, value_fingerprint
 from app.domain.test_engineering import (
     ContractAuth,
     ContractParameter,
@@ -30,6 +35,19 @@ from app.schemas.test_engineering import (
 from app.services.projects import ProjectService
 
 
+@dataclass(frozen=True, slots=True)
+class TestEngineeringGeneration:
+    design: TestDesignDocument
+    fingerprint: str
+    contract: OperationContract
+    origin: FrozenGenerationOrigin | None
+
+
+def generator_build_identity() -> str:
+    """Identify generator implementation bytes; this is not a deployment attestation."""
+    return "sha256:" + sha256(Path(generator_module.__file__).read_bytes()).hexdigest()
+
+
 class TestEngineeringService:
     def __init__(self, session: AsyncSession) -> None:
         self._projects = ProjectService(session)
@@ -43,11 +61,34 @@ class TestEngineeringService:
         project_id: UUID,
         payload: TestEngineeringGenerateRequest,
     ) -> tuple[TestDesignDocument, str]:
+        result = await self.generate_result(actor=actor, project_id=project_id, payload=payload)
+        return result.design, result.fingerprint
+
+    async def generate_result(
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        payload: TestEngineeringGenerateRequest,
+    ) -> TestEngineeringGeneration:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=False)
         contract = payload.contract
+        version_number = None
         if payload.api_definition_id is not None:
+            definition = await self._assets.get_definition(payload.api_definition_id)
+            if definition is None or definition.project_id != project_id:
+                raise AppError(
+                    code="API_DEFINITION_NOT_FOUND", message="API 定义不存在", status_code=404
+                )
+            version_number = (
+                payload.api_version
+                if payload.api_version is not None
+                else definition.current_version
+            )
             contract = await self.contract_for_api(
-                project_id=project_id, definition_id=payload.api_definition_id
+                project_id=project_id,
+                definition_id=definition.id,
+                version_number=version_number,
             )
         if contract is None:
             raise AppError(
@@ -60,7 +101,20 @@ class TestEngineeringService:
             policy=payload.generation_policy,
             additional_evidence=payload.additional_evidence,
         )
-        return design, fingerprint_design(design)
+        origin = None
+        if payload.api_definition_id is not None and version_number is not None:
+            origin = FrozenGenerationOrigin(
+                api_definition_id=payload.api_definition_id,
+                api_version=version_number,
+                contract_fingerprint=generator_module.fingerprint_contract(contract),
+                generation_policy=payload.generation_policy,
+                evidence=payload.additional_evidence,
+                evidence_fingerprints=sorted(
+                    value_fingerprint(bundle) for bundle in payload.additional_evidence
+                ),
+                generator_build=generator_build_identity(),
+            )
+        return TestEngineeringGeneration(design, fingerprint_design(design), contract, origin)
 
     @staticmethod
     def evidence_details(

@@ -1,0 +1,359 @@
+{
+  "$defs": {
+    "ApiSource": {
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "api_definition_id": {
+          "format": "uuid",
+          "title": "Api Definition Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_definition_id",
+        "api_version",
+        "contract_fingerprint"
+      ],
+      "title": "ApiSource",
+      "type": "object"
+    },
+    "AssistedRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "before_batch_id": {
+          "format": "uuid",
+          "title": "Before Batch Id",
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "$ref": "#/$defs/AssistedSelection"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Selections",
+          "type": "array"
+        }
+      },
+      "required": ["before_batch_id", "selections"],
+      "title": "AssistedRequest",
+      "type": "object"
+    },
+    "AssistedSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "workflow_proposal_id": {
+          "format": "uuid",
+          "title": "Workflow Proposal Id",
+          "type": "string"
+        },
+        "case_proposal_id": {
+          "format": "uuid",
+          "title": "Case Proposal Id",
+          "type": "string"
+        },
+        "case_item_id": {
+          "format": "uuid",
+          "title": "Case Item Id",
+          "type": "string"
+        },
+        "editor_id": {
+          "format": "uuid",
+          "title": "Editor Id",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "workflow_proposal_id",
+        "case_proposal_id",
+        "case_item_id",
+        "editor_id",
+        "reason"
+      ],
+      "title": "AssistedSelection",
+      "type": "object"
+    },
+    "HostLifecycleSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "target_project_id": {
+          "format": "uuid",
+          "title": "Target Project Id",
+          "type": "string"
+        },
+        "source_document_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Document Digest",
+          "type": "string"
+        },
+        "bound_document_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Bound Document Digest",
+          "type": "string"
+        },
+        "source_reused": {
+          "title": "Source Reused",
+          "type": "boolean"
+        },
+        "created_resource_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Created Resource Name",
+          "type": "string"
+        },
+        "updated_resource_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Updated Resource Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_project_id",
+        "source_document_digest",
+        "bound_document_digest",
+        "source_reused",
+        "created_resource_name",
+        "updated_resource_name"
+      ],
+      "title": "HostLifecycleSelection",
+      "type": "object"
+    },
+    "HostSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "pattern": "^ST-[A-Z]+-[0-9]{3}$",
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "design_kind": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Design Kind",
+          "type": "string"
+        },
+        "additional_api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 99,
+          "title": "Additional Api Sources",
+          "type": "array"
+        },
+        "lifecycle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostLifecycleSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": ["scenario_id", "api_source", "design_kind"],
+      "title": "HostSelection",
+      "type": "object"
+    },
+    "QualityTask": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "required_oracle_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Required Oracle Ids",
+          "type": "array"
+        },
+        "known_defect": {
+          "default": false,
+          "title": "Known Defect",
+          "type": "boolean"
+        },
+        "exclusion_reason": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exclusion Reason"
+        }
+      },
+      "required": ["task_id"],
+      "title": "QualityTask",
+      "type": "object"
+    },
+    "QualityTaskSet": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/QualityTask"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": ["version", "tasks"],
+      "title": "QualityTaskSet",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "flowtest-host-task-v1",
+      "default": "flowtest-host-task-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "batch_key": {
+      "maxLength": 96,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "quality_taskset": {
+      "$ref": "#/$defs/QualityTaskSet"
+    },
+    "objective": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Objective",
+      "type": "string"
+    },
+    "selections": {
+      "items": {
+        "$ref": "#/$defs/HostSelection"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Selections",
+      "type": "array"
+    },
+    "authorized_data_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authorized Data Digest",
+      "type": "string"
+    },
+    "synthetic_injection": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Synthetic Injection"
+    },
+    "assisted": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AssistedRequest"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "project_id",
+    "batch_key",
+    "quality_taskset",
+    "objective",
+    "selections",
+    "authorized_data_digest"
+  ],
+  "title": "HostTask",
+  "type": "object"
+}

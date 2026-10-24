@@ -4,6 +4,7 @@ import { setupServer } from 'msw/node'
 import { project } from './fixtures'
 
 export const server = setupServer(
+  http.get('/api/v1/organizations', () => HttpResponse.json([])),
   http.get('/api/v1/v3/features', () =>
     HttpResponse.json({
       capability_sdk: true,

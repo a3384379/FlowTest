@@ -1,0 +1,11 @@
+{
+  "schema_version": "flowtest-supplemental-exclusions-v1",
+  "items": [
+    {
+      "acceptance_id": "ST-API-001",
+      "variant_key": "expired",
+      "status": "unsupported_in_current_profile_budget",
+      "reason": "当前B使用已配置的登录JWT TTL，超过600秒批次上限；公开登录接口没有单令牌短TTL参数。禁止伪造签名、改系统时钟或将invalid误标expired。保留AuthService真实过期行为单测，不据此声称部署过期场景通过。"
+    }
+  ]
+}

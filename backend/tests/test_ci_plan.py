@@ -58,7 +58,11 @@ def plan(
         ("deploy/standalone/mcp.ps1", "integration", {"windows"}),
         ("deploy/upgrade/verify.sh", "integration", {"upgrade", "compose"}),
         ("deploy/compact/start.sh", "integration", {"compact", "compose"}),
-        ("skills/flowtest-generate-integration-flow/SKILL.md", "standard", {"skills"}),
+        (
+            "skills/flowtest-generate-integration-flow/SKILL.md",
+            "integration",
+            {"skills", "compose"},
+        ),
         (".github/workflows/required-gate.yml", "full", {"policy", "backend-full"}),
         ("scripts/build_skill_evaluation.py", "full", {"policy", "skills"}),
         ("new-area/输入 文档.md", "full", {"security", "windows"}),
@@ -653,3 +657,35 @@ def test_automatic_pr_entries_and_workflow_call_reuse() -> None:
     ):
         assert "workflow_call" in workflows[name]["on"]
         assert "pull_request" not in workflows[name]["on"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "backend/app/services/self_tests.py",
+        "backend/app/services/mcp_test_engineering.py",
+        "backend/app/domain/self_tests.py",
+        "frontend/src/features/self-test/workspace.tsx",
+        "skills/flowtest-generate-integration-flow/SKILL.md",
+        "docs/self-verification/product-workspace.md",
+    ],
+)
+@pytest.mark.parametrize("labels", [set(), {"ci:light"}])
+def test_selftest_consumers_cannot_skip_real_protocol_compose(path: str, labels: set[str]) -> None:
+    selected = plan([path], labels)
+    assert selected.tier_floor in {"integration", "full"}
+    assert "compose" in selected.required and "selftest" in selected.domains
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/selftest/product_agent.py",
+        "selftest/packs/core-v1/manifest.json",
+        "deploy/selftest/Dockerfile",
+    ],
+)
+def test_harness_and_frozen_expectations_require_controlled_bootstrap(path: str) -> None:
+    selected = plan([path], {"ci:light"})
+    assert selected.governance_change and selected.tier == "full"
+    assert "policy" in selected.required

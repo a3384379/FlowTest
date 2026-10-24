@@ -1,0 +1,1568 @@
+{
+  "$defs": {
+    "ApiSource": {
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "api_definition_id": {
+          "format": "uuid",
+          "title": "Api Definition Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_definition_id",
+        "api_version",
+        "contract_fingerprint"
+      ],
+      "title": "ApiSource",
+      "type": "object"
+    },
+    "AssistedLineage": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorization Digest",
+          "type": "string"
+        },
+        "before_batch_id": {
+          "format": "uuid",
+          "title": "Before Batch Id",
+          "type": "string"
+        },
+        "origin_batch_id": {
+          "format": "uuid",
+          "title": "Origin Batch Id",
+          "type": "string"
+        },
+        "before_source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Source Digest",
+          "type": "string"
+        },
+        "before_workflow": {
+          "$ref": "#/$defs/PublishedAsset"
+        },
+        "before_case": {
+          "$ref": "#/$defs/PublishedAsset"
+        },
+        "before_workflow_proposal": {
+          "$ref": "#/$defs/ProposalReference"
+        },
+        "before_case_proposal": {
+          "$ref": "#/$defs/ProposalReference"
+        },
+        "editor_id": {
+          "format": "uuid",
+          "title": "Editor Id",
+          "type": "string"
+        },
+        "workflow_reviewer_id": {
+          "format": "uuid",
+          "title": "Workflow Reviewer Id",
+          "type": "string"
+        },
+        "case_reviewer_id": {
+          "format": "uuid",
+          "title": "Case Reviewer Id",
+          "type": "string"
+        },
+        "reason_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reason Digest",
+          "type": "string"
+        },
+        "diff_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Diff Digest",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/RevisionDifference"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Changes",
+          "type": "array"
+        },
+        "revision_number": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Revision Number",
+          "type": "integer"
+        },
+        "review_mode": {
+          "enum": ["human", "ci_fixture"],
+          "title": "Review Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authorization_digest",
+        "before_batch_id",
+        "origin_batch_id",
+        "before_source_digest",
+        "before_workflow",
+        "before_case",
+        "before_workflow_proposal",
+        "before_case_proposal",
+        "editor_id",
+        "workflow_reviewer_id",
+        "case_reviewer_id",
+        "reason_digest",
+        "diff_digest",
+        "changes",
+        "revision_number",
+        "review_mode"
+      ],
+      "title": "AssistedLineage",
+      "type": "object"
+    },
+    "DiagnosisConclusion": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "PRODUCT_DEFECT",
+            "BAD_TEST",
+            "BAD_TEST_DATA",
+            "ENVIRONMENT_FAILURE",
+            "SERVICE_ENDPOINT_FAILURE",
+            "UPSTREAM_SERVICE_FAILURE",
+            "CONTRACT_DRIFT",
+            "AUTH_FAILURE",
+            "NETWORK_FAILURE",
+            "TIMEOUT",
+            "FLAKY",
+            "CANCELLED",
+            "UNKNOWN"
+          ],
+          "title": "Classification",
+          "type": "string"
+        },
+        "error_code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Error Code",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["main", "cleanup"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "explanation": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "supporting_sequences": {
+          "items": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 100,
+          "minItems": 2,
+          "title": "Supporting Sequences",
+          "type": "array"
+        },
+        "raw_failure_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Raw Failure Preserved",
+          "type": "boolean"
+        },
+        "required_oracles_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Required Oracles Preserved",
+          "type": "boolean"
+        },
+        "changes_applied": {
+          "const": false,
+          "default": false,
+          "title": "Changes Applied",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "classification",
+        "error_code",
+        "node_id",
+        "phase",
+        "explanation",
+        "supporting_sequences"
+      ],
+      "title": "DiagnosisConclusion",
+      "type": "object"
+    },
+    "EventReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "event_type": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Event Type",
+          "type": "string"
+        },
+        "event_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Event Digest",
+          "type": "string"
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
+        "item_type": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Type"
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Name"
+        },
+        "request_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Digest"
+        }
+      },
+      "required": ["sequence", "event_type", "event_digest"],
+      "title": "EventReceipt",
+      "type": "object"
+    },
+    "GeneratedAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "design": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "design_fingerprint": {
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "compilation_fingerprint": {
+          "title": "Compilation Fingerprint",
+          "type": "string"
+        },
+        "oracle_bindings": {
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "title": "Oracle Bindings",
+          "type": "array"
+        },
+        "workflow": {
+          "$ref": "#/$defs/ReviewedWorkflow"
+        },
+        "case": {
+          "$ref": "#/$defs/ReviewedCase"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "title": "Calls",
+          "type": "array"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "variant_key",
+        "api_source",
+        "design",
+        "design_fingerprint",
+        "compilation_fingerprint",
+        "oracle_bindings",
+        "workflow",
+        "case",
+        "calls",
+        "generated_at",
+        "frozen_at"
+      ],
+      "title": "GeneratedAsset",
+      "type": "object"
+    },
+    "HostEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "skill_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Skill Digest",
+          "type": "string"
+        },
+        "prompt_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prompt Digest",
+          "type": "string"
+        },
+        "authorized_budget_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorized Budget Digest",
+          "type": "string"
+        },
+        "actual_tool_calls": {
+          "minimum": 1,
+          "title": "Actual Tool Calls",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "host",
+        "model",
+        "skill_digest",
+        "prompt_digest",
+        "authorized_budget_digest",
+        "actual_tool_calls"
+      ],
+      "title": "HostEvidence",
+      "type": "object"
+    },
+    "HostFrozenTrail": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorization Digest",
+          "type": "string"
+        },
+        "task_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Task Digest",
+          "type": "string"
+        },
+        "host": {
+          "$ref": "#/$defs/HostEvidence"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/HostToolReceipt"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Receipts",
+          "type": "array"
+        },
+        "repairs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RepairProof"
+          },
+          "maxItems": 20,
+          "title": "Repairs",
+          "type": "array"
+        },
+        "phases": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/ProcessReceipt"
+            },
+            {
+              "$ref": "#/$defs/ProcessReceipt"
+            }
+          ],
+          "title": "Phases",
+          "type": "array"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostStopReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "authorization_digest",
+        "task_digest",
+        "host",
+        "catalog_digest",
+        "receipts",
+        "phases"
+      ],
+      "title": "HostFrozenTrail",
+      "type": "object"
+    },
+    "HostModelSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "phase": {
+          "enum": ["workflow", "case", "diagnosis"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "status": {
+          "enum": ["waiting_for_review", "blocked", "diagnosed"],
+          "title": "Status",
+          "type": "string"
+        },
+        "proposal_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Proposal Ids",
+          "type": "array"
+        },
+        "reason_codes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "diagnosis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiagnosisConclusion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": ["phase", "status"],
+      "title": "HostModelSummary",
+      "type": "object"
+    },
+    "HostRevision": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "origin_batch_key": {
+          "title": "Origin Batch Key",
+          "type": "string"
+        },
+        "fixture_batch_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Fixture Batch Key"
+        },
+        "lineage": {
+          "$ref": "#/$defs/AssistedLineage"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "variant_key",
+        "origin_batch_key",
+        "fixture_batch_key",
+        "lineage"
+      ],
+      "title": "HostRevision",
+      "type": "object"
+    },
+    "HostStopReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "reason_code": {
+          "pattern": "^[A-Z][A-Z0-9_]{0,99}$",
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "first_rejected_at": {
+          "format": "date-time",
+          "title": "First Rejected At",
+          "type": "string"
+        },
+        "last_rejected_at": {
+          "format": "date-time",
+          "title": "Last Rejected At",
+          "type": "string"
+        },
+        "admitted_calls": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Admitted Calls",
+          "type": "integer"
+        },
+        "rejected_calls": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Rejected Calls",
+          "type": "integer"
+        },
+        "rejected_count_truncated": {
+          "default": false,
+          "title": "Rejected Count Truncated",
+          "type": "boolean"
+        },
+        "first_tool_name": {
+          "maxLength": 160,
+          "title": "First Tool Name",
+          "type": "string"
+        },
+        "first_request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "First Request Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "reason_code",
+        "first_rejected_at",
+        "last_rejected_at",
+        "admitted_calls",
+        "rejected_calls",
+        "first_tool_name",
+        "first_request_digest"
+      ],
+      "title": "HostStopReceipt",
+      "type": "object"
+    },
+    "HostToolReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["workflow", "case", "diagnosis"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Result Digest"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Completed At"
+        },
+        "business_success": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Success"
+        },
+        "result_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Result Bytes",
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": ["pending", "completed", "rejected", "unknown"],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason Code"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Z][A-Z0-9_]{0,99}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "resolved_by": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved By"
+        }
+      },
+      "required": [
+        "sequence",
+        "attempt_id",
+        "phase",
+        "tool_name",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "started_at",
+        "completed_at",
+        "outcome"
+      ],
+      "title": "HostToolReceipt",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "LifecycleAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "default": "ST-MCP-023",
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "environment_lifecycle",
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "target_project_id": {
+          "format": "uuid",
+          "title": "Target Project Id",
+          "type": "string"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/OperationGeneration"
+          },
+          "title": "Operations",
+          "type": "array"
+        },
+        "source_document_digest": {
+          "title": "Source Document Digest",
+          "type": "string"
+        },
+        "bound_document_digest": {
+          "title": "Bound Document Digest",
+          "type": "string"
+        },
+        "source_reused": {
+          "title": "Source Reused",
+          "type": "boolean"
+        },
+        "context": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "integration_plan": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "combined_design": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "combined_design_fingerprint": {
+          "title": "Combined Design Fingerprint",
+          "type": "string"
+        },
+        "design_composition": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "compilation_fingerprint": {
+          "title": "Compilation Fingerprint",
+          "type": "string"
+        },
+        "oracle_bindings": {
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "title": "Oracle Bindings",
+          "type": "array"
+        },
+        "workflow": {
+          "$ref": "#/$defs/ReviewedWorkflow"
+        },
+        "case": {
+          "$ref": "#/$defs/ReviewedCase"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "title": "Calls",
+          "type": "array"
+        },
+        "created_resource_name": {
+          "title": "Created Resource Name",
+          "type": "string"
+        },
+        "updated_resource_name": {
+          "title": "Updated Resource Name",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_project_id",
+        "operations",
+        "source_document_digest",
+        "bound_document_digest",
+        "source_reused",
+        "context",
+        "integration_plan",
+        "combined_design",
+        "combined_design_fingerprint",
+        "design_composition",
+        "compilation_fingerprint",
+        "oracle_bindings",
+        "workflow",
+        "case",
+        "calls",
+        "created_resource_name",
+        "updated_resource_name",
+        "generated_at",
+        "frozen_at"
+      ],
+      "title": "LifecycleAsset",
+      "type": "object"
+    },
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": ["stdio", "streamable-http"],
+          "title": "Transport",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "OperationGeneration": {
+      "additionalProperties": false,
+      "properties": {
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "operation_ref": {
+          "title": "Operation Ref",
+          "type": "string"
+        },
+        "design": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "design_fingerprint": {
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "api_source",
+        "operation_ref",
+        "design",
+        "design_fingerprint",
+        "scenario_id"
+      ],
+      "title": "OperationGeneration",
+      "type": "object"
+    },
+    "OracleBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "oracle_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Oracle Id",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "default": "main",
+          "enum": ["main", "cleanup"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "assertion_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Assertion Name",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "expected_value_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Value Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oracle_id",
+        "node_id",
+        "assertion_name",
+        "expression",
+        "expected_value_digest"
+      ],
+      "title": "OracleBinding",
+      "type": "object"
+    },
+    "ProcessReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "prompt_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prompt Digest",
+          "type": "string"
+        },
+        "authorization_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorization Digest",
+          "type": "string"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Exit Code"
+        },
+        "reason_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reason Code"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "stderr_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Stderr Digest",
+          "type": "string"
+        },
+        "stderr_bytes": {
+          "title": "Stderr Bytes",
+          "type": "integer"
+        },
+        "events": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EventReceipt"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "billed_cost": {
+          "const": "unknown",
+          "default": "unknown",
+          "title": "Billed Cost",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostModelSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "prompt_digest",
+        "authorization_digest",
+        "exit_code",
+        "reason_code",
+        "started_at",
+        "completed_at",
+        "stderr_digest",
+        "stderr_bytes"
+      ],
+      "title": "ProcessReceipt",
+      "type": "object"
+    },
+    "ProposalEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "format": "uuid",
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
+        "route": {
+          "enum": ["flow_spec", "controlled_write"],
+          "title": "Route",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": ["accepted", "pending", "rejected"],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Materialized Resource Id"
+        },
+        "content_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Fingerprint",
+          "type": "string"
+        },
+        "review_mode": {
+          "enum": ["ci_fixture", "human"],
+          "title": "Review Mode",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "format": "uuid",
+          "title": "Reviewer Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "proposal_id",
+        "route",
+        "review_status",
+        "content_fingerprint",
+        "review_mode",
+        "reviewer_id"
+      ],
+      "title": "ProposalEvidence",
+      "type": "object"
+    },
+    "ProposalReference": {
+      "additionalProperties": false,
+      "properties": {
+        "change_set_id": {
+          "format": "uuid",
+          "title": "Change Set Id",
+          "type": "string"
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
+        "route": {
+          "enum": ["flow_spec_visual", "controlled_write"],
+          "title": "Route",
+          "type": "string"
+        },
+        "content_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Fingerprint",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": ["pending", "accepted", "rejected"],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Materialized Resource Id"
+        }
+      },
+      "required": [
+        "change_set_id",
+        "route",
+        "content_fingerprint",
+        "review_status"
+      ],
+      "title": "ProposalReference",
+      "type": "object"
+    },
+    "PublishedAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": ["id", "version", "fingerprint"],
+      "title": "PublishedAsset",
+      "type": "object"
+    },
+    "RepairProof": {
+      "additionalProperties": false,
+      "properties": {
+        "failed_sequence": {
+          "title": "Failed Sequence",
+          "type": "integer"
+        },
+        "resolved_sequence": {
+          "title": "Resolved Sequence",
+          "type": "integer"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "error_code": {
+          "title": "Error Code",
+          "type": "string"
+        },
+        "changed_fields": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed Fields",
+          "type": "array"
+        },
+        "unchanged_fields_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Unchanged Fields Digest",
+          "type": "string"
+        },
+        "policy_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "failed_sequence",
+        "resolved_sequence",
+        "tool_name",
+        "error_code",
+        "changed_fields",
+        "unchanged_fields_digest",
+        "policy_digest"
+      ],
+      "title": "RepairProof",
+      "type": "object"
+    },
+    "ReviewedCase": {
+      "additionalProperties": false,
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "version": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ProposalEvidence"
+        }
+      },
+      "required": ["case", "version", "proposal"],
+      "title": "ReviewedCase",
+      "type": "object"
+    },
+    "ReviewedWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "workflow": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "version": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ProposalEvidence"
+        }
+      },
+      "required": ["workflow", "version", "proposal"],
+      "title": "ReviewedWorkflow",
+      "type": "object"
+    },
+    "RevisionDifference": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 4096,
+          "minLength": 3,
+          "pattern": "^\\$\\.(workflow|case)(?:$|[.\\[])",
+          "title": "Path",
+          "type": "string"
+        },
+        "before_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Before Digest"
+        },
+        "after_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "After Digest"
+        }
+      },
+      "required": ["path", "before_digest", "after_digest"],
+      "title": "RevisionDifference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "attempt_id": {
+      "format": "uuid",
+      "title": "Attempt Id",
+      "type": "string"
+    },
+    "authorization_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authorization Digest",
+      "type": "string"
+    },
+    "task_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Task Digest",
+      "type": "string"
+    },
+    "catalog_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Catalog Digest",
+      "type": "string"
+    },
+    "host": {
+      "$ref": "#/$defs/HostEvidence"
+    },
+    "assets": {
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GeneratedAsset"
+          },
+          {
+            "$ref": "#/$defs/LifecycleAsset"
+          }
+        ]
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Assets",
+      "type": "array"
+    },
+    "trail": {
+      "$ref": "#/$defs/HostFrozenTrail"
+    },
+    "revisions": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HostRevision"
+      },
+      "maxItems": 3,
+      "title": "Revisions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "attempt_id",
+    "authorization_digest",
+    "task_digest",
+    "catalog_digest",
+    "host",
+    "assets",
+    "trail"
+  ],
+  "title": "HostMaterialization",
+  "type": "object"
+}

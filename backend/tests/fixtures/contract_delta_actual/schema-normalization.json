@@ -1,0 +1,7 @@
+{
+  "scope": "unit_fixture_only_not_current_deployment_evidence",
+  "original_sha256": "eda71153ccf425a2282319855b90a99c2b670be0c0e958b144e35bc49c3e3530",
+  "normalized_sha256": "a02ff01b183b7ff5bf152d7902500053dbafaa3343833697864ec714aa0af633",
+  "operation": "Current strict models expand default optional fields; phase freeze digests recomputed only for the normalized unit fixture; original captured bytes remain immutable.",
+  "model_calls": 0
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "expected_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Expected Keys",
+      "type": "array"
+    },
+    "matched_keys": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Matched Keys",
+      "type": "array"
+    },
+    "model_calls": {
+      "const": 0,
+      "default": 0,
+      "title": "Model Calls",
+      "type": "integer"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    }
+  },
+  "required": [
+    "expected_keys",
+    "matched_keys",
+    "reason_codes",
+    "exit_code"
+  ],
+  "title": "CompileBoundaryReport",
+  "type": "object"
+}

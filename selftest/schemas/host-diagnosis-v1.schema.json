@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "DiagnosisConclusion": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "PRODUCT_DEFECT",
+            "BAD_TEST",
+            "BAD_TEST_DATA",
+            "ENVIRONMENT_FAILURE",
+            "SERVICE_ENDPOINT_FAILURE",
+            "UPSTREAM_SERVICE_FAILURE",
+            "CONTRACT_DRIFT",
+            "AUTH_FAILURE",
+            "NETWORK_FAILURE",
+            "TIMEOUT",
+            "FLAKY",
+            "CANCELLED",
+            "UNKNOWN"
+          ],
+          "title": "Classification",
+          "type": "string"
+        },
+        "error_code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Error Code",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["main", "cleanup"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "explanation": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "supporting_sequences": {
+          "items": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 100,
+          "minItems": 2,
+          "title": "Supporting Sequences",
+          "type": "array"
+        },
+        "raw_failure_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Raw Failure Preserved",
+          "type": "boolean"
+        },
+        "required_oracles_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Required Oracles Preserved",
+          "type": "boolean"
+        },
+        "changes_applied": {
+          "const": false,
+          "default": false,
+          "title": "Changes Applied",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "classification",
+        "error_code",
+        "node_id",
+        "phase",
+        "explanation",
+        "supporting_sequences"
+      ],
+      "title": "DiagnosisConclusion",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "flowtest-host-diagnosis-v1",
+      "default": "flowtest-host-diagnosis-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "enum": ["NOT_RUN", "pending", "diagnosed", "blocked", "error"],
+      "title": "Status",
+      "type": "string"
+    },
+    "task_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Task Digest",
+      "type": "string"
+    },
+    "authorization_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Authorization Digest"
+    },
+    "attempt_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Attempt Id"
+    },
+    "origin_batch_id": {
+      "format": "uuid",
+      "title": "Origin Batch Id",
+      "type": "string"
+    },
+    "execution_id": {
+      "format": "uuid",
+      "title": "Execution Id",
+      "type": "string"
+    },
+    "actual_tool_calls": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Actual Tool Calls",
+      "type": "integer"
+    },
+    "host": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Host",
+      "type": "string"
+    },
+    "model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "cli_version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Cli Version",
+      "type": "string"
+    },
+    "skill_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Skill Digest",
+      "type": "string"
+    },
+    "prompt_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Prompt Digest",
+      "type": "string"
+    },
+    "reason_codes": {
+      "default": [],
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 20,
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "conclusion": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiagnosisConclusion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "process_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Process Digest"
+    },
+    "tool_receipts_digest": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tool Receipts Digest"
+    },
+    "billed_cost": {
+      "const": "unknown",
+      "default": "unknown",
+      "title": "Billed Cost",
+      "type": "string"
+    },
+    "raw_failure_preserved": {
+      "const": true,
+      "default": true,
+      "title": "Raw Failure Preserved",
+      "type": "boolean"
+    },
+    "changes_applied": {
+      "const": false,
+      "default": false,
+      "title": "Changes Applied",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "status",
+    "task_digest",
+    "authorization_digest",
+    "attempt_id",
+    "origin_batch_id",
+    "execution_id",
+    "actual_tool_calls",
+    "host",
+    "model",
+    "cli_version",
+    "skill_digest",
+    "prompt_digest"
+  ],
+  "title": "DiagnosisReceipt",
+  "type": "object"
+}

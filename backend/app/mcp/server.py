@@ -5,19 +5,21 @@
 
 import json
 from collections.abc import Awaitable, Mapping
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import unquote, urlsplit
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
-from mcp.types import ToolAnnotations
-from pydantic import ValidationError
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import Field, ValidationError
 
 from app.domain.evidence_adapters import (
     DatabaseEvidenceSubmission,
     JavaEvidenceSubmission,
     JavaSourceInput,
 )
+from app.domain.flow_spec import FlowSpec
+from app.domain.flow_spec_v2 import FlowSpecV2
 from app.domain.integration_plans import (
     IntegrationPlan,
     IntegrationPlanCompilation,
@@ -68,6 +70,7 @@ from app.schemas.test_contexts import (
     ExistingAuthWorkflowSelectionRequest,
     IntegrationPlanOperationSelectionRequest,
 )
+from app.schemas.test_design_compilation import CompileTestDesignRequest, CompileTestDesignResponse
 
 MCP_INSTRUCTIONS = (
     "FlowTest MCP 提供只读项目、服务、契约、控制能力、工作流草稿和执行证据，并允许提交"
@@ -580,6 +583,7 @@ def _register_tools(server: MCPServer, client: MCPReadGatewayClient) -> None:
     _register_close_context_tool(server, client)
     _register_commit_contract_import_tool(server, client)
     _register_compile_integration_tool(server, client)
+    _register_compile_test_design_tool(server, client)
     _register_diagnose_failure_tool(server, client)
     _register_flow_spec_diff_tool(server, client)
 
@@ -875,9 +879,10 @@ def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayC
         project_id: str,
         context_id: str,
         context_revision_id: str,
-        integration_plan: IntegrationPlan,
-        compilation: IntegrationPlanCompilation,
         idempotency_key: str,
+        integration_plan: IntegrationPlan | None = None,
+        compilation: IntegrationPlanCompilation | None = None,
+        spec: FlowSpec | FlowSpecV2 | None = None,
         dry_run: bool = True,
         workflow_id: str | None = None,
         expected_revision: int | None = None,
@@ -887,27 +892,23 @@ def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayC
         operation_version_mappings: dict[str, int] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
-        spec = compilation.flow_spec
-        if spec is None:
-            return _error_payload(
-                MCPGatewayError(
-                    code="INTEGRATION_PLAN_NOT_IMPORTABLE",
-                    status_code=422,
-                    message="Integration Plan compilation has no importable FlowSpec",
-                )
-            )
+        try:
+            spec = _resolved_proposal_spec(integration_plan, compilation, spec)
+        except MCPGatewayError as error:
+            return _error_payload(error)
         payload: dict[str, Any] = {
             "project_id": project_id,
             "context_id": context_id,
             "context_revision_id": context_revision_id,
             "spec": spec.model_dump(mode="json", by_alias=True),
-            "integration_plan": integration_plan.model_dump(mode="json"),
-            "compilation": compilation.model_dump(mode="json"),
             "dry_run": dry_run,
             "service_mappings": service_mappings or {},
             "operation_mappings": operation_mappings or {},
             "operation_version_mappings": operation_version_mappings or {},
         }
+        if integration_plan is not None and compilation is not None:
+            payload["integration_plan"] = integration_plan.model_dump(mode="json")
+            payload["compilation"] = compilation.model_dump(mode="json")
         if workflow_id is not None:
             payload["workflow_id"] = workflow_id
         if expected_revision is not None:
@@ -921,6 +922,43 @@ def _register_propose_flow_draft_tool(server: MCPServer, client: MCPReadGatewayC
                 token=_request_token(ctx, client),
             )
         )
+
+
+def _resolved_proposal_spec(
+    plan: IntegrationPlan | None,
+    compilation: IntegrationPlanCompilation | None,
+    spec: FlowSpec | FlowSpecV2 | None,
+) -> FlowSpec | FlowSpecV2:
+    if (plan is None) != (compilation is None):
+        raise MCPGatewayError(
+            code="INTEGRATION_PLAN_COMPILATION_REQUIRED",
+            status_code=422,
+            message="Integration Plan 与 Compilation 必须同时提供",
+        )
+    if compilation is not None:
+        compiled_spec = compilation.flow_spec
+        if compiled_spec is None:
+            raise MCPGatewayError(
+                code="INTEGRATION_PLAN_NOT_IMPORTABLE",
+                status_code=422,
+                message="Integration Plan compilation has no importable FlowSpec",
+            )
+        if spec is not None and spec.model_dump(
+            mode="json", by_alias=True
+        ) != compiled_spec.model_dump(mode="json", by_alias=True):
+            raise MCPGatewayError(
+                code="FLOWSPEC_COMPILATION_MISMATCH",
+                status_code=422,
+                message="显式 FlowSpec 与 Integration Plan Compilation 不一致",
+            )
+        return compiled_spec
+    if spec is None:
+        raise MCPGatewayError(
+            code="FLOWSPEC_REQUIRED",
+            status_code=422,
+            message="必须提供固定 FlowSpec 或完整 Integration Plan Compilation",
+        )
+    return spec
 
 
 def _register_propose_simple_flow_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
@@ -1344,6 +1382,7 @@ def _register_coverage_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
         api_definition_id: str,
         generation_policy: dict[str, Any] | None = None,
         additional_evidence: list[dict[str, Any]] | None = None,
+        api_version: Annotated[int, Field(ge=1, strict=True)] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
@@ -1351,6 +1390,7 @@ def _register_coverage_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
                 project_id,
                 {
                     "api_definition_id": api_definition_id,
+                    "api_version": api_version,
                     "generation_policy": generation_policy or {},
                     "additional_evidence": additional_evidence or [],
                 },
@@ -1379,6 +1419,38 @@ def _register_change_impact_tool(server: MCPServer, client: MCPReadGatewayClient
         )
 
 
+def _register_compile_test_design_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
+    @server.tool(
+        name="flowtest.compile_test_design",
+        description=(
+            "只读编译冻结 Design 与 API 版本,返回待审核 FlowSpec 和未绑定 Case 模板;"
+            "需要只读与流程提案双权限。"
+        ),
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
+        structured_output=True,
+    )
+    async def compile_test_design(
+        request: CompileTestDesignRequest,
+        ctx: Context = None,  # type: ignore[assignment]
+    ) -> Annotated[CallToolResult, CompileTestDesignResponse]:
+        try:
+            result = await client.compile_test_design(request, token=_request_token(ctx, client))
+        except MCPGatewayError as error:
+            payload = _error_payload(error)
+            return CallToolResult(
+                content=[TextContent(text=json.dumps(payload, ensure_ascii=False))],
+                structuredContent=payload,
+                isError=True,
+            )
+        payload = result.model_dump(mode="json")
+        return CallToolResult(
+            content=[TextContent(text=json.dumps(payload, ensure_ascii=False))],
+            structuredContent=payload,
+        )
+
+
 def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> None:
     @server.tool(
         name="flowtest.generate_test_design",
@@ -1392,6 +1464,7 @@ def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
         api_definition_id: str,
         generation_policy: dict[str, Any] | None = None,
         additional_evidence: list[dict[str, Any]] | None = None,
+        api_version: Annotated[int, Field(ge=1, strict=True)] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
@@ -1399,6 +1472,7 @@ def _register_generate_tool(server: MCPServer, client: MCPReadGatewayClient) -> 
                 project_id,
                 {
                     "api_definition_id": api_definition_id,
+                    "api_version": api_version,
                     "generation_policy": generation_policy or {},
                     "additional_evidence": additional_evidence or [],
                 },
@@ -1450,12 +1524,13 @@ def _register_test_evidence_tool(server: MCPServer, client: MCPReadGatewayClient
     async def inspect_test_evidence(
         project_id: str,
         api_definition_id: str,
+        api_version: Annotated[int, Field(ge=1, strict=True)] | None = None,
         ctx: Context = None,  # type: ignore[assignment]
     ) -> dict[str, Any]:
         return await _tool_payload(
             client.generate_test_design(
                 project_id,
-                {"api_definition_id": api_definition_id},
+                {"api_definition_id": api_definition_id, "api_version": api_version},
                 token=_request_token(ctx, client),
             )
         )

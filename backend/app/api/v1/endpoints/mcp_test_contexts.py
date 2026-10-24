@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, status
 
 from app.api.dependencies import (
+    MCPDesignCompilationCurrent,
     MCPEvidenceCurrent,
     MCPFlowProposalCurrent,
     MCPPreviewCurrent,
@@ -47,6 +48,7 @@ from app.schemas.test_contexts import (
     JavaSourceSnapshotIngestionResponse,
     TestContextResponse,
 )
+from app.schemas.test_design_compilation import CompileTestDesignRequest, CompileTestDesignResponse
 from app.schemas.workflows import WorkflowExecutionResponse
 from app.services.durable_execution import DurableExecutionService
 from app.services.evidence_adapters import EvidenceAdapterService
@@ -58,6 +60,7 @@ from app.services.mcp_integration_plans import MCPIntegrationPlanService
 from app.services.mcp_simple_flows import MCPSimpleFlowService
 from app.services.sandbox_preview import SandboxPreviewService
 from app.services.test_contexts import TestContextService
+from app.services.test_design_compilation import TestDesignCompilationService
 
 evidence_router = APIRouter(prefix="/mcp/evidence/contexts")
 flow_router = APIRouter(prefix="/mcp/flow")
@@ -194,6 +197,17 @@ async def close_test_context(
     principal: MCPEvidenceCurrent,
 ) -> TestContextResponse:
     return await TestContextService(session).close(actor=principal.actor, context_id=context_id)
+
+
+@flow_router.post("/designs/compile", response_model=CompileTestDesignResponse)
+async def compile_test_design(
+    payload: CompileTestDesignRequest,
+    session: SessionDependency,
+    principal: MCPDesignCompilationCurrent,
+) -> CompileTestDesignResponse:
+    return await TestDesignCompilationService(session).compile(
+        actor=principal.actor, payload=payload
+    )
 
 
 @flow_router.post(

@@ -1,0 +1,117 @@
+{
+  "schema_version": "flowtest-pack-coverage-v1",
+  "scenarios": [
+    {
+      "scenario_id": "ST-API-006-project",
+      "title": "Header 层级与大小写 project",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "project",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-006-environment",
+      "title": "Header 层级与大小写 environment",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "environment",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-006-api",
+      "title": "Header 层级与大小写 api",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "api",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-006-case",
+      "title": "Header 层级与大小写 case",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "case",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-006-runtime",
+      "title": "Header 层级与大小写 runtime",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "runtime",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-006-node",
+      "title": "Header 层级与大小写 node",
+      "acceptance_ids": [
+        "ST-API-006"
+      ],
+      "variant_key": "node",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-004-pinned",
+      "title": "新版本不得改变已固定接口请求",
+      "acceptance_ids": [
+        "ST-API-004",
+        "ST-RUN-006"
+      ],
+      "variant_key": "pinned",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-011-401",
+      "title": "正常 401 错误契约与Trace",
+      "acceptance_ids": [
+        "ST-API-011"
+      ],
+      "variant_key": "401",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-011-403",
+      "title": "正常 403 错误契约与Trace",
+      "acceptance_ids": [
+        "ST-API-011",
+        "ST-API-002"
+      ],
+      "variant_key": "403",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-011-422",
+      "title": "正常 422 错误契约与Trace",
+      "acceptance_ids": [
+        "ST-API-011"
+      ],
+      "variant_key": "422",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-003-directory-environment",
+      "title": "目录与环境创建、查询、更新和精确删除",
+      "acceptance_ids": [
+        "ST-API-003",
+        "ST-API-005"
+      ],
+      "variant_key": "directory-environment",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-API-003-project",
+      "title": "创建项目、查询、更新；隔离实例销毁清理",
+      "acceptance_ids": [
+        "ST-API-003",
+        "ST-RET-001"
+      ],
+      "variant_key": "project",
+      "validation_status": "not_run"
+    }
+  ]
+}

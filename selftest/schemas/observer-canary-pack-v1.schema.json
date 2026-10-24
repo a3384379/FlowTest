@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "CanarySpec": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_variants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Acceptance Variants",
+          "type": "array"
+        },
+        "expected_reason": {
+          "title": "Expected Reason",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "fixed-core",
+            "mcp-core"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "source",
+        "expected_reason",
+        "acceptance_variants"
+      ],
+      "title": "CanarySpec",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "pack_id": {
+      "const": "observer-canaries-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/CanarySpec"
+      },
+      "maxItems": 28,
+      "minItems": 28,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "scope": {
+      "title": "Scope",
+      "type": "string"
+    },
+    "version": {
+      "const": "1.0.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_id",
+    "version",
+    "scope",
+    "scenarios"
+  ],
+  "title": "CanaryPack",
+  "type": "object"
+}

@@ -1,0 +1,252 @@
+{
+  "$defs": {
+    "HostBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "maximum_tool_calls": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Maximum Tool Calls",
+          "type": "integer"
+        },
+        "wall_seconds": {
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Wall Seconds",
+          "type": "integer"
+        },
+        "attempts": {
+          "default": 1,
+          "maximum": 1,
+          "minimum": 1,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "maximum_prompt_bytes": {
+          "maximum": 131072,
+          "minimum": 1,
+          "title": "Maximum Prompt Bytes",
+          "type": "integer"
+        },
+        "maximum_result_bytes": {
+          "maximum": 1048576,
+          "minimum": 1024,
+          "title": "Maximum Result Bytes",
+          "type": "integer"
+        },
+        "maximum_total_result_bytes": {
+          "maximum": 8388608,
+          "minimum": 1024,
+          "title": "Maximum Total Result Bytes",
+          "type": "integer"
+        },
+        "provider_cap_reference": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider Cap Reference"
+        },
+        "require_hard_provider_cap": {
+          "default": false,
+          "title": "Require Hard Provider Cap",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "maximum_tool_calls",
+        "wall_seconds",
+        "maximum_prompt_bytes",
+        "maximum_result_bytes",
+        "maximum_total_result_bytes"
+      ],
+      "title": "HostBudget",
+      "type": "object"
+    },
+    "ReadOnlyRepairPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "tool_name": {
+          "pattern": "^flowtest\\.(inspect_contract|generate_test_design|analyze_test_coverage|validate_flowspec|compile_test_design|validate_integration_plan|compile_integration_flowspec)$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "error_codes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Error Codes",
+          "type": "array"
+        },
+        "allowed_argument_fields": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Allowed Argument Fields",
+          "type": "array"
+        }
+      },
+      "required": ["tool_name", "error_codes", "allowed_argument_fields"],
+      "title": "ReadOnlyRepairPolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "authorization_id": {
+      "format": "uuid",
+      "title": "Authorization Id",
+      "type": "string"
+    },
+    "approved_by": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Approved By",
+      "type": "string"
+    },
+    "host_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Host Id",
+      "type": "string"
+    },
+    "model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "provider": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Provider",
+      "type": "string"
+    },
+    "cli_version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Cli Version",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "batch_key": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$",
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "environment_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "title": "Environment Ids",
+      "type": "array"
+    },
+    "task_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Task Digest",
+      "type": "string"
+    },
+    "skill_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Skill Digest",
+      "type": "string"
+    },
+    "authorized_data_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authorized Data Digest",
+      "type": "string"
+    },
+    "policy_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Policy Digest",
+      "type": "string"
+    },
+    "allowed_tools": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 30,
+      "minItems": 1,
+      "title": "Allowed Tools",
+      "type": "array"
+    },
+    "review_mode": {
+      "default": "human",
+      "enum": ["human", "ci_fixture"],
+      "title": "Review Mode",
+      "type": "string"
+    },
+    "reviewer_ids": {
+      "items": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Reviewer Ids",
+      "type": "array"
+    },
+    "read_only_repairs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ReadOnlyRepairPolicy"
+      },
+      "maxItems": 5,
+      "title": "Read Only Repairs",
+      "type": "array"
+    },
+    "budget": {
+      "$ref": "#/$defs/HostBudget"
+    },
+    "approved_at": {
+      "format": "date-time",
+      "title": "Approved At",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "authorization_id",
+    "approved_by",
+    "host_id",
+    "model",
+    "provider",
+    "cli_version",
+    "project_id",
+    "batch_key",
+    "environment_ids",
+    "task_digest",
+    "skill_digest",
+    "authorized_data_digest",
+    "policy_digest",
+    "allowed_tools",
+    "reviewer_ids",
+    "budget",
+    "approved_at",
+    "expires_at"
+  ],
+  "title": "HostAuthorization",
+  "type": "object"
+}

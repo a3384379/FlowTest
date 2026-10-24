@@ -93,6 +93,7 @@ class FlowSpecChangeSetResponse(BaseModel):
 
 
 class FlowSpecChangeSetDetailResponse(FlowSpecChangeSetResponse):
+    materialized_workflow_id: UUID | None = None
     spec: FlowSpec | FlowSpecV2
     validation: FlowSpecValidationResult
     compatibility: FlowSpecCompatibilityResult

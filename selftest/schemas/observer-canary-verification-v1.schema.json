@@ -1,0 +1,110 @@
+{
+  "$defs": {
+    "CanaryObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_variants": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Acceptance Variants",
+          "type": "array"
+        },
+        "matched": {
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "observer_exit_code": {
+          "title": "Observer Exit Code",
+          "type": "integer"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "acceptance_variants",
+        "observer_exit_code",
+        "reason_codes",
+        "matched"
+      ],
+      "title": "CanaryObservation",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "exit_code": {
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "model_calls": {
+      "const": 0,
+      "default": 0,
+      "title": "Model Calls",
+      "type": "integer"
+    },
+    "originals_unchanged": {
+      "title": "Originals Unchanged",
+      "type": "boolean"
+    },
+    "pack_digest": {
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "profile": {
+      "title": "Profile",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/CanaryObservation"
+      },
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "scope": {
+      "title": "Scope",
+      "type": "string"
+    },
+    "source_hashes": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Source Hashes",
+      "type": "object"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    },
+    "verifier_digest": {
+      "title": "Verifier Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "scope",
+    "pack_digest",
+    "profile",
+    "verifier_digest",
+    "source_hashes",
+    "originals_unchanged",
+    "scenarios",
+    "exit_code"
+  ],
+  "title": "CanaryReport",
+  "type": "object"
+}

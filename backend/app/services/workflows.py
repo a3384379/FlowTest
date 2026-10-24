@@ -1475,6 +1475,8 @@ class WorkflowService:
         cancellation: CancellationToken | None = None,
         iteration_debug_gate: IterationDebugGate | None = None,
     ) -> tuple[WorkflowExecution, list[WorkflowNodeExecution]]:
+        if execution.error_code == "TEST_PLAN_WORKER_LOST":
+            return execution, await self._workflows.list_node_executions(execution.id)
         token = cancellation or CancellationToken()
         if execution.cancel_requested_at is not None:
             token.cancel(force=execution.force_cancel_requested_at is not None)
@@ -1584,6 +1586,9 @@ class WorkflowService:
             limit=plan.request_budget,
             budget=shared_request_budget,
         )
+        if not await self._workflows.reserve_runtime_completion(execution.id):
+            await self._session.refresh(execution)
+            return execution, await self._workflows.list_node_executions(execution.id)
         stored_result = await self._stored_run_result(execution, result)
         nodes = self._node_models(execution.id, stored_result)
         await self._workflows.replace_node_executions(execution.id, nodes)
@@ -1873,6 +1878,8 @@ class WorkflowService:
         error_message: str,
     ) -> WorkflowExecution:
         execution = await self.load_execution_for_run(execution_id)
+        if execution.error_code == "TEST_PLAN_WORKER_LOST":
+            return execution
         execution.status = "failed"
         execution.error_code = error_code
         execution.error_message = error_message

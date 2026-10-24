@@ -170,6 +170,8 @@ class IntegrationPlanOperationSelectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     definition_id: UUID
+    api_version: int | None = Field(default=None, ge=1, strict=True)
+    contract_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     scenario_id: str | None = Field(default=None, min_length=1, max_length=160)
 
 

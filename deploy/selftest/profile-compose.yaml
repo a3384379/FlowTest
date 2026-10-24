@@ -1,0 +1,551 @@
+# Isolated native-engine profile acceptance; not a complete Full release stack.
+services:
+  runner-postgres:
+    image: ${FLOWTEST_SELFTEST_POSTGRES_IMAGE:?required}
+    labels: &id001
+      dev.flowtest.selftest.nonce: ${FLOWTEST_SELFTEST_STACK_NONCE:?required}
+    networks:
+      - runner-data
+    environment:
+      POSTGRES_USER: flowtest
+      POSTGRES_DB: flowtest
+      POSTGRES_PASSWORD: ${FLOWTEST_SELFTEST_RUNNER_DB_PASSWORD:?required}
+    volumes:
+      - runner-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=64MB
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U flowtest -d flowtest
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.75"
+  runner-redis:
+    image: ${FLOWTEST_SELFTEST_REDIS_IMAGE:?required}
+    labels: *id001
+    networks:
+      - runner-data
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - runner-queue:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.75"
+  runner-minio:
+    image: ${FLOWTEST_SELFTEST_MINIO_IMAGE:?required}
+    labels: *id001
+    networks:
+      - runner-data
+    environment:
+      MINIO_ROOT_USER: selftest
+      MINIO_ROOT_PASSWORD: ${FLOWTEST_SELFTEST_RUNNER_S3_PASSWORD:?required}
+      MINIO_BROWSER: "off"
+    command:
+      - server
+      - /data
+    volumes:
+      - runner-artifacts:/data
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://127.0.0.1:9000/minio/health/live
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.75"
+  runner-migrate:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - runner-data
+    environment: &id002
+      FLOWTEST_RUNTIME_PROFILE: ${FLOWTEST_SELFTEST_PROFILE:?required}
+      FLOWTEST_SELFTEST_FIXTURE_RUN_DEPTH: "0"
+      FLOWTEST_ENVIRONMENT: local
+      FLOWTEST_DEBUG: "false"
+      FLOWTEST_FEATURE_TEST_ASSETS_ENABLED: "true"
+      FLOWTEST_FEATURE_ADVANCED_WORKFLOWS_ENABLED: "true"
+      FLOWTEST_FEATURE_INTEGRATION_FLOW_ENABLED: "true"
+      FLOWTEST_REDACTION_MODE: "off"
+      FLOWTEST_RATE_LIMIT_ENABLED: "false"
+      FLOWTEST_FEATURE_DATA_NODES_ENABLED: "true"
+      FLOWTEST_OTEL_ENABLED: "false"
+      FLOWTEST_SECRET_KEY: ${FLOWTEST_SELFTEST_RUNNER_KEY:?required}
+      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_SELFTEST_RUNNER_ENCRYPTION_KEY:?required}
+      FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: selftest-a@example.com
+      FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_SELFTEST_RUNNER_PASSWORD:?required}
+      FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:${FLOWTEST_SELFTEST_RUNNER_DB_PASSWORD:?required}@runner-postgres:5432/flowtest
+      FLOWTEST_REDIS_URL: redis://runner-redis:6379/0
+      FLOWTEST_CELERY_BROKER_URL: redis://runner-redis:6379/1
+      FLOWTEST_CELERY_RESULT_BACKEND: redis://runner-redis:6379/2
+      FLOWTEST_S3_ENDPOINT_URL: http://runner-minio:9000
+      FLOWTEST_S3_ACCESS_KEY: selftest
+      FLOWTEST_S3_SECRET_KEY: ${FLOWTEST_SELFTEST_RUNNER_S3_PASSWORD:?required}
+      FLOWTEST_S3_BUCKET: selftest-artifacts
+    command:
+      - alembic
+      - upgrade
+      - head
+    depends_on:
+      runner-postgres: &id003
+        condition: service_healthy
+      runner-redis: &id004
+        condition: service_healthy
+      runner-minio: &id005
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.75"
+  runner:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - runner-data
+      - runner-control
+    environment:
+      <<: *id002
+      FLOWTEST_CORS_ORIGINS: ${FLOWTEST_SELFTEST_CORS_ORIGINS:-["http://localhost:3000","http://localhost:5173"]}
+      FLOWTEST_SELFTEST_BINDINGS: ${FLOWTEST_SELFTEST_BINDINGS:-[]}
+      FLOWTEST_SELFTEST_PRINCIPALS: ${FLOWTEST_SELFTEST_PRINCIPALS:-[]}
+      FLOWTEST_SELFTEST_PROBE_GRANTS: ${FLOWTEST_SELFTEST_PROBE_GRANTS:-[]}
+      FLOWTEST_SELFTEST_EXTRA_TEMPLATES: ${FLOWTEST_SELFTEST_EXTRA_TEMPLATES:-[]}
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+    ports:
+      - 127.0.0.1:${FLOWTEST_SELFTEST_RUNNER_PORT:?required}:8000
+    depends_on:
+      runner-postgres: *id003
+      runner-redis: *id004
+      runner-minio: *id005
+      runner-migrate:
+        condition: service_completed_successfully
+    healthcheck: &id010
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/live',timeout=3)
+      interval: 3s
+      timeout: 5s
+      retries: 50
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+  runner-worker:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - runner-data
+    environment: *id002
+    command:
+      - celery
+      - -A
+      - app.tasking.celery_app.celery_app
+      - worker
+      - --loglevel=WARNING
+      - --concurrency=1
+      - --queues=${FLOWTEST_SELFTEST_WORKER_QUEUES:?required}
+      - --hostname=runner-worker@%h
+      - --beat
+      - --schedule=/tmp/flowtest-selftest-beat
+    depends_on:
+      runner:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery --broker "$$FLOWTEST_CELERY_BROKER_URL" inspect ping --destination runner-worker@$$HOSTNAME
+          --timeout 4 | grep -q pong
+      interval: 5s
+      timeout: 8s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+  runner-worker-data:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - runner-data
+    environment: *id002
+    command:
+      - celery
+      - -A
+      - app.tasking.celery_app.celery_app
+      - worker
+      - --loglevel=WARNING
+      - --concurrency=1
+      - --queues=data
+      - --hostname=runner-worker-data@%h
+    depends_on:
+      runner:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery --broker "$$FLOWTEST_CELERY_BROKER_URL" inspect ping --destination runner-worker-data@$$HOSTNAME
+          --timeout 4 | grep -q pong
+      interval: 5s
+      timeout: 8s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+    profiles:
+      - full
+  target-postgres:
+    image: ${FLOWTEST_SELFTEST_POSTGRES_IMAGE:?required}
+    labels: *id001
+    networks:
+      - target-data
+    environment:
+      POSTGRES_USER: flowtest
+      POSTGRES_DB: flowtest
+      POSTGRES_PASSWORD: ${FLOWTEST_SELFTEST_TARGET_DB_PASSWORD:?required}
+    volumes:
+      - target-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=64MB
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U flowtest -d flowtest
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.75"
+  target-redis:
+    image: ${FLOWTEST_SELFTEST_REDIS_IMAGE:?required}
+    labels: *id001
+    networks:
+      - target-data
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    volumes:
+      - target-queue:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.75"
+  target-minio:
+    image: ${FLOWTEST_SELFTEST_MINIO_IMAGE:?required}
+    labels: *id001
+    networks:
+      - target-data
+    environment:
+      MINIO_ROOT_USER: selftest
+      MINIO_ROOT_PASSWORD: ${FLOWTEST_SELFTEST_TARGET_S3_PASSWORD:?required}
+      MINIO_BROWSER: "off"
+    command:
+      - server
+      - /data
+    volumes:
+      - target-artifacts:/data
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - http://127.0.0.1:9000/minio/health/live
+      interval: 2s
+      timeout: 3s
+      retries: 45
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.75"
+  target-migrate:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - target-data
+    environment: &id006
+      FLOWTEST_RUNTIME_PROFILE: ${FLOWTEST_SELFTEST_PROFILE:?required}
+      FLOWTEST_SELFTEST_FIXTURE_RUN_DEPTH: "1"
+      FLOWTEST_SELFTEST_BINDINGS: ${FLOWTEST_SELFTEST_TARGET_BINDINGS:-[]}
+      FLOWTEST_ENVIRONMENT: local
+      FLOWTEST_DEBUG: "false"
+      FLOWTEST_FEATURE_TEST_ASSETS_ENABLED: "true"
+      FLOWTEST_FEATURE_ADVANCED_WORKFLOWS_ENABLED: "true"
+      FLOWTEST_FEATURE_INTEGRATION_FLOW_ENABLED: "true"
+      FLOWTEST_REDACTION_MODE: "off"
+      FLOWTEST_RATE_LIMIT_ENABLED: "false"
+      FLOWTEST_FEATURE_DATA_NODES_ENABLED: "true"
+      FLOWTEST_OTEL_ENABLED: "false"
+      FLOWTEST_SECRET_KEY: ${FLOWTEST_SELFTEST_TARGET_KEY:?required}
+      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_SELFTEST_TARGET_ENCRYPTION_KEY:?required}
+      FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: selftest-b@example.com
+      FLOWTEST_ACCESS_TOKEN_MINUTES: ${FLOWTEST_SELFTEST_TARGET_ACCESS_TOKEN_MINUTES:-15}
+      FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_SELFTEST_TARGET_PASSWORD:?required}
+      FLOWTEST_DATABASE_URL: postgresql+asyncpg://flowtest:${FLOWTEST_SELFTEST_TARGET_DB_PASSWORD:?required}@target-postgres:5432/flowtest
+      FLOWTEST_REDIS_URL: redis://target-redis:6379/0
+      FLOWTEST_CELERY_BROKER_URL: redis://target-redis:6379/1
+      FLOWTEST_CELERY_RESULT_BACKEND: redis://target-redis:6379/2
+      FLOWTEST_S3_ENDPOINT_URL: http://target-minio:9000
+      FLOWTEST_S3_ACCESS_KEY: selftest
+      FLOWTEST_S3_SECRET_KEY: ${FLOWTEST_SELFTEST_TARGET_S3_PASSWORD:?required}
+      FLOWTEST_S3_BUCKET: selftest-artifacts
+    command:
+      - alembic
+      - upgrade
+      - head
+    depends_on:
+      target-postgres: &id007
+        condition: service_healthy
+      target-redis: &id008
+        condition: service_healthy
+      target-minio: &id009
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: "0.75"
+  target:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - target-data
+      - target-control
+    environment: *id006
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+    ports:
+      - 127.0.0.1:${FLOWTEST_SELFTEST_TARGET_PORT:?required}:8000
+    depends_on:
+      target-postgres: *id007
+      target-redis: *id008
+      target-minio: *id009
+      target-migrate:
+        condition: service_completed_successfully
+    healthcheck: *id010
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+  target-worker:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - target-data
+    environment: *id006
+    command:
+      - celery
+      - -A
+      - app.tasking.celery_app.celery_app
+      - worker
+      - --loglevel=WARNING
+      - --concurrency=1
+      - --queues=${FLOWTEST_SELFTEST_WORKER_QUEUES:?required}
+      - --hostname=target-worker@%h
+      - --beat
+      - --schedule=/tmp/flowtest-selftest-beat
+    depends_on:
+      target:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery --broker "$$FLOWTEST_CELERY_BROKER_URL" inspect ping --destination target-worker@$$HOSTNAME
+          --timeout 4 | grep -q pong
+      interval: 5s
+      timeout: 8s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+  target-worker-data:
+    image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+      - target-data
+    environment: *id006
+    command:
+      - celery
+      - -A
+      - app.tasking.celery_app.celery_app
+      - worker
+      - --loglevel=WARNING
+      - --concurrency=1
+      - --queues=data
+      - --hostname=target-worker-data@%h
+    depends_on:
+      target:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery --broker "$$FLOWTEST_CELERY_BROKER_URL" inspect ping --destination target-worker-data@$$HOSTNAME
+          --timeout 4 | grep -q pong
+      interval: 5s
+      timeout: 8s
+      retries: 30
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
+    profiles:
+      - full
+  mock-target:
+    image: ${FLOWTEST_SELFTEST_FIXTURE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - execution
+    environment:
+      FLOWTEST_SELFTEST_JOURNAL_PATH: /journal/selftest.sqlite3
+    volumes:
+      - fixture-journal:/journal
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.75"
+  observer:
+    image: ${FLOWTEST_SELFTEST_FIXTURE_IMAGE:?required}
+    labels: *id001
+    networks:
+      - management
+      - observer-control
+    command:
+      - uvicorn
+      - app.selftest:create_observer_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8081"
+      - --no-access-log
+    environment:
+      FLOWTEST_SELFTEST_JOURNAL_PATH: /journal/selftest.sqlite3
+      FLOWTEST_SELFTEST_OBSERVER_TOKEN: ${FLOWTEST_SELFTEST_OBSERVER_TOKEN:?required}
+    ports:
+      - 127.0.0.1:${FLOWTEST_SELFTEST_OBSERVER_PORT:?required}:8081
+    volumes:
+      - fixture-journal:/journal
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.75"
+networks:
+  execution:
+    internal: true
+    labels: *id001
+    ipam:
+      config:
+        - subnet: ${FLOWTEST_SELFTEST_SUBNET:?required}
+  management:
+    internal: true
+    labels: *id001
+  runner-data:
+    internal: true
+    labels: *id001
+  target-data:
+    internal: true
+    labels: *id001
+  runner-control:
+    labels: *id001
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+  target-control:
+    labels: *id001
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+  observer-control:
+    labels: *id001
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: 127.0.0.1
+volumes:
+  runner-data:
+    labels: *id001
+  target-data:
+    labels: *id001
+  runner-queue:
+    labels: *id001
+  target-queue:
+    labels: *id001
+  runner-artifacts:
+    labels: *id001
+  target-artifacts:
+    labels: *id001
+  fixture-journal:
+    labels: *id001

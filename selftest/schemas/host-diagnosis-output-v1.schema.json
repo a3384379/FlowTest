@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "DiagnosisConclusion": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "classification": {
+          "enum": [
+            "PRODUCT_DEFECT",
+            "BAD_TEST",
+            "BAD_TEST_DATA",
+            "ENVIRONMENT_FAILURE",
+            "SERVICE_ENDPOINT_FAILURE",
+            "UPSTREAM_SERVICE_FAILURE",
+            "CONTRACT_DRIFT",
+            "AUTH_FAILURE",
+            "NETWORK_FAILURE",
+            "TIMEOUT",
+            "FLAKY",
+            "CANCELLED",
+            "UNKNOWN"
+          ],
+          "title": "Classification",
+          "type": "string"
+        },
+        "error_code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Error Code",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": ["main", "cleanup"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "explanation": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "supporting_sequences": {
+          "items": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 100,
+          "minItems": 2,
+          "title": "Supporting Sequences",
+          "type": "array"
+        },
+        "raw_failure_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Raw Failure Preserved",
+          "type": "boolean"
+        },
+        "required_oracles_preserved": {
+          "const": true,
+          "default": true,
+          "title": "Required Oracles Preserved",
+          "type": "boolean"
+        },
+        "changes_applied": {
+          "const": false,
+          "default": false,
+          "title": "Changes Applied",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "classification",
+        "error_code",
+        "node_id",
+        "phase",
+        "explanation",
+        "supporting_sequences"
+      ],
+      "title": "DiagnosisConclusion",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "phase": {
+      "const": "diagnosis",
+      "default": "diagnosis",
+      "title": "Phase",
+      "type": "string"
+    },
+    "status": {
+      "enum": ["diagnosed", "blocked"],
+      "title": "Status",
+      "type": "string"
+    },
+    "proposal_ids": {
+      "default": [],
+      "maxItems": 0,
+      "minItems": 0,
+      "title": "Proposal Ids",
+      "type": "array"
+    },
+    "reason_codes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "diagnosis": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiagnosisConclusion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": ["status"],
+  "title": "DiagnosisOutput",
+  "type": "object"
+}

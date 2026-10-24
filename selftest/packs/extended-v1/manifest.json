@@ -1,0 +1,33 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "extended-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-EXT-if-miss",
+    "ST-EXT-switch-default",
+    "ST-EXT-foreach-empty",
+    "ST-EXT-loop-not-array",
+    "ST-EXT-loop-min-items",
+    "ST-EXT-loop-max-items",
+    "ST-EXT-loop-break",
+    "ST-EXT-loop-continue",
+    "ST-EXT-while",
+    "ST-EXT-while-limit",
+    "ST-EXT-retry-three",
+    "ST-EXT-retry-exhausted",
+    "ST-EXT-poll-terminal",
+    "ST-EXT-poll-budget",
+    "ST-EXT-main-cleanup-failure",
+    "ST-EXT-parallel-branches",
+    "ST-EXT-try-caught",
+    "ST-EXT-try-unmatched",
+    "ST-EXT-submit-poll"
+  ],
+  "files": {
+    "api-definitions.json": "16962801d0675490f4085ebac94cece6c45b65d62c6ad485178df41c9bf4796a",
+    "workflows.json": "4302f62980fd6246a93f8d9746825709f2479ebf365e3c429a8a4c5c31d8b24f",
+    "expectations.json": "f9b6e89d88bcd16a62d08ac5a66025dd84fafdbf459e72de7b7e1b9ce6b25d82"
+  }
+}

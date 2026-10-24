@@ -16,7 +16,7 @@ from app.api.dependencies import get_test_plan_dispatcher, get_workflow_coordina
 from app.core.database import get_session
 from app.core.errors import AppError
 from app.core.security import password_service
-from app.core.storage import StoredObject
+from app.core.storage import ObjectAvailability, StoredObject
 from app.domain.tasking import webhook_signature
 from app.domain.test_assets import definition_fingerprint
 from app.main import app
@@ -468,6 +468,9 @@ class MemoryObjectStorage:
 
     async def get(self, *, key: str) -> StoredObject:
         return self.objects[key]
+
+    async def availability(self, *, key: str) -> ObjectAvailability:
+        return ObjectAvailability.AVAILABLE if key in self.objects else ObjectAvailability.MISSING
 
     async def delete(self, *, key: str) -> None:
         self.objects.pop(key, None)

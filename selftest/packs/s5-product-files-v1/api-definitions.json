@@ -1,0 +1,67 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-API-008-product-files",
+      "source_id": "f1071e07-f710-59fc-814f-ff413ec6f529",
+      "name": "login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "7c4be67b-941c-5d30-91ee-60409c3b0bb3",
+          "name": "upload_file",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/files",
+            "body_kind": "multipart",
+            "body": {
+              "fields": {},
+              "files": [
+                {
+                  "field": "file",
+                  "artifact_id": "00000000-0000-4000-8000-000000000801"
+                }
+              ]
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "d442f257-2363-5fb8-a695-d0ab5efd1fd5",
+          "name": "download_file",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/files/{{uploaded_file_id}}",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "pack_id": "initialization-boundaries-v1",
+  "version": "1.0.0",
+  "scenario_ids": [
+    "ST-INIT-concurrent",
+    "ST-INIT-partial",
+    "ST-INIT-unknown"
+  ],
+  "runtime_seconds": 600,
+  "request_budget": 500,
+  "provenance": "local_untrusted",
+  "claims_native_execution": false,
+  "scope": "真实子进程/公开原生安装接口；固定基准仅选首个echo模板，证明同逻辑安装不重复。"
+}

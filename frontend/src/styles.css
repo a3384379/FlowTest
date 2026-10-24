@@ -104,6 +104,10 @@ body {
   font-size: 12px;
   color: var(--ft-text-secondary);
 }
+.global-organization-select {
+  width: 148px;
+  min-width: 112px;
+}
 .global-project-select {
   min-width: 156px;
 }
@@ -176,6 +180,10 @@ body {
     width: min(25vw, 180px);
     min-width: 80px;
   }
+  .global-organization-select {
+    width: 112px;
+    min-width: 96px;
+  }
   .global-project-select {
     width: 120px;
     min-width: 100px;
@@ -205,7 +213,7 @@ body {
     min-width: 96px;
   }
   .global-search {
-    width: min(42vw, 180px);
+    width: min(24vw, 128px);
     min-width: 64px;
   }
   .app-shell .topbar {

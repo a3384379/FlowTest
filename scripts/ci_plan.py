@@ -46,9 +46,47 @@ GOVERNANCE_FILES = frozenset(
         "scripts/ci_summary.py",
         "scripts/required_gate.py",
         "scripts/run_targeted_tests.py",
+        "scripts/selftest_ci.py",
+        "scripts/selftest/verify.py",
+        "scripts/selftest/verify_generation_provenance.py",
+        "scripts/selftest/contracts.py",
+        "scripts/selftest/local_stack.py",
+        "backend/tests/test_selftest_ci_trust.py",
     }
 )
-GOVERNANCE_PREFIXES = (".github/workflows/", ".github/actions/")
+GOVERNANCE_PREFIXES = (
+    ".github/workflows/",
+    ".github/actions/",
+    "selftest/packs/",
+    "selftest/schemas/",
+    "deploy/selftest/",
+    "scripts/selftest/",
+)
+MCP_GENERATION_PATHS = (
+    "backend/app/api/v1/endpoints/self_tests",
+    "backend/app/core/self_tests",
+    "backend/app/models/self_tests",
+    "backend/app/repositories/self_tests",
+    "backend/app/schemas/self_tests",
+    "backend/app/services/self_test",
+    "backend/app/domain/self_tests",
+    "backend/app/mcp/",
+    "backend/app/services/mcp_",
+    "backend/app/services/test_engineering",
+    "backend/app/services/test_design",
+    "backend/app/services/integration_plans",
+    "backend/app/services/flow_spec",
+    "backend/app/domain/test_design",
+    "backend/app/domain/test_engineering",
+    "backend/app/domain/integration_plans",
+    "backend/app/domain/flow_spec",
+    "frontend/src/features/self-test/",
+    "skills/",
+    "scripts/selftest/",
+    "selftest/",
+    "deploy/selftest/",
+    "docs/self-verification/product-workspace.md",
+)
 FRONTEND_SHARED = (
     "frontend/src/lib/",
     "frontend/src/app/",
@@ -209,6 +247,13 @@ class Routing:
         else:
             self.tier = "full"
             self.reasons.add(f"未知路径保守执行完整验收: {path}")
+        self.selftest(path)
+
+    def selftest(self, path: str) -> None:
+        if path.startswith(MCP_GENERATION_PATHS):
+            self.tier = _tier_max(self.tier, "integration")
+            self.domains.update(("selftest", "compose", "skills"))
+            self.reasons.add("MCP/设计/自测变更需真实协议生成与独立来源核验")
 
     def deploy(self, path: str) -> None:
         if path in DEPLOY_IMAGE_INPUTS:

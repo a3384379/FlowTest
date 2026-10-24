@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ai import AIChangeItem, AIChangeSet
@@ -23,9 +23,21 @@ class AIChangeSetRepository:
         return await self._session.get(AIChangeSet, change_set_id)
 
     async def get_change_set_for_update(self, change_set_id: UUID) -> AIChangeSet | None:
+        if self._session.get_bind().dialect.name == "sqlite":
+            # SQLite ignores FOR UPDATE. Acquire its transaction-wide write lock
+            # before reading pending state, without changing content or timestamps.
+            await self._session.execute(
+                update(AIChangeSet)
+                .where(AIChangeSet.id == change_set_id)
+                .values(id=AIChangeSet.id, updated_at=AIChangeSet.updated_at)
+                .execution_options(synchronize_session=False)
+            )
         return (
             await self._session.execute(
-                select(AIChangeSet).where(AIChangeSet.id == change_set_id).with_for_update()
+                select(AIChangeSet)
+                .where(AIChangeSet.id == change_set_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
 

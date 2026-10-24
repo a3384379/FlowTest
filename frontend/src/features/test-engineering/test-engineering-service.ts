@@ -96,8 +96,26 @@ export type TestDesignDocument = {
   review_requirements: string[]
 }
 
+export type FrozenGenerationOrigin = {
+  api_definition_id: string
+  api_version: number
+  contract_fingerprint: string
+  generation_policy: {
+    max_scenarios: number
+    include_negative: boolean
+    include_auth: boolean
+    include_state: boolean
+    include_data_constraints: boolean
+    pairwise_enabled: boolean
+  }
+  evidence: unknown[]
+  evidence_fingerprints: string[]
+  generator_build: string
+}
+
 export type TestEngineeringGeneration = {
   fingerprint: string
+  origin?: FrozenGenerationOrigin | null
   design: TestDesignDocument
   persisted: false
   contract_completeness: string
@@ -155,11 +173,15 @@ export async function listTestEngineeringEnvironments(projectId: string): Promis
 export async function generateTestDesign(
   projectId: string,
   apiDefinitionId: string,
+  apiVersion?: number,
 ): Promise<TestEngineeringGeneration> {
   return (
     await apiClient.post<TestEngineeringGeneration>(
       `/projects/${projectId}/test-engineering/generate`,
-      { api_definition_id: apiDefinitionId },
+      {
+        api_definition_id: apiDefinitionId,
+        ...(apiVersion === undefined ? {} : { api_version: apiVersion }),
+      },
     )
   ).data
 }

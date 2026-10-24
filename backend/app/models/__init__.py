@@ -61,6 +61,7 @@ from app.models.runner_fabric import (
     RunnerTask,
 )
 from app.models.sandbox_preview import SandboxPreviewApproval
+from app.models.self_tests import SelfTestBatch, SelfTestInstallation, SelfTestScenarioResult
 from app.models.service_targets import Service, ServiceEndpoint
 from app.models.tasking import ServiceToken, TestPlan, TestPlanItem, TestPlanRun, TestPlanRunItem
 from app.models.test_assets import (
@@ -154,6 +155,9 @@ __all__ = [
     "SandboxPreviewApproval",
     "SchemaArtifact",
     "Secret",
+    "SelfTestBatch",
+    "SelfTestInstallation",
+    "SelfTestScenarioResult",
     "SemanticGapWaiver",
     "Service",
     "ServiceAccount",

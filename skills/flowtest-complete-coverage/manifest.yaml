@@ -12,13 +12,15 @@ required_tools:
 - flowtest.generate_test_design
 - flowtest.propose_test_design
 optional_tools:
+- flowtest.compile_test_design
 - flowtest.inspect_source_evidence
 - flowtest.inspect_project_readiness
 - flowtest.propose_test_plan_update
 required_scopes:
 - mcp:read
 - mcp:write
-optional_scopes: []
+optional_scopes:
+- mcp:flow:propose
 stages:
 - select_project
 - inspect_evidence

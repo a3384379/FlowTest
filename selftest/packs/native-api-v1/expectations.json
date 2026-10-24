@@ -1,0 +1,719 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-API-006-project",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "project",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-006-environment",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "environment",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-006-api",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "api",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-006-case",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "case",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-006-runtime",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "runtime",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-006-node",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false,
+            "synthetic_precedence_header": {
+              "value": "node",
+              "count": 1
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-004-pinned",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_value",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "frozen-v1",
+            "actual": "frozen-v1"
+          }
+        ],
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions",
+        "fixture_journal"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-011-401",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 401,
+            "actual": 401
+          },
+          {
+            "node_id": "assert_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "AUTHENTICATION_REQUIRED",
+            "actual": "AUTHENTICATION_REQUIRED"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "negative_request",
+            "status_code": 401,
+            "error_code": "AUTHENTICATION_REQUIRED",
+            "trace_id": "$BATCH-error-401"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-011-403",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 403,
+            "actual": 403
+          },
+          {
+            "node_id": "assert_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "PROJECT_FORBIDDEN",
+            "actual": "PROJECT_FORBIDDEN"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "negative_request",
+            "status_code": 403,
+            "error_code": "PROJECT_FORBIDDEN",
+            "trace_id": "$BATCH-error-403"
+          }
+        ],
+        "resource_absences": [
+          {
+            "project_id": "00000000-0000-4000-8000-000000000001",
+            "resource_kind": "environments",
+            "absent_names": [
+              "$BATCH-denied"
+            ]
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-011-422",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 422,
+            "actual": 422
+          },
+          {
+            "node_id": "assert_code",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "VALIDATION_ERROR",
+            "actual": "VALIDATION_ERROR"
+          }
+        ],
+        "error_envelopes": [
+          {
+            "node_id": "negative_request",
+            "status_code": 422,
+            "error_code": "VALIDATION_ERROR",
+            "trace_id": "$BATCH-error-422"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-003-directory-environment",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_create_folder",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "assert_name_create_folder",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-folder-created",
+            "actual": "$BATCH-folder-created"
+          },
+          {
+            "node_id": "assert_list_folders",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_patch_folder",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_name_patch_folder",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-folder-updated",
+            "actual": "$BATCH-folder-updated"
+          },
+          {
+            "node_id": "assert_delete_folder",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          },
+          {
+            "node_id": "assert_create_environment",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "assert_name_create_environment",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-env-created",
+            "actual": "$BATCH-env-created"
+          },
+          {
+            "node_id": "assert_list_environments",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_patch_environment",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_name_patch_environment",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-env-updated",
+            "actual": "$BATCH-env-updated"
+          },
+          {
+            "node_id": "assert_delete_environment",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 204,
+            "actual": 204
+          }
+        ],
+        "resource_absences": [
+          {
+            "project_id": "00000000-0000-4000-8000-000000000001",
+            "resource_kind": "folders",
+            "absent_names": [
+              "$BATCH-folder-created",
+              "$BATCH-folder-updated"
+            ]
+          },
+          {
+            "project_id": "00000000-0000-4000-8000-000000000001",
+            "resource_kind": "environments",
+            "absent_names": [
+              "$BATCH-env-created",
+              "$BATCH-env-updated"
+            ]
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-API-003-project",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_create_project",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "assert_name_create_project",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-project-created",
+            "actual": "$BATCH-project-created"
+          },
+          {
+            "node_id": "assert_get_project",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_patch_project",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_name_patch_project",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "$BATCH-project-updated",
+            "actual": "$BATCH-project-updated"
+          },
+          {
+            "node_id": "assert_grant_observer",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          }
+        ],
+        "project_state": {
+          "organization_id": "00000000-0000-4000-8000-000000000002",
+          "created_by_id": "00000000-0000-4000-8000-000000000003",
+          "name": "$BATCH-project-updated",
+          "disposal_binding_nonce": "$BINDING_NONCE"
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-API-006-project",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-006-environment",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-006-api",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-006-case",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-006-runtime",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-006-node",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "header",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-004-pinned",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "frozen-v1",
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-011-401",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-011-403",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-011-422",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-003-directory-environment",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-API-003-project",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    }
+  ]
+}

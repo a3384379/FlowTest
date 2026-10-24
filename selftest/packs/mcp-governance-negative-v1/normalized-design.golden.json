@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "intent": {
+    "key": "synthetic.governance",
+    "objective": "合成治理验证, 不执行发布运行",
+    "actors": [],
+    "preconditions": [],
+    "acceptance_criteria": ["只允许已批准草稿"],
+    "evidence_refs": [],
+    "confidence": 1.0,
+    "deterministic": true
+  },
+  "knowledge_graph": {"nodes": [], "edges": []},
+  "state_model": null,
+  "scenarios": [],
+  "oracles": [{
+    "id": "status",
+    "kind": "status",
+    "expression": "$.status",
+    "operator": "equals",
+    "expected": 200,
+    "confidence": 1.0,
+    "source_ref": null,
+    "evidence_refs": [],
+    "source_type": null,
+    "deterministic": true,
+    "requires_review": false,
+    "applies_to": []
+  }],
+  "coverage": {"entries": []},
+  "test_case_refs": [],
+  "evidence_refs": [],
+  "warnings": [],
+  "confidence": 1.0,
+  "review_requirements": []
+}

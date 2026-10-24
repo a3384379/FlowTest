@@ -76,12 +76,13 @@ CONTINUOUS_SKILL_PROFILES = (
             "flowtest.propose_test_design",
         ),
         (
+            "flowtest.compile_test_design",
             "flowtest.inspect_source_evidence",
             "flowtest.inspect_project_readiness",
             "flowtest.propose_test_plan_update",
         ),
         ("mcp:read", "mcp:write"),
-        (),
+        ("mcp:flow:propose",),
         (
             "select_project",
             "inspect_evidence",

@@ -1,0 +1,19 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "engine-golden-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-GOLDEN-schema",
+    "ST-GOLDEN-header-json",
+    "ST-GOLDEN-file",
+    "ST-GOLDEN-explicit-status",
+    "ST-GOLDEN-min-items"
+  ],
+  "files": {
+    "api-definitions.json": "375b1d31df91dce7c939403715a20927bbe66719ce087faa29180e9c40614afa",
+    "workflows.json": "3270359b6d6941fc001b89bf66b3b29ecad29c08fcf52dc1148851adc10bdb06",
+    "expectations.json": "ddd7ea212ecef0e17f59be064c284b5bb3f360120e3a057df28f0c546174494b"
+  }
+}

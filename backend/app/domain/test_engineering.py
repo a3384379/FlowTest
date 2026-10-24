@@ -471,7 +471,7 @@ class OracleInferenceEngine:
             oracles.append(auth_oracle)
             if auth_oracle.requires_review:
                 warnings.append("Contract 未声明认证失败状态码,认证 Oracle 需要审核")
-        oracles.extend(_response_schema_oracles(contract, evidence, scenarios))
+        oracles.extend(_response_schema_oracles(contract, evidence, scenarios, oracles))
         return oracles, warnings
 
     def _success_oracle(
@@ -1554,6 +1554,7 @@ def _response_schema_oracles(
     contract: OperationContract,
     evidence: EvidenceBundle,
     scenarios: list[ScenarioCandidate],
+    status_oracles: list[OracleSpec],
 ) -> list[OracleSpec]:
     result: list[OracleSpec] = []
     for status, response in sorted(contract.responses.items()):
@@ -1574,14 +1575,40 @@ def _response_schema_oracles(
                 confidence=1,
                 evidence_refs=evidence_ids,
                 source_type=EvidenceSourceType.CONTRACT,
-                applies_to=[
-                    scenario.id
-                    for scenario in scenarios
-                    if scenario.expected_category == "success" and status.startswith("2")
-                ],
+                applies_to=_schema_scenarios(status, scenarios, status_oracles),
             )
         )
     return result
+
+
+def _schema_scenarios(
+    status: str, scenarios: list[ScenarioCandidate], status_oracles: list[OracleSpec]
+) -> list[str]:
+    result: list[str] = []
+    for scenario in scenarios:
+        if scenario.expected_category == "success":
+            if status.startswith("2"):
+                result.append(scenario.id)
+            continue
+        candidates = [
+            oracle
+            for oracle in status_oracles
+            if oracle.kind == "status" and scenario.id in oracle.applies_to
+        ]
+        if len(candidates) == 1 and _exact_schema_status(candidates[0], status):
+            result.append(scenario.id)
+    return result
+
+
+def _exact_schema_status(oracle: OracleSpec, status: str) -> bool:
+    return (
+        oracle.deterministic
+        and not oracle.requires_review
+        and oracle.operator == "equals"
+        and isinstance(oracle.expected, int)
+        and not isinstance(oracle.expected, bool)
+        and str(oracle.expected) == status
+    )
 
 
 def _valid_request(fields: list[EvidenceFinding]) -> ScenarioRequest:

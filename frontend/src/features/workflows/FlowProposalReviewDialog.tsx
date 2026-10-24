@@ -1,3 +1,4 @@
+import SelfTestProposalBacklink from '../self-test/SelfTestProposalBacklink'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
@@ -239,6 +240,13 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           title={flowProposalSafetyTitle(isRepairProposal)}
           description="Production、Staging 与未分类环境永久不进入 Preview；预览复用正式执行引擎，并受固定请求、数据行、并发、运行时与 Cleanup 预算约束。"
         />
+        {displayedVisual && (
+          <SelfTestProposalBacklink
+            projectId={props.projectId}
+            proposalId={proposalId}
+            route="flow_spec_visual"
+          />
+        )}
         <Select
           aria-label="流程提案"
           style={{ width: '100%' }}

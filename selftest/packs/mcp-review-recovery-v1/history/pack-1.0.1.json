@@ -1,0 +1,54 @@
+{
+  "pack_id": "mcp-review-recovery-v1",
+  "version": "1.0.1",
+  "sdk_version": "2.2.0",
+  "protocol_version": "2026-07-28",
+  "max_requests": 500,
+  "max_tool_calls": 100,
+  "max_runtime_seconds": 600,
+  "actions": [
+    "preview_cancel",
+    "unknown_publish",
+    "stale_proposal",
+    "stale_approval",
+    "concurrent_accept",
+    "partial_resume"
+  ],
+  "transports": [
+    "stdio",
+    "streamable-http"
+  ],
+  "preview_budget": {
+    "max_nodes": 10,
+    "max_requests": 2,
+    "max_dataset_rows": 1,
+    "max_parallelism": 1,
+    "max_runtime_seconds": 30
+  },
+  "preview_expected_requests": 1,
+  "preview_expected_status": "cancelled",
+  "preview_expected_cleanup": "passed",
+  "stale_approval_code": "MCP_APPROVAL_CONTENT_CHANGED",
+  "concurrent_code": "MCP_CHANGE_ITEM_ALREADY_REVIEWED",
+  "stale_proposal_code": "WORKFLOW_DRAFT_CONFLICT",
+  "design_input": {
+    "intent": {
+      "key": "synthetic.governance",
+      "objective": "合成治理验证, 不执行发布运行",
+      "acceptance_criteria": [
+        "只允许已批准草稿"
+      ]
+    },
+    "oracles": [
+      {
+        "id": "status",
+        "kind": "status",
+        "expression": "$.status",
+        "operator": "equals",
+        "expected": 200,
+        "confidence": 1.0
+      }
+    ]
+  },
+  "publication_status": 200
+}
