@@ -23,7 +23,7 @@
 | Mock / Observer          | 独立业务与管理网络，共享私有 journal 卷  | 同 Full                    |
 | 发布端口                 | 仅 A / B API 与 Observer，绑定 127.0.0.1 | 同 Full                    |
 
-本入口仅启动当前固定包需要的 worker，不启用宿主 Docker socket、外部模型或未授权出站目标。
+本入口仅启动当前固定包需要的 worker，不启用宿主 Docker socket、外部模型或未授权出站目标。general worker 在此隔离验收形态启用内嵌 beat，实际运行 15 秒一次的 worker 租约回收；Full 的独立 data worker 不重复运行 beat。正式 Full 使用原有独立 beat，Compact 使用原有内嵌 beat。
 
 ## 运行
 
@@ -70,3 +70,9 @@ Full 使用另一个新目录并传 `--profile full`，其余步骤相同。
 
 固定资源见 [core-v1](../../selftest/packs/core-v1/manifest.json)、
 [extended-v1](../../selftest/packs/extended-v1/manifest.json)。
+
+## S5 与完整非模型入口
+
+上述命令只展示核心原生链。完整入口见[CI 分波次与证据白名单](../../docs/self-verification/ci-acceptance.md)，包含 S5 合成文件、B 自身文件 API、并行 Cookie、15 个一般运行故障，以及 Full/Compact 的 4 个 Celery worker 故障。Standalone 不运行 Celery 专属场景，其余适用包仍必跑。
+
+每包保持 500 请求、600 秒、100 工具调用与递归深度 1；所有处置依赖场景在精确所属栈移除后才最终通过。模型保持关闭，确定性 MCP、独立 O 和实际原生执行分别留证；本地通过不授予远程 Required Gate。最新实际构建与未执行边界见[当前验证记录](../../docs/self-verification/current-validation.md)。

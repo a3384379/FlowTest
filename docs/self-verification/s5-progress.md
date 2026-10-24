@@ -8,7 +8,7 @@
 - 两个并行分支使用各自客户端和 Cookie，确定性屏障证明并发峰值 2，核对六条请求及 left/right 合成 Cookie，不扩张任意 Cookie 采集。
 - TestPlanRun 增加 worker owner 与租约截止，原子 claim、心跳和完成阶段 fencing；旧 worker 的迟到结果不能覆盖已判定失效的执行。取消和准备串行化，取消后不再创建正式任务。未知写入不重放；已知完成保留，其余以 `TEST_PLAN_WORKER_LOST` 失败。
 - 新增 Alembic `20261024_0068` upgrade/downgrade，以及既有 Standalone 表增量升级路径；不完整历史表不盲建索引。
-- 映射预检覆盖初始化、已有安装预览、H 物化及原生 dispatch：环境、默认 ServiceEndpoint、目标身份或类别漂移即阻断。PostgreSQL 锁定实际路由行，标准错误保留 trace ID。
+- 映射预检覆盖初始化、已有安装预览、H 物化及原生 dispatch：环境、默认 ServiceEndpoint、目标身份或类别漂移即阻断。PostgreSQL 先取得与原生执行一致的项目准入锁，再锁定实际环境与端点行，避免外键和配额锁形成死锁，同时保留新增端点的阻挡；标准错误保留 trace ID。
 - 新增产品边界 27、编译/Quick/FlowSpec 草稿 38、独立 O 抗误绿 28，纳入所有适用部署形态 CI。全部 schema 已从 37 个具名强类型模型同步导出。
 
 ## worker 部署与迁移
@@ -19,4 +19,4 @@ Standalone 本地后台执行不启用 Celery 租约，因此 Celery 双 worker 
 
 ## 验收解释
 
-所有当前来源本地完整入口、GUI、原始/独立双 JUnit 和精确清理结果见[当前验证记录](current-validation.md)。`local_untrusted` 不授予远程 Required Gate。旧稳定版本不支持新自测 API 的交叉组合以能力探测明确不适用，不能降级契约来制造通过。真实模型、真人审核及 assisted 质量验收继续 NOT_RUN。
+当前来源的本地完整入口、保留原构建摘要的 GUI、原始/独立双 JUnit 和精确清理结果见[当前验证记录](current-validation.md)。`local_untrusted` 不授予远程 Required Gate。旧稳定版本不支持新自测 API 的交叉组合以能力探测明确不适用，不能降级契约来制造通过。真实模型、真人审核及 assisted 质量验收继续 NOT_RUN。
