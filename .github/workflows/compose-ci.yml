@@ -29,7 +29,8 @@ jobs:
       matrix:
         profile: [standalone, compact, full]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Includes the cold runtime build, sequential bounded packs and final cleanup.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
