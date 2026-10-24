@@ -235,6 +235,21 @@ def test_other_exit_two_finding_is_not_accepted_as_disposal_only(harness, monkey
     monkeypatch.setattr(driver, "command", damaged)
     assert subject.run_probe_stages(paths, []) == 2
     assert not (paths.directory / "probe-governance42").exists()
+    failure = paths.public / "probe-protocol34-before-disposal-failure"
+    reason = read_json(failure / "verification.json")
+    assert reason["exit_code"] == 2
+    assert reason["findings"][0]["code"] == "SELFTEST_CI_PROBE_REPORT_NOT_REPRODUCIBLE"
+    observed = read_json(failure / "observed-verification.json")
+    assert {row["code"] for row in observed["findings"]} == {
+        "OWNED_ASSET_DISPOSAL_PENDING",
+        "OTHER_INCOMPLETE",
+    }
+    assert {item.name for item in failure.iterdir()} == {
+        "verification.json",
+        "observed-verification.json",
+        "execution.junit.xml",
+        "verification.junit.xml",
+    }
 
 
 @pytest.mark.parametrize("changed", ["observation", "first_report"])

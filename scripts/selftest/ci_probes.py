@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from scripts.selftest.contracts import Builds, Contract, Sha256, canonical_digest
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.io import HarnessError, read_json, write_json
 from scripts.selftest.local_stack import BuildReceipt, StackBinding, _verify_removed
 from scripts.selftest.mcp_governance_contracts import Manifest
-from scripts.selftest.mcp_governance_verify import Report
+from scripts.selftest.mcp_governance_verify import Report, write_incomplete_reports
 from scripts.selftest.mcp_negative_contracts import ProtocolManifest
 from scripts.selftest.mcp_probe_contracts import ProbeAuthority
 from scripts.selftest.mcp_probe_evidence import DeployedEvidence
@@ -155,6 +156,27 @@ def _first(bundle: ProbeBundle) -> ProbeFirstReceipt:
     )
 
 
+def _archive_probe_failure(
+    paths: RunPaths,
+    pack: ProbePack,
+    phase: Literal["before-disposal", "finalization"],
+    error: BaseException,
+) -> None:
+    destination = paths.public / f"probe-{pack}-{phase}-failure"
+    write_incomplete_reports(destination, failure_codes(error)[0])
+    try:
+        source = _output(paths, pack) / "public/verification.json"
+        if source.stat().st_size > 1048576:
+            raise HarnessError("SELFTEST_CI_PROBE_PUBLIC_REPORT_TOO_LARGE")
+        report = Report.model_validate(read_json(source))
+    except (HarnessError, OSError, ValueError) as report_error:
+        write_incomplete_reports(
+            destination / "source-report-unavailable", failure_codes(report_error)[0]
+        )
+    else:
+        write_json(destination / "observed-verification.json", report)
+
+
 def run_probe_stages(paths: RunPaths, stages: list[StageResult]) -> int:
     from scripts.selftest_ci import StageResult, command
 
@@ -176,7 +198,8 @@ def run_probe_stages(paths: RunPaths, stages: list[StageResult]) -> int:
             write_json(public / "ci-first.json", _first(bundle))
             # Keep the original blocked report immutable alongside post-disposal output.
             write_json(public / "verification.pre-disposal.json", bundle.report)
-        except (HarnessError, OSError, ValueError, subprocess.SubprocessError):
+        except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as error:
+            _archive_probe_failure(paths, pack, "before-disposal", error)
             if code is None:
                 stages.append(StageResult(f"{pack}-before-disposal", 2))
             return 2
@@ -281,7 +304,8 @@ def finalize_probe_stages(
             bundle = _after_finalize(paths, pack, first)
             _archive(paths, pack, bundle)
             results.append(BatchSummary(pack, 0, "passed", bundle.manifest.batch_key))
-        except (HarnessError, OSError, ValueError, subprocess.SubprocessError):
+        except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as error:
+            _archive_probe_failure(paths, pack, "finalization", error)
             stages.append(StageResult(f"{pack}-verification", 2))
             results.append(BatchSummary(pack, 2, "blocked"))
     return tuple(results)

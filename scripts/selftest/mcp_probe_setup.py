@@ -229,9 +229,9 @@ async def provision(
         second = await _project(api, nonce, "b")
         api.set_organization(str(first.organization_id))
         reviewer, reviewer_token = await _reviewer(api, first, nonce)
-        keys = ("reader_a", "reader_b", "limited", "revoked", "expired", "writer")
+        keys = ("expired", "reader_a", "reader_b", "limited", "revoked", "writer")
         accounts: dict[str, tuple[UUID, str]] = {}
-        expiry = datetime.now(UTC) + timedelta(seconds=3)
+        expiry = datetime.now(UTC) + timedelta(seconds=30)
         for key in keys:
             scopes = ["project:read"] if key == "limited" else ["mcp:read"]
             if key == "writer":

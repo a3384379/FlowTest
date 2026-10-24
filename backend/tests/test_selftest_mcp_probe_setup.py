@@ -1,5 +1,6 @@
 """Only real public ASGI APIs provision fixture identities; no business SQL counts."""
 
+import asyncio
 import hashlib
 import json
 import sys
@@ -58,8 +59,9 @@ def binding() -> StackBinding:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("account_delay", [0.0, 1.0])
 async def test_public_fixture_provision_separate_reviewer_revocation_expiry_and_scoped_inventory(
-    tasking_context, monkeypatch, tmp_path
+    tasking_context, monkeypatch, tmp_path, account_delay
 ):
     from scripts.selftest import mcp_probe_setup
 
@@ -69,6 +71,15 @@ async def test_public_fixture_provision_separate_reviewer_revocation_expiry_and_
     class API(original_api):
         def __init__(self, url, budget, token="", organization=None):
             super().__init__(url, budget, token, organization, transport=transport)
+
+        async def request(
+            self, method, path, payload=None, *, idempotency_key=None, allow_status=()
+        ):
+            if method == "POST" and path.endswith("/service-accounts"):
+                await asyncio.sleep(account_delay)
+            return await super().request(
+                method, path, payload, idempotency_key=idempotency_key, allow_status=allow_status
+            )
 
     monkeypatch.setattr(mcp_probe_setup, "ProbeAPI", API)
     original_login = mcp_probe_setup._login
@@ -169,6 +180,23 @@ async def test_existing_output_is_not_reused_or_rewritten(monkeypatch, tmp_path)
     with pytest.raises(FileExistsError):
         await mcp_probe_run.run_deployed(tmp_path, tmp_path, "protocol34")
     assert json.loads(marker.read_text()) == {"original": True}
+
+
+@pytest.mark.asyncio
+async def test_probe_driver_retains_safe_failure_code_without_exception_payload(
+    monkeypatch, tmp_path
+):
+    from scripts.selftest import mcp_probe_run
+
+    async def rejected(*_, **__):
+        raise HarnessError("SELFTEST_HTTP_422:SERVICE_ACCOUNT_EXPIRY_INVALID:trace=private-value")
+
+    monkeypatch.setattr(mcp_probe_run, "_prepare_claimed", rejected)
+    output = tmp_path / "failed"
+    assert await mcp_probe_run.run_deployed(tmp_path, output, "protocol34") == 2
+    report = read_json(output / "public/verification.json")
+    assert report["findings"][0]["code"] == "SELFTEST_HTTP_422_SERVICE_ACCOUNT_EXPIRY_INVALID"
+    assert all("private-value" not in path.read_text() for path in (output / "public").iterdir())
 
 
 def test_config_reload_preserves_existing_principals_grants_and_other_settings(

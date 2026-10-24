@@ -122,3 +122,32 @@ def test_observer_removes_old_green_and_rejects_inconsistent_child(tmp_path, mon
     )
     assert result.exit_code == 2
     assert result.findings[0].code == "CONFIGURED_OBSERVER_PROCESS_UNAVAILABLE"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_group_cli_projects_safe_failure_without_overwriting_existing_output(
+    tmp_path, monkeypatch, capsys, existing
+):
+    output = tmp_path / "group"
+    prior = group.GroupResult(exit_code=0, reports=())
+    if existing:
+        write_json(output / "group-verification.json", prior)
+    original = (output / "group-verification.json").read_bytes() if existing else None
+
+    async def rejected(*_):
+        if existing:
+            raise FileExistsError("private-value")
+        raise HarnessError("SELFTEST_HTTP_422:SERVICE_ACCOUNT_EXPIRY_INVALID:trace=private-value")
+
+    monkeypatch.setattr(group, "run", rejected)
+    monkeypatch.setattr(
+        sys, "argv", ["configured", "--directory", str(tmp_path), "--output", str(output)]
+    )
+    assert group.main() == (1 if existing else 2)
+    assert "private-value" not in capsys.readouterr().out
+    if existing:
+        assert (output / "group-verification.json").read_bytes() == original
+    else:
+        report = group.GroupResult.model_validate(read_json(output / "group-verification.json"))
+        assert report.exit_code == 2 and not report.reports
+        assert report.reason_codes == ("SELFTEST_HTTP_422_SERVICE_ACCOUNT_EXPIRY_INVALID",)

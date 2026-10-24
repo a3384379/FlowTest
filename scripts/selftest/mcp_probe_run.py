@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 from scripts.selftest.contracts import canonical_digest
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.io import HarnessError, JsonObject, read_json, write_json
 from scripts.selftest.local_stack import StackBinding, _verify_removed
 from scripts.selftest.mcp_container_http import container_http_gateway
@@ -264,10 +265,15 @@ async def run_deployed(directory: Path, output: Path, kind: ProbePack) -> int:
         model = ProtocolManifest if kind == "protocol34" else Manifest
         manifest = model.model_validate(read_json(output / "public/manifest.json"))
         report = verify_deployed(manifest, evidence, prepared.authority)
-    except (HarnessError, ValidationError, OSError, ValueError, TimeoutError, ExceptionGroup):
-        return write_incomplete_reports(
-            output / "public", "PROBE_SETUP_OR_DRIVER_INCOMPLETE"
-        ).exit_code
+    except (
+        HarnessError,
+        ValidationError,
+        OSError,
+        ValueError,
+        TimeoutError,
+        ExceptionGroup,
+    ) as error:
+        return write_incomplete_reports(output / "public", failure_codes(error)[0]).exit_code
     write_json(output / "public/evidence.json", evidence)
     write_deployed_reports(report, evidence, output / "public")
     return report.exit_code

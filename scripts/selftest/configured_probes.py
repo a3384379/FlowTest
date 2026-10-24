@@ -18,6 +18,7 @@ from scripts.selftest.configured_probe_observer import (
     observe,
 )
 from scripts.selftest.contracts import Contract, canonical_digest
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.io import HarnessError, read_json, write_json
 from scripts.selftest.local_stack import StackBinding, verify_binding
 from scripts.selftest.mcp_fault_setup import PreparedFault
@@ -40,6 +41,7 @@ class PreparedGroup:
 class GroupResult(Contract):
     exit_code: Literal[0, 1, 2]
     reports: tuple[ConfiguredReport, ...]
+    reason_codes: tuple[str, ...] = ()
     claim: Literal["configured_mcp_negative_packs_only"] = "configured_mcp_negative_packs_only"
     trust: Literal["local_untrusted"] = "local_untrusted"
 
@@ -184,11 +186,19 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--finalize-disposable", action="store_true")
     args = parser.parse_args()
-    result = (
-        finalize(args.directory, args.output)
-        if args.finalize_disposable
-        else asyncio.run(run(args.directory, args.output))
-    )
+    existing = args.output.exists()
+    try:
+        result = (
+            finalize(args.directory, args.output)
+            if args.finalize_disposable
+            else asyncio.run(run(args.directory, args.output))
+        )
+    except FileExistsError as error:
+        result = GroupResult(exit_code=1, reports=(), reason_codes=failure_codes(error))
+    except (HarnessError, OSError, ValueError, TimeoutError, ExceptionGroup) as error:
+        result = GroupResult(exit_code=2, reports=(), reason_codes=failure_codes(error))
+        if not existing:
+            write_json(args.output / "group-verification.json", result)
     print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
     return result.exit_code
 

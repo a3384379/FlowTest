@@ -65,6 +65,18 @@ describe('OrganizationGovernancePage', () => {
     expect(useAuthStore.getState().organizationId).toBe(nextId)
   })
 
+  it('activates the displayed default organization when explicitly selecting the same option', async () => {
+    renderPage()
+    const browser = userEvent.setup()
+    await browser.click(await screen.findByRole('combobox', { name: '治理组织' }))
+    await browser.click(
+      screen.getByText(`${organization.name} · ${organization.slug}`, {
+        selector: '.ant-select-item-option-content',
+      }),
+    )
+    expect(useAuthStore.getState().organizationId).toBe(organizationId)
+  })
+
   it('renders organization roles, quota governance, security and redacted support bundle', async () => {
     renderPage()
     expect(await screen.findByText('组织治理')).toBeVisible()

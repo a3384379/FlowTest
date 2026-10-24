@@ -254,7 +254,7 @@ function OrganizationGovernanceSelected({
           <Select
             aria-label="治理组织"
             value={selected.id}
-            onChange={onSelect}
+            onSelect={onSelect}
             options={organizations.map((organization) => ({
               value: organization.id,
               label: `${organization.name} · ${organization.slug}`,

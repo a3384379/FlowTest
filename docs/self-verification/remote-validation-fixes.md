@@ -9,7 +9,7 @@
 - 自测专用 DockerHub MinIO 镜像实际返回 pull denied，未进入场景。改用主部署已经采用的 `cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1`，同步其用户和 bash TCP 健康检查。继续核对容器健康、镜像 ID 和网络/卷归属，未放宽隔离或证据判断。
 - Linux 浏览器稳定复现 N10 失败：打开组织治理页自动选择首个组织，触发全局缓存清理、子树重建并卸载项目下拉框。默认展示治理组织改为只读选择；用户明确选择治理组织时才更新全局作用域。增加先失败再通过的回归，并保留显式选择与离开页面后的组织选择。原 N10 浏览器断言未修改，修复后通过。
 
-## 新来源的本地补验
+## 冻结 46 的本地补验
 
 应用摘要 `77bab6458cdf165ba18847eff080673e3b5b0ffb6e71bba72de61c27cef6883c`；Standalone H/O 摘要 `bfb71f14d8613b164956bdeaaf5c97b2b7f5578023c24902f49a4b1c5b6a06be`；Full/Compact H/O 摘要 `c5bf5b287ae9dec06590c1346e487be24b8ed1a017e67cc66be7b34874f1b75d`。Compose 文件另由 profile proof 的实际摘要约束。应用镜像重新构建并包含更新后的依赖。
 
@@ -21,6 +21,20 @@
 Linux Chromium 1.62.1 导航与编辑器两份原有 E2E 共 13 项通过，包含 1280×800、1440×900、1920×1080 的 27 个状态及真实执行/历史快照。截图基线仅更新新增组织选择器所在的前 56 行像素，原图其余像素逐一保持相同；原 `maxDiffPixelRatio: 0.003`、mask 和业务断言均未修改，最终不带 `--update-snapshots` 的完整断言运行退出码 0。审阅记录在本地 `frozen46/public/header-baseline-review.json`，截图在 `output/playwright/selftest-s5-editor46/`。该补验使用独立 localhost、生产前端构建和隔离 Standalone 后端，私有测试配置未修改应用安全策略；较早非 localhost 测试地址缺少安全上下文、代理 Host 丢失端口等试验失败保留，未计通过。
 
 最新提交的全量远程检查、三形态安全工件和 Windows 原生包以 PR 实际运行结果及本地 `output/selftest-validation-20261024-s5/remote/` 补充记录为准；本文件不预告成功。
+
+## 后续探针与组织切换补修
+
+提交 `bcf7f2e`、tested merge `2135c723153e329d83ca8f49767dd7b9cdaa2d1d` 的 Bootstrap `40072818119` 已实际通过后端全量（3386 passed、20 skipped、91.64%）、15 项数据库集成、源依赖和镜像安全、Windows、升级回退、Quick、Skill 及 Standalone 全套自测。Windows 实际预检确认 55 个 MCP 工具；下载的外层工件摘要与包内发布 SHA-256 均匹配。该提交 Full 在协议探针阶段失败，Compact 基线完成但配置类扩展失败；前端全量有 4 项组织切换前置操作失败，Compose 有 S28 弹窗超时及 Service Account header 首次不匹配。均保留原失败工件，不能用成功子检查推导整体通过。
+
+- 独立 Full 栈重新执行 34 个协议场景，实际全部 matched，销毁后独立核验退出码 0，未复现远程该次失败。单独的 `diagnostic_subset` 证据位于本地 `frozen47/public/`，不能替代远程整轮。
+- 对共享的探针账号初始化增加真实接口延迟回归：每次创建账号延迟 1 秒，旧实现稳定收到 `422 SERVICE_ACCOUNT_EXPIRY_INVALID`。原因是 3 秒期限在其它账号创建前就开始计算。改为首先创建待过期账号、初始期限为 30 秒，并继续等待真实时钟过期；不移动批次截止时间，不重放未知写入，也不放宽过期账号的拒绝断言。协议、故障、质量等配置共用该夹具。旧远程工件缺少细分原因，尚不能据此断言这就是两次远程失败的唯一原因。
+- 复用原有安全错误码提取器，将已有类型化失败报告和双 JUnit 投影到原有 CI 公开白名单目录；协议和配置组的初始化原因不再只剩通用错误。只投影错误码及已采集的类型化报告，不公开原始异常文本、SDK 帧、环境或令牌。已有输出仍拒绝重跑和覆盖，缺报告、额外 finding、伪成功及最终处置失败继续阻断。
+- 治理组织使用显式选择事件，选择当前已经显示的默认选项也会激活正确的组织 header；浏览页面本身不改变全局域。新增先失败再通过的同选项回归。4 项跨组织迟到响应测试也改为实际选择组织，原缓存失效范围和会话隔离断言保留；全部使用合成响应，模型调用 0。
+- S28 原测试选择资产后多按一次 Escape，会在下拉框已关闭时取消父弹窗。改为等待下拉框关闭并确认父弹窗仍可见，再提交；映射 201、覆盖矩阵及证据断言全部保留。Linux 原有 N10、S28、Service Account 三个业务用例及登录 setup 共 4 项，`--retries=0`，实际一次通过；后者保持关闭令牌截图、视频和 trace。
+
+该次 H/CI 核心专项 91 项、输出复用与配置报告补验 40 项通过；前端四个相关文件 81 项、跨组织迟到响应 4 项通过，格式、lint、类型和构建通过。修改后的前端完整检查实际为 194 文件、1542 测试通过，450.28 秒，覆盖率 statements 86.81%、branches 82.70%、functions 86.74%、lines 89.42%，日志 `/tmp/flowtest-s5-frontend-coverage48-final.log`，退出码 0。远程新提交验收仍须看最终实际结果，不从本地通过推断。应用摘要保持 `77bab6458cdf165ba18847eff080673e3b5b0ffb6e71bba72de61c27cef6883c`；新 H/O 摘要为 Standalone `ceda375cd795a4005aa45b4b225a59c6e2e588df5c75e02d17c56c9bcad4186d`、Full/Compact `55e6df698617e722362458b7fb24a4f5453c80b5aa956c7929a7875ad503d26b`。原冻结 45/46/47 收据不改写。
+
+新 H/O 的真实 Compact 配置组另完成 14 个故障、18 个质量、12 个审核场景，共 44 个，均由独立 O 匹配。处置前保持待清理退出码 2，精确处置后原 CLI finalizer 退出码 0；所属基础栈和 Compact 栈均清理完成。该 `selected_suites` 补验位于本地 `output/selftest-validation-20261024-s5/frozen49/public/`，不冒充完整三形态远程运行。
 
 ## 验收边界
 

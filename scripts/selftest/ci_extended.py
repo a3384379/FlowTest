@@ -19,6 +19,7 @@ from scripts.selftest.ci_extended_reports import (
 )
 from scripts.selftest.configured_probes import GroupResult, _only_disposal
 from scripts.selftest.contracts import Contract
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.io import HarnessError, read_json, write_json
 from scripts.selftest.local_stack import StackBinding
 
@@ -149,6 +150,51 @@ def require_pending(paths: RunPaths, spec: JourneySpec) -> None:
         raise HarnessError("SELFTEST_EXTENDED_PRE_DISPOSAL_INCOMPLETE:" + spec.label)
 
 
+def _archive_configured_failure(paths: RunPaths, error: BaseException) -> None:
+    destination = paths.public / "configured-failure"
+    write_json(
+        destination / "driver-failure.json",
+        GroupResult(exit_code=2, reports=(), reason_codes=failure_codes(error)),
+    )
+    try:
+        source = paths.directory / "configured/group-verification.json"
+        if source.stat().st_size > 1048576:
+            raise HarnessError("SELFTEST_EXTENDED_PUBLIC_REPORT_TOO_LARGE")
+        report = GroupResult.model_validate(read_json(source))
+    except (HarnessError, OSError, ValueError) as source_error:
+        write_json(
+            destination / "source-unavailable.json",
+            GroupResult(exit_code=2, reports=(), reason_codes=failure_codes(source_error)),
+        )
+    else:
+        write_json(destination / "observed-verification.json", report)
+
+
+def _configured_group(paths: RunPaths, stages: list[StageResult]) -> list[str]:
+    args = [
+        "scripts.selftest.configured_probes",
+        "--directory",
+        str(paths.stack),
+        "--output",
+        str(paths.directory / "configured"),
+    ]
+    try:
+        _command(paths, stages, "configured-before-disposal", args, accepted=(2,))
+        group = GroupResult.model_validate(
+            read_json(paths.directory / "configured/group-verification.json")
+        )
+        if (
+            group.reason_codes
+            or len(group.reports) != 3
+            or not all(_only_disposal(r) for r in group.reports)
+        ):
+            raise HarnessError("SELFTEST_EXTENDED_CONFIGURED_INCOMPLETE")
+    except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as error:
+        _archive_configured_failure(paths, error)
+        raise
+    return args
+
+
 def run_wave(paths: RunPaths, source: Path, stages: list[StageResult]) -> tuple[PackSummary, ...]:
     from scripts.selftest_ci import stop_owned_stack
 
@@ -175,19 +221,7 @@ def run_wave(paths: RunPaths, source: Path, stages: list[StageResult]) -> tuple[
             paths.directory / "badtargets/round-1", paths.public, initial_binding
         )
         # All grants recreate the runner before any disposal-dependent pack freezes it.
-        group_args = [
-            "scripts.selftest.configured_probes",
-            "--directory",
-            str(paths.stack),
-            "--output",
-            str(paths.directory / "configured"),
-        ]
-        _command(paths, stages, "configured-before-disposal", group_args, accepted=(2,))
-        group = GroupResult.model_validate(
-            read_json(paths.directory / "configured/group-verification.json")
-        )
-        if len(group.reports) != 3 or not all(_only_disposal(r) for r in group.reports):
-            raise HarnessError("SELFTEST_EXTENDED_CONFIGURED_INCOMPLETE")
+        group_args = _configured_group(paths, stages)
         for spec in JOURNEYS:
             _command(
                 paths,

@@ -13,9 +13,34 @@ sys.path.insert(0, str(Path(__file__).parents[2]))
 
 from scripts import selftest_ci as driver
 from scripts.selftest import ci_extended, ci_extended_reports
-from scripts.selftest.io import HarnessError, write_json
+from scripts.selftest.io import HarnessError, read_json, write_json
 from test_selftest_ci_runner_lineage import binding
 from test_selftest_review_boundary_verify import FIXTURE, bundle
+
+
+def test_configured_failure_archives_only_existing_typed_report_and_safe_codes(tmp_path):
+    from scripts.selftest.configured_probes import GroupResult
+
+    paths = driver.RunPaths.create(tmp_path / "wave")
+    source = paths.directory / "configured/group-verification.json"
+    observed = GroupResult(
+        exit_code=2, reports=(), reason_codes=("SELFTEST_HTTP_422_SERVICE_ACCOUNT_EXPIRY_INVALID",)
+    )
+    write_json(source, observed)
+    (source.parent / "private.env").write_text("synthetic-private-value")
+    ci_extended._archive_configured_failure(
+        paths, HarnessError("SELFTEST_EXTENDED_CONFIGURED_INCOMPLETE:trace=private-value")
+    )
+    public = paths.public / "configured-failure"
+    assert read_json(public / "observed-verification.json") == observed.model_dump(mode="json")
+    assert read_json(public / "driver-failure.json")["reason_codes"] == [
+        "SELFTEST_EXTENDED_CONFIGURED_INCOMPLETE"
+    ]
+    assert {path.name for path in public.iterdir()} == {
+        "driver-failure.json",
+        "observed-verification.json",
+    }
+    assert all("private-value" not in path.read_text() for path in public.iterdir())
 
 
 @pytest.mark.parametrize(

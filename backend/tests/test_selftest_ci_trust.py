@@ -264,7 +264,7 @@ def test_finalizer_failure_cannot_be_hidden_by_a_preexisting_passed_summary(
     monkeypatch.setattr(driver, "stop_owned_stack", lambda _: "completed")
 
     def summaries(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [driver.BatchSummary("native-api-round-1", 0, "passed")]
 
     monkeypatch.setattr(driver, "archive_summaries", summaries)
@@ -313,7 +313,7 @@ def test_profile_and_source_cleanup_preserve_separate_logs(
     )
 
     def summaries(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [
             driver.BatchSummary(label, 0, "passed")
             for label in (
@@ -346,7 +346,7 @@ def test_a_successful_subset_cannot_hide_an_absent_required_round(
     monkeypatch.setattr(driver, "stop_owned_stack", lambda _: "completed")
 
     def summaries(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [driver.BatchSummary("fixed-core-round-1", 0, "passed")]
 
     monkeypatch.setattr(driver, "archive_summaries", summaries)
@@ -381,7 +381,7 @@ def test_compact_requires_runtime_fault_evidence_even_if_every_native_round_pass
     monkeypatch.setattr(driver, "stop_owned_stack", lambda _: "completed")
 
     def summaries(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [
             driver.BatchSummary(label, 0, "passed")
             for label in (
@@ -428,7 +428,7 @@ def test_required_p0_supplements_cannot_be_satisfied_by_old_six_rounds(
     monkeypatch.setattr(driver, "stop_owned_stack", lambda _: "completed")
 
     def historical(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [
             driver.BatchSummary(label, 0, "passed")
             for label in (
@@ -468,7 +468,7 @@ def test_native_success_cannot_replace_exact_negative_probe_pair(
     )
 
     def successful(_: Path, public: Path) -> list[driver.BatchSummary]:
-        public.mkdir(parents=True)
+        public.mkdir(parents=True, exist_ok=True)
         return [
             driver.BatchSummary(label, 0, "passed")
             for label in (
