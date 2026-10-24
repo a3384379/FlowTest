@@ -1108,3 +1108,54 @@ async def test_native_queue_transaction_failure_can_retry_frozen_plan_without_se
     async with product.native.session_maker() as session:
         assert len((await session.scalars(select(PlanRun))).all()) == 1
         assert len((await session.scalars(select(Suite))).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_batch_cannot_be_revived_by_observer_success_receipt(
+    product: ProductContext,
+) -> None:
+    installed = await _ready(product)
+    batch = await product.post(
+        product.root + f"/installations/{installed['id']}/runs",
+        {},
+        key="cancelled-seal-refusal",
+        status=202,
+    )
+    cancelled = await product.post(product.root + f"/runs/{batch['id']}/cancel", {})
+    artifact = {"id": str(uuid4()), "sha256": "0" * 64, "kind": "verification"}
+    receipt = {
+        "lease_token": "0" * 64,
+        "nonce": "0" * 64,
+        "manifest_digest": batch["manifest_digest"],
+        "resource_digest": batch["resource_digest"],
+        "policy_digest": batch["policy_digest"],
+        "builds": batch["builds"],
+        "cleanup_status": "completed",
+        "batch_verdict": "passed",
+        "evidence_integrity": "complete",
+        "batch_reason_codes": [],
+        "scenarios": [
+            {
+                "scenario_id": row["scenario_id"],
+                "variant_key": row["variant_key"],
+                "observed_status": "passed",
+                "verification_status": "matched",
+                "evidence_refs": [artifact],
+            }
+            for row in batch["expected_scenario_set"]
+        ],
+        "artifacts": [artifact],
+    }
+    response = await product.post(
+        f"/api/v1/ci/projects/{product.project_id}/self-test-runs/{batch['id']}/verification",
+        receipt,
+        machine="o",
+        status=409,
+    )
+    assert response["error"]["code"] == "SELFTEST_BATCH_FINISHED"
+    assert response["error"]["trace_id"]
+    after = await product.get(product.root + f"/runs/{batch['id']}")
+    assert after["phase"] == cancelled["phase"] == "cancelled"
+    assert after["verdict"] == cancelled["verdict"] == "blocked"
+    assert after["sealed_at"] is None and not after["plan_run_ids"]
+    assert after["manifest_digest"] == cancelled["manifest_digest"]

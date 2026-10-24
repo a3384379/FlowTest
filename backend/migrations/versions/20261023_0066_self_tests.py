@@ -276,7 +276,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "generation_attempt >= 0 AND generation_attempt <= 10",
-            name=op.f("ck_self_test_scenario_results_self_test_scenario_generation_attempt"),
+            name=op.f("ck_self_test_scenario_results_self_test_scenario_gen_attempt"),
         ),
         sa.CheckConstraint(
             "verification_status IN ('pending','matched','mismatched','incomplete',"
@@ -286,7 +286,7 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "observed_status IS NULL OR observed_status IN "
             "('queued','running','passed','failed','cancelled','quarantined')",
-            name=op.f("ck_self_test_scenario_results_self_test_scenario_observed_status"),
+            name=op.f("ck_self_test_scenario_results_self_test_scenario_observed"),
         ),
         sa.UniqueConstraint(
             "batch_id", "scenario_id", "variant_key", name="uq_self_test_scenario_variant"

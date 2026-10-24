@@ -10,7 +10,7 @@ from app.core.self_tests import SelfTestBinding
 from app.domain.self_tests import document_digest, request_upper_bound
 from app.domain.test_engineering import fingerprint_contract
 from app.engine.contracts import WorkflowDefinition
-from app.models.access import User
+from app.models.access import Project, User
 from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.api_assets import Environment
 from app.models.artifacts import Artifact
@@ -89,6 +89,10 @@ class SelfTestAssets:
     async def _environment(
         self, project_id: UUID, identifier: UUID, service_id: UUID, url: str
     ) -> None:
+        # Follow native admission before routing locks; do not weaken the environment FK lock.
+        await self.session.scalar(
+            select(Project.id).where(Project.id == project_id).with_for_update(key_share=True)
+        )
         environment = await self.session.scalar(
             select(Environment).where(Environment.id == identifier).with_for_update()
         )

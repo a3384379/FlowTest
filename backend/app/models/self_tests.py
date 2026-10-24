@@ -184,12 +184,12 @@ class SelfTestScenarioResult(UuidPrimaryKeyMixin, TimestampMixin, Base):
         ),
         CheckConstraint(
             "generation_attempt >= 0 AND generation_attempt <= 10",
-            name="self_test_scenario_generation_attempt",
+            name="self_test_scenario_gen_attempt",
         ),
         CheckConstraint(
             "observed_status IS NULL OR observed_status IN "
             "('queued','running','passed','failed','cancelled','quarantined')",
-            name="self_test_scenario_observed_status",
+            name="self_test_scenario_observed",
         ),
     )
     batch_id: Mapped[UUID] = mapped_column(

@@ -88,3 +88,14 @@ def test_selftest_migration_round_trip_matches_model_columns_and_constraints(mon
             )
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("model", [SelfTestInstallation, SelfTestBatch, SelfTestScenarioResult])
+def test_selftest_check_names_match_postgres_identifiers_without_truncation(model):
+    from sqlalchemy import CheckConstraint
+    from sqlalchemy.dialects.postgresql import dialect
+
+    preparer = dialect().identifier_preparer
+    for constraint in model.__table__.constraints:
+        if isinstance(constraint, CheckConstraint):
+            assert preparer.format_constraint(constraint) == str(constraint.name)
