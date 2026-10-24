@@ -398,7 +398,14 @@ def _archive_compiler_failure(
             expected_keys=keys(), matched_keys=(), reason_codes=failure_codes(error), exit_code=2
         ),
     )
-    stage = next((row for row in reversed(stages) if row.stage == "compiler-boundaries"), None)
+    stage = next(
+        (
+            row
+            for row in reversed(stages)
+            if row.stage in {"compiler-boundaries", "compiler-boundaries-final"}
+        ),
+        None,
+    )
     if stage is not None:
         write_json(destination / "stage-result.json", asdict(stage))
     for name in ("failure", "verification"):
@@ -451,7 +458,11 @@ def run_product(
     if cleanup != "completed":
         raise HarnessError("SELFTEST_EXTENDED_PRODUCT_CLEANUP_FAILED")
     _command(paths, stages, "product-boundaries-final", journey_command(paths, spec, final=True))
-    _command(paths, stages, "compiler-boundaries-final", [*compiler, "--finalize-disposable"])
+    try:
+        _command(paths, stages, "compiler-boundaries-final", [*compiler, "--finalize-disposable"])
+    except (HarnessError, OSError, ValueError, subprocess.SubprocessError) as error:
+        _archive_compiler_failure(paths, error, stages)
+        raise
     binding = StackBinding.model_validate(read_json(paths.stack / "stack.json"))
     return (
         archive("product", 27, paths.directory / "product", paths.public, binding),

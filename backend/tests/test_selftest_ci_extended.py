@@ -54,7 +54,8 @@ def test_compiler_failure_archives_safe_typed_failure_without_private_files(tmp_
     assert all("synthetic-private" not in p.read_text() for p in public.iterdir())
 
 
-def test_compiler_driver_failure_cannot_skip_cleanup_or_become_a_pass(tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["collection", "finalization"])
+def test_compiler_driver_failure_cannot_skip_cleanup_or_become_a_pass(tmp_path, monkeypatch, phase):
     from scripts.selftest.compile_boundary_contracts import CompileBoundaryReport
     from scripts.selftest.compile_boundary_verify import keys
 
@@ -74,8 +75,12 @@ def test_compiler_driver_failure_cannot_skip_cleanup_or_become_a_pass(tmp_path, 
                 ),
             )
 
+        if phase == "finalization" and name == "compiler-boundaries-final":
+            stages.append(driver.StageResult(name, 2))
+            raise HarnessError("SELFTEST_EXTENDED_STAGE_FAILED")
+
     def require(actual, spec):
-        if spec.label == "compiler":
+        if spec.label == "compiler" and phase == "collection":
             raise FileNotFoundError("synthetic-private-path")
 
     def stop(actual):
@@ -85,13 +90,18 @@ def test_compiler_driver_failure_cannot_skip_cleanup_or_become_a_pass(tmp_path, 
     monkeypatch.setattr(ci_extended, "_command", command)
     monkeypatch.setattr(ci_extended, "require_pending", require)
     monkeypatch.setattr(driver, "stop_owned_stack", stop)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError if phase == "collection" else HarnessError):
         ci_extended.run_product(paths, tmp_path / "source", [])
     assert stopped == [paths]
     public = paths.public / "compiler-failure"
     assert read_json(public / "driver-failure.json")["exit_code"] == 2
     assert read_json(public / "observed-failure.json")["reason_codes"] == ["SELFTEST_TIMEOUTERROR"]
     assert not (paths.public / "compiler-verification.json").exists()
+    if phase == "finalization":
+        assert read_json(public / "stage-result.json") == {
+            "stage": "compiler-boundaries-final",
+            "exit_code": 2,
+        }
 
 
 def test_configured_failure_archives_only_existing_typed_report_and_safe_codes(tmp_path):
