@@ -89,9 +89,9 @@ class SelfTestAssets:
     async def _environment(
         self, project_id: UUID, identifier: UUID, service_id: UUID, url: str
     ) -> None:
-        # Follow native admission before routing locks; do not weaken the environment FK lock.
+        # Match native admission's lock mode before routing locks; a later upgrade can deadlock.
         await self.session.scalar(
-            select(Project.id).where(Project.id == project_id).with_for_update(key_share=True)
+            select(Project.id).where(Project.id == project_id).with_for_update()
         )
         environment = await self.session.scalar(
             select(Environment).where(Environment.id == identifier).with_for_update()

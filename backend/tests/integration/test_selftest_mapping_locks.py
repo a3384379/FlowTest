@@ -154,6 +154,51 @@ async def finish_guard(session: AsyncSession, value: RoutingFixture) -> None:
         await session.rollback()
 
 
+async def finish_native_guard(session: AsyncSession, value: RoutingFixture) -> None:
+    try:
+        await SelfTestAssets(session)._environment(
+            value.project, value.environment, value.service, value.url
+        )
+        await session.scalar(
+            select(Project.id).where(Project.id == value.project).with_for_update()
+        )
+        await session.commit()
+    finally:
+        await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_mapping_guard_does_not_upgrade_project_lock_after_locking_environment() -> None:
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    value = await seed(sessions)
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        async with sessions() as guard, sessions() as runner, sessions() as observer:
+            guard_pid = await guard.scalar(text("SELECT pg_backend_pid()"))
+            await runner.scalar(
+                select(Project.id)
+                .where(Project.id == value.project)
+                .with_for_update(read=True, key_share=True)
+            )
+            tasks.append(asyncio.create_task(finish_native_guard(guard, value)))
+            async with asyncio.timeout(5):
+                while not await observer.scalar(
+                    text("SELECT pg_blocking_pids(:pid)"), {"pid": guard_pid}
+                ):
+                    await asyncio.sleep(0.01)
+            tasks.append(asyncio.create_task(insert_execution(runner, value)))
+            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 8)
+            assert results == [None, None], results
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await cleanup(sessions, value)
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_mapping_guard_allows_native_fk_insert_while_waiting_for_quota_lock() -> None:
     engine = create_async_engine(settings.database_url, poolclass=NullPool)
