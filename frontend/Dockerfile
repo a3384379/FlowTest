@@ -8,7 +8,8 @@ COPY . .
 RUN pnpm build
 
 FROM nginx:1.31.3-alpine-slim
-RUN apk add --no-cache --upgrade libcrypto3 libssl3 'pcre2>=10.49-r0' 'zlib>=1.3.2-r1'
+RUN apk add --no-cache --upgrade libcrypto3 libssl3 \
+    'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3' 'pcre2>=10.49-r0' 'zlib>=1.4-r0'
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
