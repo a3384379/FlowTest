@@ -13,6 +13,7 @@ WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod edit -go=1.27.2 \
+        -require=github.com/go-jose/go-jose/v4@v4.1.6 \
         -require=github.com/klauspost/compress@v1.20.2 \
         -require=golang.org/x/crypto@v0.58.0 \
         -require=golang.org/x/net@v0.62.0 \

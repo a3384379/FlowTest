@@ -74,7 +74,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     go get github.com/containerd/containerd/v2@v2.3.4 google.golang.org/grpc@v1.83.2 \
-        github.com/klauspost/compress@v1.20.2 golang.org/x/crypto@v0.58.0 \
+        github.com/go-jose/go-jose/v4@v4.1.6 github.com/klauspost/compress@v1.20.2 \
+        golang.org/x/crypto@v0.58.0 \
         golang.org/x/net@v0.62.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
@@ -105,6 +106,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         golang.org/x/sync@v0.24.0 \
         golang.org/x/text@v0.43.0 \
         golang.org/x/net@v0.62.0 \
+        github.com/go-jose/go-jose/v4@v4.1.6 \
         github.com/klauspost/compress@v1.20.2 \
         google.golang.org/grpc@v1.83.2; \
     go mod download all; \
@@ -153,6 +155,9 @@ RUN set -eux; \
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
 RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.9.0-r0' \
     'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3' 'zlib>=1.4-r0' \
+    'brotli-libs>=1.2.1-r0' 'libcurl>=8.23.0-r0' \
+    'openssh-client-common>=10.3_p1-r2' 'openssh-client-default>=10.3_p1-r2' \
+    'openssh-keygen>=10.3_p1-r2' \
     && apk info --exists 'libexpat>=2.9.0-r0'
 
 FROM debian:trixie-slim AS python-base-source
