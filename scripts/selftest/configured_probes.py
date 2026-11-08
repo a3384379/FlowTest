@@ -6,6 +6,8 @@ import argparse
 import asyncio
 import json
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
@@ -53,13 +55,43 @@ def require_same_owned_stack(earlier: StackBinding, current: StackBinding) -> No
         raise HarnessError("SELFTEST_CONFIGURED_GROUP_STACK_DRIFT")
 
 
+@contextmanager
+def _required_files(stage: str) -> Iterator[None]:
+    try:
+        yield
+    except* FileNotFoundError as missing:
+        first: BaseException = missing
+        while isinstance(first, BaseExceptionGroup):
+            first = first.exceptions[0]
+        filename = first.filename if isinstance(first, FileNotFoundError) else None
+        categories = {
+            "dispatch.json": "STDIO_DISPATCH",
+            "dispatch-error.json": "STDIO_DISPATCH_ERROR",
+            "gateway-cleanup.json": "HTTP_GATEWAY_CLEANUP",
+            "stack.json": "STACK_BINDING",
+            "profile-proof.json": "STACK_PROFILE",
+            "installation.json": "INSTALLATION_RECEIPT",
+            "private.env": "STACK_ENVIRONMENT",
+        }
+        category = (
+            categories.get(Path(filename).name, "OTHER")
+            if isinstance(filename, (str, Path))
+            else "OTHER"
+        )
+        raise HarnessError(f"SELFTEST_CONFIGURED_{stage}_FILE_MISSING:{category}") from missing
+
+
 async def prepare_all(directory: Path, output: Path) -> PreparedGroup:
     output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    fault = await prepare_fault(directory, output / "faults")
-    quality = await prepare_quality(directory, output / "quality")
-    review = await prepare_review(directory, output / "review")
-    current = StackBinding.model_validate(read_json(directory / "stack.json"))
-    verify_binding(current, directory)
+    with _required_files("PREPARE_FAULTS"):
+        fault = await prepare_fault(directory, output / "faults")
+    with _required_files("PREPARE_QUALITY"):
+        quality = await prepare_quality(directory, output / "quality")
+    with _required_files("PREPARE_REVIEW"):
+        review = await prepare_review(directory, output / "review")
+    with _required_files("FREEZE_BINDING"):
+        current = StackBinding.model_validate(read_json(directory / "stack.json"))
+        verify_binding(current, directory)
     for prepared in (fault, quality, review):
         require_same_owned_stack(prepared.binding, current)
     # This happens before any fault/quality/review SDK observation. No sealed
@@ -118,20 +150,23 @@ def _only_disposal(report: ConfiguredReport) -> bool:
 async def run(directory: Path, output: Path) -> GroupResult:
     group = await prepare_all(directory, output)
     reports = []
-    evidence = await mcp_fault_run.execute(group.fault)
-    write_json(output / "faults/public/evidence.json", evidence)
-    write_fault(
-        verify_fault(group.fault.manifest, evidence, group.fault.authority),
-        evidence,
-        output / "faults/public",
-    )
-    reports.append(_observed("faults", group.fault, output))
+    with _required_files("COLLECT_FAULTS"):
+        evidence = await mcp_fault_run.execute(group.fault)
+        write_json(output / "faults/public/evidence.json", evidence)
+        write_fault(
+            verify_fault(group.fault.manifest, evidence, group.fault.authority),
+            evidence,
+            output / "faults/public",
+        )
+        reports.append(_observed("faults", group.fault, output))
     if _only_disposal(reports[-1]):
-        await quality_run.collect_prepared(group.quality, directory, output / "quality")
-        reports.append(_observed("quality", group.quality, output))
+        with _required_files("COLLECT_QUALITY"):
+            await quality_run.collect_prepared(group.quality, directory, output / "quality")
+            reports.append(_observed("quality", group.quality, output))
     if len(reports) == 2 and _only_disposal(reports[-1]):
-        await review_boundary_run.collect_prepared(group.review, directory, output / "review")
-        reports.append(_observed("review", group.review, output))
+        with _required_files("COLLECT_REVIEW"):
+            await review_boundary_run.collect_prepared(group.review, directory, output / "review")
+            reports.append(_observed("review", group.review, output))
     result = GroupResult(
         exit_code=2 if len(reports) == 3 and all(_only_disposal(r) for r in reports) else 1,
         reports=tuple(reports),

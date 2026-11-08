@@ -5,6 +5,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from errno import ENOENT
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,35 @@ async def test_all_grants_complete_before_any_final_identity_is_frozen(tmp_path,
     )
     receipt = read_json(tmp_path / "output/collection-binding.json")
     assert receipt["phase"] == "all_grants_installed_before_collection"
+
+
+@pytest.mark.parametrize(
+    ("filename", "category"), [("dispatch.json", "STDIO_DISPATCH"), ("private-value", "OTHER")]
+)
+@pytest.mark.parametrize("grouped", [False, True])
+def test_configured_file_failure_preserves_phase_without_exposing_paths(
+    tmp_path, monkeypatch, capsys, filename, category, grouped
+):
+    output = tmp_path / "group"
+
+    async def rejected(*_):
+        with group._required_files("COLLECT_FAULTS"):
+            error = FileNotFoundError(
+                ENOENT, "private-value", tmp_path / "private-value" / filename
+            )
+            if grouped:
+                raise ExceptionGroup("private-value", [ExceptionGroup("nested", [error])])
+            raise error
+
+    monkeypatch.setattr(group, "run", rejected)
+    monkeypatch.setattr(
+        sys, "argv", ["configured", "--directory", str(tmp_path), "--output", str(output)]
+    )
+    assert group.main() == 2
+    assert "private-value" not in capsys.readouterr().out
+    assert read_json(output / "group-verification.json")["reason_codes"] == [
+        f"SELFTEST_CONFIGURED_COLLECT_FAULTS_FILE_MISSING_{category}"
+    ]
 
 
 @pytest.mark.parametrize(
