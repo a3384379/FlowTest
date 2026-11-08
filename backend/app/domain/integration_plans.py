@@ -2793,7 +2793,7 @@ def _secret_reference_runtime_diagnostics(plan: IntegrationPlan) -> list[PlanDia
 
 
 def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
-    diagnostics: list[PlanDiagnostic] = []
+    diagnostics: list[PlanDiagnostic] = _path_binding_diagnostics(plan)
     operations = {item.ref: item for item in plan.operations}
     operation_by_step = {
         step.id: operations[step.operation_ref]
@@ -2821,7 +2821,7 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
         )
         if body_diagnostic is not None:
             diagnostics.append(body_diagnostic)
-        if binding.target.location in {"path", "cookie"}:
+        if binding.target.location == "cookie":
             diagnostics.append(
                 _diagnostic(
                     "BINDING_TARGET_RUNTIME_UNSUPPORTED",
@@ -2907,6 +2907,52 @@ def _runtime_compatibility_diagnostics(plan: IntegrationPlan) -> list[PlanDiagno
     )
     diagnostics.extend(_secret_reference_runtime_diagnostics(plan))
     return diagnostics
+
+
+def _path_parameter_names(path: str) -> set[str]:
+    return set(re.findall(r"\{\{?([A-Za-z_][A-Za-z0-9_.-]*)\}\}?", path))
+
+
+def _path_binding_diagnostics(plan: IntegrationPlan) -> list[PlanDiagnostic]:
+    operations = {item.ref: item for item in plan.operations}
+    diagnostics: list[PlanDiagnostic] = []
+    for step in plan.steps:
+        operation = operations.get(step.operation_ref or "")
+        if operation is None:
+            continue
+        names = _path_parameter_names(operation.path)
+        targets = [
+            binding.target.key
+            for binding in plan.bindings
+            if binding.target.step_id == step.id and binding.target.location == "path"
+        ]
+        diagnostics.extend(_path_target_diagnostics(step.id, names, targets))
+    return diagnostics
+
+
+def _path_target_diagnostics(
+    step_id: str, names: set[str], targets: list[str]
+) -> list[PlanDiagnostic]:
+    conditions = (
+        (set(targets) - names, "PATH_BINDING_TARGET_UNKNOWN", "路径绑定字段不是目标接口的路径参数"),
+        (names - set(targets), "PATH_BINDING_REQUIRED", "路径参数缺少显式证据绑定"),
+        (
+            {name for name in targets if targets.count(name) > 1},
+            "PATH_BINDING_TARGET_DUPLICATE",
+            "同一路径参数不能存在多个绑定",
+        ),
+    )
+    return [
+        _diagnostic(
+            code,
+            "blocker",
+            f"{message}: {', '.join(sorted(fields))}",
+            f"$.steps[{step_id}]",
+            stage="compile_edge_mapping",
+        )
+        for fields, code, message in conditions
+        if fields
+    ]
 
 
 def _body_mapping_compatibility_diagnostic(
@@ -3179,6 +3225,8 @@ def _compile_bindings(
             item for item in binding.candidates if item.id == binding.selected_candidate_id
         )
         source_id, source_path = _mapping_source(selected, recipe_steps)
+        if binding.target.location == "path" and binding.capture_variable is None:
+            binding = binding.model_copy(update={"capture_variable": binding.target.key})
         if binding.capture_variable is not None:
             source_id, source_path = _compile_extract_node(
                 binding,
@@ -3371,6 +3419,7 @@ def _mapping_location(
     location: Literal["path", "query", "header", "cookie", "body", "workflow_variable"],
 ) -> MappingTargetLocation:
     return {
+        "path": MappingTargetLocation.VARIABLE,
         "query": MappingTargetLocation.QUERY,
         "header": MappingTargetLocation.HEADER,
         "body": MappingTargetLocation.BODY,

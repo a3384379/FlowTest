@@ -1,0 +1,115 @@
+{
+  "$defs": {
+    "WorkerVariantReport": {
+      "additionalProperties": false,
+      "properties": {
+        "native_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Native Status"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "variant": {
+          "enum": [
+            "double_claim",
+            "duplicate_delivery",
+            "worker_death",
+            "recovery"
+          ],
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "native_status",
+        "reason_codes"
+      ],
+      "title": "WorkerVariantReport",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "evidence_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Evidence Digest",
+      "type": "string"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "model_calls": {
+      "const": 0,
+      "default": 0,
+      "title": "Model Calls",
+      "type": "integer"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "scenario_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Scenario Ids",
+      "type": "array"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/WorkerVariantReport"
+      },
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "flowtest-worker-fault-verification-v1",
+      "default": "flowtest-worker-fault-verification-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    }
+  },
+  "required": [
+    "manifest_digest",
+    "evidence_digest",
+    "scenario_ids",
+    "exit_code",
+    "reason_codes",
+    "scenarios"
+  ],
+  "title": "WorkerReport",
+  "type": "object"
+}

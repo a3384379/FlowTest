@@ -1,0 +1,537 @@
+{
+  "$defs": {
+    "BoundaryEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup_status": {
+          "enum": [
+            "pending",
+            "completed"
+          ],
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "http_attempts": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Http Attempts",
+          "type": "integer"
+        },
+        "identities": {
+          "$ref": "#/$defs/BoundaryIdentity"
+        },
+        "manifest_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Digest",
+          "type": "string"
+        },
+        "rejected_attempts": {
+          "minimum": 0,
+          "title": "Rejected Attempts",
+          "type": "integer"
+        },
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/BoundaryObservation"
+          },
+          "maxItems": 5,
+          "minItems": 5,
+          "title": "Scenarios",
+          "type": "array"
+        },
+        "target_disposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetDisposalReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "manifest_digest",
+        "identities",
+        "scenarios",
+        "http_attempts",
+        "rejected_attempts",
+        "cleanup_status",
+        "collected_at"
+      ],
+      "title": "BoundaryEvidence",
+      "type": "object"
+    },
+    "BoundaryIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "editor_id": {
+          "format": "uuid",
+          "title": "Editor Id",
+          "type": "string"
+        },
+        "observer_id": {
+          "format": "uuid",
+          "title": "Observer Id",
+          "type": "string"
+        },
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "owner_id": {
+          "format": "uuid",
+          "title": "Owner Id",
+          "type": "string"
+        },
+        "project_ids": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "format": "uuid",
+              "type": "string"
+            }
+          ],
+          "title": "Project Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "organization_id",
+        "project_ids",
+        "owner_id",
+        "editor_id",
+        "observer_id"
+      ],
+      "title": "BoundaryIdentity",
+      "type": "object"
+    },
+    "BoundaryManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "deadline": {
+          "format": "date-time",
+          "title": "Deadline",
+          "type": "string"
+        },
+        "expected_scenarios": {
+          "default": [
+            "ST-SECURITY-owner-self-sign",
+            "ST-SECURITY-editor-self-sign",
+            "ST-SECURITY-manual-report",
+            "ST-SECURITY-write-only-export",
+            "ST-SECURITY-project-redaction"
+          ],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Expected Scenarios",
+          "type": "array"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "pack_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Pack Digest",
+          "type": "string"
+        },
+        "pack_id": {
+          "const": "security-boundaries-v1",
+          "default": "security-boundaries-v1",
+          "title": "Pack Id",
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Profile",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "default": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "governance_negative_and_secret_boundary_only",
+          "default": "governance_negative_and_secret_boundary_only",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-security-boundaries-v1",
+          "default": "flowtest-security-boundaries-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pack_digest",
+        "project_name",
+        "nonce",
+        "profile",
+        "source_digest",
+        "target_container_id",
+        "target_image",
+        "target_volume",
+        "created_at",
+        "deadline"
+      ],
+      "title": "BoundaryManifest",
+      "type": "object"
+    },
+    "BoundaryObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "format": "uuid",
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "artifact_purpose": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Purpose"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "denials": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DenialObservation"
+          },
+          "maxItems": 20,
+          "title": "Denials",
+          "type": "array"
+        },
+        "forbidden_secret_keys": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Forbidden Secret Keys",
+          "type": "array"
+        },
+        "is_system_admin": {
+          "title": "Is System Admin",
+          "type": "boolean"
+        },
+        "native_executions": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Native Executions",
+          "type": "array"
+        },
+        "native_run_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Native Run Ids",
+          "type": "array"
+        },
+        "observation_digests": {
+          "default": [],
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "title": "Observation Digests",
+          "type": "array"
+        },
+        "permission_role": {
+          "enum": [
+            "owner",
+            "editor",
+            "viewer"
+          ],
+          "title": "Permission Role",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "owner",
+            "editor",
+            "observer"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sentinel_present": {
+          "default": [],
+          "items": {
+            "type": "boolean"
+          },
+          "title": "Sentinel Present",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "role",
+        "actor_id",
+        "is_system_admin",
+        "permission_role",
+        "complete"
+      ],
+      "title": "BoundaryObservation",
+      "type": "object"
+    },
+    "DenialObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "operation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "response_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Digest",
+          "type": "string"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Status",
+          "type": "integer"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "response_digest"
+      ],
+      "title": "DenialObservation",
+      "type": "object"
+    },
+    "TargetDisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "containers_absent": {
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "TargetDisposalReceipt",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_verdict": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Batch Verdict",
+      "type": "string"
+    },
+    "evidence": {
+      "$ref": "#/$defs/BoundaryEvidence"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "manifest": {
+      "$ref": "#/$defs/BoundaryManifest"
+    },
+    "reason_codes": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    }
+  },
+  "required": [
+    "manifest",
+    "evidence",
+    "batch_verdict",
+    "exit_code",
+    "reason_codes"
+  ],
+  "title": "BoundaryResult",
+  "type": "object"
+}

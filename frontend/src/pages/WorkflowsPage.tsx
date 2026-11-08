@@ -1,3 +1,4 @@
+import { SelfTestWorkflowContext } from '../features/self-test/SelfTestFixedWorkflow'
 import WorkflowWorkspaceShell from '../flow/WorkflowWorkspaceShell'
 import WorkflowWorkbenchHeader from '../flow/WorkflowWorkbenchHeader'
 import WorkflowRuntimeDock from '../flow/WorkflowRuntimeDock'
@@ -149,6 +150,7 @@ export default function WorkflowsPage() {
 
   return (
     <div className="workflow-workspace-page" data-testid="workflow-page">
+      <SelfTestWorkflowContext projectId={state.projectId} />
       <WorkflowTabs
         state={state}
         workflowIds={tabs.workflowIds}
@@ -204,7 +206,7 @@ export default function WorkflowsPage() {
         onFlowProposalClose={() => {
           setFlowProposalOpen(false)
           const next = new URLSearchParams(searchParams)
-          next.delete('proposal')
+          preserveSelfTestProposal(next)
           setSearchParams(next, { replace: true })
         }}
         onOpenRawMapping={(seed) => {
@@ -2168,4 +2170,10 @@ function WorkflowCatalog({
 
 function canCreateCatalogWorkflow(state: WorkflowState): boolean {
   return Boolean(state.projectId && state.canEdit && state.apis.data?.items.length)
+}
+
+function preserveSelfTestProposal(params: URLSearchParams) {
+  const proposal = params.get('proposal')
+  if (proposal && params.has('selfTestBatch')) params.set('selfTestProposal', proposal)
+  params.delete('proposal')
 }

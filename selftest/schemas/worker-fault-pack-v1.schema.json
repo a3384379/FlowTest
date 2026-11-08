@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "WorkerGolden": {
+      "additionalProperties": false,
+      "properties": {
+        "markers": {
+          "items": {
+            "enum": [
+              "first",
+              "follow",
+              "cleanup"
+            ],
+            "type": "string"
+          },
+          "title": "Markers",
+          "type": "array"
+        },
+        "minimum_actor_processes": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Minimum Actor Processes",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "double_claim",
+            "duplicate_delivery",
+            "worker_death",
+            "recovery"
+          ],
+          "title": "Variant",
+          "type": "string"
+        },
+        "worker_killed": {
+          "title": "Worker Killed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "variant",
+        "status",
+        "markers",
+        "minimum_actor_processes",
+        "worker_killed"
+      ],
+      "title": "WorkerGolden",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "lease_seconds": {
+      "const": 60,
+      "title": "Lease Seconds",
+      "type": "integer"
+    },
+    "max_requests": {
+      "const": 100,
+      "title": "Max Requests",
+      "type": "integer"
+    },
+    "max_runtime_seconds": {
+      "const": 300,
+      "title": "Max Runtime Seconds",
+      "type": "integer"
+    },
+    "pack_id": {
+      "const": "worker-faults-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "pack_version": {
+      "const": "1.0.0",
+      "title": "Pack Version",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/WorkerGolden"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "flowtest-worker-fault-pack-v1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "pack_id",
+    "pack_version",
+    "max_requests",
+    "max_runtime_seconds",
+    "lease_seconds",
+    "scenarios"
+  ],
+  "title": "WorkerPack",
+  "type": "object"
+}

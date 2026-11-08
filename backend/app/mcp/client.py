@@ -67,6 +67,7 @@ from app.schemas.test_contexts import (
     TestContextResponse,
 )
 from app.schemas.test_design import MCPControlledWriteEnvelope
+from app.schemas.test_design_compilation import CompileTestDesignRequest, CompileTestDesignResponse
 
 
 class MCPGatewayError(Exception):
@@ -382,6 +383,17 @@ class MCPReadGatewayClient:
             payload=payload,
             token=token,
         )
+
+    async def compile_test_design(
+        self,
+        payload: CompileTestDesignRequest,
+        *,
+        token: str | None = None,
+    ) -> CompileTestDesignResponse:
+        response = await self._request_post(
+            path="/api/v1/mcp/flow/designs/compile", payload=_model_payload(payload), token=token
+        )
+        return _validate_response(response, CompileTestDesignResponse)
 
     async def analyze_test_coverage(
         self,

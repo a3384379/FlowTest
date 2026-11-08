@@ -1,0 +1,4870 @@
+{
+  "$defs": {
+    "ApiSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_definition_id": {
+          "format": "uuid",
+          "title": "Api Definition Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_definition_id",
+        "api_version",
+        "contract_fingerprint"
+      ],
+      "title": "ApiSource",
+      "type": "object"
+    },
+    "AssertionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "mode": {
+          "const": "value",
+          "default": "value",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "expected",
+        "actual"
+      ],
+      "title": "AssertionEvidence",
+      "type": "object"
+    },
+    "AssertionExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "mode": {
+          "const": "value",
+          "default": "value",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "phase": {
+          "default": "main",
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "passed",
+        "expected",
+        "actual",
+        "node_id"
+      ],
+      "title": "AssertionExpectation",
+      "type": "object"
+    },
+    "BatchEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "builds": {
+          "$ref": "#/$defs/Builds"
+        },
+        "ci_attempt": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Attempt"
+        },
+        "ci_run_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Run Id"
+        },
+        "cleanup_status": {
+          "enum": [
+            "completed",
+            "failed",
+            "pending"
+          ],
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "expired": {
+          "default": false,
+          "title": "Expired",
+          "type": "boolean"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "observer_error": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observer Error"
+        },
+        "pack_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Pack Digest",
+          "type": "string"
+        },
+        "policy_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Digest",
+          "type": "string"
+        },
+        "scenarios": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ScenarioObservation"
+          },
+          "maxItems": 500,
+          "title": "Scenarios",
+          "type": "array"
+        }
+      },
+      "required": [
+        "batch_key",
+        "nonce",
+        "pack_digest",
+        "policy_digest",
+        "builds",
+        "collected_at",
+        "cleanup_status"
+      ],
+      "title": "BatchEvidence",
+      "type": "object"
+    },
+    "BatchManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "batch_kind": {
+          "enum": [
+            "fixed_baseline",
+            "mcp_generated"
+          ],
+          "title": "Batch Kind",
+          "type": "string"
+        },
+        "builds": {
+          "$ref": "#/$defs/Builds"
+        },
+        "ci_attempt": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Attempt"
+        },
+        "ci_run_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ci Run Id"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "expected_scenario_set": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Expected Scenario Set",
+          "type": "array"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "fixture_budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBudgetScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "format": {
+          "const": "flowtest-selftest",
+          "default": "flowtest-selftest",
+          "title": "Format",
+          "type": "string"
+        },
+        "format_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Format Version",
+          "type": "integer"
+        },
+        "generation_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "deterministic_mcp",
+                "host_llm_mcp"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation Mode"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "pack_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Pack Digest",
+          "type": "string"
+        },
+        "pack_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Pack Id",
+          "type": "string"
+        },
+        "pack_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Pack Version",
+          "type": "string"
+        },
+        "policy_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Policy Digest",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "required_scenario_set": {
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Required Scenario Set",
+          "type": "array"
+        },
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/ScenarioExpectation"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Scenarios",
+          "type": "array"
+        },
+        "trusted_required_scenario_set": {
+          "default": [],
+          "items": {
+            "maxLength": 160,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Trusted Required Scenario Set",
+          "type": "array"
+        },
+        "verification_scope": {
+          "enum": [
+            "full_pack",
+            "selected_suites",
+            "diagnostic_subset"
+          ],
+          "title": "Verification Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pack_id",
+        "pack_version",
+        "pack_digest",
+        "policy_digest",
+        "project_id",
+        "batch_key",
+        "nonce",
+        "builds",
+        "batch_kind",
+        "verification_scope",
+        "expected_scenario_set",
+        "required_scenario_set",
+        "scenarios",
+        "created_at",
+        "expires_at"
+      ],
+      "title": "BatchManifest",
+      "type": "object"
+    },
+    "BinaryFileExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "content_utf8": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Content Utf8",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_utf8",
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename"
+      ],
+      "title": "BinaryFileExpectation",
+      "type": "object"
+    },
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "CreatedFileEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_base64": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "created_by_id": {
+          "format": "uuid",
+          "title": "Created By Id",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "native_uploaded_id": {
+          "format": "uuid",
+          "title": "Native Uploaded Id",
+          "type": "string"
+        },
+        "observed_artifact_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Observed Artifact Ids",
+          "type": "array"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "upload",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "requested_download_origin": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Requested Download Origin",
+          "type": "string"
+        },
+        "requested_download_path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Requested Download Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "artifact_id",
+        "content_base64",
+        "content_type",
+        "filename",
+        "size_bytes",
+        "sha256",
+        "observed_artifact_ids",
+        "native_uploaded_id",
+        "created_by_id",
+        "created_at",
+        "observed_at",
+        "purpose",
+        "requested_download_origin",
+        "requested_download_path"
+      ],
+      "title": "CreatedFileEvidence",
+      "type": "object"
+    },
+    "CreatedFileExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "content_utf8": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Content Utf8",
+          "type": "string"
+        },
+        "created_by_id": {
+          "format": "uuid",
+          "title": "Created By Id",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "previous_artifact_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Previous Artifact Ids",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "target_origin": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Target Origin",
+          "type": "string"
+        },
+        "timestamp_precision": {
+          "enum": [
+            "second",
+            "microsecond"
+          ],
+          "title": "Timestamp Precision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content_utf8",
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename",
+        "project_id",
+        "created_by_id",
+        "previous_artifact_ids",
+        "target_origin",
+        "timestamp_precision"
+      ],
+      "title": "CreatedFileExpectation",
+      "type": "object"
+    },
+    "DatasetBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "row_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "row_count"
+      ],
+      "title": "DatasetBinding",
+      "type": "object"
+    },
+    "DatasetChildReference": {
+      "additionalProperties": false,
+      "properties": {
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "row_index": {
+          "maximum": 499,
+          "minimum": 0,
+          "title": "Row Index",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_id",
+        "row_index",
+        "status"
+      ],
+      "title": "DatasetChildReference",
+      "type": "object"
+    },
+    "DatasetExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "assertions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AssertionExpectation"
+          },
+          "maxItems": 500,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NestedNodeExpectation"
+          },
+          "maxItems": 500,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "row_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "row_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Row Indices",
+          "type": "array"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "sha256",
+        "row_count",
+        "row_indices"
+      ],
+      "title": "DatasetExpectation",
+      "type": "object"
+    },
+    "DenialObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "operation": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation",
+          "type": "string"
+        },
+        "response_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Response Digest",
+          "type": "string"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Status",
+          "type": "integer"
+        },
+        "trace_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trace Id"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "response_digest"
+      ],
+      "title": "DenialObservation",
+      "type": "object"
+    },
+    "DesignSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "design_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "operation_ref": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operation Ref",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_source",
+        "operation_ref",
+        "scenario_id",
+        "design_fingerprint"
+      ],
+      "title": "DesignSource",
+      "type": "object"
+    },
+    "DigestAssertionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Actual Digest",
+          "type": "string"
+        },
+        "expected_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Digest",
+          "type": "string"
+        },
+        "mode": {
+          "const": "digest",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "name",
+        "passed",
+        "expected_digest",
+        "actual_digest"
+      ],
+      "title": "DigestAssertionEvidence",
+      "type": "object"
+    },
+    "DisposableTargetIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image"
+      ],
+      "title": "DisposableTargetIdentity",
+      "type": "object"
+    },
+    "ErrorEnvelopeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Error Code",
+          "type": "string"
+        },
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "response_trace_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Response Trace Id",
+          "type": "string"
+        },
+        "status_code": {
+          "enum": [
+            401,
+            403,
+            422
+          ],
+          "title": "Status Code",
+          "type": "integer"
+        },
+        "trace_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "status_code",
+        "error_code",
+        "trace_id",
+        "project_id",
+        "execution_id",
+        "response_trace_id"
+      ],
+      "title": "ErrorEnvelopeEvidence",
+      "type": "object"
+    },
+    "ErrorEnvelopeExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "error_code": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Error Code",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "status_code": {
+          "enum": [
+            401,
+            403,
+            422
+          ],
+          "title": "Status Code",
+          "type": "integer"
+        },
+        "trace_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Trace Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "status_code",
+        "error_code",
+        "trace_id"
+      ],
+      "title": "ErrorEnvelopeExpectation",
+      "type": "object"
+    },
+    "EvidencePage": {
+      "additionalProperties": false,
+      "properties": {
+        "ordinals": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 100,
+          "title": "Ordinals",
+          "type": "array"
+        },
+        "page": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Page",
+          "type": "integer"
+        },
+        "page_size": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "total": {
+          "maximum": 100000,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page",
+        "page_size",
+        "total"
+      ],
+      "title": "EvidencePage",
+      "type": "object"
+    },
+    "ExecutionEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DatasetChildReference"
+          },
+          "maxItems": 500,
+          "title": "Children",
+          "type": "array"
+        },
+        "children_complete": {
+          "default": true,
+          "title": "Children Complete",
+          "type": "boolean"
+        },
+        "cleanup_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Status"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "dataset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatasetBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dataset_row_index": {
+          "anyOf": [
+            {
+              "maximum": 499,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dataset Row Index"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "main_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Main Status"
+        },
+        "nested_nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeEvidence"
+          },
+          "maxItems": 1000,
+          "title": "Nested Nodes",
+          "type": "array"
+        },
+        "nested_nodes_complete": {
+          "default": true,
+          "title": "Nested Nodes Complete",
+          "type": "boolean"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeEvidence"
+          },
+          "maxItems": 5000,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "parent_execution_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Execution Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_purpose": {
+          "default": "standard",
+          "enum": [
+            "standard",
+            "preview"
+          ],
+          "title": "Run Purpose",
+          "type": "string"
+        },
+        "snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshot Digest",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "subflows": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SubflowBinding"
+          },
+          "maxItems": 100,
+          "title": "Subflows",
+          "type": "array"
+        },
+        "subflows_complete": {
+          "default": true,
+          "title": "Subflows Complete",
+          "type": "boolean"
+        },
+        "workflow_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Workflow Fingerprint",
+          "type": "string"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version_id": {
+          "format": "uuid",
+          "title": "Workflow Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "workflow_id",
+        "workflow_version_id",
+        "environment_id",
+        "status",
+        "snapshot_digest",
+        "workflow_fingerprint",
+        "started_at"
+      ],
+      "title": "ExecutionEvidence",
+      "type": "object"
+    },
+    "ExpectedOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "assertions": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/AssertionExpectation"
+          },
+          "maxItems": 500,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "binary_file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BinaryFileExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cleanup_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Status"
+        },
+        "created_file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CreatedFileExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dataset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DatasetExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "error_envelopes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ErrorEnvelopeExpectation"
+          },
+          "maxItems": 20,
+          "title": "Error Envelopes",
+          "type": "array"
+        },
+        "execution_status": {
+          "enum": [
+            "passed",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Execution Status",
+          "type": "string"
+        },
+        "expected_request_value_presence": {
+          "default": [],
+          "items": {
+            "type": "boolean"
+          },
+          "maxItems": 10000,
+          "title": "Expected Request Value Presence",
+          "type": "array"
+        },
+        "fixture_metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureMetricsExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fixture_responses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FixtureResponseExpectation"
+          },
+          "maxItems": 10000,
+          "title": "Fixture Responses",
+          "type": "array"
+        },
+        "isolated_cookies": {
+          "default": false,
+          "title": "Isolated Cookies",
+          "type": "boolean"
+        },
+        "main_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "passed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Main Status"
+        },
+        "nested_nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NestedNodeExpectation"
+          },
+          "maxItems": 1000,
+          "title": "Nested Nodes",
+          "type": "array"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "enum": [
+                "main",
+                "cleanup"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phase"
+        },
+        "project_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectStateExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_count": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Count"
+        },
+        "required_disposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequiredDisposal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resource_absence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceAbsenceExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resource_absences": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResourceAbsenceExpectation"
+          },
+          "maxItems": 20,
+          "title": "Resource Absences",
+          "type": "array"
+        },
+        "response_fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResponseFieldExpectation"
+          },
+          "maxItems": 100,
+          "title": "Response Fields",
+          "type": "array"
+        },
+        "subflows": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SubflowBinding"
+          },
+          "maxItems": 100,
+          "title": "Subflows",
+          "type": "array"
+        },
+        "synthetic_artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticArtifactExpectation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "top_nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NestedNodeExpectation"
+          },
+          "maxItems": 5000,
+          "title": "Top Nodes",
+          "type": "array"
+        },
+        "uploaded_synthetic_file": {
+          "default": false,
+          "title": "Uploaded Synthetic File",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_status"
+      ],
+      "title": "ExpectedOutcome",
+      "type": "object"
+    },
+    "FixtureBinaryResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename"
+      ],
+      "title": "FixtureBinaryResponse",
+      "type": "object"
+    },
+    "FixtureBudgetReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "admitted_count": {
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Admitted Count",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "number"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "parent_batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Parent Batch Key",
+          "type": "string"
+        },
+        "registration_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Registration Epoch",
+          "type": "string"
+        },
+        "rejected_count": {
+          "minimum": 0,
+          "title": "Rejected Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent_batch_key",
+        "nonce",
+        "expires_at",
+        "admitted_count",
+        "rejected_count",
+        "fixture_digest",
+        "registration_epoch"
+      ],
+      "title": "FixtureBudgetReceipt",
+      "type": "object"
+    },
+    "FixtureBudgetScope": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "exclusiveMinimum": 0,
+          "title": "Expires At",
+          "type": "number"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "parent_batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Parent Batch Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent_batch_key",
+        "nonce",
+        "expires_at"
+      ],
+      "title": "FixtureBudgetScope",
+      "type": "object"
+    },
+    "FixtureJournal": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBudgetReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entries": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FixtureRequest"
+          },
+          "maxItems": 10000,
+          "title": "Entries",
+          "type": "array"
+        },
+        "epoch_changed": {
+          "default": false,
+          "title": "Epoch Changed",
+          "type": "boolean"
+        },
+        "expired": {
+          "default": false,
+          "title": "Expired",
+          "type": "boolean"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "fixture_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Epoch",
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Sequence"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "request_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Request Count",
+          "type": "integer"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "batch_key",
+        "scenario_id",
+        "nonce",
+        "fixture_epoch",
+        "fixture_digest",
+        "request_count"
+      ],
+      "title": "FixtureJournal",
+      "type": "object"
+    },
+    "FixtureMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "active_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Active Count",
+          "type": "integer"
+        },
+        "cancelled_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Cancelled Count",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "completed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/FixtureRequestEvent"
+          },
+          "maxItems": 500,
+          "title": "Events",
+          "type": "array"
+        },
+        "failed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Failed Count",
+          "type": "integer"
+        },
+        "peak_concurrency": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Peak Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "complete",
+        "active_count",
+        "peak_concurrency",
+        "completed_count",
+        "cancelled_count",
+        "failed_count"
+      ],
+      "title": "FixtureMetrics",
+      "type": "object"
+    },
+    "FixtureMetricsExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "active_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Active Count",
+          "type": "integer"
+        },
+        "cancelled_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Cancelled Count",
+          "type": "integer"
+        },
+        "completed_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "failed_count": {
+          "const": 0,
+          "default": 0,
+          "title": "Failed Count",
+          "type": "integer"
+        },
+        "peak_concurrency": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Peak Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "peak_concurrency",
+        "completed_count"
+      ],
+      "title": "FixtureMetricsExpectation",
+      "type": "object"
+    },
+    "FixturePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "iteration_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iteration Key"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "request_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Count"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        }
+      },
+      "title": "FixturePayload",
+      "type": "object"
+    },
+    "FixtureRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_present": {
+          "default": false,
+          "title": "Authorization Present",
+          "type": "boolean"
+        },
+        "binary_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "binary_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cookie_present": {
+          "default": false,
+          "title": "Cookie Present",
+          "type": "boolean"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "method": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Received At"
+        },
+        "request_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_value_present": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Value Present"
+        },
+        "response_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "response_status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Response Status",
+          "type": "integer"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "synthetic_cookie": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticCookieSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "synthetic_precedence_header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticHeaderSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "sequence",
+        "method",
+        "path",
+        "response_status"
+      ],
+      "title": "FixtureRequest",
+      "type": "object"
+    },
+    "FixtureRequestEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "active_at_begin": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Active At Begin",
+          "type": "integer"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "completed",
+                "cancelled",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "request_id",
+        "sequence",
+        "started_at",
+        "active_at_begin"
+      ],
+      "title": "FixtureRequestEvent",
+      "type": "object"
+    },
+    "FixtureResponseExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "title": "Actual",
+          "type": "integer"
+        },
+        "authorization_present": {
+          "default": false,
+          "title": "Authorization Present",
+          "type": "boolean"
+        },
+        "code": {
+          "title": "Code",
+          "type": "integer"
+        },
+        "cookie_present": {
+          "default": false,
+          "title": "Cookie Present",
+          "type": "boolean"
+        },
+        "response_status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Response Status",
+          "type": "integer"
+        },
+        "synthetic_precedence_header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticHeaderSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "response_status",
+        "actual",
+        "code"
+      ],
+      "title": "FixtureResponseExpectation",
+      "type": "object"
+    },
+    "GenerationProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "assisted": {
+          "default": false,
+          "title": "Assisted",
+          "type": "boolean"
+        },
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Calls",
+          "type": "array"
+        },
+        "case": {
+          "$ref": "#/$defs/PublishedCase"
+        },
+        "case_proposal": {
+          "$ref": "#/$defs/ProposalEvidence"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "combined_design_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Combined Design Fingerprint"
+        },
+        "compilation_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Compilation Fingerprint",
+          "type": "string"
+        },
+        "design_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Design Fingerprint",
+          "type": "string"
+        },
+        "design_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DesignSource"
+          },
+          "maxItems": 100,
+          "title": "Design Sources",
+          "type": "array"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "generation_mode": {
+          "enum": [
+            "deterministic_mcp",
+            "host_llm_mcp"
+          ],
+          "title": "Generation Mode",
+          "type": "string"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "oracle_bindings": {
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Oracle Bindings",
+          "type": "array"
+        },
+        "run": {
+          "$ref": "#/$defs/PlanRunSnapshot"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "suite": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublishedSuite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workflow": {
+          "$ref": "#/$defs/PublishedWorkflow"
+        },
+        "workflow_proposal": {
+          "$ref": "#/$defs/ProposalEvidence"
+        }
+      },
+      "required": [
+        "batch_key",
+        "scenario_id",
+        "generation_mode",
+        "api_source",
+        "design_fingerprint",
+        "compilation_fingerprint",
+        "catalog_digest",
+        "oracle_bindings",
+        "calls",
+        "workflow_proposal",
+        "case_proposal",
+        "workflow",
+        "case",
+        "run",
+        "generated_at",
+        "frozen_at"
+      ],
+      "title": "GenerationProvenance",
+      "type": "object"
+    },
+    "HostEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_tool_calls": {
+          "minimum": 1,
+          "title": "Actual Tool Calls",
+          "type": "integer"
+        },
+        "authorized_budget_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Authorized Budget Digest",
+          "type": "string"
+        },
+        "host": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "prompt_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Prompt Digest",
+          "type": "string"
+        },
+        "skill_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Skill Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "model",
+        "skill_digest",
+        "prompt_digest",
+        "authorized_budget_digest",
+        "actual_tool_calls"
+      ],
+      "title": "HostEvidence",
+      "type": "object"
+    },
+    "InstallationInventory": {
+      "additionalProperties": false,
+      "properties": {
+        "api_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Api Ids",
+          "type": "array"
+        },
+        "case_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Case Ids",
+          "type": "array"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "default_service_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Default Service Id"
+        },
+        "environment_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Environment Ids",
+          "type": "array"
+        },
+        "execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Execution Ids",
+          "type": "array"
+        },
+        "plan_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Plan Ids",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Run Ids",
+          "type": "array"
+        },
+        "service_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Service Ids",
+          "type": "array"
+        },
+        "suite_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Suite Ids",
+          "type": "array"
+        },
+        "workflow_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Workflow Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "api_ids",
+        "workflow_ids",
+        "case_ids",
+        "suite_ids",
+        "plan_ids",
+        "run_ids",
+        "execution_ids",
+        "environment_ids",
+        "service_ids",
+        "default_service_id",
+        "complete"
+      ],
+      "title": "InstallationInventory",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "MaintenanceReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "artifacts_deleted": {
+          "title": "Artifacts Deleted",
+          "type": "integer"
+        },
+        "clock": {
+          "format": "date-time",
+          "title": "Clock",
+          "type": "string"
+        },
+        "container_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Container Id",
+          "type": "string"
+        },
+        "ownership_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Ownership Nonce",
+          "type": "string"
+        },
+        "projects_scanned": {
+          "title": "Projects Scanned",
+          "type": "integer"
+        },
+        "repeat": {
+          "title": "Repeat",
+          "type": "boolean"
+        },
+        "storage_failures": {
+          "title": "Storage Failures",
+          "type": "integer"
+        },
+        "test_plan_runs_deleted": {
+          "title": "Test Plan Runs Deleted",
+          "type": "integer"
+        },
+        "workflow_executions_deleted": {
+          "title": "Workflow Executions Deleted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "container_id",
+        "ownership_nonce",
+        "clock",
+        "repeat",
+        "projects_scanned",
+        "workflow_executions_deleted",
+        "test_plan_runs_deleted",
+        "artifacts_deleted",
+        "storage_failures"
+      ],
+      "title": "MaintenanceReceipt",
+      "type": "object"
+    },
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "NestedNodeExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "default": 1,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "skipped",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "phase",
+        "status"
+      ],
+      "title": "NestedNodeExpectation",
+      "type": "object"
+    },
+    "NodeEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "assertions": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "digest": "#/$defs/DigestAssertionEvidence",
+                "value": "#/$defs/AssertionEvidence"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AssertionEvidence"
+              },
+              {
+                "$ref": "#/$defs/DigestAssertionEvidence"
+              }
+            ]
+          },
+          "maxItems": 500,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "attempts": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Type",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "running",
+            "passed",
+            "failed",
+            "skipped",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "phase",
+        "status",
+        "attempts"
+      ],
+      "title": "NodeEvidence",
+      "type": "object"
+    },
+    "OracleBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Assertion Name",
+          "type": "string"
+        },
+        "expected_value_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Value Digest",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "oracle_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Oracle Id",
+          "type": "string"
+        },
+        "phase": {
+          "default": "main",
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oracle_id",
+        "node_id",
+        "assertion_name",
+        "expression",
+        "expected_value_digest"
+      ],
+      "title": "OracleBinding",
+      "type": "object"
+    },
+    "PlanRunSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "maximum": 4,
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "expected_target_snapshot_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Target Snapshot Digest"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_item_id": {
+          "format": "uuid",
+          "title": "Run Item Id",
+          "type": "string"
+        },
+        "source_suite": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SuiteReference"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled",
+            "quarantined"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_id": {
+          "format": "uuid",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "target_snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Target Snapshot Digest",
+          "type": "string"
+        },
+        "target_type": {
+          "const": "case",
+          "default": "case",
+          "title": "Target Type",
+          "type": "string"
+        },
+        "target_version": {
+          "minimum": 1,
+          "title": "Target Version",
+          "type": "integer"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "run_id",
+        "run_item_id",
+        "target_id",
+        "target_version",
+        "workflow_id",
+        "workflow_version",
+        "environment_id",
+        "execution_id",
+        "attempts",
+        "status",
+        "target_snapshot_digest"
+      ],
+      "title": "PlanRunSnapshot",
+      "type": "object"
+    },
+    "ProductBatchSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "actual_scenario_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Actual Scenario Ids",
+          "type": "array"
+        },
+        "artifact_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Artifact Ids",
+          "type": "array"
+        },
+        "cleanup_status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "evidence_integrity": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Evidence Integrity",
+          "type": "string"
+        },
+        "execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Execution Ids",
+          "type": "array"
+        },
+        "expected_scenario_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Expected Scenario Ids",
+          "type": "array"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "installation_id": {
+          "format": "uuid",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "manifest_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Digest",
+          "type": "string"
+        },
+        "observed_statuses": {
+          "items": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Observed Statuses",
+          "type": "array"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "plan_run_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Plan Run Ids",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "resource_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Resource Digest"
+        },
+        "sealed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sealed At"
+        },
+        "sealed_verdict": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sealed Verdict"
+        },
+        "verdict": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verdict",
+          "type": "string"
+        },
+        "verification_statuses": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Verification Statuses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "installation_id",
+        "plan_run_ids",
+        "execution_ids",
+        "phase",
+        "verdict",
+        "sealed_verdict",
+        "evidence_integrity",
+        "cleanup_status",
+        "manifest_digest",
+        "resource_digest",
+        "sealed_at",
+        "expected_scenario_ids",
+        "actual_scenario_ids",
+        "observed_statuses",
+        "verification_statuses",
+        "artifact_ids",
+        "provenance"
+      ],
+      "title": "ProductBatchSnapshot",
+      "type": "object"
+    },
+    "ProductBoundaryObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallationInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "batches": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProductBatchSnapshot"
+          },
+          "maxItems": 3,
+          "title": "Batches",
+          "type": "array"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallationInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installation_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Installation Ids",
+          "type": "array"
+        },
+        "key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "listed_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Listed Ids",
+          "type": "array"
+        },
+        "listed_total": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Listed Total"
+        },
+        "maintenance": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MaintenanceReceipt"
+          },
+          "title": "Maintenance",
+          "type": "array"
+        },
+        "mapping_digests": {
+          "default": [],
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "title": "Mapping Digests",
+          "type": "array"
+        },
+        "namespace_statuses": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Namespace Statuses",
+          "type": "array"
+        },
+        "object_statuses": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Object Statuses",
+          "type": "array"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "requests": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DenialObservation"
+          },
+          "maxItems": 20,
+          "title": "Requests",
+          "type": "array"
+        },
+        "safe_fields": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Safe Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "observed_at"
+      ],
+      "title": "ProductBoundaryObservation",
+      "type": "object"
+    },
+    "ProductNativeProof": {
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/BatchEvidence"
+        },
+        "manifest": {
+          "$ref": "#/$defs/BatchManifest"
+        }
+      },
+      "required": [
+        "manifest",
+        "evidence"
+      ],
+      "title": "ProductNativeProof",
+      "type": "object"
+    },
+    "ProjectStateEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "created_by_id": {
+          "format": "uuid",
+          "title": "Created By Id",
+          "type": "string"
+        },
+        "disposable_target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisposableTargetIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "disposal_binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Disposal Binding Nonce",
+          "type": "string"
+        },
+        "disposal_receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetDisposalReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "disposal_status": {
+          "enum": [
+            "pending",
+            "completed"
+          ],
+          "title": "Disposal Status",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "organization_id",
+        "created_by_id",
+        "name",
+        "disposal_binding_nonce",
+        "project_id",
+        "created_at",
+        "observed_at",
+        "disposal_status"
+      ],
+      "title": "ProjectStateEvidence",
+      "type": "object"
+    },
+    "ProjectStateExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "created_by_id": {
+          "format": "uuid",
+          "title": "Created By Id",
+          "type": "string"
+        },
+        "disposable_target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisposableTargetIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "disposal_binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Disposal Binding Nonce",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "organization_id",
+        "created_by_id",
+        "name",
+        "disposal_binding_nonce"
+      ],
+      "title": "ProjectStateExpectation",
+      "type": "object"
+    },
+    "ProposalEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "content_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Fingerprint",
+          "type": "string"
+        },
+        "item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Materialized Resource Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "format": "uuid",
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "review_mode": {
+          "enum": [
+            "ci_fixture",
+            "human"
+          ],
+          "title": "Review Mode",
+          "type": "string"
+        },
+        "review_status": {
+          "enum": [
+            "accepted",
+            "pending",
+            "rejected"
+          ],
+          "title": "Review Status",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "format": "uuid",
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "route": {
+          "enum": [
+            "flow_spec",
+            "controlled_write"
+          ],
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "proposal_id",
+        "route",
+        "review_status",
+        "content_fingerprint",
+        "review_mode",
+        "reviewer_id"
+      ],
+      "title": "ProposalEvidence",
+      "type": "object"
+    },
+    "PublishedCase": {
+      "additionalProperties": false,
+      "properties": {
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version",
+        "fingerprint",
+        "workflow_id",
+        "workflow_version",
+        "environment_id"
+      ],
+      "title": "PublishedCase",
+      "type": "object"
+    },
+    "PublishedSuite": {
+      "additionalProperties": false,
+      "properties": {
+        "case_versions": {
+          "items": {
+            "$ref": "#/$defs/SuiteCaseVersion"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Case Versions",
+          "type": "array"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version",
+        "fingerprint",
+        "case_versions"
+      ],
+      "title": "PublishedSuite",
+      "type": "object"
+    },
+    "PublishedWorkflow": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "assertions": {
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Assertions",
+          "type": "array"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "version_id": {
+          "format": "uuid",
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "id",
+        "version_id",
+        "version",
+        "fingerprint",
+        "assertions"
+      ],
+      "title": "PublishedWorkflow",
+      "type": "object"
+    },
+    "RequiredDisposal": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce"
+      ],
+      "title": "RequiredDisposal",
+      "type": "object"
+    },
+    "ResourceAbsenceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "resource_kind": {
+          "default": "environments",
+          "enum": [
+            "environments",
+            "folders"
+          ],
+          "title": "Resource Kind",
+          "type": "string"
+        },
+        "returned_names": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10000,
+          "title": "Returned Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "returned_names",
+        "observed_at",
+        "complete"
+      ],
+      "title": "ResourceAbsenceEvidence",
+      "type": "object"
+    },
+    "ResourceAbsenceExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "absent_names": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Absent Names",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "resource_kind": {
+          "default": "environments",
+          "enum": [
+            "environments",
+            "folders"
+          ],
+          "title": "Resource Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "absent_names"
+      ],
+      "title": "ResourceAbsenceExpectation",
+      "type": "object"
+    },
+    "ResponseFieldEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Actual",
+          "type": "string"
+        },
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "field": {
+          "const": "name",
+          "default": "name",
+          "title": "Field",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "workflow_version_id": {
+          "format": "uuid",
+          "title": "Workflow Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "batch_key",
+        "scenario_id",
+        "project_id",
+        "execution_id",
+        "workflow_version_id",
+        "api_source",
+        "node_id",
+        "actual",
+        "observed_at"
+      ],
+      "title": "ResponseFieldEvidence",
+      "type": "object"
+    },
+    "ResponseFieldExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "api_source": {
+          "$ref": "#/$defs/ApiSource"
+        },
+        "expected": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Expected",
+          "type": "string"
+        },
+        "field": {
+          "const": "name",
+          "default": "name",
+          "title": "Field",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_source",
+        "node_id",
+        "expected"
+      ],
+      "title": "ResponseFieldExpectation",
+      "type": "object"
+    },
+    "ScenarioExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "cleanup_required": {
+          "default": true,
+          "title": "Cleanup Required",
+          "type": "boolean"
+        },
+        "expected": {
+          "$ref": "#/$defs/ExpectedOutcome"
+        },
+        "expected_api_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 100,
+          "title": "Expected Api Sources",
+          "type": "array"
+        },
+        "expected_attempts": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Expected Attempts",
+          "type": "integer"
+        },
+        "expected_combined_design_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Combined Design Fingerprint"
+        },
+        "expected_design_sources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/DesignSource"
+          },
+          "maxItems": 100,
+          "title": "Expected Design Sources",
+          "type": "array"
+        },
+        "expected_mcp_calls": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "maxItems": 100,
+          "title": "Expected Mcp Calls",
+          "type": "array"
+        },
+        "expected_oracle_bindings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/OracleBinding"
+          },
+          "maxItems": 500,
+          "title": "Expected Oracle Bindings",
+          "type": "array"
+        },
+        "expected_suite": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PublishedSuite"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expected_target_snapshot_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Target Snapshot Digest"
+        },
+        "fixture_batch_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Batch Key"
+        },
+        "require_suite_provenance": {
+          "default": false,
+          "title": "Require Suite Provenance",
+          "type": "boolean"
+        },
+        "required_evidence": {
+          "items": {
+            "enum": [
+              "execution",
+              "assertions",
+              "fixture_journal",
+              "provenance",
+              "postcondition",
+              "control_records",
+              "response_fields"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "minItems": 1,
+          "title": "Required Evidence",
+          "type": "array"
+        },
+        "required_oracle_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Required Oracle Ids",
+          "type": "array"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "expected",
+        "required_evidence"
+      ],
+      "title": "ScenarioExpectation",
+      "type": "object"
+    },
+    "ScenarioObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "attempts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExecutionEvidence"
+          },
+          "maxItems": 4,
+          "title": "Attempts",
+          "type": "array"
+        },
+        "children": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExecutionEvidence"
+          },
+          "maxItems": 500,
+          "title": "Children",
+          "type": "array"
+        },
+        "children_complete": {
+          "default": true,
+          "title": "Children Complete",
+          "type": "boolean"
+        },
+        "cleanup_status": {
+          "enum": [
+            "completed",
+            "failed",
+            "pending",
+            "not_required"
+          ],
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "control_pages": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EvidencePage"
+          },
+          "maxItems": 1000,
+          "title": "Control Pages",
+          "type": "array"
+        },
+        "created_file": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CreatedFileEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_envelopes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ErrorEnvelopeEvidence"
+          },
+          "maxItems": 20,
+          "title": "Error Envelopes",
+          "type": "array"
+        },
+        "evidence_complete": {
+          "default": true,
+          "title": "Evidence Complete",
+          "type": "boolean"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "journal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureJournal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "postcondition_matched": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Postcondition Matched"
+        },
+        "project_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectStateEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GenerationProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "read_error": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Read Error"
+        },
+        "resource_absence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceAbsenceEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resource_absences": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResourceAbsenceEvidence"
+          },
+          "maxItems": 20,
+          "title": "Resource Absences",
+          "type": "array"
+        },
+        "response_fields": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ResponseFieldEvidence"
+          },
+          "maxItems": 100,
+          "title": "Response Fields",
+          "type": "array"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "synthetic_artifact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticArtifactEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "target_disposal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetDisposalReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "cleanup_status"
+      ],
+      "title": "ScenarioObservation",
+      "type": "object"
+    },
+    "SubflowBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "api_sources": {
+          "items": {
+            "$ref": "#/$defs/ApiSource"
+          },
+          "maxItems": 500,
+          "title": "Api Sources",
+          "type": "array"
+        },
+        "complete": {
+          "default": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "path": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Path",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "workflow_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Workflow Fingerprint",
+          "type": "string"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "minimum": 1,
+          "title": "Workflow Version",
+          "type": "integer"
+        },
+        "workflow_version_id": {
+          "format": "uuid",
+          "title": "Workflow Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "project_id",
+        "workflow_id",
+        "workflow_version_id",
+        "workflow_version",
+        "workflow_fingerprint",
+        "api_sources"
+      ],
+      "title": "SubflowBinding",
+      "type": "object"
+    },
+    "SuiteCaseVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "case_id",
+        "version"
+      ],
+      "title": "SuiteCaseVersion",
+      "type": "object"
+    },
+    "SuiteReference": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "SuiteReference",
+      "type": "object"
+    },
+    "SyntheticArtifactEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_base64": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "artifact_id",
+        "content_base64",
+        "content_type"
+      ],
+      "title": "SyntheticArtifactEvidence",
+      "type": "object"
+    },
+    "SyntheticArtifactExpectation": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "format": "uuid",
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "content_utf8": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Content Utf8",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_utf8",
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename",
+        "project_id",
+        "artifact_id"
+      ],
+      "title": "SyntheticArtifactExpectation",
+      "type": "object"
+    },
+    "SyntheticCookieSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "enum": [
+            "set",
+            "barrier",
+            "check"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "stage",
+        "value"
+      ],
+      "title": "SyntheticCookieSnapshot",
+      "type": "object"
+    },
+    "SyntheticHeaderSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "project",
+                "environment",
+                "api",
+                "case",
+                "runtime",
+                "node"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "SyntheticHeaderSnapshot",
+      "type": "object"
+    },
+    "TargetDisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "containers_absent": {
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "TargetDisposalReceipt",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "collected_at": {
+      "format": "date-time",
+      "title": "Collected At",
+      "type": "string"
+    },
+    "disposal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TargetDisposalReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "http_attempts": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Http Attempts",
+      "type": "integer"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "native": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProductNativeProof"
+      },
+      "maxItems": 2,
+      "title": "Native",
+      "type": "array"
+    },
+    "observations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProductBoundaryObservation"
+      },
+      "maxItems": 50,
+      "title": "Observations",
+      "type": "array"
+    },
+    "rejected_attempts": {
+      "minimum": 0,
+      "title": "Rejected Attempts",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "manifest_digest",
+    "http_attempts",
+    "rejected_attempts",
+    "collected_at"
+  ],
+  "title": "ProductBoundaryEvidence",
+  "type": "object"
+}

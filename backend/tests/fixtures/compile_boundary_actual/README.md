@@ -1,0 +1,1 @@
+本目录当前控制来自 development40 的真实 Standalone SDK 验收：stdio / Streamable HTTP 各 17 项纯编译与拒绝检查，另各 2 项 Quick / FlowSpec 提案、普通评审身份审核和应用后的草稿检查，共 38 项。只作为独立 O 的历史单元控制，不能证明当前部署、Full/Compact 或正式 CI 门禁通过。模型调用 0，无业务执行；提案审核为 ci_fixture，不等于真人审核。原 development34 的 32 项输入逐字保留在同目录 development34 文件中，旧记录不改绿。当前控制保留自己的源码、时间与所属资源清理收据。

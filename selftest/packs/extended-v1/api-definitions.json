@@ -1,0 +1,380 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-EXT-if-miss",
+      "source_id": "20c276e2-0297-558d-a000-86861e63d308",
+      "name": "If 未命中分支",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-if-miss/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-switch-default",
+      "source_id": "022b6fb3-a66d-5e06-9dab-d610fd754aae",
+      "name": "Switch 默认分支",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-switch-default/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-foreach-empty",
+      "source_id": "7ac230da-60a5-58b5-abb3-d2dc08067f73",
+      "name": "ForEach 空集合不发送请求",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-foreach-empty/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-loop-not-array",
+      "source_id": "35772507-6b63-5b8e-baa8-cf159fe4951f",
+      "name": "循环边界 not-array",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-loop-not-array/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-loop-min-items",
+      "source_id": "f771d6fb-9f5c-53ca-8c5c-6d45f359167c",
+      "name": "循环边界 min-items",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-loop-min-items/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-loop-max-items",
+      "source_id": "427e4df4-7fdc-5bfb-bd0e-e1a9be98277f",
+      "name": "循环边界 max-items",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-loop-max-items/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-loop-break",
+      "source_id": "128e48a8-350f-5cea-b1d7-920dda270116",
+      "name": "循环 break 不执行后续节点",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-loop-break/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-loop-continue",
+      "source_id": "15b65cdb-1f81-5432-aedc-92b54adc79cf",
+      "name": "循环 continue 不执行后续节点",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-loop-continue/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-while",
+      "source_id": "f958ca8b-be86-5069-bf08-8d2372738e7d",
+      "name": "While 有界迭代 while",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-while/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-while-limit",
+      "source_id": "c77469be-d0fd-5f70-ad4d-2b29590edb3b",
+      "name": "While 有界迭代 while-limit",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-while-limit/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-retry-three",
+      "source_id": "fa7e34a1-ac56-5855-9af5-9ecf4299e730",
+      "name": "只读请求重试 retry-three",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-EXT-retry-three/request",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-retry-exhausted",
+      "source_id": "f15e1537-8238-5a9e-9011-61c32c421fb4",
+      "name": "只读请求重试 retry-exhausted",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-EXT-retry-exhausted/request",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-poll-terminal",
+      "source_id": "c85e204b-91e2-5d71-a2e6-75570e5dbd94",
+      "name": "轮询边界 poll-terminal",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-EXT-poll-terminal/request",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-poll-budget",
+      "source_id": "20a0578a-cd68-500e-ac8c-1adf89cd25f0",
+      "name": "轮询边界 poll-budget",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-EXT-poll-budget/request",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-main-cleanup-failure",
+      "source_id": "3804e5eb-6548-5a83-a2b5-8a22cf835a4f",
+      "name": "主流程和清理断言均失败",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-main-cleanup-failure/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-parallel-branches",
+      "source_id": "f5ee4d8d-37cf-5a18-86dc-0d91fc9d233f",
+      "name": "并行分支请求隔离与精确集合",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-parallel-branches/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-try-caught",
+      "source_id": "65f00c0b-c1b1-5b0e-80b2-5ef87aa5ef8b",
+      "name": "Try 捕获指定错误并保留 Finally try-caught",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-try-caught/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-try-unmatched",
+      "source_id": "7b13c610-b043-5c43-8b69-1f48e71d6498",
+      "name": "Try 捕获指定错误并保留 Finally try-unmatched",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-try-unmatched/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-EXT-submit-poll",
+      "source_id": "f2d4b882-f87c-5b92-88cc-c6a8ef1b17bb",
+      "name": "单次提交后仅GET轮询两次",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-EXT-submit-poll/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "extended-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "6855fd47-a059-5956-a6f7-0f3339063f64",
+          "name": "单次提交后的只读轮询",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-EXT-submit-poll/request",
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

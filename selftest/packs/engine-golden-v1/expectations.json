@@ -1,0 +1,398 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-GOLDEN-schema",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [
+          {
+            "node_id": "assert_schema",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": {
+              "type": "object",
+              "required": [
+                "zero",
+                "flag",
+                "empty",
+                "text",
+                "nullable"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "zero": {
+                  "const": 0
+                },
+                "flag": {
+                  "const": false
+                },
+                "empty": {
+                  "const": ""
+                },
+                "text": {
+                  "const": "中文"
+                },
+                "nullable": {
+                  "type": "null"
+                }
+              }
+            },
+            "actual": {
+              "zero": 0,
+              "flag": false,
+              "empty": "",
+              "text": "中文",
+              "nullable": null
+            }
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-GOLDEN-header-json",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [
+          {
+            "response_status": 200,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [
+          {
+            "node_id": "assert_extracted",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": {
+              "zero": 0,
+              "flag": false,
+              "empty": "",
+              "text": "中文",
+              "nullable": null
+            },
+            "actual": {
+              "zero": 0,
+              "flag": false,
+              "empty": "",
+              "text": "中文",
+              "nullable": null
+            }
+          },
+          {
+            "node_id": "assert_header",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "application/json",
+            "actual": "application/json"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-GOLDEN-file",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [],
+        "assertions": [
+          {
+            "node_id": "assert_file_content",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "flowtest-download",
+            "actual": "flowtest-download"
+          },
+          {
+            "node_id": "assert_file_size",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 17,
+            "actual": 17
+          },
+          {
+            "node_id": "assert_file_header",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "application/octet-stream",
+            "actual": "application/octet-stream"
+          }
+        ],
+        "binary_file": {
+          "content_utf8": "flowtest-download",
+          "size_bytes": 17,
+          "sha256": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f",
+          "content_type": "application/octet-stream",
+          "filename": "flowtest.bin"
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-GOLDEN-explicit-status",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 2,
+        "fixture_responses": [
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          },
+          {
+            "response_status": 503,
+            "actual": 1,
+            "code": 0,
+            "authorization_present": false,
+            "cookie_present": false
+          }
+        ],
+        "assertions": [],
+        "error_code": "HTTP_UNEXPECTED_STATUS",
+        "node_id": "retry_api",
+        "phase": "main",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "retry_api",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "HTTP_UNEXPECTED_STATUS",
+            "attempts": 2
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    },
+    {
+      "scenario_id": "ST-GOLDEN-min-items",
+      "expected": {
+        "execution_status": "failed",
+        "request_count": 0,
+        "fixture_responses": [],
+        "assertions": [],
+        "error_code": "LOOP_MIN_ITEMS_NOT_MET",
+        "node_id": "guard_1",
+        "phase": "main",
+        "top_nodes": [
+          {
+            "node_id": "start",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "guard_0",
+            "phase": "main",
+            "status": "passed",
+            "error_code": null,
+            "attempts": 1
+          },
+          {
+            "node_id": "guard_1",
+            "phase": "main",
+            "status": "failed",
+            "error_code": "LOOP_MIN_ITEMS_NOT_MET",
+            "attempts": 1
+          },
+          {
+            "node_id": "end",
+            "phase": "main",
+            "status": "cancelled",
+            "error_code": null,
+            "attempts": 0
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-GOLDEN-schema",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": {
+            "zero": 0,
+            "flag": false,
+            "empty": "",
+            "text": "中文",
+            "nullable": null
+          },
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-GOLDEN-header-json",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": {
+            "zero": 0,
+            "flag": false,
+            "empty": "",
+            "text": "中文",
+            "nullable": null
+          },
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-GOLDEN-file",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-GOLDEN-explicit-status",
+      "fixture": {
+        "response_statuses": [
+          503,
+          503
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        },
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 503,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-GOLDEN-min-items",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    }
+  ]
+}

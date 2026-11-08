@@ -1,0 +1,101 @@
+{
+  "$defs": {
+    "SemanticVerdict": {
+      "additionalProperties": false,
+      "properties": {
+        "raw_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Raw Status"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "source_rejected": {
+          "title": "Source Rejected",
+          "type": "boolean"
+        },
+        "variant": {
+          "enum": [
+            "positive_control",
+            "missing_assertion",
+            "wrong_field",
+            "wrong_operator",
+            "expected_from_actual"
+          ],
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "raw_status",
+        "source_rejected",
+        "reason_codes"
+      ],
+      "title": "SemanticVerdict",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "claim": {
+      "const": "semantic_review_negative_only",
+      "default": "semantic_review_negative_only",
+      "title": "Claim",
+      "type": "string"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        1,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/SemanticVerdict"
+      },
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "exit_code",
+    "reason_codes",
+    "scenarios"
+  ],
+  "title": "SemanticReport",
+  "type": "object"
+}

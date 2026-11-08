@@ -1,0 +1,68 @@
+{
+  "format": "flowtest-selftest-golden-behaviors",
+  "format_version": 1,
+  "expected_scenario_set": ["ST-MCP-023", "ST-MCP-025", "ST-MCP-026"],
+  "required_scenario_set": ["ST-MCP-023", "ST-MCP-025", "ST-MCP-026"],
+  "rules": [
+    {
+      "scenario_id": "ST-MCP-023",
+      "variant_key": "environment_lifecycle",
+      "execution_status": "passed",
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "provenance",
+        "postcondition"
+      ],
+      "postcondition": "本批创建的环境资源已被删除，独立会话查询可证实"
+    },
+    {
+      "scenario_id": "ST-MCP-025",
+      "variant_key": "negative_assertion_canary",
+      "execution_status": "failed",
+      "error_code": "WORKFLOW_ASSERTION_FAILED",
+      "phase": "main",
+      "node_binding": "审核后、运行前独立核对并冻结唯一具体断言 node_id",
+      "request_count": 1,
+      "assertion": {
+        "expression": "body.actual",
+        "expected": 2,
+        "actual": 1,
+        "passed": false
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "fixture_journal",
+        "provenance"
+      ]
+    },
+    {
+      "scenario_id": "ST-MCP-026",
+      "variant_key": "positive_assertion_canary",
+      "execution_status": "passed",
+      "request_count": 1,
+      "assertion": {
+        "expression": "body.actual",
+        "expected": 1,
+        "actual": 1,
+        "passed": true
+      },
+      "required_evidence": [
+        "execution",
+        "assertions",
+        "fixture_journal",
+        "provenance"
+      ]
+    }
+  ],
+  "constraints": [
+    "required_scenario_set 非空且是 expected_scenario_set 的子集，实际执行集合与 expected 精确一致",
+    "已选可选项也必须全部符合预期，子集通过不得表述为完整模板通过",
+    "断言节点与错误阶段只能在运行前冻结，禁止从实际失败反推 node_id",
+    "发布版本、全部尝试、本批 nonce 和独立回执缺失均不得通过",
+    "原始执行 failed 和独立核验 matched 分别保留，JUnit 不合并",
+    "当前本地报告仅 local_untrusted，不授予 GitHub Required Gate",
+    "真实宿主未获模型、外发与预算授权时为 NOT_RUN，不以确定性结果代替"
+  ]
+}

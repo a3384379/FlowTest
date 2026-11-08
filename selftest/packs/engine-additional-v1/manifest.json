@@ -1,0 +1,25 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "extended-v1",
+  "pack_version": "1.1.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-ADD-poll-time-budget",
+    "ST-ADD-request-budget",
+    "ST-ADD-finally-failure",
+    "ST-ADD-parallel-bound",
+    "ST-ADD-nested-break",
+    "ST-ADD-nested-continue",
+    "ST-ADD-return-outside-call",
+    "ST-ADD-switch-hit",
+    "ST-ADD-workflow-time-budget",
+    "ST-ADD-subflow-return",
+    "ST-ADD-dataset-rows"
+  ],
+  "files": {
+    "api-definitions.json": "0677c68c79d2ce5497ebf2a3e9473d88578752e5396c205da9bcdf558d7d15b9",
+    "workflows.json": "5da0a8bca8406c8613ce3363fc01c6d705e0569ac3f3e4e4d9ca6c6d6fe8658f",
+    "expectations.json": "f6e92444b2f45e1a9e54f0440a06faa53ce2175a18e34bf59a6a995e6ff8a869"
+  }
+}

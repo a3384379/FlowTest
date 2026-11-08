@@ -15,10 +15,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     set -eux; \
     go mod init flowtest.local/k6-build; \
-    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0; \
+    go get go.k6.io/k6/v2@v2.2.0 google.golang.org/grpc@v1.83.2 \
+        github.com/andybalholm/brotli@v1.2.7 github.com/klauspost/compress@v1.20.2 \
+        golang.org/x/net@v0.62.0; \
     GOBIN=/out CGO_ENABLED=0 go install go.k6.io/k6/v2; \
     go version -m /out/k6 | grep -F 'go1.26.9'; \
     go version -m /out/k6 | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
+    go version -m /out/k6 | grep -F 'github.com/andybalholm/brotli' | grep -F 'v1.2.7'; \
+    go version -m /out/k6 | grep -F 'github.com/klauspost/compress' | grep -F 'v1.20.2'; \
+    go version -m /out/k6 | grep -F 'golang.org/x/net' | grep -F 'v0.62.0'; \
     /out/k6 version | grep -F 'k6 v2.2.0'
 
 FROM scratch AS k6-base-source
@@ -36,7 +41,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = a7dcaa6fdb6ed04aacbfdc76357fdae01605609e; \
     cp vendor.mod go.mod; \
     cp vendor.sum go.sum; \
-    go get google.golang.org/grpc@v1.83.2 golang.org/x/net@v0.60.0; \
+    go get google.golang.org/grpc@v1.83.2 github.com/klauspost/compress@v1.20.2 \
+        golang.org/x/net@v0.62.0; \
     go mod vendor; \
     grep -Fx '# google.golang.org/grpc v1.83.2' vendor/modules.txt; \
     mv go.mod vendor.mod; \
@@ -67,7 +73,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     git fetch --depth 1 origin 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
     git checkout --detach FETCH_HEAD; \
     test "$(git rev-parse HEAD)" = 6a43e3d5afddf4111da0f864bbc7cae5d7e95001; \
-    go get github.com/containerd/containerd/v2@v2.3.4 google.golang.org/grpc@v1.83.2 golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0; \
+    go get github.com/containerd/containerd/v2@v2.3.4 google.golang.org/grpc@v1.83.2 \
+        github.com/go-jose/go-jose/v4@v4.1.6 github.com/klauspost/compress@v1.20.2 \
+        golang.org/x/crypto@v0.58.0 \
+        golang.org/x/net@v0.62.0; \
     go mod vendor; \
     SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
         VERSION=29.7.2 \
@@ -79,7 +88,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'go1.26.9'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'github.com/containerd/containerd/v2' | grep -F 'v2.3.4'; \
     go version -m /out/bundles/binary-daemon/dockerd | grep -F 'google.golang.org/grpc' | grep -F 'v1.83.2'; \
-    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.57.0'; \
+    go version -m /out/bundles/binary-daemon/dockerd | grep -F 'golang.org/x/crypto' | grep -F 'v0.58.0'; \
     /out/bundles/binary-daemon/dockerd --version | grep -F 'Docker version 29.7.2'
 
 FROM go-toolchain AS containerd-builder
@@ -94,9 +103,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     test "$(git rev-parse HEAD)" = db8809540e1a7a9da5d518876894933ff55692ab; \
     git tag v2.3.4; \
     go get \
-        golang.org/x/sync@v0.23.0 \
-        golang.org/x/text@v0.42.0 \
-        golang.org/x/net@v0.60.0 \
+        golang.org/x/sync@v0.24.0 \
+        golang.org/x/text@v0.43.0 \
+        golang.org/x/net@v0.62.0 \
+        github.com/go-jose/go-jose/v4@v4.1.6 \
+        github.com/klauspost/compress@v1.20.2 \
         google.golang.org/grpc@v1.83.2; \
     go mod download all; \
     go mod vendor; \
@@ -142,17 +153,21 @@ RUN set -eux; \
     ctr --version
 
 FROM ${FLOWTEST_ENVIRONMENT_DAEMON_BASE} AS environment-daemon
-RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.9.0-r0' 'zlib>=1.3.2-r1' \
+RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.9.0-r0' \
+    'musl>=1.2.6-r3' 'musl-utils>=1.2.6-r3' 'zlib>=1.4-r0' \
+    'brotli-libs>=1.2.1-r0' 'libcurl>=8.23.0-r0' \
+    'openssh-client-common>=10.3_p1-r2' 'openssh-client-default>=10.3_p1-r2' \
+    'openssh-keygen>=10.3_p1-r2' \
     && apk info --exists 'libexpat>=2.9.0-r0'
 
 FROM debian:trixie-slim AS python-base-source
 
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.16" \
-    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
+    PYTHON_VERSION="3.13.18" \
+    PYTHON_SHA256="abb0102e6d4ae027509bcb82327d9dd85515b44a3ba8ad538cfc5e9847029f68"
 
 # Build the signed CPython maintenance release with an explicit checksum.
-# 3.13.16 includes the SSLContext and previously backported tarfile fixes.
+# 3.13.18 adds the CA distrust fix for CVE-2026-115557.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \

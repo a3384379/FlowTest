@@ -1,0 +1,222 @@
+{
+  "$defs": {
+    "OracleBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "oracle_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Oracle Id",
+          "type": "string"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "phase": {
+          "default": "main",
+          "enum": ["main", "cleanup"],
+          "title": "Phase",
+          "type": "string"
+        },
+        "assertion_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Assertion Name",
+          "type": "string"
+        },
+        "expression": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Expression",
+          "type": "string"
+        },
+        "expected_value_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Value Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "oracle_id",
+        "node_id",
+        "assertion_name",
+        "expression",
+        "expected_value_digest"
+      ],
+      "title": "OracleBinding",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "flowtest-host-diagnosis-task-v1",
+      "default": "flowtest-host-diagnosis-task-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "project_id": {
+      "format": "uuid",
+      "title": "Project Id",
+      "type": "string"
+    },
+    "batch_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "origin_batch_id": {
+      "format": "uuid",
+      "title": "Origin Batch Id",
+      "type": "string"
+    },
+    "origin_batch_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Origin Batch Key",
+      "type": "string"
+    },
+    "scenario_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "variant_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Variant Key",
+      "type": "string"
+    },
+    "execution_id": {
+      "format": "uuid",
+      "title": "Execution Id",
+      "type": "string"
+    },
+    "workflow_id": {
+      "format": "uuid",
+      "title": "Workflow Id",
+      "type": "string"
+    },
+    "workflow_version_id": {
+      "format": "uuid",
+      "title": "Workflow Version Id",
+      "type": "string"
+    },
+    "workflow_version": {
+      "minimum": 1,
+      "title": "Workflow Version",
+      "type": "integer"
+    },
+    "workflow_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Workflow Fingerprint",
+      "type": "string"
+    },
+    "environment_id": {
+      "format": "uuid",
+      "title": "Environment Id",
+      "type": "string"
+    },
+    "error_code": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Error Code",
+      "type": "string"
+    },
+    "node_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Node Id",
+      "type": "string"
+    },
+    "phase": {
+      "enum": ["main", "cleanup"],
+      "title": "Phase",
+      "type": "string"
+    },
+    "expected_classification": {
+      "default": "PRODUCT_DEFECT",
+      "enum": [
+        "PRODUCT_DEFECT",
+        "BAD_TEST",
+        "BAD_TEST_DATA",
+        "ENVIRONMENT_FAILURE",
+        "SERVICE_ENDPOINT_FAILURE",
+        "UPSTREAM_SERVICE_FAILURE",
+        "CONTRACT_DRIFT",
+        "AUTH_FAILURE",
+        "NETWORK_FAILURE",
+        "TIMEOUT",
+        "FLAKY",
+        "CANCELLED",
+        "UNKNOWN"
+      ],
+      "title": "Expected Classification",
+      "type": "string"
+    },
+    "required_oracles": {
+      "items": {
+        "$ref": "#/$defs/OracleBinding"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Required Oracles",
+      "type": "array"
+    },
+    "manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Sha256",
+      "type": "string"
+    },
+    "evidence_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Evidence Sha256",
+      "type": "string"
+    },
+    "verification_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Verification Sha256",
+      "type": "string"
+    },
+    "expected_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Expected Digest",
+      "type": "string"
+    },
+    "authorized_data_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authorized Data Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "project_id",
+    "batch_key",
+    "origin_batch_id",
+    "origin_batch_key",
+    "scenario_id",
+    "variant_key",
+    "execution_id",
+    "workflow_id",
+    "workflow_version_id",
+    "workflow_version",
+    "workflow_fingerprint",
+    "environment_id",
+    "error_code",
+    "node_id",
+    "phase",
+    "required_oracles",
+    "manifest_sha256",
+    "evidence_sha256",
+    "verification_sha256",
+    "expected_digest",
+    "authorized_data_digest"
+  ],
+  "title": "DiagnosisTask",
+  "type": "object"
+}

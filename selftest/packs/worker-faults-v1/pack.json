@@ -1,0 +1,14 @@
+{
+  "schema_version": "flowtest-worker-fault-pack-v1",
+  "pack_id": "worker-faults-v1",
+  "pack_version": "1.0.0",
+  "max_requests": 100,
+  "max_runtime_seconds": 300,
+  "lease_seconds": 60,
+  "scenarios": [
+    {"variant": "double_claim", "status": "passed", "markers": ["first", "follow", "cleanup"], "minimum_actor_processes": 2, "worker_killed": false},
+    {"variant": "duplicate_delivery", "status": "passed", "markers": ["first", "follow", "cleanup"], "minimum_actor_processes": 0, "worker_killed": false},
+    {"variant": "worker_death", "status": "failed", "markers": ["first"], "minimum_actor_processes": 0, "worker_killed": true},
+    {"variant": "recovery", "status": "failed", "markers": ["first", "follow"], "minimum_actor_processes": 0, "worker_killed": true}
+  ]
+}

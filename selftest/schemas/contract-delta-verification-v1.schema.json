@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "DeltaCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "findings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Findings",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "matched",
+            "mismatched",
+            "incomplete"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "variant": {
+          "enum": [
+            "contract_delta",
+            "regenerate_delta",
+            "preview_freeze",
+            "slot_foreign",
+            "slot_unpublished",
+            "slot_drift",
+            "slot_positive"
+          ],
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "status",
+        "findings"
+      ],
+      "title": "DeltaCheck",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        1,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "findings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "pack_id": {
+      "const": "contract-delta-v1",
+      "default": "contract-delta-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/DeltaCheck"
+      },
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    },
+    "verdict": {
+      "enum": [
+        "passed",
+        "failed",
+        "blocked"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "verification_scope": {
+      "const": "contract_delta_and_slot_only",
+      "default": "contract_delta_and_slot_only",
+      "title": "Verification Scope",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_digest",
+    "manifest_digest",
+    "batch_key",
+    "verdict",
+    "exit_code",
+    "findings",
+    "scenarios"
+  ],
+  "title": "DeltaReport",
+  "type": "object"
+}

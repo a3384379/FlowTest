@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeGuard, cast
 from uuid import UUID
 
 from pydantic import JsonValue
@@ -103,14 +103,44 @@ class MCPControlledWriteService:
         )
         return MCPControlledWriteEnvelope.model_validate(response)
 
+    async def propose_for_user(
+        self, *, actor: User, payload: MCPControlledWriteCreate, call: MCPReadCall, batch_id: UUID
+    ) -> MCPControlledWriteEnvelope:
+        """An explicit product service entry; never exposed as a machine MCP tool."""
+        await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
+        self._reject_sensitive(payload.model_dump(mode="json"))
+        governance = evaluate_governance(
+            confidence=payload.confidence, risk_level=payload.risk_level, design=payload.design
+        )
+        if payload.dry_run:
+            return _preview_envelope(payload, governance, _source_ref(payload.source_ref))
+        response = await IdempotencyService(self._session).run(
+            key=payload.idempotency_key,
+            project_id=payload.project_id,
+            actor_key=f"user:{actor.id}",
+            operation=call.operation,
+            request_payload={"batch_id": str(batch_id), "payload": payload.model_dump(mode="json")},
+            action=lambda: self._propose_draft(
+                actor=actor,
+                payload=payload,
+                call=call,
+                actor_type="user",
+                assisted_batch_id=batch_id,
+            ),
+        )
+        return MCPControlledWriteEnvelope.model_validate(response)
+
     async def _propose_draft(
         self,
         *,
         actor: User,
         payload: MCPControlledWriteCreate,
         call: MCPReadCall,
+        actor_type: Literal["user", "service_account"] = "service_account",
+        assisted_batch_id: UUID | None = None,
     ) -> MCPControlledWriteEnvelope:
-        self._require_write_scope()
+        if actor_type == "service_account":
+            self._require_write_scope()
         await self._projects.authorize(actor=actor, project_id=payload.project_id, editing=True)
         self._reject_sensitive(payload.model_dump(mode="json"))
         source_ref = _source_ref(payload.source_ref)
@@ -120,6 +150,8 @@ class MCPControlledWriteService:
             design=payload.design,
         )
         source_snapshot = _source_snapshot(payload, governance, source_ref)
+        if assisted_batch_id is not None:
+            source_snapshot["selftest_assisted_batch_id"] = str(assisted_batch_id)
         source_fingerprint = _fingerprint(source_snapshot)
         change_set = AIChangeSet(
             project_id=payload.project_id,
@@ -130,9 +162,9 @@ class MCPControlledWriteService:
             status="draft",
             source_snapshot=source_snapshot,
             source_fingerprint=source_fingerprint,
-            source_type="mcp",
+            source_type="mcp" if actor_type == "service_account" else "rest",
             source_ref=source_ref,
-            actor_type="service_account",
+            actor_type=actor_type,
             actor_id=actor.id,
             created_by_id=actor.id,
         )
@@ -172,7 +204,9 @@ class MCPControlledWriteService:
             project_id=payload.project_id,
             change_set_id=change_set.id,
             call=call,
-            action="mcp.change_set_proposed",
+            action="mcp.change_set_proposed"
+            if actor_type == "service_account"
+            else "selftest.assisted_case_proposed",
             details={
                 "source_fingerprint": source_fingerprint,
                 "item_count": len(payload.test_cases) + 1,
@@ -290,7 +324,7 @@ class MCPControlledWriteService:
         payload: MCPManualApprovalCreate,
     ) -> MCPControlledWriteEnvelope:
         change_set = await self._change_sets.get_change_set_for_update(change_set_id)
-        if change_set is None or change_set.source_type != "mcp":
+        if not _controlled_change_set(change_set):
             raise _not_found()
         await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=True)
         governance = _governance(change_set)
@@ -349,7 +383,7 @@ class MCPControlledWriteService:
         payload: MCPControlledWriteReview,
     ) -> MCPControlledWriteEnvelope:
         change_set = await self._change_sets.get_change_set_for_update(change_set_id)
-        if change_set is None or change_set.source_type != "mcp":
+        if not _controlled_change_set(change_set):
             raise _not_found()
         await self._projects.authorize(actor=actor, project_id=change_set.project_id, editing=True)
         item = await self._change_sets.get_item_for_update(item_id)
@@ -386,6 +420,12 @@ class MCPControlledWriteService:
                 status_code=409,
             )
         content = await self._validated_content(change_set, item, payload.content)
+        await self._require_approved_content(
+            change_set,
+            item,
+            content,
+            required=decision == "accept" and bool(governance["manual_approval_required"]),
+        )
         materialized_type: str | None = None
         materialized_id: UUID | None = None
         if decision == "accept":
@@ -431,6 +471,24 @@ class MCPControlledWriteService:
             confidence=_governance_confidence(governance),
             warnings=_warnings_from_snapshot(change_set),
         )
+
+    async def _require_approved_content(
+        self,
+        change_set: AIChangeSet,
+        item: AIChangeItem,
+        content: dict[str, JsonValue],
+        *,
+        required: bool,
+    ) -> None:
+        if not required:
+            return
+        original = await self._validated_content(change_set, item, None)
+        if _fingerprint(content) != _fingerprint(original):
+            raise AppError(
+                code="MCP_APPROVAL_CONTENT_CHANGED",
+                message="变更内容与已批准的提案不一致，请为修改后的内容重新提交审批",
+                status_code=409,
+            )
 
     async def _validated_content(
         self,
@@ -604,7 +662,7 @@ class MCPControlledWriteService:
 
     async def _get_change_set(self, change_set_id: UUID) -> AIChangeSet:
         change_set = await self._change_sets.get_change_set(change_set_id)
-        if change_set is None or change_set.source_type != "mcp":
+        if not _controlled_change_set(change_set):
             raise _not_found()
         return change_set
 
@@ -660,6 +718,18 @@ class MCPControlledWriteService:
                 **details,
             },
         )
+
+
+def _controlled_change_set(change_set: AIChangeSet | None) -> TypeGuard[AIChangeSet]:
+    return change_set is not None and (
+        change_set.source_type == "mcp"
+        or (
+            change_set.source_type == "rest"
+            and change_set.actor_type == "user"
+            and change_set.source_snapshot.get("schema_version") == "s42-test-design-v1"
+            and isinstance(change_set.source_snapshot.get("selftest_assisted_batch_id"), str)
+        )
+    )
 
 
 def _source_ref(value: str | None) -> str:

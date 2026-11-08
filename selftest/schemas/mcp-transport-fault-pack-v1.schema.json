@@ -1,0 +1,277 @@
+{
+  "$defs": {
+    "FaultGolden": {
+      "additionalProperties": false,
+      "properties": {
+        "business_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Code"
+        },
+        "mutation_count": {
+          "default": 0,
+          "enum": [
+            0,
+            1
+          ],
+          "title": "Mutation Count",
+          "type": "integer"
+        },
+        "rpc_error_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rpc Error Code"
+        },
+        "sdk_complete": {
+          "default": false,
+          "title": "Sdk Complete",
+          "type": "boolean"
+        },
+        "server_http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Server Http Status"
+        },
+        "server_killed": {
+          "default": false,
+          "title": "Server Killed",
+          "type": "boolean"
+        },
+        "server_rpc_error": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Server Rpc Error"
+        },
+        "text_marker": {
+          "anyOf": [
+            {
+              "const": "invalid_arguments",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Marker"
+        },
+        "tool_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Error"
+        },
+        "trace_required": {
+          "default": false,
+          "title": "Trace Required",
+          "type": "boolean"
+        },
+        "transport_error": {
+          "anyOf": [
+            {
+              "const": "remote_protocol_error",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transport Error"
+        }
+      },
+      "title": "FaultGolden",
+      "type": "object"
+    },
+    "FaultScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "enum": [
+            "ST-MCP-004",
+            "ST-MCP-007",
+            "ST-MCP-008"
+          ],
+          "title": "Acceptance Id",
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/FaultGolden"
+        },
+        "fault": {
+          "enum": [
+            "bad_json",
+            "bad_version",
+            "oversized_field",
+            "timeout",
+            "pipe_break",
+            "socket_break",
+            "server_crash",
+            "unknown_mutation",
+            "inactive_account_creator"
+          ],
+          "title": "Fault",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        },
+        "variant_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "acceptance_id",
+        "variant_key",
+        "transport",
+        "fault",
+        "expected"
+      ],
+      "title": "FaultScenario",
+      "type": "object"
+    }
+  },
+  "$id": "https://flowtest.local/selftest/schemas/mcp-transport-fault-pack-v1.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "catalog_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Catalog Fingerprint",
+      "type": "string"
+    },
+    "max_requests": {
+      "const": 500,
+      "title": "Max Requests",
+      "type": "integer"
+    },
+    "max_runtime_seconds": {
+      "const": 600,
+      "title": "Max Runtime Seconds",
+      "type": "integer"
+    },
+    "max_tool_calls": {
+      "const": 100,
+      "title": "Max Tool Calls",
+      "type": "integer"
+    },
+    "normalized_design_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Normalized Design Digest",
+      "type": "string"
+    },
+    "pack_id": {
+      "const": "mcp-transport-fault-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "pack_version": {
+      "const": "1.0.1",
+      "title": "Pack Version",
+      "type": "string"
+    },
+    "proposed_source_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Proposed Source Fingerprint",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/FaultScenario"
+      },
+      "maxItems": 30,
+      "minItems": 1,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "flowtest-mcp-transport-fault-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "sdk_version": {
+      "const": "2.2.0",
+      "title": "Sdk Version",
+      "type": "string"
+    },
+    "tool_names": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 300,
+      "minItems": 1,
+      "title": "Tool Names",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "pack_id",
+    "pack_version",
+    "sdk_version",
+    "max_requests",
+    "max_tool_calls",
+    "max_runtime_seconds",
+    "normalized_design_digest",
+    "proposed_source_fingerprint",
+    "catalog_fingerprint",
+    "tool_names",
+    "scenarios"
+  ],
+  "title": "FaultPack",
+  "type": "object"
+}

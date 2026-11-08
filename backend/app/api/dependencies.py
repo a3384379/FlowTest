@@ -22,6 +22,7 @@ from app.domain.mcp_planning import (
 from app.domain.mcp_read import MCP_READ_SCOPE
 from app.domain.runtime_profiles import RuntimeProfile
 from app.domain.sandbox_preview import MCP_PREVIEW_EXECUTE_SCOPE
+from app.domain.tasking import ServiceTokenScope
 from app.domain.tenant import TenantContext
 from app.http.contract_hub import HttpPactBrokerSource, HttpProviderInteractionVerifier
 from app.http.imports import HttpImportDocumentFetcher
@@ -37,7 +38,9 @@ from app.services.mcp_flow_proposals import MCP_FLOW_PROPOSE_SCOPE
 from app.services.oidc import OIDCConfiguration, OIDCProvider
 from app.services.organizations import OrganizationContextService
 from app.services.service_accounts import ServiceAccountService
+from app.services.tasking import ServiceTokenIdentity, ServiceTokenService
 from app.services.test_contexts import MCP_EVIDENCE_WRITE_SCOPE
+from app.services.test_design_compilation import require_design_compilation_scopes
 from app.tasking.dispatch import (
     AIJobDispatcher,
     EnvironmentTaskDispatcher,
@@ -49,6 +52,25 @@ from app.tasking.dispatch import (
 
 SessionDependency = Annotated[AsyncSession, Depends(get_session)]
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def get_ci_execution_reader(
+    project_id: UUID,
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> ServiceTokenIdentity:
+    if credentials is None:
+        raise AppError(
+            code="INVALID_SERVICE_TOKEN", message="CI Token 无效或权限不足", status_code=401
+        )
+    return await ServiceTokenService(session).authenticate(
+        raw_token=credentials.credentials,
+        project_id=project_id,
+        required_scope=ServiceTokenScope.READ_EXECUTION,
+    )
+
+
+CIExecutionReader = Annotated[ServiceTokenIdentity, Depends(get_ci_execution_reader)]
 
 
 def get_oidc_provider() -> OIDCProvider:
@@ -215,6 +237,23 @@ async def get_mcp_flow_proposal_principal(
         reset_tenant_context(context_token)
 
 
+async def get_mcp_design_compilation_principal(
+    session: SessionDependency,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> AsyncIterator[MCPAuthenticatedPrincipal]:
+    principal, context_token = await _authenticate_mcp_principal(
+        session=session,
+        credentials=credentials,
+        required_scope=MCP_READ_SCOPE,
+        missing_scope_message="固定 Design 编译需要 MCP 只读权限",
+    )
+    try:
+        require_design_compilation_scopes()
+        yield principal
+    finally:
+        reset_tenant_context(context_token)
+
+
 async def get_mcp_preview_principal(
     session: SessionDependency,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
@@ -363,6 +402,10 @@ MCPEvidenceCurrent = Annotated[
 MCPFlowProposalCurrent = Annotated[
     MCPAuthenticatedPrincipal,
     Depends(get_mcp_flow_proposal_principal),
+]
+
+MCPDesignCompilationCurrent = Annotated[
+    MCPAuthenticatedPrincipal, Depends(get_mcp_design_compilation_principal)
 ]
 
 MCPPreviewCurrent = Annotated[

@@ -1,0 +1,12 @@
+{
+  "pack_id": "auth-expiry-v1",
+  "version": "1.0.0",
+  "scenario_ids": [
+    "ST-SECURITY-access-expired"
+  ],
+  "runtime_seconds": 600,
+  "request_budget": 500,
+  "provenance": "local_untrusted",
+  "claims_native_execution": false,
+  "scope": "独立owned目标启动JWT有效期1分钟，真实签发后等待61秒，不伪造JWT或修改时钟。"
+}

@@ -1,0 +1,231 @@
+{
+  "pack_id": "observer-canaries-v1",
+  "version": "1.0.0",
+  "scope": "diagnostic_copy_replay_at_original_collection_time_no_target_requests_no_trust_promotion",
+  "scenarios": [
+    {
+      "key": "missing",
+      "source": "fixed-core",
+      "expected_reason": "REQUIRED_SCENARIO_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-001/missing"
+      ]
+    },
+    {
+      "key": "duplicate",
+      "source": "fixed-core",
+      "expected_reason": "SCENARIO_DUPLICATE",
+      "acceptance_variants": [
+        "ST-CAN-001/duplicate"
+      ]
+    },
+    {
+      "key": "zero",
+      "source": "fixed-core",
+      "expected_reason": "REQUIRED_SCENARIO_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-001/zero"
+      ]
+    },
+    {
+      "key": "required_subset",
+      "source": "fixed-core",
+      "expected_reason": "OBSERVER_INPUT_ERROR",
+      "acceptance_variants": [
+        "ST-CAN-001/required_subset"
+      ]
+    },
+    {
+      "key": "quarantined",
+      "source": "mcp-core",
+      "expected_reason": "EXECUTION_ATTEMPT_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-002/quarantined"
+      ]
+    },
+    {
+      "key": "skipped",
+      "source": "fixed-core",
+      "expected_reason": "ASSERTION_EVIDENCE_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-002/skipped"
+      ]
+    },
+    {
+      "key": "parent_passed_child_running",
+      "source": "mcp-core",
+      "expected_reason": "EXECUTION_ATTEMPT_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-002/parent_passed_child_running"
+      ]
+    },
+    {
+      "key": "junit_zero",
+      "source": "fixed-core",
+      "expected_reason": "EXECUTION_ERROR_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-002/junit_zero"
+      ]
+    },
+    {
+      "key": "missing_page",
+      "source": "fixed-core",
+      "expected_reason": "CONTROL_PAGE_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-003/missing_page",
+        "ST-MCP-026/delete_page"
+      ]
+    },
+    {
+      "key": "truncated",
+      "source": "fixed-core",
+      "expected_reason": "EVIDENCE_TRUNCATED",
+      "acceptance_variants": [
+        "ST-CAN-003/truncated"
+      ]
+    },
+    {
+      "key": "missing_receipt",
+      "source": "fixed-core",
+      "expected_reason": "FIXTURE_RECEIPT_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-003/missing_receipt"
+      ]
+    },
+    {
+      "key": "missing_attempt",
+      "source": "mcp-core",
+      "expected_reason": "ATTEMPT_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-003/missing_attempt",
+        "ST-MCP-026/delete_attempt"
+      ]
+    },
+    {
+      "key": "digest_mismatch",
+      "source": "mcp-core",
+      "expected_reason": "EXECUTION_FINGERPRINT_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-003/digest_mismatch"
+      ]
+    },
+    {
+      "key": "build",
+      "source": "fixed-core",
+      "expected_reason": "BATCH_IDENTITY_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-004/build"
+      ]
+    },
+    {
+      "key": "manifest",
+      "source": "fixed-core",
+      "expected_reason": "BATCH_IDENTITY_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-004/manifest"
+      ]
+    },
+    {
+      "key": "ci_attempt",
+      "source": "fixed-core",
+      "expected_reason": "BATCH_IDENTITY_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-004/ci_attempt"
+      ]
+    },
+    {
+      "key": "nonce",
+      "source": "fixed-core",
+      "expected_reason": "BATCH_IDENTITY_MISMATCH",
+      "acceptance_variants": []
+    },
+    {
+      "key": "replay",
+      "source": "fixed-core",
+      "expected_reason": "EVIDENCE_REPLAY",
+      "acceptance_variants": [
+        "ST-CAN-004/replay"
+      ]
+    },
+    {
+      "key": "wrong_code",
+      "source": "fixed-core",
+      "expected_reason": "EXECUTION_ERROR_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-005/wrong_code"
+      ]
+    },
+    {
+      "key": "wrong_node",
+      "source": "fixed-core",
+      "expected_reason": "FAILURE_NODE_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-005/wrong_node"
+      ]
+    },
+    {
+      "key": "wrong_phase",
+      "source": "fixed-core",
+      "expected_reason": "FAILURE_LOCATION_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-005/wrong_phase"
+      ]
+    },
+    {
+      "key": "timeout",
+      "source": "fixed-core",
+      "expected_reason": "EXECUTION_ERROR_MISMATCH",
+      "acceptance_variants": [
+        "ST-CAN-005/timeout"
+      ]
+    },
+    {
+      "key": "unexecuted",
+      "source": "fixed-core",
+      "expected_reason": "ASSERTION_EVIDENCE_MISSING",
+      "acceptance_variants": [
+        "ST-CAN-005/unexecuted"
+      ]
+    },
+    {
+      "key": "missing_assertion",
+      "source": "mcp-core",
+      "expected_reason": "ASSERTION_EVIDENCE_MISSING",
+      "acceptance_variants": [
+        "ST-MCP-026/delete_assertion"
+      ]
+    },
+    {
+      "key": "delete_case",
+      "source": "mcp-core",
+      "expected_reason": "CASE_MATERIALIZATION_MISMATCH",
+      "acceptance_variants": [
+        "ST-MCP-026/delete_case"
+      ]
+    },
+    {
+      "key": "delete_tool_receipt",
+      "source": "mcp-core",
+      "expected_reason": "FROZEN_MCP_RECEIPT_SET_MISMATCH",
+      "acceptance_variants": [
+        "ST-MCP-026/delete_receipt"
+      ]
+    },
+    {
+      "key": "old_run",
+      "source": "mcp-core",
+      "expected_reason": "EXECUTION_SOURCE_MISMATCH",
+      "acceptance_variants": [
+        "ST-MCP-026/old_run"
+      ]
+    },
+    {
+      "key": "expiry",
+      "source": "fixed-core",
+      "expected_reason": "BATCH_EXPIRED",
+      "acceptance_variants": [
+        "ST-CAN-004/nonce_expiry"
+      ]
+    }
+  ]
+}

@@ -30,25 +30,19 @@ async def generate_test_design(
     current_user: CurrentUser,
 ) -> TestEngineeringGenerateResponse:
     service = TestEngineeringService(session)
-    design, fingerprint = await service.generate(
-        actor=current_user,
-        project_id=project_id,
-        payload=payload,
+    result = await service.generate_result(
+        actor=current_user, project_id=project_id, payload=payload
     )
-    contract = payload.contract
-    if payload.api_definition_id is not None:
-        contract = await service.contract_for_api(
-            project_id=project_id, definition_id=payload.api_definition_id
-        )
-    if contract is None:
-        raise RuntimeError("validated test engineering request lost its contract")
     return TestEngineeringGenerateResponse(
-        fingerprint=fingerprint,
-        design=design,
-        contract_completeness=contract.completeness,
-        contract_fingerprint=fingerprint_contract(contract),
-        contract=contract,
-        evidence_details=service.evidence_details(design, contract, payload.additional_evidence),
+        fingerprint=result.fingerprint,
+        design=result.design,
+        origin=result.origin,
+        contract_completeness=result.contract.completeness,
+        contract_fingerprint=fingerprint_contract(result.contract),
+        contract=result.contract,
+        evidence_details=service.evidence_details(
+            result.design, result.contract, payload.additional_evidence
+        ),
     )
 
 

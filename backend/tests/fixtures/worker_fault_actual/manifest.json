@@ -1,0 +1,101 @@
+{
+  "assets": [
+    {
+      "api_id": "40725852-ff22-43d7-a4bd-e91530948502",
+      "batch_key": "worker-faults-7cb46f089fcc0a21",
+      "case_id": "e81038e0-bc35-411f-8f2e-b30f37f03a22",
+      "case_version": 1,
+      "environment_id": "b3385c00-0b8d-48f5-92dc-ab609117de70",
+      "frozen_environment_digest": "8160722a1c17c6008d18083d93143b6d1e631e884835692f62cad8fbb5927020",
+      "pinned": true,
+      "plan_id": "b7310a1d-7905-4f66-a1a8-767289a3eb5b",
+      "project_id": "874449f1-5dc5-4946-8be7-f262e2f0e2da",
+      "scenario_key": "double_claim",
+      "skip_cleanup": false,
+      "suite_id": "ef0dea74-668b-41c2-b77f-3802ea436410",
+      "suite_version": 1,
+      "workflow_fingerprint": "f815e0b4a505632418a200e60668e56c5c066ed922ad379ab7592b992f8530d9",
+      "workflow_id": "a05032d4-b39f-47ef-9efc-d0eea5ca543b",
+      "workflow_version": 1
+    },
+    {
+      "api_id": "9494dbd7-a126-42b6-a7eb-05dfbf6aa92b",
+      "batch_key": "worker-faults-7cb46f089fcc0a21",
+      "case_id": "dc57429d-3731-4ff4-8a37-369fd016cc07",
+      "case_version": 1,
+      "environment_id": "9bb953d7-1603-4aa1-becb-9890dd4dd82a",
+      "frozen_environment_digest": "77bcb0911437a91bb05c10b524289b05551eb0cee7fd97775090fedbcd46ab90",
+      "pinned": true,
+      "plan_id": "54d6cc0a-3d16-4119-a04b-31ef240be994",
+      "project_id": "874449f1-5dc5-4946-8be7-f262e2f0e2da",
+      "scenario_key": "duplicate_delivery",
+      "skip_cleanup": false,
+      "suite_id": "7ceeebfd-fb09-4be3-ab3e-d0be16429e69",
+      "suite_version": 1,
+      "workflow_fingerprint": "cc69d77e10aa0a4a9f3f3a2307478898ecb7decea00da4c8abb3dfbbee1f9dfc",
+      "workflow_id": "7887e625-c624-4c52-800d-7e0eb93cb115",
+      "workflow_version": 1
+    },
+    {
+      "api_id": "d4ef506b-22e3-4e82-86d0-e9d3dde33c03",
+      "batch_key": "worker-faults-7cb46f089fcc0a21",
+      "case_id": "2cc0ea28-877a-478b-9828-054e0fc5a803",
+      "case_version": 1,
+      "environment_id": "4ba884ed-b39d-453d-9975-5badf0e31ecb",
+      "frozen_environment_digest": "cb7abd2c58ed672171d99e7b02c7485beb2ff44d12e71fa6e28bafe8100381fd",
+      "pinned": true,
+      "plan_id": "96b31acc-1026-43df-bb82-9c08457af0cb",
+      "project_id": "874449f1-5dc5-4946-8be7-f262e2f0e2da",
+      "scenario_key": "worker_death",
+      "skip_cleanup": false,
+      "suite_id": "154c7354-654f-4f61-89aa-1d17975640b9",
+      "suite_version": 1,
+      "workflow_fingerprint": "1fa18faf4b697a0dfda6ef6bbacc7eed9f7ed14d76436f676f7881cad438c664",
+      "workflow_id": "99cddbcc-f2ec-442d-8194-ae733566d783",
+      "workflow_version": 1
+    },
+    {
+      "api_id": "385121e5-55ff-4a2e-8fc9-4722c7729bf5",
+      "batch_key": "worker-faults-7cb46f089fcc0a21",
+      "case_id": "2faea999-351f-41a5-a269-42c4a521f2cb",
+      "case_version": 1,
+      "environment_id": "efa204ab-e8f8-4da2-aba4-104a1b8f6928",
+      "frozen_environment_digest": "0666d3137e140b20c2c60639b0b42ba8facc99b4fd7d434412ad6b4dbbe548d5",
+      "pinned": true,
+      "plan_id": "45f2e3e4-530e-4295-a285-deb4381ddbaf",
+      "project_id": "874449f1-5dc5-4946-8be7-f262e2f0e2da",
+      "scenario_key": "recovery",
+      "skip_cleanup": false,
+      "suite_id": "e9ae859a-a99c-43ca-851c-2a353a98c2ae",
+      "suite_version": 1,
+      "workflow_fingerprint": "c6998d28ef444c1fdff90989a1ca90ce6e535f006b9e2a05dd1053193ebc8d04",
+      "workflow_id": "ab8430cb-25c4-4c28-ba2c-7c69816e35d3",
+      "workflow_version": 1
+    }
+  ],
+  "batch_key": "worker-faults-7cb46f089fcc0a21",
+  "builds": {
+    "fixture": "sha256:198f89b31ad7d7649fa0248508132c943b7aff5d48511c575e73758ea97bb97a",
+    "runner": "sha256:d2f626439188df3e9463d1ea9239452cf17661f08ae0d729f158bb8c39362cb0",
+    "target": "sha256:d2f626439188df3e9463d1ea9239452cf17661f08ae0d729f158bb8c39362cb0",
+    "verifier": "d11e85f71c298a00f9345fdf6782bd61de49b5f1da2215c047046cf8a533e99a"
+  },
+  "created_at": "2026-10-23T23:24:44.446725Z",
+  "deadline": "2026-10-23T23:29:44.446725Z",
+  "disposal": {
+    "binding_nonce": "660c5d0da46ca9ac5c434a647f5da2f0",
+    "project_name": "flowtest-selftest-62bd2657f8c5",
+    "target_container_id": "b6a48bce70baf9d28fe95a1aee9ba74549e71de245a294cbb93e40e9df87d339",
+    "target_image": "sha256:d2f626439188df3e9463d1ea9239452cf17661f08ae0d729f158bb8c39362cb0",
+    "target_volume": "flowtest-selftest-62bd2657f8c5_runner-data"
+  },
+  "nonce": "33af34acb329755fd6e23c7433ad4250a8354ccf17858e0d",
+  "pack_digest": "2a20c752ed4cfe44cea847e660e45181a52ce9758f7979d51e014151feb335a9",
+  "profile": "full",
+  "schema_version": "flowtest-worker-fault-manifest-v1",
+  "source_digest": "03417a4155e6f930551f2b2b1b249e81f40a913f7c05edf7eff23ccc7e198838",
+  "worker_container_ids": [
+    "1bc9843a6fbaea1a3a5ef97d830aa5193465975e2f44fcbd5668129cfc1b476a",
+    "d823be86df86ded7fffa454b95870a81873342ded1d68b0102fd20d02b076ba8"
+  ]
+}

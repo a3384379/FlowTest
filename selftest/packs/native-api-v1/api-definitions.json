@@ -1,0 +1,533 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-API-006-project",
+      "source_id": "2f6c8000-ac45-5231-955d-69febf34f20c",
+      "name": "Header 层级与大小写 project",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-project/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-006-environment",
+      "source_id": "fbb20f70-2198-5601-be8e-d513346334f6",
+      "name": "Header 层级与大小写 environment",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-environment/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-006-api",
+      "source_id": "0c6731c0-84e7-5b5f-8004-c96fc410855e",
+      "name": "Header 层级与大小写 api",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-api/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {
+          "x-selftest-Precedence": "api"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-006-case",
+      "source_id": "3fe08c04-07af-565b-8035-0762e0a4c470",
+      "name": "Header 层级与大小写 case",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-case/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {
+          "x-selftest-Precedence": "api"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-006-runtime",
+      "source_id": "99388e50-2da8-51b2-b523-942a72057d13",
+      "name": "Header 层级与大小写 runtime",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-runtime/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {
+          "x-selftest-Precedence": "api"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-006-node",
+      "source_id": "2ebbc94a-9e9a-52f9-ab44-314cb0820088",
+      "name": "Header 层级与大小写 node",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-006-node/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "header",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {
+          "x-selftest-Precedence": "api"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-004-pinned",
+      "source_id": "5724a0cf-9e2b-547b-a3f0-1f56465b74cc",
+      "name": "新版本不得改变已固定接口请求",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-API-004-pinned/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "native-api-v1",
+          "value": "frozen-v1",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-011-401",
+      "source_id": "957e0ab3-09ea-53f3-87e4-d3a3c7e8be40",
+      "name": "正常 401 错误契约与Trace",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments",
+        "body_kind": "none",
+        "body": null,
+        "headers": {
+          "X-Trace-ID": "$BATCH-error-401"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-API-011-403",
+      "source_id": "c277f319-03cd-5a15-a9db-7a12cf1fd02d",
+      "name": "正常 403 错误契约与Trace",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body_kind": "json",
+        "body": {
+          "email": "$DENIED_EMAIL",
+          "password": "{{secret.SELFTEST_B_DENIED_PASSWORD}}"
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "01faa447-4fb4-5958-9b73-0ea8e5abb261",
+          "name": "正常业务负向 403",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-denied",
+              "base_url": "http://synthetic.example",
+              "classification": "test"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002",
+              "X-Trace-ID": "$BATCH-error-403"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-API-011-422",
+      "source_id": "f577b9cf-8113-57b3-96fb-b72c589020d4",
+      "name": "正常 422 错误契约与Trace",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "a0e095ad-77de-5e83-afdd-8c8170ca1557",
+          "name": "正常业务负向 422",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments",
+            "body_kind": "json",
+            "body": {
+              "base_url": "http://synthetic.example"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002",
+              "X-Trace-ID": "$BATCH-error-422"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-API-003-directory-environment",
+      "source_id": "0552d708-10ca-51ab-b3cc-2051694db18a",
+      "name": "目录与环境创建、查询、更新和精确删除",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "1e1002a1-e820-536c-b4c9-e8650474075d",
+          "name": "create_folder",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/folders",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-folder-created"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "85a7f1ce-a6aa-5a34-8662-4df9f2887b8c",
+          "name": "list_folders",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/folders",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "675febde-c3ba-5220-9e68-0925f030afa9",
+          "name": "patch_folder",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/folders/{{folder_id}}",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-folder-updated"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "2510bb8d-29c8-5577-8ae9-e36255fac4cd",
+          "name": "delete_folder",
+          "request": {
+            "method": "DELETE",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/folders/{{folder_id}}",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "b3edf77c-f65d-53ad-b9ab-2bf619aef7ff",
+          "name": "create_environment",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-env-created",
+              "base_url": "http://synthetic.example",
+              "classification": "test"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "4a79431d-a01a-5ee2-820d-205f4b1286f8",
+          "name": "list_environments",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "28c0bc3e-f574-593b-a556-68c6c2bd66b8",
+          "name": "patch_environment",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments/{{environment_id}}",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-env-updated"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "e782f49b-2f0f-567e-aac7-6fba0f713071",
+          "name": "delete_environment",
+          "request": {
+            "method": "DELETE",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/environments/{{environment_id}}",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-API-003-project",
+      "source_id": "9907f499-9639-5c23-86e6-6e2790f8e001",
+      "name": "创建项目、查询、更新；隔离实例销毁清理",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "headers": {},
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "d44d0a11-6ca3-55d9-882b-7cf2952ca02f",
+          "name": "create_project",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-project-created",
+              "organization_id": "00000000-0000-4000-8000-000000000002"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "8c0b5f62-e798-54d6-9f0b-36a171d2e3ed",
+          "name": "get_project",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/{{created_project_id}}",
+            "body_kind": "none",
+            "body": null,
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "6fbcc266-4111-5d52-b2f0-e3336260a1a9",
+          "name": "patch_project",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/{{created_project_id}}",
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-project-updated"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "abf0da55-349b-5e48-bd07-23e2717a2167",
+          "name": "grant_observer",
+          "request": {
+            "method": "PUT",
+            "path": "/api/v1/projects/{{created_project_id}}/members/00000000-0000-4000-8000-000000000004",
+            "body_kind": "json",
+            "body": {
+              "user_id": "00000000-0000-4000-8000-000000000004",
+              "role": "viewer"
+            },
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,171 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-S5-file-upload",
+      "source_id": "7b2e6a6e-8cb6-5113-8b0a-a64f2698ea1b",
+      "name": "合成文件upload",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-S5-file-upload/upload",
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "body_kind": "multipart",
+        "body": {
+          "fields": {},
+          "files": [
+            {
+              "field": "file",
+              "artifact_id": "00000000-0000-4000-8000-000000000801"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-S5-file-download",
+      "source_id": "db5069db-4191-591b-a7be-592cc002d938",
+      "name": "合成文件download",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-S5-file-download/download",
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "body_kind": "none",
+        "body": null
+      }
+    },
+    {
+      "scenario_id": "ST-S5-parallel-cookies",
+      "source_id": "c0c1401e-7919-5a4c-9ca4-ef5071e002e1",
+      "name": "Cookie left set",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/set",
+        "query_parameters": [
+          {
+            "name": "branch",
+            "value": "left",
+            "enabled": true
+          }
+        ],
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "68eb254f-8cde-5278-acf4-363addc3baed",
+          "name": "Cookie left barrier",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/barrier",
+            "query_parameters": [
+              {
+                "name": "branch",
+                "value": "left",
+                "enabled": true
+              }
+            ],
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "80ebfeca-ff99-5d0e-9519-bcd0d096b785",
+          "name": "Cookie left check",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/check",
+            "query_parameters": [
+              {
+                "name": "branch",
+                "value": "left",
+                "enabled": true
+              }
+            ],
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "506dcc56-3c9b-50a7-a767-a628461535df",
+          "name": "Cookie right set",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/set",
+            "query_parameters": [
+              {
+                "name": "branch",
+                "value": "right",
+                "enabled": true
+              }
+            ],
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "4ed704df-abd3-58b0-8160-669969def31a",
+          "name": "Cookie right barrier",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/barrier",
+            "query_parameters": [
+              {
+                "name": "branch",
+                "value": "right",
+                "enabled": true
+              }
+            ],
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "af6226ad-fd97-5b9e-bcdc-48d07a537be4",
+          "name": "Cookie right check",
+          "request": {
+            "method": "GET",
+            "path": "/selftest/{batch_key}/ST-S5-parallel-cookies/cookie/check",
+            "query_parameters": [
+              {
+                "name": "branch",
+                "value": "right",
+                "enabled": true
+              }
+            ],
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

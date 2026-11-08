@@ -1,0 +1,63 @@
+{
+  "schema_version": "flowtest-engine-additional-acceptance-v1",
+  "pack_digest": "b8280f525c23300fba7bbe0227b6debbac5af2375399ba323bd34e97ab4f7a0a",
+  "deployment_status": "not_run",
+  "dependencies_digest": "f69419dc2bea070334936ea1ebdca667233771343da36f13aa3576fe467588ec",
+  "requirements": [
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "top_nodes": [
+        {
+          "node_id": "forbidden_second",
+          "status": "failed",
+          "error_code": "REQUEST_BUDGET_EXHAUSTED",
+          "phase": "main",
+          "attempts": 0
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "target_peak_concurrency": 2,
+      "target_completed_requests": 4,
+      "target_event_requirement": "由独立合成目标记录begin/end及本namespace active/peak；现部署journal缺此投影，ASGI独立计数器不能替代部署验收。"
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "top_nodes": [
+        {
+          "node_id": "slow_request",
+          "status": "cancelled",
+          "error_code": null,
+          "phase": "main",
+          "attempts": 1
+        }
+      ],
+      "max_observed_seconds": 1.8,
+      "node_timeout_seconds": 10,
+      "workflow_runtime_seconds": 1
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "dependency_kind": "subflow",
+      "placeholder": "f81fc54b-a409-57ac-931a-7ac6f54f68a5",
+      "expected_version": 1,
+      "new_current_version": 2,
+      "expected_return": 42,
+      "newer_return_must_not_run": 99,
+      "subflow_snapshot_binding_required": true
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "dependency_kind": "dataset",
+      "placeholder": "e38e03dc-bb12-5730-9068-3d448a81224c",
+      "row_indices": [
+        0,
+        1
+      ],
+      "expected_children": 2,
+      "all_children_terminal_passed": true,
+      "child_evidence_projection_required": true
+    }
+  ]
+}

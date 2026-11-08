@@ -20,6 +20,16 @@ on:
       - "scripts/ci_summary.py"
       - "scripts/required_gate.py"
       - "scripts/run_targeted_tests.py"
+      - "scripts/selftest_ci.py"
+      - "scripts/selftest/**"
+      - "scripts/selftest/verify.py"
+      - "scripts/selftest/verify_generation_provenance.py"
+      - "scripts/selftest/contracts.py"
+      - "scripts/selftest/local_stack.py"
+      - "backend/tests/test_selftest_ci_trust.py"
+      - "selftest/packs/**"
+      - "selftest/schemas/**"
+      - "deploy/selftest/**"
 
 # Governance changes cannot pass the normal Required Gate. This separate,
 # PR-triggered full suite supplies eligible checks for maintainer Bootstrap.
@@ -40,6 +50,9 @@ jobs:
     uses: ./.github/workflows/frontend-ci.yml
   bootstrap-compose:
     uses: ./.github/workflows/compose-ci.yml
+    with:
+      run_selftest: true
+      selftest_bootstrap_review: true
   bootstrap-security:
     uses: ./.github/workflows/security-ci.yml
   bootstrap-windows:

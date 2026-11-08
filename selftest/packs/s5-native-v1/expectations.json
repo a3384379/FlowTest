@@ -1,0 +1,210 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-S5-file-upload",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "uploaded_synthetic_file": true,
+        "assertions": [
+          {
+            "node_id": "assert_upload_sha",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f",
+            "actual": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-S5-file-download",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 1,
+        "fixture_responses": [],
+        "assertions": [
+          {
+            "node_id": "assert_file_content",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "flowtest-download",
+            "actual": "flowtest-download"
+          },
+          {
+            "node_id": "assert_file_size",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 17,
+            "actual": 17
+          },
+          {
+            "node_id": "assert_file_header",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "application/octet-stream",
+            "actual": "application/octet-stream"
+          }
+        ],
+        "binary_file": {
+          "content_utf8": "flowtest-download",
+          "size_bytes": 17,
+          "sha256": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f",
+          "content_type": "application/octet-stream",
+          "filename": "flowtest.bin"
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "assertions"
+      ]
+    },
+    {
+      "scenario_id": "ST-S5-parallel-cookies",
+      "expected": {
+        "execution_status": "passed",
+        "request_count": 6,
+        "isolated_cookies": true,
+        "fixture_responses": [],
+        "fixture_metrics": {
+          "peak_concurrency": 2,
+          "completed_count": 6,
+          "active_count": 0,
+          "cancelled_count": 0,
+          "failed_count": 0
+        }
+      },
+      "required_evidence": [
+        "execution",
+        "fixture_journal",
+        "postcondition",
+        "control_records"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-S5-file-upload",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": {
+            "size_bytes": 17,
+            "sha256": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f",
+            "content_type": "application/octet-stream",
+            "filename": "flowtest.bin"
+          },
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-S5-file-download",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0,
+          "value": null
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": null,
+          "branch": "",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": null
+    },
+    {
+      "scenario_id": "ST-S5-parallel-cookies",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [
+        {
+          "value": "left",
+          "branch": "left",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "left",
+          "branch": "left",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "left",
+          "branch": "left",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "right",
+          "branch": "right",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "right",
+          "branch": "right",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        },
+        {
+          "value": "right",
+          "branch": "right",
+          "iteration_key": "",
+          "response_status": 200,
+          "authorization_present": false
+        }
+      ],
+      "control": {
+        "node_id": "parallel",
+        "kind": "branch",
+        "total": 2
+      },
+      "wire_order": "unordered"
+    }
+  ]
+}

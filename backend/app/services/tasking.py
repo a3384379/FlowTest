@@ -102,6 +102,7 @@ class TestPlanService:
         schedule_timezone: str,
         queue_priority: int,
         items: list[TestPlanItemInput],
+        commit: bool = True,
     ) -> CreatedTestPlan:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         normalized_name = name.strip()
@@ -147,8 +148,11 @@ class TestPlanService:
             resource_id=plan.id,
             details={"item_count": len(models)},
         )
-        await self._session.commit()
-        await self._session.refresh(plan)
+        if commit:
+            await self._session.commit()
+            await self._session.refresh(plan)
+        else:
+            await self._session.flush()
         return CreatedTestPlan(TestPlanDetail(plan, list(models)), webhook_secret)
 
     async def list_plans(
@@ -347,10 +351,13 @@ class TestPlanService:
         project_id: UUID,
         plan_id: UUID,
         trigger: TestPlanTrigger,
+        commit: bool = True,
     ) -> TestPlanRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
         plan = await self._get_project_plan(project_id, plan_id)
-        return await self._create_run(plan=plan, requested_by_id=actor.id, trigger=trigger)
+        return await self._create_run(
+            plan=plan, requested_by_id=actor.id, trigger=trigger, commit=commit
+        )
 
     async def queue_external_run(
         self,
@@ -382,6 +389,7 @@ class TestPlanService:
 
     async def cancel_run(self, *, actor: User, project_id: UUID, run_id: UUID) -> TestPlanRun:
         await self._projects.authorize(actor=actor, project_id=project_id, editing=True)
+        await self._tasks.lock_project_run(project_id, run_id)
         run = await self._get_project_run(project_id, run_id)
         if run.status in {"passed", "failed", "cancelled"}:
             raise AppError(

@@ -1,0 +1,219 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-ADD-poll-time-budget",
+      "source_id": "bb541214-6d83-5cc9-a1f0-6ff433360e2f",
+      "name": "轮询时间预算先于次数预算耗尽",
+      "request": {
+        "method": "GET",
+        "path": "/selftest/{batch_key}/ST-ADD-poll-time-budget/request",
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "source_id": "1605f6f7-a3c4-5e19-9751-43d961f6feca",
+      "name": "全局请求预算一禁止第二次发送",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-request-budget/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-finally-failure",
+      "source_id": "697a0bd3-9911-58fa-8eb1-8c92136b8b55",
+      "name": "Try主通过但Finally断言失败必须失败",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-finally-failure/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "source_id": "5777efa3-8d01-5ca1-b669-cc5573aa2894",
+      "name": "四个实际HTTP分支独立目标峰值并发必须等于二",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-parallel-bound/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-nested-break",
+      "source_id": "16ee6a7c-e2a2-575a-84ce-a23d65ac2d97",
+      "name": "嵌套循环break只传播到最近循环",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-nested-break/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-nested-continue",
+      "source_id": "385b1eab-2c45-523a-9525-d846bc68ef75",
+      "name": "嵌套循环continue只传播到最近循环",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-nested-continue/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-return-outside-call",
+      "source_id": "6668f7c8-6c2d-5c5c-87b9-3d1ffc024ea9",
+      "name": "根流程Return必须明确失败且零请求",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-return-outside-call/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-switch-hit",
+      "source_id": "35c031b2-4be7-56d0-b048-761fc2bcf5b5",
+      "name": "Switch命中仅请求选中分支",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-switch-hit/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "source_id": "f15c6275-5117-5424-a562-cf6bcae29f63",
+      "name": "全局运行一秒取消两秒请求而非节点超时",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-workflow-time-budget/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "source_id": "1a7b53ae-8a61-55b3-bfc1-6eb2d0eaa38f",
+      "name": "真实子流程Return穿过Try并执行Finally且固定v1",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-subflow-return/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "source_id": "fc2ea187-623a-57a5-b312-37664da444fd",
+      "name": "两个数据行false与0类型独立且子行完整执行",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-ADD-dataset-rows/request",
+        "body_kind": "json",
+        "body": {
+          "marker": "engine-additional-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      }
+    }
+  ]
+}

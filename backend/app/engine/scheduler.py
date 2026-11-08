@@ -1078,6 +1078,10 @@ def _activated_cleanup_nodes(
 def _cleanup_edges(
     definition: WorkflowDefinition, nodes: tuple[WorkflowNode, ...]
 ) -> tuple[WorkflowEdge, ...]:
+    node_ids = {node.id for node in nodes}
+    edges = [
+        edge for edge in definition.edges if edge.source in node_ids and edge.target in node_ids
+    ]
     ranks = _main_node_ranks(definition)
     cleanup_ranks = {
         node.id: max((ranks[target] for target in node.cleanup_for), default=0) for node in nodes
@@ -1088,10 +1092,25 @@ def _cleanup_edges(
         for target in nodes
         if cleanup_ranks[source.id] > cleanup_ranks[target.id]
     )
-    return tuple(
-        WorkflowEdge(id=f"cleanup-order-{index}", source=source, target=target)
-        for index, (source, target) in enumerate(ordered_pairs, start=1)
-    )
+    for index, (source, target) in enumerate(ordered_pairs, start=1):
+        if _cleanup_path_exists(edges, target, source):
+            continue
+        if not any(edge.source == source and edge.target == target for edge in edges):
+            edges.append(WorkflowEdge(id=f"cleanup-order-{index}", source=source, target=target))
+    return tuple(edges)
+
+
+def _cleanup_path_exists(edges: list[WorkflowEdge], source: str, target: str) -> bool:
+    pending = [source]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == target:
+            return True
+        if current not in seen:
+            seen.add(current)
+            pending.extend(edge.target for edge in edges if edge.source == current)
+    return False
 
 
 def _main_node_ranks(definition: WorkflowDefinition) -> dict[str, int]:

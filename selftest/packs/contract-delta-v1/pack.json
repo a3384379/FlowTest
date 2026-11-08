@@ -1,0 +1,123 @@
+{
+  "expected_codes": {
+    "contract_delta": null,
+    "preview_freeze": "IMPORT_PREVIEW_STALE",
+    "regenerate_delta": null,
+    "slot_drift": "TEST_CASE_DRAFT_CONFLICT",
+    "slot_foreign": "WORKFLOW_NOT_FOUND",
+    "slot_positive": null,
+    "slot_unpublished": "WORKFLOW_NOT_PUBLISHED"
+  },
+  "format": "flowtest-contract-delta-v1",
+  "max_requests": 500,
+  "max_seconds": 600,
+  "max_tool_calls": 100,
+  "pack_id": "contract-delta-v1",
+  "phases": [
+    {
+      "absent_mutations": [
+        "required_omitted:body.marker",
+        "required_null:body.marker",
+        "enum_value:body.marker",
+        "enum_invalid:body.marker"
+      ],
+      "api_version": 1,
+      "marker": "",
+      "phase": "v1",
+      "request_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "enum": [0],
+            "type": "integer"
+          }
+        },
+        "required": ["value"],
+        "type": "object"
+      },
+      "required_mutations": [],
+      "response_schema": {
+        "properties": {
+          "actual": {
+            "enum": [1],
+            "type": "integer"
+          },
+          "code": {
+            "enum": [0],
+            "type": "integer"
+          },
+          "marker": {
+            "enum": [""],
+            "type": "string"
+          },
+          "value": {
+            "enum": [0],
+            "type": "integer"
+          }
+        },
+        "required": ["actual", "code", "value", "marker"],
+        "type": "object"
+      }
+    },
+    {
+      "absent_mutations": [],
+      "api_version": 2,
+      "marker": "delta-v2",
+      "phase": "v2",
+      "request_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "marker": {
+            "enum": ["delta-v2"],
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "enum": [0],
+            "type": "integer"
+          }
+        },
+        "required": ["value", "marker"],
+        "type": "object"
+      },
+      "required_mutations": [
+        "required_omitted:body.marker",
+        "required_null:body.marker",
+        "enum_value:body.marker",
+        "enum_invalid:body.marker"
+      ],
+      "response_schema": {
+        "properties": {
+          "actual": {
+            "enum": [1],
+            "type": "integer"
+          },
+          "code": {
+            "enum": [0],
+            "type": "integer"
+          },
+          "marker": {
+            "enum": ["delta-v2"],
+            "type": "string"
+          },
+          "value": {
+            "enum": [0],
+            "type": "integer"
+          }
+        },
+        "required": ["actual", "code", "value", "marker"],
+        "type": "object"
+      }
+    }
+  ],
+  "variants": [
+    "contract_delta",
+    "regenerate_delta",
+    "preview_freeze",
+    "slot_foreign",
+    "slot_unpublished",
+    "slot_drift",
+    "slot_positive"
+  ],
+  "version": "1.0.0"
+}

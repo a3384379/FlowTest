@@ -1,0 +1,105 @@
+{
+  "schema_version": "flowtest-pack-coverage-v1",
+  "scenarios": [
+    {
+      "scenario_id": "ST-ADD-poll-time-budget",
+      "acceptance_ids": [
+        "ST-ENG-011"
+      ],
+      "variant_key": "poll-time-budget",
+      "title": "轮询时间预算先于次数预算耗尽",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-request-budget",
+      "acceptance_ids": [
+        "ST-ENG-011"
+      ],
+      "variant_key": "request-budget",
+      "title": "全局请求预算一禁止第二次发送",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-finally-failure",
+      "acceptance_ids": [
+        "ST-ENG-013"
+      ],
+      "variant_key": "finally-failure",
+      "title": "Try主通过但Finally断言失败必须失败",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-parallel-bound",
+      "acceptance_ids": [
+        "ST-ENG-015"
+      ],
+      "variant_key": "parallel-bound",
+      "title": "四个实际HTTP分支独立目标峰值并发必须等于二",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-nested-break",
+      "acceptance_ids": [
+        "ST-ENG-005"
+      ],
+      "variant_key": "nested-break",
+      "title": "嵌套循环break只传播到最近循环",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-nested-continue",
+      "acceptance_ids": [
+        "ST-ENG-005"
+      ],
+      "variant_key": "nested-continue",
+      "title": "嵌套循环continue只传播到最近循环",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-return-outside-call",
+      "acceptance_ids": [
+        "ST-ENG-005"
+      ],
+      "variant_key": "return-outside-call",
+      "title": "根流程Return必须明确失败且零请求",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-switch-hit",
+      "acceptance_ids": [
+        "ST-ENG-003"
+      ],
+      "variant_key": "switch-hit",
+      "title": "Switch命中仅请求选中分支",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-workflow-time-budget",
+      "acceptance_ids": [
+        "ST-ENG-011"
+      ],
+      "variant_key": "workflow-time-budget",
+      "title": "全局运行一秒取消两秒请求而非节点超时",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-subflow-return",
+      "acceptance_ids": [
+        "ST-ENG-005",
+        "ST-ENG-016"
+      ],
+      "variant_key": "subflow-return",
+      "title": "真实子流程Return穿过Try并执行Finally且固定v1",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-ADD-dataset-rows",
+      "acceptance_ids": [
+        "ST-ENG-016"
+      ],
+      "variant_key": "dataset-rows",
+      "title": "两个数据行false与0类型独立且子行完整执行",
+      "validation_status": "not_run"
+    }
+  ]
+}

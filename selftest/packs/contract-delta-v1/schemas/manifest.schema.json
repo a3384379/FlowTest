@@ -1,0 +1,356 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": ["runner", "target", "fixture", "verifier"],
+      "title": "Builds",
+      "type": "object"
+    },
+    "FixtureBudgetScope": {
+      "additionalProperties": false,
+      "properties": {
+        "expires_at": {
+          "exclusiveMinimum": 0,
+          "title": "Expires At",
+          "type": "number"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "parent_batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Parent Batch Key",
+          "type": "string"
+        }
+      },
+      "required": ["parent_batch_key", "nonce", "expires_at"],
+      "title": "FixtureBudgetScope",
+      "type": "object"
+    },
+    "Installation": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "capture_viewer_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Viewer Email"
+        },
+        "capture_viewer_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Viewer Id"
+        },
+        "denied_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Denied Email"
+        },
+        "denied_user_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Denied User Id"
+        },
+        "fixture_environment_id": {
+          "format": "uuid",
+          "title": "Fixture Environment Id",
+          "type": "string"
+        },
+        "fixture_service_id": {
+          "format": "uuid",
+          "title": "Fixture Service Id",
+          "type": "string"
+        },
+        "mcp_account_id": {
+          "format": "uuid",
+          "title": "Mcp Account Id",
+          "type": "string"
+        },
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reused": {
+          "default": false,
+          "title": "Reused",
+          "type": "boolean"
+        },
+        "reviewer_email": {
+          "title": "Reviewer Email",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "format": "uuid",
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "default": "flowtest-selftest-installation-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "target_email": {
+          "title": "Target Email",
+          "type": "string"
+        },
+        "target_environment_id": {
+          "format": "uuid",
+          "title": "Target Environment Id",
+          "type": "string"
+        },
+        "target_organization_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Organization Id"
+        },
+        "target_project_id": {
+          "format": "uuid",
+          "title": "Target Project Id",
+          "type": "string"
+        },
+        "target_service_id": {
+          "format": "uuid",
+          "title": "Target Service Id",
+          "type": "string"
+        },
+        "target_user_id": {
+          "format": "uuid",
+          "title": "Target User Id",
+          "type": "string"
+        },
+        "target_viewer_email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Viewer Email"
+        },
+        "target_viewer_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Viewer Id"
+        }
+      },
+      "required": [
+        "binding_nonce",
+        "organization_id",
+        "project_id",
+        "reviewer_id",
+        "reviewer_email",
+        "mcp_account_id",
+        "target_project_id",
+        "target_user_id",
+        "target_email",
+        "fixture_environment_id",
+        "target_environment_id",
+        "fixture_service_id",
+        "target_service_id"
+      ],
+      "title": "Installation",
+      "type": "object"
+    },
+    "RequiredDisposal": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce"
+      ],
+      "title": "RequiredDisposal",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "binding_fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Binding Fingerprint",
+      "type": "string"
+    },
+    "binding_nonce": {
+      "title": "Binding Nonce",
+      "type": "string"
+    },
+    "builds": {
+      "$ref": "#/$defs/Builds"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "installation": {
+      "$ref": "#/$defs/Installation"
+    },
+    "nonce": {
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "required_disposal": {
+      "$ref": "#/$defs/RequiredDisposal"
+    },
+    "scope": {
+      "$ref": "#/$defs/FixtureBudgetScope"
+    }
+  },
+  "required": [
+    "pack_digest",
+    "binding_fingerprint",
+    "binding_nonce",
+    "batch_key",
+    "nonce",
+    "builds",
+    "installation",
+    "created_at",
+    "expires_at",
+    "scope",
+    "required_disposal"
+  ],
+  "title": "DeltaManifest",
+  "type": "object"
+}

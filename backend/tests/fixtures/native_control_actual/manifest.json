@@ -1,0 +1,27 @@
+{
+  "batch_key": "native_control_fixture",
+  "binding_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "binding_nonce": "owned-native-control",
+  "builds": {
+    "fixture": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "runner": "runner",
+    "target": "target",
+    "verifier": "verifier"
+  },
+  "created_at": "2026-10-23T04:47:39.505857Z",
+  "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+  "expires_at": "2026-10-23T04:57:39.505857Z",
+  "mcp_account_id": "f5a978e2-587b-4f81-9bf9-10fb3160dd35",
+  "mcp_actor_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+  "nonce": "native-control-nonce-0001",
+  "pack_digest": "4b2a7512e528ede036f9c8b5ad0774f684eb94f6fd328b9481ecd2bcc0171541",
+  "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+  "required_disposal": {
+    "binding_nonce": "owned-native-control",
+    "project_name": "owned",
+    "target_container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "target_image": "runner",
+    "target_volume": "owned_runner"
+  },
+  "reviewer_id": "334500bb-0102-4537-aafc-f23d2ccc3a01"
+}

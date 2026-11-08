@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError
-from app.core.storage import ObjectStorage, object_storage
+from app.core.storage import ObjectAvailability, ObjectStorage, object_storage
 from app.domain.governance import QuotaDimension
 from app.models.access import Project, User
 from app.models.artifacts import Artifact
@@ -36,6 +36,16 @@ class ArtifactService:
         self._projects = ProjectService(session)
         self._audit = AuditService(session)
         self._storage = storage or object_storage
+
+    async def availability(
+        self, *, project_id: UUID, artifact_id: UUID, expected_sha256: str
+    ) -> ObjectAvailability:
+        artifact = await self._repository.get(artifact_id)
+        if artifact is None or artifact.project_id != project_id:
+            return ObjectAvailability.MISSING
+        if artifact.sha256 != expected_sha256:
+            return ObjectAvailability.UNAVAILABLE
+        return await self._storage.availability(key=artifact.object_key)
 
     async def upload(
         self,

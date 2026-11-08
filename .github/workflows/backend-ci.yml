@@ -26,9 +26,10 @@ jobs:
       - name: Format and lint
         working-directory: backend
         run: |
-          uv run ruff format --check . ../scripts/*.py
-          uv run ruff check . ../scripts/*.py
-          uv run mypy app ../scripts/*.py
+          uv run ruff format --check . ../scripts/*.py ../scripts/selftest
+          uv run ruff check . ../scripts/*.py ../scripts/selftest
+          uv run mypy app ../scripts --exclude '(^|/)selftest(/|_ci[.]py$)'
+          MYPYPATH=..:. uv run mypy --explicit-package-bases ../scripts/selftest ../scripts/selftest_ci.py
           uv run lint-imports
       - name: Test
         working-directory: backend

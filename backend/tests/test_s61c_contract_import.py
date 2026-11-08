@@ -159,3 +159,86 @@ async def test_mcp_contract_import_rolls_back_business_write_before_receipt_fail
     )
     assert mismatch.status_code == 409
     assert mismatch.json()["error"]["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unselected_change", ["deleted", "changed"])
+async def test_commit_summary_excludes_unselected_deleted_definition_and_keeps_it_active(
+    failure_repair_api: dict[str, Any],
+    unselected_change: str,
+) -> None:
+    fixture = failure_repair_api
+    _, token = await _account(fixture, ["mcp:contract:import"])
+    headers = {"Authorization": f"Bearer {token}"}
+    async with fixture["sessions"]() as session:
+        environment = await session.get(Environment, fixture["environment_id"])
+        assert environment is not None and environment.default_service_id is not None
+        service_id = environment.default_service_id
+    responses = []
+    for index, path in enumerate(("/summary-original", "/summary-selected-new")):
+        operations = [
+            {
+                "name": f"Summary {index}",
+                "method": "GET",
+                "path": path,
+                "responses": {"200": {"description": "ok"}},
+            }
+        ]
+        if index == 1 and unselected_change == "changed":
+            operations.append(
+                {
+                    "name": "Unselected renamed API",
+                    "method": "GET",
+                    "path": "/summary-original",
+                    "responses": {"200": {"description": "ok"}},
+                }
+            )
+        preview = await fixture["client"].post(
+            "/api/v1/mcp/contracts/preview",
+            headers=headers,
+            json={
+                "project_id": str(fixture["project_id"]),
+                "source_kind": "operations",
+                "operations": operations,
+                "persist": True,
+                "service_id": str(service_id),
+                "environment_id": str(fixture["environment_id"]),
+            },
+        )
+        assert preview.status_code == 200, preview.text
+        body = preview.json()
+        selected = next(item for item in body["items"] if item["path"] == path)
+        assert selected["change"] == "added"
+        response = await fixture["client"].post(
+            "/api/v1/mcp/contracts/commit",
+            headers={**headers, "Idempotency-Key": f"s61-summary-selected-{index}"},
+            json={
+                "project_id": str(fixture["project_id"]),
+                "preview_id": body["preview_id"],
+                "preview_sha256": body["source_sha256"],
+                "selected_operations": [selected["import_key"]],
+                "service_id": str(service_id),
+                "environment_id": str(fixture["environment_id"]),
+            },
+        )
+        assert response.status_code == 200, response.text
+        responses.append(response.json())
+    original_id = UUID(responses[0]["created_definition_ids"][0])
+    committed = responses[1]
+    async with fixture["sessions"]() as session:
+        original = await session.get(APIDefinition, original_id)
+        run = await session.get(ImportRun, UUID(committed["import_run_id"]))
+        assert original is not None and original.is_active
+        assert original.current_version == 1
+        assert run is not None and run.status == "applied"
+        assert run.applied_keys == committed["applied_keys"]
+        assert len(run.applied_keys) == 1
+    assert (
+        next(item for item in committed["results"] if item["definition_id"] == str(original_id))[
+            "change"
+        ]
+        == unselected_change
+    )
+    assert len(committed["created_definition_ids"]) == 1
+    assert committed["changed_definition_ids"] == []
+    assert committed["deleted_definition_ids"] == []

@@ -13,8 +13,10 @@ WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod edit -go=1.27.2 \
-        -require=golang.org/x/crypto@v0.57.0 \
-        -require=golang.org/x/net@v0.60.0 \
+        -require=github.com/go-jose/go-jose/v4@v4.1.6 \
+        -require=github.com/klauspost/compress@v1.20.2 \
+        -require=golang.org/x/crypto@v0.58.0 \
+        -require=golang.org/x/net@v0.62.0 \
         -require=google.golang.org/grpc@v1.83.2 \
     && go mod tidy \
     && CGO_ENABLED=0 go build -mod=readonly -trimpath \
@@ -23,16 +25,25 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 FROM postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
 
-RUN apt-get update \
-    && apt-get upgrade --yes --no-install-recommends \
-    && apt-get install --yes --no-install-recommends \
+RUN set -eux; \
+    apt-get update; \
+    apt-get upgrade --yes --no-install-recommends; \
+    apt-get install --yes --no-install-recommends \
         ca-certificates \
         libbrotli1 \
         liblzo2-2 \
-        libsodium23 \
-    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' perl-base)" ge '5.36.0-7+deb12u4' \
-    && dpkg --compare-versions "$(dpkg-query --show --showformat='${Version}' libpcre2-8-0)" ge '10.42-1+deb12u2' \
-    && rm -rf /var/lib/apt/lists/*
+        libsodium23; \
+    for package in \
+        'apt=2.6.2' 'libapt-pkg6.0=2.6.2' \
+        'libbrotli1=1.0.9-2+deb12u1' \
+        'libpcre2-8-0=10.42-1+deb12u2' \
+        'libsasl2-2=2.1.28+dfsg-10+deb12u1' 'libsasl2-modules-db=2.1.28+dfsg-10+deb12u1' \
+        'libssl3=3.0.22-1~deb12u2' 'openssl=3.0.22-1~deb12u2' \
+        'perl-base=5.36.0-7+deb12u4'; do \
+        installed_version="$(dpkg-query --show --showformat='${Version}' "${package%%=*}")"; \
+        dpkg --compare-versions "$installed_version" ge "${package#*=}"; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=wal-g /usr/local/bin/wal-g /usr/local/bin/wal-g
 COPY entrypoint.sh /usr/local/bin/flowtest-postgres-entrypoint

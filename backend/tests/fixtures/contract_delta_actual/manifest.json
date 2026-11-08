@@ -1,0 +1,52 @@
+{
+  "batch_key": "delta_fixture",
+  "binding_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "binding_nonce": "owned-delta",
+  "builds": {
+    "fixture": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "runner": "runner",
+    "target": "target",
+    "verifier": "verifier"
+  },
+  "created_at": "2026-10-23T04:08:50.737918Z",
+  "expires_at": "2026-10-23T04:18:50.737918Z",
+  "installation": {
+    "binding_nonce": "owned-delta",
+    "capture_viewer_email": null,
+    "capture_viewer_id": null,
+    "denied_email": null,
+    "denied_user_id": null,
+    "fixture_environment_id": "32e3d2ba-18af-4b4d-9242-b833f0e368e8",
+    "fixture_service_id": "883bef01-b35c-4b3f-8f7e-a98c50b15593",
+    "mcp_account_id": "0797c499-e63f-43fb-8c9f-7d478dcd7c90",
+    "organization_id": "3318ce32-e2cf-4d3a-94ad-78fd36dcfae3",
+    "project_id": "6fd093e2-7df7-43e4-a5b0-61ec5e65f123",
+    "reused": false,
+    "reviewer_email": "fixture@example.com",
+    "reviewer_id": "fc2efb60-edab-4fe3-9009-3a9398580951",
+    "schema_version": "flowtest-selftest-installation-v1",
+    "target_email": "target@example.com",
+    "target_environment_id": "32e3d2ba-18af-4b4d-9242-b833f0e368e8",
+    "target_organization_id": null,
+    "target_project_id": "76c48a21-c0fe-4030-a280-b0b40b181b2c",
+    "target_service_id": "883bef01-b35c-4b3f-8f7e-a98c50b15593",
+    "target_user_id": "563db66c-bb21-4221-8ac8-909df91fad8a",
+    "target_viewer_email": null,
+    "target_viewer_id": null
+  },
+  "nonce": "nonce_delta_0000000001",
+  "pack_digest": "0ad08bb798f8864fcc46cb53ac4b24703e175bc8453b82ba3c58faa38a6f9dbe",
+  "required_disposal": {
+    "binding_nonce": "owned-delta",
+    "project_name": "owned",
+    "target_container_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "target_image": "target",
+    "target_volume": "owned_target"
+  },
+  "scope": {
+    "expires_at": 1792729130.737918,
+    "limit": 500,
+    "nonce": "nonce_delta_0000000001",
+    "parent_batch_key": "delta_fixture"
+  }
+}

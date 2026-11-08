@@ -1,0 +1,236 @@
+{
+  "$defs": {
+    "QualityCall": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Arguments Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "tool_name",
+        "arguments_digest"
+      ],
+      "title": "QualityCall",
+      "type": "object"
+    },
+    "QualityScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "enum": [
+            "ST-MCP-013",
+            "ST-MCP-016",
+            "ST-MCP-027"
+          ],
+          "title": "Acceptance Id",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "positive_control",
+            "empty_cases",
+            "needs_review",
+            "truncated",
+            "coverage_missing",
+            "prompt_injection",
+            "scope",
+            "target",
+            "credential_ref"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "expected_business_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Business Code"
+        },
+        "expected_readiness": {
+          "anyOf": [
+            {
+              "enum": [
+                "ready",
+                "incomplete",
+                "needs_review"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Readiness"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "acceptance_id",
+        "action",
+        "transport"
+      ],
+      "title": "QualityScenario",
+      "type": "object"
+    },
+    "QualityScope": {
+      "additionalProperties": false,
+      "properties": {
+        "credential_ref": {
+          "title": "Credential Ref",
+          "type": "string"
+        },
+        "fixture_environment_id": {
+          "format": "uuid",
+          "title": "Fixture Environment Id",
+          "type": "string"
+        },
+        "fixture_service_id": {
+          "format": "uuid",
+          "title": "Fixture Service Id",
+          "type": "string"
+        },
+        "production_environment_id": {
+          "format": "uuid",
+          "title": "Production Environment Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "fixture_environment_id",
+        "fixture_service_id",
+        "production_environment_id",
+        "credential_ref"
+      ],
+      "title": "QualityScope",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "calls": {
+      "items": {
+        "$ref": "#/$defs/QualityCall"
+      },
+      "maxItems": 8,
+      "minItems": 8,
+      "title": "Calls",
+      "type": "array"
+    },
+    "claim": {
+      "const": "generation_quality_negative_only",
+      "default": "generation_quality_negative_only",
+      "title": "Claim",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "nonce": {
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "reader_machine_id": {
+      "format": "uuid",
+      "title": "Reader Machine Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/QualityScenario"
+      },
+      "maxItems": 18,
+      "minItems": 18,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/$defs/QualityScope"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    },
+    "writer_machine_id": {
+      "format": "uuid",
+      "title": "Writer Machine Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "nonce",
+    "pack_digest",
+    "source_digest",
+    "scope",
+    "writer_machine_id",
+    "reader_machine_id",
+    "created_at",
+    "expires_at",
+    "scenarios",
+    "calls"
+  ],
+  "title": "QualityManifest",
+  "type": "object"
+}

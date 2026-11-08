@@ -1,0 +1,226 @@
+{
+  "branch_node_id": "parallel",
+  "branches": [
+    {
+      "branch_id": "first",
+      "instance_id": "__nested_request__:78d28a89893386a731b441fc8e537ec904b132c7c0e232c4c6ef70519aa9d183",
+      "node_id": "wait_first",
+      "ordinal": 0,
+      "status": "passed",
+      "test_verdict": "passed"
+    },
+    {
+      "branch_id": "second",
+      "instance_id": "__nested_request__:508878d050e51374c1f6edd857bbf18f2afdd0499cbd2198e9d3413494a43945",
+      "node_id": "wait_second",
+      "ordinal": 1,
+      "status": "passed",
+      "test_verdict": "passed"
+    }
+  ],
+  "definition": {
+    "edges": [
+      {
+        "condition": null,
+        "id": "start-parallel",
+        "mappings": [],
+        "source": "start",
+        "target": "parallel"
+      },
+      {
+        "condition": null,
+        "id": "parallel-end",
+        "mappings": [],
+        "source": "parallel",
+        "target": "end"
+      }
+    ],
+    "nodes": [
+      {
+        "best_effort": false,
+        "bindings": null,
+        "capability_id": null,
+        "capability_version": null,
+        "cleanup_for": [],
+        "cleanup_retry_budget": 0,
+        "cleanup_timeout_seconds": 30,
+        "config": {},
+        "configuration": null,
+        "id": "start",
+        "name": "start",
+        "phase": "main",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "run_when": "always",
+        "type": "start"
+      },
+      {
+        "best_effort": false,
+        "bindings": [],
+        "capability_id": "flow.control.parallel",
+        "capability_version": "1.0.0",
+        "cleanup_for": [],
+        "cleanup_retry_budget": 0,
+        "cleanup_timeout_seconds": 30,
+        "config": {},
+        "configuration": {
+          "branches": [
+            {
+              "body": {
+                "kind": "inline",
+                "region_id": "first"
+              },
+              "id": "first",
+              "label": "first"
+            },
+            {
+              "body": {
+                "kind": "inline",
+                "region_id": "second"
+              },
+              "id": "second",
+              "label": "second"
+            }
+          ],
+          "policy": {
+            "concurrency": 2,
+            "on_error": "collect_all",
+            "timeout_seconds": 10
+          }
+        },
+        "id": "parallel",
+        "name": "parallel",
+        "phase": "main",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "run_when": "always",
+        "type": "capability"
+      },
+      {
+        "best_effort": false,
+        "bindings": null,
+        "capability_id": null,
+        "capability_version": null,
+        "cleanup_for": [],
+        "cleanup_retry_budget": 0,
+        "cleanup_timeout_seconds": 30,
+        "config": {},
+        "configuration": null,
+        "id": "end",
+        "name": "end",
+        "phase": "main",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "run_when": "always",
+        "type": "end"
+      }
+    ],
+    "regions": [
+      {
+        "edges": [],
+        "entry_node_id": "wait_first",
+        "exit_node_ids": [
+          "wait_first"
+        ],
+        "id": "first",
+        "inputs": {},
+        "nodes": [
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {
+              "seconds": 0
+            },
+            "configuration": null,
+            "id": "wait_first",
+            "name": "wait_first",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "delay"
+          }
+        ],
+        "outputs": {},
+        "owner_node_id": "parallel",
+        "role": "branch:first"
+      },
+      {
+        "edges": [],
+        "entry_node_id": "wait_second",
+        "exit_node_ids": [
+          "wait_second"
+        ],
+        "id": "second",
+        "inputs": {},
+        "nodes": [
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {
+              "seconds": 0
+            },
+            "configuration": null,
+            "id": "wait_second",
+            "name": "wait_second",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "delay"
+          }
+        ],
+        "outputs": {},
+        "owner_node_id": "parallel",
+        "role": "branch:second"
+      }
+    ],
+    "run_policy": {
+      "cleanup_request_budget": 1,
+      "force_cancel_skips_cleanup": false,
+      "max_runtime_seconds": 30,
+      "request_budget": 1
+    },
+    "runtime_inputs": [],
+    "schema_version": "4.0",
+    "settings": {
+      "concurrency": 20,
+      "default_timeout_seconds": 30,
+      "fail_fast": true
+    },
+    "variables": {}
+  },
+  "export_error_code": "FLOWSPEC_CONTROL_UNSUPPORTED",
+  "export_status": 422,
+  "format": "flowtest-native-control-mcp-v1",
+  "max_requests": 500,
+  "max_seconds": 600,
+  "max_tool_calls": 100,
+  "pack_id": "native-control-mcp-v1",
+  "variants": [
+    "native_control_chain",
+    "regions4_draft",
+    "regions4_published"
+  ],
+  "version": "1.0.0"
+}

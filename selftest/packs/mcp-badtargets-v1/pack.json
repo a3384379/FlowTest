@@ -1,0 +1,115 @@
+{
+  "pack_id": "mcp-badtargets-v1",
+  "version": "1.0.0",
+  "runtime_seconds": 600,
+  "request_budget": 500,
+  "tool_budget": 100,
+  "scope": "synthetic_target_fault_detection",
+  "auth_boundary": "403_synthetic_response_leak_not_cross_tenant_authorization",
+  "scenarios": [
+    {
+      "scenario_id": "ST-BAD-business",
+      "fault_kind": "business_fault",
+      "status": 200,
+      "actual": 1,
+      "good_code": 0,
+      "bad_code": 7,
+      "good_value": null,
+      "bad_value": null,
+      "requests": 1,
+      "schema": {
+        "type": "object",
+        "required": [
+          "actual",
+          "code",
+          "value"
+        ],
+        "properties": {
+          "actual": {
+            "const": 1
+          },
+          "code": {
+            "const": 0
+          },
+          "value": {
+            "const": null
+          }
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-BAD-dependency",
+      "fault_kind": "dependency_fault",
+      "status": 200,
+      "actual": 1,
+      "good_code": 0,
+      "bad_code": 0,
+      "good_value": {
+        "dependency_id": "dependency-good"
+      },
+      "bad_value": {
+        "dependency_id": "dependency-other"
+      },
+      "requests": 2,
+      "schema": {
+        "type": "object",
+        "required": [
+          "actual",
+          "code",
+          "value"
+        ],
+        "properties": {
+          "actual": {
+            "const": 1
+          },
+          "code": {
+            "const": 0
+          },
+          "value": {
+            "const": {
+              "dependency_id": "dependency-good"
+            }
+          }
+        }
+      }
+    },
+    {
+      "scenario_id": "ST-BAD-auth",
+      "fault_kind": "auth_fault",
+      "status": 403,
+      "actual": 0,
+      "good_code": 403,
+      "bad_code": 403,
+      "good_value": null,
+      "bad_value": {
+        "resource": "synthetic-protected",
+        "allowed": true
+      },
+      "requests": 1,
+      "schema": {
+        "type": "object",
+        "required": [
+          "actual",
+          "code",
+          "value"
+        ],
+        "properties": {
+          "actual": {
+            "const": 0
+          },
+          "code": {
+            "const": 403
+          },
+          "value": {
+            "const": null
+          }
+        }
+      }
+    }
+  ],
+  "failure_code": "WORKFLOW_ASSERTION_FAILED",
+  "failure_phase": "main",
+  "failure_binding": "consumer.schema",
+  "positive_first": true,
+  "same_published_assets": true
+}

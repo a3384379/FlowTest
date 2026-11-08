@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -65,6 +65,12 @@ class EnvironmentResponse(BaseModel):
     created_by_id: UUID
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def utc_timestamps(cls, value: datetime) -> datetime:
+        # SQLite CURRENT_TIMESTAMP stores UTC without an offset; PostgreSQL retains it.
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 class SecretWrite(BaseModel):

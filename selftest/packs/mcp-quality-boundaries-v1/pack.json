@@ -1,0 +1,154 @@
+{
+  "pack_id": "mcp-quality-boundaries-v1",
+  "version": "1.0.0",
+  "sdk_version": "2.2.0",
+  "max_requests": 500,
+  "max_tool_calls": 100,
+  "max_runtime_seconds": 600,
+  "scenarios": [
+    {
+      "scenario_id": "QUALITY-positive_control-stdio",
+      "acceptance_id": "ST-MCP-013",
+      "action": "positive_control",
+      "transport": "stdio",
+      "expected_readiness": "ready",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-empty_cases-stdio",
+      "acceptance_id": "ST-MCP-013",
+      "action": "empty_cases",
+      "transport": "stdio",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-needs_review-stdio",
+      "acceptance_id": "ST-MCP-013",
+      "action": "needs_review",
+      "transport": "stdio",
+      "expected_readiness": "needs_review",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-truncated-stdio",
+      "acceptance_id": "ST-MCP-013",
+      "action": "truncated",
+      "transport": "stdio",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-coverage_missing-stdio",
+      "acceptance_id": "ST-MCP-013",
+      "action": "coverage_missing",
+      "transport": "stdio",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-prompt_injection-stdio",
+      "acceptance_id": "ST-MCP-016",
+      "action": "prompt_injection",
+      "transport": "stdio",
+      "expected_readiness": "ready",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-scope-stdio",
+      "acceptance_id": "ST-MCP-016",
+      "action": "scope",
+      "transport": "stdio",
+      "expected_readiness": null,
+      "expected_business_code": "MCP_SCOPE_REQUIRED"
+    },
+    {
+      "scenario_id": "QUALITY-target-stdio",
+      "acceptance_id": "ST-MCP-016",
+      "action": "target",
+      "transport": "stdio",
+      "expected_readiness": null,
+      "expected_business_code": "ENVIRONMENT_NOT_ALLOWED"
+    },
+    {
+      "scenario_id": "QUALITY-credential_ref-stdio",
+      "acceptance_id": "ST-MCP-027",
+      "action": "credential_ref",
+      "transport": "stdio",
+      "expected_readiness": null,
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-positive_control-streamable-http",
+      "acceptance_id": "ST-MCP-013",
+      "action": "positive_control",
+      "transport": "streamable-http",
+      "expected_readiness": "ready",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-empty_cases-streamable-http",
+      "acceptance_id": "ST-MCP-013",
+      "action": "empty_cases",
+      "transport": "streamable-http",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-needs_review-streamable-http",
+      "acceptance_id": "ST-MCP-013",
+      "action": "needs_review",
+      "transport": "streamable-http",
+      "expected_readiness": "needs_review",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-truncated-streamable-http",
+      "acceptance_id": "ST-MCP-013",
+      "action": "truncated",
+      "transport": "streamable-http",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-coverage_missing-streamable-http",
+      "acceptance_id": "ST-MCP-013",
+      "action": "coverage_missing",
+      "transport": "streamable-http",
+      "expected_readiness": "incomplete",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-prompt_injection-streamable-http",
+      "acceptance_id": "ST-MCP-016",
+      "action": "prompt_injection",
+      "transport": "streamable-http",
+      "expected_readiness": "ready",
+      "expected_business_code": null
+    },
+    {
+      "scenario_id": "QUALITY-scope-streamable-http",
+      "acceptance_id": "ST-MCP-016",
+      "action": "scope",
+      "transport": "streamable-http",
+      "expected_readiness": null,
+      "expected_business_code": "MCP_SCOPE_REQUIRED"
+    },
+    {
+      "scenario_id": "QUALITY-target-streamable-http",
+      "acceptance_id": "ST-MCP-016",
+      "action": "target",
+      "transport": "streamable-http",
+      "expected_readiness": null,
+      "expected_business_code": "ENVIRONMENT_NOT_ALLOWED"
+    },
+    {
+      "scenario_id": "QUALITY-credential_ref-streamable-http",
+      "acceptance_id": "ST-MCP-027",
+      "action": "credential_ref",
+      "transport": "streamable-http",
+      "expected_readiness": null,
+      "expected_business_code": null
+    }
+  ]
+}

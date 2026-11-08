@@ -1,0 +1,396 @@
+{
+  "$defs": {
+    "AssistedRevision": {
+      "additionalProperties": false,
+      "properties": {
+        "before_proposal_id": {
+          "format": "uuid",
+          "title": "Before Proposal Id",
+          "type": "string"
+        },
+        "after_proposal_id": {
+          "format": "uuid",
+          "title": "After Proposal Id",
+          "type": "string"
+        },
+        "before_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Before Fingerprint",
+          "type": "string"
+        },
+        "after_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "After Fingerprint",
+          "type": "string"
+        },
+        "reviewer_id": {
+          "format": "uuid",
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "reason_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Reason Digest",
+          "type": "string"
+        },
+        "independent_execution_match": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Independent Execution Match"
+        },
+        "review_mode": {
+          "enum": ["human", "ci_fixture"],
+          "title": "Review Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "before_proposal_id",
+        "after_proposal_id",
+        "before_fingerprint",
+        "after_fingerprint",
+        "reviewer_id",
+        "reason_digest",
+        "independent_execution_match",
+        "review_mode"
+      ],
+      "title": "AssistedRevision",
+      "type": "object"
+    },
+    "QualityAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "attempt_id": {
+          "format": "uuid",
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "evidence_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Evidence Digest",
+          "type": "string"
+        },
+        "review_mode": {
+          "enum": ["human", "ci_fixture"],
+          "title": "Review Mode",
+          "type": "string"
+        },
+        "generation_kind": {
+          "default": "model",
+          "enum": ["model", "assisted"],
+          "title": "Generation Kind",
+          "type": "string"
+        },
+        "protocol_available": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Protocol Available"
+        },
+        "design_valid": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Design Valid"
+        },
+        "executable_asset_generated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executable Asset Generated"
+        },
+        "landed_oracle_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Landed Oracle Ids"
+        },
+        "independent_execution_match": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Independent Execution Match"
+        },
+        "fixed_defect_detected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixed Defect Detected"
+        },
+        "source_complete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Complete"
+        },
+        "assisted": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AssistedRevision"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "task_id",
+        "attempt_id",
+        "ordinal",
+        "evidence_digest",
+        "review_mode"
+      ],
+      "title": "QualityAttempt",
+      "type": "object"
+    },
+    "QualityRatio": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "protocol_availability",
+            "design_validity",
+            "executable_asset_generation",
+            "required_oracle_landing",
+            "first_generation_execution_match",
+            "assisted_execution_match",
+            "fixed_defect_detection",
+            "source_completeness"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "numerator": {
+          "minimum": 0,
+          "title": "Numerator",
+          "type": "integer"
+        },
+        "denominator": {
+          "minimum": 0,
+          "title": "Denominator",
+          "type": "integer"
+        },
+        "status": {
+          "enum": ["EVALUATED", "NOT_EVALUATED", "INCOMPLETE"],
+          "title": "Status",
+          "type": "string"
+        },
+        "unobserved_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unobserved Count",
+          "type": "integer"
+        }
+      },
+      "required": ["name", "numerator", "denominator", "status"],
+      "title": "QualityRatio",
+      "type": "object"
+    },
+    "QualityTask": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        },
+        "variant_key": {
+          "default": "default",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Variant Key",
+          "type": "string"
+        },
+        "required_oracle_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Required Oracle Ids",
+          "type": "array"
+        },
+        "known_defect": {
+          "default": false,
+          "title": "Known Defect",
+          "type": "boolean"
+        },
+        "exclusion_reason": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exclusion Reason"
+        }
+      },
+      "required": ["task_id"],
+      "title": "QualityTask",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "flowtest-host-quality-v1",
+      "default": "flowtest-host-quality-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "taskset_version": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Taskset Version",
+      "type": "string"
+    },
+    "taskset_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Taskset Digest",
+      "type": "string"
+    },
+    "selected_task_count": {
+      "minimum": 1,
+      "title": "Selected Task Count",
+      "type": "integer"
+    },
+    "coverage": {
+      "enum": ["NOT_RUN", "PARTIAL", "COMPLETE"],
+      "title": "Coverage",
+      "type": "string"
+    },
+    "evaluation_status": {
+      "enum": ["EVALUATED", "NOT_EVALUATED", "INCOMPLETE"],
+      "title": "Evaluation Status",
+      "type": "string"
+    },
+    "excluded": {
+      "items": {
+        "$ref": "#/$defs/QualityTask"
+      },
+      "title": "Excluded",
+      "type": "array"
+    },
+    "not_run_task_ids": {
+      "items": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Not Run Task Ids",
+      "type": "array"
+    },
+    "attempts": {
+      "items": {
+        "$ref": "#/$defs/QualityAttempt"
+      },
+      "title": "Attempts",
+      "type": "array"
+    },
+    "metrics": {
+      "items": {
+        "$ref": "#/$defs/QualityRatio"
+      },
+      "maxItems": 8,
+      "minItems": 8,
+      "title": "Metrics",
+      "type": "array"
+    }
+  },
+  "required": [
+    "taskset_version",
+    "taskset_digest",
+    "selected_task_count",
+    "coverage",
+    "evaluation_status",
+    "excluded",
+    "not_run_task_ids",
+    "attempts",
+    "metrics"
+  ],
+  "title": "HostQualityReport",
+  "type": "object"
+}

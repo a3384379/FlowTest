@@ -12,6 +12,7 @@ class TestPlanTrigger(StrEnum):
 
 
 class ServiceTokenScope(StrEnum):
+    READ_EXECUTION = "read:execution"
     EXECUTE_WORKFLOW = "execute:workflow"
     EXECUTE_TEST_PLAN = "execute:test-plan"
     ANALYZE_CHANGE_REGRESSION = "analyze:change-regression"

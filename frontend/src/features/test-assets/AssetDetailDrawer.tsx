@@ -13,7 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useId } from 'react'
 import {
   apiErrorMessage,
@@ -34,6 +34,9 @@ import {
 import { listTestCaseVersions, listTestSuiteVersions } from './test-asset-service'
 import AssetRunEvidence from './AssetRunEvidence'
 import type { useAssetHistory } from './use-asset-history'
+import SelfTestAssetBacklink from '../self-test/SelfTestAssetBacklink'
+import { SelfTestAssetContext } from '../self-test/SelfTestProposalBacklink'
+import { carrySelfTestContext } from '../self-test/self-test-navigation'
 
 export type AssetDetailProps = {
   projectId: string
@@ -69,6 +72,13 @@ export default function AssetDetailDrawer(props: AssetDetailProps) {
       onClose={props.onClose}
       destroyOnHidden
     >
+      <SelfTestAssetBacklink
+        projectId={props.projectId}
+        kind={props.kind}
+        id={props.id}
+        version={props.version}
+      />
+      <SelfTestAssetContext projectId={props.projectId} />
       {asset.isPending && <Spin aria-label="读取资产详情" />}
       {asset.error && <AssetQueryError error={asset.error} onRetry={() => void asset.refetch()} />}
       {asset.data && <AssetDetailBody {...props} asset={asset.data} />}
@@ -289,6 +299,10 @@ function CaseBinding({
   environments: Environment[]
   draft: boolean
 }) {
+  const [params] = useSearchParams()
+  const fixedVersion =
+    !draft && definition.workflow_version ? `&version=${definition.workflow_version}` : ''
+  const workflowPath = `${projectPath(projectId, 'workflows')}?focus=${definition.workflow_id}${fixedVersion}`
   const workflow = workflows.find((item) => item.id === definition.workflow_id)
   const environment = environments.find((item) => item.id === definition.environment_id)
   return (
@@ -305,9 +319,7 @@ function CaseBinding({
             children: (
               <Space wrap>
                 {workflow?.name ?? definition.workflow_id}
-                <Link to={`${projectPath(projectId, 'workflows')}?focus=${definition.workflow_id}`}>
-                  打开流程
-                </Link>
+                <Link to={carrySelfTestContext(workflowPath, params)}>打开流程</Link>
               </Space>
             ),
           },
@@ -326,7 +338,9 @@ function CaseBinding({
         ]}
       />
       <Typography.Paragraph type="secondary" className="asset-binding-note">
-        打开流程用于查看或编辑当前流程；历史执行证据请从“执行与报告”进入冻结回看。
+        {fixedVersion
+          ? '打开流程查看此用例固定的发布定义；历史执行证据请从“执行与报告”进入冻结回看。'
+          : '打开流程用于查看或编辑当前流程；历史执行证据请从“执行与报告”进入冻结回看。'}
       </Typography.Paragraph>
       <Typography.Title level={5}>运行变量</Typography.Title>
       <OverrideValues values={definition.runtime_variables} />
@@ -357,6 +371,7 @@ function OverrideValues({ values }: { values: Record<string, string> }) {
 }
 
 function SuiteMembers(props: AssetDetailProps & { items: TestSuiteItem[]; draft: boolean }) {
+  const [params] = useSearchParams()
   return (
     <>
       <Typography.Paragraph type="secondary">
@@ -372,7 +387,10 @@ function SuiteMembers(props: AssetDetailProps & { items: TestSuiteItem[]; draft:
             title: '用例',
             render: (_, item) => (
               <Link
-                to={`${projectPath(props.projectId, 'assets')}?type=case&focus=${item.test_case_id}&version=${item.test_case_version ?? 'draft'}`}
+                to={carrySelfTestContext(
+                  `${projectPath(props.projectId, 'assets')}?type=case&focus=${item.test_case_id}&version=${item.test_case_version ?? 'draft'}`,
+                  params,
+                )}
               >
                 {props.cases.find((asset) => asset.id === item.test_case_id)?.name ??
                   item.test_case_id}

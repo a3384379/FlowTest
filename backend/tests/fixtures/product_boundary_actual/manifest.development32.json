@@ -1,0 +1,52 @@
+{
+  "builds": {
+    "fixture": "c01ebe980f1f481b7c566c87f399afd8bcfbf9d67e918a157dfc7ff299a6975a",
+    "runner": "sha256:0de2f0a4ed70b15297918b8fe51e1f7d7b8bf60247640cca871170fbaa03f2a0",
+    "target": "sha256:0de2f0a4ed70b15297918b8fe51e1f7d7b8bf60247640cca871170fbaa03f2a0",
+    "verifier": "06e99c538dd225771ecd34f48eeedf549fe9c9d7bb6fd70eb477aec0ca117e00"
+  },
+  "created_at": "2026-10-24T01:21:40.435677Z",
+  "deadline": "2026-10-24T01:31:40.435677Z",
+  "disposal": {
+    "binding_nonce": "848460f341634b07adb327a74f7d767a",
+    "project_name": "flowtest-selftest-bf277fc8d32d",
+    "target_container_id": "dd66818e2fc0efde5ac1113cdb9f02e1b46b2db4ee00b292b8dad9054eee0fd0",
+    "target_image": "sha256:0de2f0a4ed70b15297918b8fe51e1f7d7b8bf60247640cca871170fbaa03f2a0",
+    "target_volume": "flowtest-selftest-bf277fc8d32d_runner-data"
+  },
+  "expected_keys": [
+    "clean_install",
+    "same_key_reinstall",
+    "new_run",
+    "two_batch_isolation",
+    "readonly_scope",
+    "pagination",
+    "seal_idempotent",
+    "a_b_isolation",
+    "cross_project",
+    "cross_run",
+    "denied_mutations",
+    "revoked_token",
+    "expired_token",
+    "unauthorized_binding",
+    "wrong_target",
+    "environment_drift",
+    "recursive_target",
+    "seal_conflict",
+    "seal_build",
+    "seal_manifest",
+    "seal_attempt",
+    "nonce_expiry",
+    "success_failure_cleanup",
+    "cancel_cleanup",
+    "retention",
+    "expiry",
+    "foreign_key"
+  ],
+  "ownership_nonce": "848460f341634b07adb327a74f7d767a",
+  "pack_digest": "fd70761493576a8458447d2cdbae96ad0df909bd18fa0c3364202bd898e21bf7",
+  "profile": "standalone",
+  "project_id": "e07a810a-85da-4b06-a5b5-67c6fd8ebe54",
+  "project_name": "flowtest-selftest-bf277fc8d32d",
+  "source_digest": "29b55bc7e8716c5f0f7b2a9496b9a7febf49b7389c8afe2913ef3500528412df"
+}

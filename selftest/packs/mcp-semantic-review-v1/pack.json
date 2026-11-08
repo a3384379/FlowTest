@@ -1,0 +1,26 @@
+{
+  "pack_id": "mcp-semantic-review-v1",
+  "pack_version": "1.0.0",
+  "sdk_version": "2.2.0",
+  "max_requests": 500,
+  "max_tool_calls": 100,
+  "max_runtime_seconds": 600,
+  "claim": "semantic_review_negative_only",
+  "variants": [
+    "positive_control",
+    "missing_assertion",
+    "wrong_field",
+    "wrong_operator",
+    "expected_from_actual"
+  ],
+  "expected_raw_status": "passed",
+  "expected_review_rejections": [false, true, true, true, true],
+  "response_schema": {
+    "type": "object",
+    "required": ["actual", "code"],
+    "properties": {
+      "actual": {"type": "integer", "const": 1},
+      "code": {"type": "integer", "const": 0}
+    }
+  }
+}

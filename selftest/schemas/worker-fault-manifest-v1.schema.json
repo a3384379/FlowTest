@@ -1,0 +1,273 @@
+{
+  "$defs": {
+    "Assets": {
+      "additionalProperties": false,
+      "properties": {
+        "api_id": {
+          "format": "uuid",
+          "title": "Api Id",
+          "type": "string"
+        },
+        "batch_key": {
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "case_id": {
+          "format": "uuid",
+          "title": "Case Id",
+          "type": "string"
+        },
+        "case_version": {
+          "title": "Case Version",
+          "type": "integer"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "frozen_environment_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Frozen Environment Digest",
+          "type": "string"
+        },
+        "pinned": {
+          "title": "Pinned",
+          "type": "boolean"
+        },
+        "plan_id": {
+          "format": "uuid",
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "scenario_key": {
+          "title": "Scenario Key",
+          "type": "string"
+        },
+        "skip_cleanup": {
+          "title": "Skip Cleanup",
+          "type": "boolean"
+        },
+        "suite_id": {
+          "format": "uuid",
+          "title": "Suite Id",
+          "type": "string"
+        },
+        "suite_version": {
+          "title": "Suite Version",
+          "type": "integer"
+        },
+        "workflow_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Workflow Fingerprint",
+          "type": "string"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        },
+        "workflow_version": {
+          "title": "Workflow Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "project_id",
+        "environment_id",
+        "api_id",
+        "workflow_id",
+        "workflow_version",
+        "workflow_fingerprint",
+        "case_id",
+        "case_version",
+        "suite_id",
+        "suite_version",
+        "plan_id",
+        "batch_key",
+        "scenario_key",
+        "skip_cleanup",
+        "pinned",
+        "frozen_environment_digest"
+      ],
+      "title": "Assets",
+      "type": "object"
+    },
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "RequiredDisposal": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "project_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Name",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Image",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_name",
+        "target_container_id",
+        "target_volume",
+        "target_image",
+        "binding_nonce"
+      ],
+      "title": "RequiredDisposal",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/Assets"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "title": "Assets",
+      "type": "array"
+    },
+    "batch_key": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "builds": {
+      "$ref": "#/$defs/Builds"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "deadline": {
+      "format": "date-time",
+      "title": "Deadline",
+      "type": "string"
+    },
+    "disposal": {
+      "$ref": "#/$defs/RequiredDisposal"
+    },
+    "nonce": {
+      "maxLength": 160,
+      "minLength": 16,
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "profile": {
+      "enum": [
+        "full",
+        "compact"
+      ],
+      "title": "Profile",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "flowtest-worker-fault-manifest-v1",
+      "default": "flowtest-worker-fault-manifest-v1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    },
+    "worker_container_ids": {
+      "items": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "title": "Worker Container Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "pack_digest",
+    "profile",
+    "builds",
+    "source_digest",
+    "batch_key",
+    "nonce",
+    "created_at",
+    "deadline",
+    "disposal",
+    "worker_container_ids",
+    "assets"
+  ],
+  "title": "WorkerManifest",
+  "type": "object"
+}

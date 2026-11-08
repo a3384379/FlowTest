@@ -1,3 +1,4 @@
+import SelfTestProposalBacklink from '../self-test/SelfTestProposalBacklink'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Alert,
@@ -14,7 +15,9 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { useMemo, useState } from 'react'
+import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { UNSAFE_LocationContext } from 'react-router-dom'
+import { useAuthStore } from '../auth/auth-store'
 
 import WorkflowDesigner, { type ProposalGraphStatus } from '../../flow/WorkflowDesigner'
 import {
@@ -109,6 +112,36 @@ function useSandboxPreview(
   return { environments, environmentId, query }
 }
 
+function useProposalCommandContext(
+  projectId: string,
+  proposalId: string | undefined,
+  open: boolean,
+) {
+  const actor = useAuthStore((state) => `${state.user?.id}:${state.organizationId}:${state.epoch}`)
+  const route = useContext(UNSAFE_LocationContext)?.location
+  const routeKey = route ? `${route.key}:${route.pathname}:${route.search}` : null
+  const context = useMemo(
+    () => ({ projectId, proposalId, open, actor, routeKey }),
+    [projectId, proposalId, open, actor, routeKey],
+  )
+  const current = useRef<typeof context | null>(context)
+  useLayoutEffect(() => {
+    current.current = context
+    return () => {
+      current.current = null
+    }
+  }, [context])
+  function isCurrent() {
+    const state = useAuthStore.getState()
+    return (
+      current.current === context &&
+      context.open &&
+      `${state.user?.id}:${state.organizationId}:${state.epoch}` === context.actor
+    )
+  }
+  return { isCurrent, isMounted: () => current.current !== null }
+}
+
 export default function FlowProposalReviewDialog(props: FlowProposalReviewDialogProps) {
   const { message } = App.useApp()
   const queryClient = useQueryClient()
@@ -130,6 +163,12 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     [proposals.data],
   )
   const proposalId = selectedId ?? candidates.at(0)?.id
+  const { isCurrent, isMounted } = useProposalCommandContext(
+    props.projectId,
+    proposalId,
+    props.open,
+  )
+  const pending = useRef(false)
 
   const visual = useQuery({
     queryKey: ['flow-proposal', props.projectId, proposalId],
@@ -162,6 +201,13 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           accept,
           accept ? '可视化流程提案人工接受' : '可视化流程提案人工拒绝',
         )
+        if (!isCurrent()) {
+          await queryClient.invalidateQueries({
+            queryKey: ['flow-proposal', props.projectId, proposalId],
+            refetchType: 'none',
+          })
+          return
+        }
         queryClient.setQueryData<FlowSpecVisualProposal>(
           ['flow-proposal', props.projectId, proposalId],
           (current) => (current ? { ...current, proposal: reviewed } : current),
@@ -179,6 +225,17 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
     if (!proposalId) return
     await act(async () => {
       const result = await applyFlowSpec(props.projectId, proposalId)
+      if (!isCurrent()) {
+        await queryClient.invalidateQueries({
+          queryKey: ['workflows', props.projectId],
+          refetchType: 'none',
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ['flow-proposal', props.projectId, proposalId],
+          refetchType: 'none',
+        })
+        return
+      }
       const appliedVisual = {
         ...currentVisual,
         proposal: { ...currentVisual.proposal, applied_at: result.applied_at },
@@ -189,7 +246,7 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
       )
       setVisualOverride({ proposalId, visual: appliedVisual })
       await queryClient.invalidateQueries({ queryKey: ['workflows', props.projectId] })
-      props.onApplied(result.workflow_id)
+      if (isCurrent()) props.onApplied(result.workflow_id)
     }, '流程提案已应用到工作流草稿，可继续安全编辑')
   }
 
@@ -201,25 +258,29 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
         proposalId,
         previewEnvironmentId,
       )
+      if (!isCurrent()) return
       const execution = await executeSandboxPreview(
         props.projectId,
         proposalId,
         previewEnvironmentId,
         approval.id,
       )
-      setPreviewExecutionId(execution.id)
+      if (isCurrent()) setPreviewExecutionId(execution.id)
     }, 'Sandbox Preview 已启动；一次性审批已消费')
   }
 
   async function act(operation: () => Promise<void>, success: string): Promise<void> {
+    if (!isCurrent() || pending.current) return
+    pending.current = true
     setBusy(true)
     try {
       await operation()
-      void message.success(success)
+      if (isCurrent()) void message.success(success)
     } catch (error) {
-      void message.error(apiErrorMessage(error))
+      if (isCurrent()) void message.error(apiErrorMessage(error))
     } finally {
-      setBusy(false)
+      pending.current = false
+      if (isMounted()) setBusy(false)
     }
   }
 
@@ -239,6 +300,13 @@ export default function FlowProposalReviewDialog(props: FlowProposalReviewDialog
           title={flowProposalSafetyTitle(isRepairProposal)}
           description="Production、Staging 与未分类环境永久不进入 Preview；预览复用正式执行引擎，并受固定请求、数据行、并发、运行时与 Cleanup 预算约束。"
         />
+        {displayedVisual && (
+          <SelfTestProposalBacklink
+            projectId={props.projectId}
+            proposalId={proposalId}
+            route="flow_spec_visual"
+          />
+        )}
         <Select
           aria-label="流程提案"
           style={{ width: '100%' }}

@@ -1,0 +1,575 @@
+{
+  "schema_version": "flowtest-mcp-negative-v1",
+  "pack_id": "mcp-negative-v1",
+  "pack_version": "1.0.0",
+  "sdk_version": "2.2.0",
+  "max_tool_calls": 100,
+  "max_requests": 500,
+  "max_runtime_seconds": 600,
+  "scenarios": [
+    {
+      "scenario_id": "ST-MCP-004-unknown_tool-stdio",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "unknown_tool",
+      "title": "ST-MCP-004 unknown_tool stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "unknown_tool",
+      "expected": {
+        "layer": "tool_error",
+        "is_error": true,
+        "text_marker": "unknown_tool"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-004-bad_params-stdio",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "bad_params",
+      "title": "ST-MCP-004 bad_params stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "bad_params",
+      "expected": {
+        "layer": "tool_error",
+        "is_error": true,
+        "text_marker": "invalid_arguments"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-005-business_error_under_http200-stdio",
+      "acceptance_id": "ST-MCP-005",
+      "variant_key": "business_error_under_http200",
+      "title": "ST-MCP-005 business_error_under_http200 stdio",
+      "transport": "stdio",
+      "actor": "none",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_AUTHENTICATION_REQUIRED",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-missing_scope-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "missing_scope",
+      "title": "ST-MCP-007 missing_scope stdio",
+      "transport": "stdio",
+      "actor": "limited",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_SCOPE_REQUIRED",
+        "diagnostic_code": "SCOPE_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-cross_org-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "cross_org",
+      "title": "ST-MCP-007 cross_org stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "cross_org",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "PROJECT_NOT_FOUND",
+        "diagnostic_code": "REQUEST_REJECTED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-revoked-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "revoked",
+      "title": "ST-MCP-007 revoked stdio",
+      "transport": "stdio",
+      "actor": "revoked",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-expired-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "expired",
+      "title": "ST-MCP-007 expired stdio",
+      "transport": "stdio",
+      "actor": "expired",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "SERVICE_ACCOUNT_EXPIRED",
+        "diagnostic_code": "AUTH_EXPIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-human_token-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "human_token",
+      "title": "ST-MCP-007 human_token stdio",
+      "transport": "stdio",
+      "actor": "human",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-ci_token-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "ci_token",
+      "title": "ST-MCP-007 ci_token stdio",
+      "transport": "stdio",
+      "actor": "ci",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-read_cannot_propose-stdio",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "read_cannot_propose",
+      "title": "ST-MCP-007 read_cannot_propose stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "propose_denied",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_SCOPE_REQUIRED",
+        "diagnostic_code": "SCOPE_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-modern_protocol-stdio",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "modern_protocol",
+      "title": "ST-MCP-009 modern_protocol stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "modern",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-legacy_protocol-stdio",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "legacy_protocol",
+      "title": "ST-MCP-009 legacy_protocol stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "legacy",
+      "expected": {
+        "layer": "success",
+        "protocol_version": "2025-11-25",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-unsupported_protocol-stdio",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "unsupported_protocol",
+      "title": "ST-MCP-009 unsupported_protocol stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "unsupported",
+      "expected": {
+        "layer": "protocol_error",
+        "protocol_version": null,
+        "rpc_error_code": -32022
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-resources-stdio",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "resources",
+      "title": "ST-MCP-010 resources stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "resources",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-prompts-stdio",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "prompts",
+      "title": "ST-MCP-010 prompts stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "prompts",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-inspect_readonly-stdio",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "inspect_readonly",
+      "title": "ST-MCP-010 inspect_readonly stdio",
+      "transport": "stdio",
+      "actor": "reader_a",
+      "operation": "inspect",
+      "expected": {
+        "layer": "success",
+        "is_error": false,
+        "effective_scopes": [
+          "mcp:read"
+        ],
+        "runtime_profile": "standalone"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-004-unknown_tool-streamable-http",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "unknown_tool",
+      "title": "ST-MCP-004 unknown_tool streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "unknown_tool",
+      "expected": {
+        "layer": "tool_error",
+        "is_error": true,
+        "text_marker": "unknown_tool"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-004-bad_params-streamable-http",
+      "acceptance_id": "ST-MCP-004",
+      "variant_key": "bad_params",
+      "title": "ST-MCP-004 bad_params streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "bad_params",
+      "expected": {
+        "layer": "tool_error",
+        "is_error": true,
+        "text_marker": "invalid_arguments"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-005-business_error_under_http200-streamable-http",
+      "acceptance_id": "ST-MCP-005",
+      "variant_key": "business_error_under_http200",
+      "title": "ST-MCP-005 business_error_under_http200 streamable-http",
+      "transport": "streamable-http",
+      "actor": "none",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_AUTHENTICATION_REQUIRED",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-missing_scope-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "missing_scope",
+      "title": "ST-MCP-007 missing_scope streamable-http",
+      "transport": "streamable-http",
+      "actor": "limited",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_SCOPE_REQUIRED",
+        "diagnostic_code": "SCOPE_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-cross_org-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "cross_org",
+      "title": "ST-MCP-007 cross_org streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "cross_org",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "PROJECT_NOT_FOUND",
+        "diagnostic_code": "REQUEST_REJECTED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-revoked-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "revoked",
+      "title": "ST-MCP-007 revoked streamable-http",
+      "transport": "streamable-http",
+      "actor": "revoked",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-expired-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "expired",
+      "title": "ST-MCP-007 expired streamable-http",
+      "transport": "streamable-http",
+      "actor": "expired",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "SERVICE_ACCOUNT_EXPIRED",
+        "diagnostic_code": "AUTH_EXPIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-human_token-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "human_token",
+      "title": "ST-MCP-007 human_token streamable-http",
+      "transport": "streamable-http",
+      "actor": "human",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-ci_token-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "ci_token",
+      "title": "ST-MCP-007 ci_token streamable-http",
+      "transport": "streamable-http",
+      "actor": "ci",
+      "operation": "list_projects",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "INVALID_SERVICE_ACCOUNT_TOKEN",
+        "diagnostic_code": "AUTH_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-007-read_cannot_propose-streamable-http",
+      "acceptance_id": "ST-MCP-007",
+      "variant_key": "read_cannot_propose",
+      "title": "ST-MCP-007 read_cannot_propose streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "propose_denied",
+      "expected": {
+        "layer": "business_error",
+        "is_error": false,
+        "business_code": "MCP_SCOPE_REQUIRED",
+        "diagnostic_code": "SCOPE_REQUIRED",
+        "trace_required": true
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-modern_protocol-streamable-http",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "modern_protocol",
+      "title": "ST-MCP-009 modern_protocol streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "modern",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-legacy_protocol-streamable-http",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "legacy_protocol",
+      "title": "ST-MCP-009 legacy_protocol streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "legacy",
+      "expected": {
+        "layer": "success",
+        "protocol_version": "2025-11-25",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-009-unsupported_protocol-streamable-http",
+      "acceptance_id": "ST-MCP-009",
+      "variant_key": "unsupported_protocol",
+      "title": "ST-MCP-009 unsupported_protocol streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "unsupported",
+      "expected": {
+        "layer": "protocol_error",
+        "protocol_version": null,
+        "rpc_error_code": -32022
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-resources-streamable-http",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "resources",
+      "title": "ST-MCP-010 resources streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "resources",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-prompts-streamable-http",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "prompts",
+      "title": "ST-MCP-010 prompts streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "prompts",
+      "expected": {
+        "layer": "success",
+        "minimum_items": 1
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-010-inspect_readonly-streamable-http",
+      "acceptance_id": "ST-MCP-010",
+      "variant_key": "inspect_readonly",
+      "title": "ST-MCP-010 inspect_readonly streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "inspect",
+      "expected": {
+        "layer": "success",
+        "is_error": false,
+        "effective_scopes": [
+          "mcp:read"
+        ],
+        "runtime_profile": "standalone"
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-006-two_principals-streamable-http",
+      "acceptance_id": "ST-MCP-006",
+      "variant_key": "two_principals",
+      "title": "ST-MCP-006 two_principals streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "interleaved",
+      "expected": {
+        "layer": "success",
+        "is_error": false
+      }
+    },
+    {
+      "scenario_id": "ST-MCP-006-concurrent_http-streamable-http",
+      "acceptance_id": "ST-MCP-006",
+      "variant_key": "concurrent_http",
+      "title": "ST-MCP-006 concurrent_http streamable-http",
+      "transport": "streamable-http",
+      "actor": "reader_a",
+      "operation": "concurrent",
+      "expected": {
+        "layer": "success",
+        "is_error": false
+      }
+    }
+  ],
+  "catalog_fingerprint": "3e46d4cb48d9d5cf754111af184cf0d65d77cc27fd02977c4ce9d1f57d30ca38",
+  "tool_names": [
+    "flowtest.analyze_test_coverage",
+    "flowtest.begin_test_context",
+    "flowtest.cancel_preview",
+    "flowtest.check_service_target",
+    "flowtest.close_test_context",
+    "flowtest.commit_contract_import",
+    "flowtest.compile_integration_flowspec",
+    "flowtest.compile_test_design",
+    "flowtest.diagnose_failure",
+    "flowtest.diff_flowspec",
+    "flowtest.discover_control_capabilities",
+    "flowtest.discover_services",
+    "flowtest.ensure_project",
+    "flowtest.ensure_service_target",
+    "flowtest.ensure_test_environment",
+    "flowtest.explain_compiler_diagnostics",
+    "flowtest.export_flowspec",
+    "flowtest.find_assets",
+    "flowtest.generate_test_design",
+    "flowtest.ingest_database_evidence",
+    "flowtest.ingest_external_evidence",
+    "flowtest.ingest_java_evidence",
+    "flowtest.ingest_java_source_snapshot",
+    "flowtest.inspect_affected_flows",
+    "flowtest.inspect_change_impact",
+    "flowtest.inspect_change_regression",
+    "flowtest.inspect_connection",
+    "flowtest.inspect_context_diff",
+    "flowtest.inspect_context_requirements",
+    "flowtest.inspect_contract",
+    "flowtest.inspect_data_profile",
+    "flowtest.inspect_entity_mapping",
+    "flowtest.inspect_flow",
+    "flowtest.inspect_flow_proposal",
+    "flowtest.inspect_project",
+    "flowtest.inspect_project_readiness",
+    "flowtest.inspect_run_evidence",
+    "flowtest.inspect_source_evidence",
+    "flowtest.inspect_test_context",
+    "flowtest.inspect_test_evidence",
+    "flowtest.list_projects",
+    "flowtest.plan_integration_test",
+    "flowtest.prepare_change_regression",
+    "flowtest.preview_contract_import",
+    "flowtest.preview_flow_proposal",
+    "flowtest.propose_control_block",
+    "flowtest.propose_control_workflow",
+    "flowtest.propose_flow_draft",
+    "flowtest.propose_maintenance",
+    "flowtest.propose_repair",
+    "flowtest.propose_simple_flow",
+    "flowtest.propose_test_design",
+    "flowtest.propose_test_plan_update",
+    "flowtest.validate_flowspec",
+    "flowtest.validate_integration_plan"
+  ]
+}

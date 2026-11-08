@@ -186,7 +186,7 @@ export function defaultEnvironmentService(name = 'web'): EnvironmentServiceDefin
   return {
     name,
     image:
-      'cgr.dev/chainguard/nginx@sha256:a104d1995e56b7a15e8f152078dfbdb1ecbf9f9d1af311e7906e7b4c0c790cf2',
+      'cgr.dev/chainguard/nginx@sha256:0352063c168740414d8caf7cbcc2b386506dba82ba3955cfaee2b8582a1a93a8',
     internal_port: 8080,
     environment: [{ name: 'NGINX_PORT', value: '8080' }],
     depends_on: [],

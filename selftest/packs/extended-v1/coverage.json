@@ -1,0 +1,176 @@
+{
+  "schema_version": "flowtest-pack-coverage-v1",
+  "scenarios": [
+    {
+      "scenario_id": "ST-EXT-if-miss",
+      "acceptance_ids": [
+        "ST-ENG-003"
+      ],
+      "variant_key": "if-miss",
+      "title": "If 未命中分支",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-switch-default",
+      "acceptance_ids": [
+        "ST-ENG-003"
+      ],
+      "variant_key": "switch-default",
+      "title": "Switch 默认分支",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-foreach-empty",
+      "acceptance_ids": [
+        "ST-ENG-004"
+      ],
+      "variant_key": "foreach-empty",
+      "title": "ForEach 空集合不发送请求",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-not-array",
+      "acceptance_ids": [
+        "ST-ENG-006"
+      ],
+      "variant_key": "loop-not-array",
+      "title": "循环边界 not-array",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-min-items",
+      "acceptance_ids": [
+        "ST-ENG-006"
+      ],
+      "variant_key": "loop-min-items",
+      "title": "循环边界 min-items",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-max-items",
+      "acceptance_ids": [
+        "ST-ENG-006"
+      ],
+      "variant_key": "loop-max-items",
+      "title": "循环边界 max-items",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-break",
+      "acceptance_ids": [
+        "ST-ENG-005"
+      ],
+      "variant_key": "loop-break",
+      "title": "循环 break 不执行后续节点",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-loop-continue",
+      "acceptance_ids": [
+        "ST-ENG-005"
+      ],
+      "variant_key": "loop-continue",
+      "title": "循环 continue 不执行后续节点",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-while",
+      "acceptance_ids": [
+        "ST-ENG-004"
+      ],
+      "variant_key": "while",
+      "title": "While 有界迭代 while",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-while-limit",
+      "acceptance_ids": [
+        "ST-ENG-006"
+      ],
+      "variant_key": "while-limit",
+      "title": "While 有界迭代 while-limit",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-retry-three",
+      "acceptance_ids": [
+        "ST-ENG-007"
+      ],
+      "variant_key": "retry-three",
+      "title": "只读请求重试 retry-three",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-retry-exhausted",
+      "acceptance_ids": [
+        "ST-ENG-008"
+      ],
+      "variant_key": "retry-exhausted",
+      "title": "只读请求重试 retry-exhausted",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-poll-terminal",
+      "acceptance_ids": [
+        "ST-ENG-010"
+      ],
+      "variant_key": "poll-terminal",
+      "title": "轮询边界 poll-terminal",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-poll-budget",
+      "acceptance_ids": [
+        "ST-ENG-011"
+      ],
+      "variant_key": "poll-budget",
+      "title": "轮询边界 poll-budget",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-main-cleanup-failure",
+      "acceptance_ids": [
+        "ST-ENG-014"
+      ],
+      "variant_key": "main-cleanup-failure",
+      "title": "主流程和清理断言均失败",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-parallel-branches",
+      "acceptance_ids": [
+        "ST-ENG-015"
+      ],
+      "variant_key": "parallel-branches",
+      "title": "并行分支请求隔离与精确集合",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-try-caught",
+      "acceptance_ids": [
+        "ST-ENG-013"
+      ],
+      "variant_key": "try-caught",
+      "title": "Try 捕获指定错误并保留 Finally try-caught",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-try-unmatched",
+      "acceptance_ids": [
+        "ST-ENG-013"
+      ],
+      "variant_key": "try-unmatched",
+      "title": "Try 捕获指定错误并保留 Finally try-unmatched",
+      "validation_status": "not_run"
+    },
+    {
+      "scenario_id": "ST-EXT-submit-poll",
+      "acceptance_ids": [
+        "ST-ENG-009"
+      ],
+      "variant_key": "submit-poll",
+      "title": "单次提交后仅GET轮询两次",
+      "validation_status": "not_run"
+    }
+  ]
+}

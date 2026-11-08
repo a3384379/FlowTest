@@ -426,9 +426,10 @@ class MCPReadService:
         coverage_only: bool = False,
     ) -> MCPReadEnvelope:
         self._require_scope()
-        design, fingerprint = await TestEngineeringService(self._session).generate(
+        result = await TestEngineeringService(self._session).generate_result(
             actor=actor, project_id=project_id, payload=payload
         )
+        design, fingerprint = result.design, result.fingerprint
         data = (
             cast(JsonValue, design.coverage.model_dump(mode="json"))
             if coverage_only
@@ -436,6 +437,9 @@ class MCPReadService:
                 JsonValue,
                 {
                     "fingerprint": fingerprint,
+                    "origin": result.origin.model_dump(mode="json")
+                    if result.origin is not None
+                    else None,
                     "design": normalized_design(design),
                     "persisted": False,
                 },

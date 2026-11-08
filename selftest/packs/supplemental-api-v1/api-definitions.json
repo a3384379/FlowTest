@@ -1,0 +1,868 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-P0-API001-session",
+      "source_id": "d26e76f8-2677-5cc1-9fcb-51fefb8110fb",
+      "name": "ST-P0-API001-session login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "d7801163-44b4-58ff-9759-34a6d314fbc0",
+          "name": "ST-P0-API001-session refresh",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/auth/refresh",
+            "headers": {
+              "X-Requested-With": "FlowTest"
+            },
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "c92e1ce3-f34e-5f79-91d2-f8117bd6ecee",
+          "name": "ST-P0-API001-session logout",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/auth/logout",
+            "headers": {
+              "X-Requested-With": "FlowTest"
+            },
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "6af0e16a-9770-5aa2-b86d-3a087933256d",
+          "name": "ST-P0-API001-session refresh_replay",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/auth/refresh",
+            "headers": {
+              "X-Requested-With": "FlowTest",
+              "X-Trace-Id": "$BATCH-ST-P0-API001-session-refresh_replay"
+            },
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-access",
+      "source_id": "bd4a8e3e-2e3a-5cd5-ad99-42f93082faa7",
+      "name": "ST-P0-API001-invalid-access request",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/auth/me",
+        "headers": {
+          "Authorization": "Bearer synthetic-invalid-access",
+          "X-Trace-Id": "$BATCH-ST-P0-API001-invalid-access-request"
+        },
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API001-invalid-refresh",
+      "source_id": "52f4126b-597a-5797-98c7-ecb71049e9f5",
+      "name": "ST-P0-API001-invalid-refresh request",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/refresh",
+        "headers": {
+          "X-Requested-With": "FlowTest",
+          "Cookie": "flowtest_refresh=synthetic-invalid-refresh",
+          "X-Trace-Id": "$BATCH-ST-P0-API001-invalid-refresh-request"
+        },
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API001-missing-refresh",
+      "source_id": "6e6bf308-0db0-5e88-9723-c69df8965b90",
+      "name": "ST-P0-API001-missing-refresh request",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/refresh",
+        "headers": {
+          "X-Requested-With": "FlowTest",
+          "X-Trace-Id": "$BATCH-ST-P0-API001-missing-refresh-request"
+        },
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API001-logout-no-cookie",
+      "source_id": "12d203b9-0e95-5bdd-900a-078ac3944cd3",
+      "name": "ST-P0-API001-logout-no-cookie request",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/logout",
+        "headers": {
+          "X-Requested-With": "FlowTest"
+        },
+        "body_kind": "none",
+        "body": null,
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API002-nonmember",
+      "source_id": "40fadc9b-f66d-5851-a968-a89a1e65d493",
+      "name": "ST-P0-API002-nonmember login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "email": "$NONMEMBER_EMAIL",
+          "password": "{{secret.SELFTEST_B_NONMEMBER_PASSWORD}}"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "6400049f-e968-57d4-a83b-91d94f93d28a",
+          "name": "ST-P0-API002-nonmember request",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001",
+            "headers": {
+              "X-Organization-ID": "00000000-0000-4000-8000-000000000002",
+              "X-Trace-Id": "$BATCH-ST-P0-API002-nonmember-request"
+            },
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API002-cross",
+      "source_id": "9dbc2c67-b157-5df2-a392-f10670e7893d",
+      "name": "ST-P0-API002-cross login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "email": "$CROSS_EMAIL",
+          "password": "{{secret.SELFTEST_B_CROSS_PASSWORD}}"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "fa0841e6-8022-5fc7-b0ba-28f837dd46df",
+          "name": "ST-P0-API002-cross request",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001",
+            "headers": {
+              "X-Organization-ID": "$CROSS_ORG",
+              "X-Trace-Id": "$BATCH-ST-P0-API002-cross-request"
+            },
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API006-auth-disabled",
+      "source_id": "4c41d970-8fd6-59e5-b02c-09576027e6b1",
+      "name": "ST-P0-API006-auth-disabled request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API006-auth-disabled/request",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "bearer",
+          "values": {
+            "token": "synthetic-owned-credential"
+          }
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API006-header-suppressed",
+      "source_id": "2ec7736f-8313-5359-bf9e-32a7b780d22f",
+      "name": "ST-P0-API006-header-suppressed request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API006-header-suppressed/request",
+        "headers": {
+          "aUtHoRiZaTiOn": "Bearer synthetic-owned-header"
+        },
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API006-cookie-suppressed",
+      "source_id": "b20e022f-8270-511d-8bd8-b87753009b21",
+      "name": "ST-P0-API006-cookie-suppressed request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API006-cookie-suppressed/request",
+        "headers": {
+          "Cookie": "synthetic_session=owned"
+        },
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "value": "suppression",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API007-nested",
+      "source_id": "69ff31ed-b55e-541e-86be-3f368eb75255",
+      "name": "ST-P0-API007-nested request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API007-nested/request",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "branch": "",
+          "iteration_key": "",
+          "value": {
+            "batch": "$BATCH",
+            "deep": {
+              "zero": 0,
+              "false": false,
+              "empty": "",
+              "null": null
+            }
+          }
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API007-omitted",
+      "source_id": "75d1e5a3-4833-5fad-b29b-7784f0edebb4",
+      "name": "ST-P0-API007-omitted request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API007-omitted/request",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API007-explicit-null",
+      "source_id": "0e494771-a130-5c50-8643-6d0ad151b41f",
+      "name": "ST-P0-API007-explicit-null request",
+      "request": {
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-P0-API007-explicit-null/request",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "$BATCH",
+          "branch": "",
+          "iteration_key": "",
+          "value": null
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": []
+    },
+    {
+      "scenario_id": "ST-P0-API009-history",
+      "source_id": "4b548f5b-ef40-5cfe-bd4d-29a902653aa1",
+      "name": "ST-P0-API009-history login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "050ceac2-c38c-5b0c-9bfb-87d30420aff2",
+          "name": "ST-P0-API009-history create",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows",
+            "headers": {},
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-history",
+              "definition": {
+                "schema_version": "4.0",
+                "variables": {},
+                "runtime_inputs": [],
+                "nodes": [
+                  {
+                    "id": "start",
+                    "type": "start",
+                    "name": "frozen-v1",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  },
+                  {
+                    "id": "end",
+                    "type": "end",
+                    "name": "end",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  }
+                ],
+                "edges": [
+                  {
+                    "id": "s-e",
+                    "source": "start",
+                    "target": "end",
+                    "mappings": []
+                  }
+                ],
+                "regions": [],
+                "settings": {
+                  "fail_fast": true,
+                  "concurrency": 20,
+                  "default_timeout_seconds": 30
+                },
+                "run_policy": {
+                  "request_budget": 12,
+                  "max_runtime_seconds": 60,
+                  "cleanup_request_budget": 2,
+                  "force_cancel_skips_cleanup": false
+                }
+              }
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "4e5c6836-c32e-5012-a477-7a62588f9cf0",
+          "name": "ST-P0-API009-history publish_one",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}/versions",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "c00be3a7-e174-5966-80e1-f88a8d570bba",
+          "name": "ST-P0-API009-history update",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}",
+            "headers": {},
+            "body_kind": "json",
+            "body": {
+              "expected_revision": 1,
+              "definition": {
+                "schema_version": "4.0",
+                "variables": {},
+                "runtime_inputs": [],
+                "nodes": [
+                  {
+                    "id": "start",
+                    "type": "start",
+                    "name": "current-v2",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  },
+                  {
+                    "id": "end",
+                    "type": "end",
+                    "name": "end",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  }
+                ],
+                "edges": [
+                  {
+                    "id": "s-e",
+                    "source": "start",
+                    "target": "end",
+                    "mappings": []
+                  }
+                ],
+                "regions": [],
+                "settings": {
+                  "fail_fast": true,
+                  "concurrency": 20,
+                  "default_timeout_seconds": 30
+                },
+                "run_policy": {
+                  "request_budget": 12,
+                  "max_runtime_seconds": 60,
+                  "cleanup_request_budget": 2,
+                  "force_cancel_skips_cleanup": false
+                }
+              }
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "a1b67b62-be79-59c5-9d46-d67a6a8ce5c1",
+          "name": "ST-P0-API009-history publish_two",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}/versions",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "81fd9def-2742-56c1-8b9d-636ede6ab4ee",
+          "name": "ST-P0-API009-history versions",
+          "request": {
+            "method": "GET",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}/versions",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "a4845954-2cb6-52ff-b9ba-02f2909ca7aa",
+          "name": "ST-P0-API009-history archive",
+          "request": {
+            "method": "DELETE",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "scenario_id": "ST-P0-API009-conflict",
+      "source_id": "3cf73ed7-4bd4-54b7-9138-6b78167501f7",
+      "name": "ST-P0-API009-conflict login",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/auth/login",
+        "headers": {},
+        "body_kind": "json",
+        "body": {
+          "email": "$B_EMAIL",
+          "password": "{{secret.SELFTEST_B_PASSWORD}}"
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        }
+      },
+      "additional_sources": [
+        {
+          "source_id": "b9643fe5-e21f-5fda-8910-8365cfc14059",
+          "name": "ST-P0-API009-conflict create",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows",
+            "headers": {},
+            "body_kind": "json",
+            "body": {
+              "name": "$BATCH-conflict",
+              "definition": {
+                "schema_version": "4.0",
+                "variables": {},
+                "runtime_inputs": [],
+                "nodes": [
+                  {
+                    "id": "start",
+                    "type": "start",
+                    "name": "frozen-v1",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  },
+                  {
+                    "id": "end",
+                    "type": "end",
+                    "name": "end",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  }
+                ],
+                "edges": [
+                  {
+                    "id": "s-e",
+                    "source": "start",
+                    "target": "end",
+                    "mappings": []
+                  }
+                ],
+                "regions": [],
+                "settings": {
+                  "fail_fast": true,
+                  "concurrency": 20,
+                  "default_timeout_seconds": 30
+                },
+                "run_policy": {
+                  "request_budget": 12,
+                  "max_runtime_seconds": 60,
+                  "cleanup_request_budget": 2,
+                  "force_cancel_skips_cleanup": false
+                }
+              }
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "0d9bb867-bedc-5b81-a456-defaf76dcb45",
+          "name": "ST-P0-API009-conflict publish_one",
+          "request": {
+            "method": "POST",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}/versions",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "8b523ca8-d2d6-514d-a886-5087d7ca38b6",
+          "name": "ST-P0-API009-conflict update",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}",
+            "headers": {},
+            "body_kind": "json",
+            "body": {
+              "expected_revision": 1,
+              "definition": {
+                "schema_version": "4.0",
+                "variables": {},
+                "runtime_inputs": [],
+                "nodes": [
+                  {
+                    "id": "start",
+                    "type": "start",
+                    "name": "current-v2",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  },
+                  {
+                    "id": "end",
+                    "type": "end",
+                    "name": "end",
+                    "position": {
+                      "x": 0.0,
+                      "y": 0.0
+                    },
+                    "config": {},
+                    "capability_id": null,
+                    "capability_version": null,
+                    "configuration": null,
+                    "bindings": null,
+                    "phase": "main",
+                    "run_when": "always",
+                    "cleanup_for": [],
+                    "best_effort": false,
+                    "cleanup_timeout_seconds": 30,
+                    "cleanup_retry_budget": 0
+                  }
+                ],
+                "edges": [
+                  {
+                    "id": "s-e",
+                    "source": "start",
+                    "target": "end",
+                    "mappings": []
+                  }
+                ],
+                "regions": [],
+                "settings": {
+                  "fail_fast": true,
+                  "concurrency": 20,
+                  "default_timeout_seconds": 30
+                },
+                "run_policy": {
+                  "request_budget": 12,
+                  "max_runtime_seconds": 60,
+                  "cleanup_request_budget": 2,
+                  "force_cancel_skips_cleanup": false
+                }
+              }
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "8f94b474-65c4-588e-8bb9-0823327dd55c",
+          "name": "ST-P0-API009-conflict stale_update",
+          "request": {
+            "method": "PATCH",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}",
+            "headers": {
+              "X-Trace-Id": "$BATCH-ST-P0-API009-conflict-stale_update"
+            },
+            "body_kind": "json",
+            "body": {
+              "expected_revision": 1,
+              "name": "must-not-apply"
+            },
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        },
+        {
+          "source_id": "86bd2499-0379-520b-a78b-2b411ca482de",
+          "name": "ST-P0-API009-conflict archive",
+          "request": {
+            "method": "DELETE",
+            "path": "/api/v1/projects/00000000-0000-4000-8000-000000000001/workflows/{{workflow_id}}",
+            "headers": {},
+            "body_kind": "none",
+            "body": null,
+            "auth": {
+              "kind": "none",
+              "values": {}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

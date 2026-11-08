@@ -1,3 +1,4 @@
+import SelfTestReportPanels from '../self-test/SelfTestReportPanels'
 import { ArrowLeftOutlined, DownloadOutlined, NodeIndexOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -78,6 +79,12 @@ export default function ReportExecutionWorkspace(props: WorkspaceProps) {
       <ReportExecutionHeading
         props={props}
         environment={snapshotEnvironment(snapshot.data?.execution.snapshot)}
+      />
+      <SelfTestReportPanels
+        key={`${props.projectId}:${executionId}`}
+        projectId={props.projectId}
+        executionId={executionId}
+        detail={detail}
       />
       <ReportFocusNotice requestedId={nodeId} detail={detail} node={node} />
       {props.loading && (

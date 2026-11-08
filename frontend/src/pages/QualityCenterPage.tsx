@@ -18,11 +18,15 @@ import {
   Statistic,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import SelfTestWorkspace from '../features/self-test/SelfTestWorkspace'
+import { useProjectContext } from '../features/projects/use-project-context'
+import { useSelfTestIdentity } from '../features/self-test/self-test-query-keys'
 
 import type {
   QualityGateInput,
@@ -44,6 +48,39 @@ import type { TestPlanRun } from '../lib/api'
 import '../features/quality/quality-center.css'
 
 export default function QualityCenterPage() {
+  const [params, setParams] = useSearchParams()
+  const { projectId } = useProjectContext()
+  const identity = useSelfTestIdentity(projectId)
+  const active = params.get('tab') === 'selftest' ? 'selftest' : 'analysis'
+  return (
+    <>
+      <Tabs
+        activeKey={active}
+        onChange={(tab) => {
+          const next = new URLSearchParams(params)
+          if (tab === 'selftest') {
+            next.set('tab', 'selftest')
+            if (!next.has('mode')) next.set('mode', 'mcp_generation')
+          } else next.delete('tab')
+          setParams(next)
+        }}
+        items={[
+          { key: 'analysis', label: '质量分析' },
+          { key: 'selftest', label: '系统自测' },
+        ]}
+      />
+      {active === 'analysis' ? (
+        <QualityAnalysisWorkspace />
+      ) : (
+        <SelfTestWorkspace
+          key={`${identity.userId}:${identity.organizationId}:${identity.epoch}:${projectId}`}
+        />
+      )}
+    </>
+  )
+}
+
+function QualityAnalysisWorkspace() {
   const state = useQualityCenter()
   const [createOpen, setCreateOpen] = useRouteScopedState(state.projectId, null, false)
   const [riskOpen, setRiskOpen] = useRouteScopedState(state.projectId, null, false)

@@ -18,6 +18,7 @@
     "fixtures/login-create-query.flowspec-v2.json": "backend/tests/fixtures/v6_golden/login-create-query.flowspec-v2.json",
     "fixtures/login-create-query.integration-plan-v1.json": "backend/tests/fixtures/v6_golden/login-create-query.integration-plan-v1.json",
     "fixtures/mcp-contract.json": "backend/tests/fixtures/v6_golden/mcp-contract.json",
+    "fixtures/mcp-schema-fingerprints.json": "backend/tests/fixtures/v6_golden/mcp-schema-fingerprints.json",
     "fixtures/operation-identity.json": "backend/tests/fixtures/v6_golden/operation-identity.json",
     "fixtures/ruoyi-target.json": "backend/tests/fixtures/v6_golden/ruoyi-target.json",
     "fixtures/small-spring/manifest.json": "backend/tests/fixtures/v6_golden/small-spring/manifest.json",

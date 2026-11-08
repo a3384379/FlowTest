@@ -1,0 +1,2494 @@
+{
+  "$defs": {
+    "Builds": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture",
+          "type": "string"
+        },
+        "runner": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner",
+          "type": "string"
+        },
+        "target": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "verifier": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Verifier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner",
+        "target",
+        "fixture",
+        "verifier"
+      ],
+      "title": "Builds",
+      "type": "object"
+    },
+    "DisposalReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Binding Nonce",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "containers_absent": {
+          "const": true,
+          "title": "Containers Absent",
+          "type": "boolean"
+        },
+        "networks_absent": {
+          "const": true,
+          "title": "Networks Absent",
+          "type": "boolean"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "removed_at": {
+          "format": "date-time",
+          "title": "Removed At",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        },
+        "volumes_absent": {
+          "const": true,
+          "title": "Volumes Absent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "project_name",
+        "binding_nonce",
+        "runner_volume",
+        "target_volume",
+        "candidate_image_digest",
+        "removed_at",
+        "containers_absent",
+        "volumes_absent",
+        "networks_absent"
+      ],
+      "title": "DisposalReceipt",
+      "type": "object"
+    },
+    "FixtureBinaryResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename"
+      ],
+      "title": "FixtureBinaryResponse",
+      "type": "object"
+    },
+    "FixtureBudgetReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "admitted_count": {
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Admitted Count",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "number"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "parent_batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Parent Batch Key",
+          "type": "string"
+        },
+        "registration_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Registration Epoch",
+          "type": "string"
+        },
+        "rejected_count": {
+          "minimum": 0,
+          "title": "Rejected Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent_batch_key",
+        "nonce",
+        "expires_at",
+        "admitted_count",
+        "rejected_count",
+        "fixture_digest",
+        "registration_epoch"
+      ],
+      "title": "FixtureBudgetReceipt",
+      "type": "object"
+    },
+    "FixtureJournal": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBudgetReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entries": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FixtureRequest"
+          },
+          "maxItems": 10000,
+          "title": "Entries",
+          "type": "array"
+        },
+        "epoch_changed": {
+          "default": false,
+          "title": "Epoch Changed",
+          "type": "boolean"
+        },
+        "expired": {
+          "default": false,
+          "title": "Expired",
+          "type": "boolean"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "fixture_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Epoch",
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Sequence"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "request_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Request Count",
+          "type": "integer"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "batch_key",
+        "scenario_id",
+        "nonce",
+        "fixture_epoch",
+        "fixture_digest",
+        "request_count"
+      ],
+      "title": "FixtureJournal",
+      "type": "object"
+    },
+    "FixtureMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "active_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Active Count",
+          "type": "integer"
+        },
+        "cancelled_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Cancelled Count",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "completed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/FixtureRequestEvent"
+          },
+          "maxItems": 500,
+          "title": "Events",
+          "type": "array"
+        },
+        "failed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Failed Count",
+          "type": "integer"
+        },
+        "peak_concurrency": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Peak Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "complete",
+        "active_count",
+        "peak_concurrency",
+        "completed_count",
+        "cancelled_count",
+        "failed_count"
+      ],
+      "title": "FixtureMetrics",
+      "type": "object"
+    },
+    "FixturePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "iteration_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iteration Key"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "request_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Count"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        }
+      },
+      "title": "FixturePayload",
+      "type": "object"
+    },
+    "FixtureRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_present": {
+          "default": false,
+          "title": "Authorization Present",
+          "type": "boolean"
+        },
+        "binary_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "binary_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cookie_present": {
+          "default": false,
+          "title": "Cookie Present",
+          "type": "boolean"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "method": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Received At"
+        },
+        "request_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_value_present": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Value Present"
+        },
+        "response_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "response_status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Response Status",
+          "type": "integer"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "synthetic_cookie": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticCookieSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "synthetic_precedence_header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticHeaderSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "sequence",
+        "method",
+        "path",
+        "response_status"
+      ],
+      "title": "FixtureRequest",
+      "type": "object"
+    },
+    "FixtureRequestEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "active_at_begin": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Active At Begin",
+          "type": "integer"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "completed",
+                "cancelled",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "request_id",
+        "sequence",
+        "started_at",
+        "active_at_begin"
+      ],
+      "title": "FixtureRequestEvent",
+      "type": "object"
+    },
+    "JsonObject": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "type": "object"
+    },
+    "JsonValue": {},
+    "McpCallReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "call_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "catalog_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Catalog Digest",
+          "type": "string"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "phase": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "protocol_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "sdk_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Sdk Version",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "tool_name": {
+          "maxLength": 160,
+          "pattern": "^flowtest\\.[a-z_]+$",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "batch_key",
+        "scenario_id",
+        "phase",
+        "tool_name",
+        "transport",
+        "sdk_version",
+        "protocol_version",
+        "request_digest",
+        "result_digest",
+        "catalog_digest",
+        "completed_at",
+        "success"
+      ],
+      "title": "McpCallReceipt",
+      "type": "object"
+    },
+    "PreviewApprovalProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/PreviewBudgetProjection"
+        },
+        "change_set_id": {
+          "format": "uuid",
+          "title": "Change Set Id",
+          "type": "string"
+        },
+        "context_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Context Fingerprint",
+          "type": "string"
+        },
+        "context_revision_id": {
+          "format": "uuid",
+          "title": "Context Revision Id",
+          "type": "string"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "executor_id": {
+          "format": "uuid",
+          "title": "Executor Id",
+          "type": "string"
+        },
+        "executor_kind": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Executor Kind",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "proposal_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Proposal Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "project_id",
+        "change_set_id",
+        "environment_id",
+        "executor_id",
+        "executor_kind",
+        "proposal_fingerprint",
+        "context_fingerprint",
+        "context_revision_id",
+        "budget"
+      ],
+      "title": "PreviewApprovalProjection",
+      "type": "object"
+    },
+    "PreviewBudgetProjection": {
+      "additionalProperties": false,
+      "properties": {
+        "max_dataset_rows": {
+          "title": "Max Dataset Rows",
+          "type": "integer"
+        },
+        "max_nodes": {
+          "title": "Max Nodes",
+          "type": "integer"
+        },
+        "max_parallelism": {
+          "title": "Max Parallelism",
+          "type": "integer"
+        },
+        "max_requests": {
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "max_runtime_seconds": {
+          "title": "Max Runtime Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_nodes",
+        "max_requests",
+        "max_dataset_rows",
+        "max_parallelism",
+        "max_runtime_seconds"
+      ],
+      "title": "PreviewBudgetProjection",
+      "type": "object"
+    },
+    "PreviewExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings_complete": {
+          "title": "Bindings Complete",
+          "type": "boolean"
+        },
+        "children_complete": {
+          "title": "Children Complete",
+          "type": "boolean"
+        },
+        "children_total": {
+          "minimum": 0,
+          "title": "Children Total",
+          "type": "integer"
+        },
+        "cleanup_status": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cleanup Status"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Completed At"
+        },
+        "environment_id": {
+          "format": "uuid",
+          "title": "Environment Id",
+          "type": "string"
+        },
+        "execution_id": {
+          "format": "uuid",
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "main_status": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Main Status"
+        },
+        "nested_node_total": {
+          "minimum": 0,
+          "title": "Nested Node Total",
+          "type": "integer"
+        },
+        "nested_nodes_complete": {
+          "title": "Nested Nodes Complete",
+          "type": "boolean"
+        },
+        "node_total": {
+          "minimum": 0,
+          "title": "Node Total",
+          "type": "integer"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/PreviewNode"
+          },
+          "maxItems": 100,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "run_purpose": {
+          "enum": [
+            "standard",
+            "preview"
+          ],
+          "title": "Run Purpose",
+          "type": "string"
+        },
+        "source_case_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Case Id"
+        },
+        "source_plan_run_item_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Plan Run Item Id"
+        },
+        "status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "workflow_fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workflow Fingerprint"
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workflow Id"
+        },
+        "workflow_version_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Workflow Version Id"
+        }
+      },
+      "required": [
+        "execution_id",
+        "project_id",
+        "environment_id",
+        "workflow_id",
+        "workflow_version_id",
+        "run_purpose",
+        "source_case_id",
+        "source_plan_run_item_id",
+        "status",
+        "main_status",
+        "cleanup_status",
+        "bindings_complete",
+        "nodes",
+        "node_total",
+        "truncated",
+        "children_total",
+        "children_complete",
+        "nested_node_total",
+        "nested_nodes_complete",
+        "completed_at",
+        "workflow_fingerprint"
+      ],
+      "title": "PreviewExecution",
+      "type": "object"
+    },
+    "PreviewNode": {
+      "additionalProperties": false,
+      "properties": {
+        "assertions_complete": {
+          "title": "Assertions Complete",
+          "type": "boolean"
+        },
+        "attempts": {
+          "minimum": 0,
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "node_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Id",
+          "type": "string"
+        },
+        "node_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Node Type",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "main",
+            "cleanup"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "node_type",
+        "phase",
+        "status",
+        "attempts",
+        "assertions_complete"
+      ],
+      "title": "PreviewNode",
+      "type": "object"
+    },
+    "ProbeDesign": {
+      "additionalProperties": false,
+      "properties": {
+        "document_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Document Digest",
+          "type": "string"
+        },
+        "intent_key_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Intent Key Digest",
+          "type": "string"
+        },
+        "objective_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Objective Digest",
+          "type": "string"
+        },
+        "oracles": {
+          "items": {
+            "$ref": "#/$defs/ProbeOracle"
+          },
+          "maxItems": 200,
+          "title": "Oracles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "document_digest",
+        "intent_key_digest",
+        "objective_digest",
+        "oracles"
+      ],
+      "title": "ProbeDesign",
+      "type": "object"
+    },
+    "ProbeFixture": {
+      "additionalProperties": false,
+      "properties": {
+        "organization_id": {
+          "format": "uuid",
+          "title": "Organization Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "organization_id"
+      ],
+      "title": "ProbeFixture",
+      "type": "object"
+    },
+    "ProbeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "item_type": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Item Type",
+          "type": "string"
+        },
+        "materialized_resource_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Id"
+        },
+        "materialized_resource_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Materialized Resource Type"
+        },
+        "proposed_document_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposed Document Digest"
+        },
+        "review_status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Review Status",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reviewed By Id"
+        }
+      },
+      "required": [
+        "id",
+        "item_type",
+        "action",
+        "review_status",
+        "reviewed_by_id",
+        "materialized_resource_type",
+        "materialized_resource_id"
+      ],
+      "title": "ProbeItem",
+      "type": "object"
+    },
+    "ProbeOracle": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expected Digest",
+          "type": "string"
+        },
+        "expression_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Expression Digest",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "operator": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Operator",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "expression_digest",
+        "operator",
+        "expected_digest"
+      ],
+      "title": "ProbeOracle",
+      "type": "object"
+    },
+    "ProbePage": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binding Fingerprint",
+          "type": "string"
+        },
+        "binding_id": {
+          "format": "uuid",
+          "title": "Binding Id",
+          "type": "string"
+        },
+        "builds": {
+          "$ref": "#/$defs/Builds"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "covered_kinds": {
+          "items": {
+            "enum": [
+              "workflow",
+              "workflow_version",
+              "test_case",
+              "test_case_version",
+              "test_plan",
+              "test_plan_run",
+              "workflow_execution",
+              "ai_change_set",
+              "test_design",
+              "change_set_approval"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "minItems": 10,
+          "title": "Covered Kinds",
+          "type": "array"
+        },
+        "covered_projects": {
+          "items": {
+            "$ref": "#/$defs/ProbeFixture"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Covered Projects",
+          "type": "array"
+        },
+        "execution_scope": {
+          "const": "governance_negative_only",
+          "title": "Execution Scope",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "has_more": {
+          "title": "Has More",
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ProbeResource"
+          },
+          "maxItems": 100,
+          "title": "Items",
+          "type": "array"
+        },
+        "manifest_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifest Digest",
+          "type": "string"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}\\.[0-9]{1,3}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Next Cursor"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "probe_id": {
+          "format": "uuid",
+          "title": "Probe Id",
+          "type": "string"
+        },
+        "provenance": {
+          "const": "local_untrusted",
+          "title": "Provenance",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "mcp_governance_negative",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "compose",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "snapshot_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshot Digest",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "total": {
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "probe_id",
+        "purpose",
+        "execution_scope",
+        "provenance",
+        "binding_id",
+        "binding_fingerprint",
+        "manifest_digest",
+        "source_digest",
+        "runtime_profile",
+        "builds",
+        "covered_projects",
+        "covered_kinds",
+        "items",
+        "total",
+        "next_cursor",
+        "has_more",
+        "complete",
+        "reason_codes",
+        "snapshot_digest",
+        "observed_at",
+        "expires_at"
+      ],
+      "title": "ProbePage",
+      "type": "object"
+    },
+    "ProbeResource": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_type": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor Type"
+        },
+        "created_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created By Id"
+        },
+        "design": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeDesign"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fingerprint"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProbeItem"
+          },
+          "maxItems": 500,
+          "title": "Items",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "workflow",
+            "workflow_version",
+            "test_case",
+            "test_case_version",
+            "test_plan",
+            "test_plan_run",
+            "workflow_execution",
+            "ai_change_set",
+            "test_design",
+            "change_set_approval"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reviewed_by_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed By Id"
+        },
+        "source_change_set_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Change Set Id"
+        },
+        "status": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "project_id",
+        "status"
+      ],
+      "title": "ProbeResource",
+      "type": "object"
+    },
+    "ProbeSnapshot": {
+      "additionalProperties": false,
+      "description": "All raw pages retained, so O can repeat every completeness and digest check.",
+      "properties": {
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/ProbePage"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "pages"
+      ],
+      "title": "ProbeSnapshot",
+      "type": "object"
+    },
+    "Result": {
+      "additionalProperties": false,
+      "properties": {
+        "business_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Business Code"
+        },
+        "http_status": {
+          "anyOf": [
+            {
+              "maximum": 599,
+              "minimum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Http Status"
+        },
+        "is_error": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Is Error"
+        },
+        "persisted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persisted"
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preview"
+        },
+        "proposal_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Proposal Id"
+        },
+        "result_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Result Digest",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "text_marker": {
+          "anyOf": [
+            {
+              "const": "unknown_tool",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Marker"
+        },
+        "trace_present": {
+          "default": false,
+          "title": "Trace Present",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "result_digest"
+      ],
+      "title": "Result",
+      "type": "object"
+    },
+    "ReviewHTTPReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Code"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "received",
+            "lost_response_body"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 500,
+          "title": "Path",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "response_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Response Digest"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Status",
+          "type": "integer"
+        },
+        "step": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Step",
+          "type": "string"
+        },
+        "trace_present": {
+          "title": "Trace Present",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "step",
+        "method",
+        "path",
+        "request_digest",
+        "status",
+        "code",
+        "trace_present",
+        "outcome",
+        "response_digest",
+        "started_at",
+        "completed_at"
+      ],
+      "title": "ReviewHTTPReceipt",
+      "type": "object"
+    },
+    "ReviewObservation": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "approval_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Id"
+        },
+        "before": {
+          "$ref": "#/$defs/ProbeSnapshot"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "maxItems": 10,
+          "title": "Calls",
+          "type": "array"
+        },
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProbeSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "http": {
+          "items": {
+            "$ref": "#/$defs/ReviewHTTPReceipt"
+          },
+          "maxItems": 30,
+          "title": "Http",
+          "type": "array"
+        },
+        "journal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureJournal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewExecution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preview_approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PreviewApprovalProjection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preview_execution_ids": {
+          "default": [],
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Preview Execution Ids",
+          "type": "array"
+        },
+        "proposal_arguments": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal_envelope": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "proposal_id": {
+          "format": "uuid",
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "proposal_result": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        },
+        "tool_results": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Result"
+          },
+          "maxItems": 2,
+          "title": "Tool Results",
+          "type": "array"
+        },
+        "workflow_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workflow Id"
+        },
+        "workflow_read_envelope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "scenario_id",
+        "started_at",
+        "completed_at",
+        "before",
+        "after",
+        "proposal_id",
+        "proposal_arguments",
+        "proposal_result",
+        "proposal_envelope",
+        "http",
+        "calls"
+      ],
+      "title": "ReviewObservation",
+      "type": "object"
+    },
+    "ReviewSource": {
+      "additionalProperties": false,
+      "properties": {
+        "api_id": {
+          "format": "uuid",
+          "title": "Api Id",
+          "type": "string"
+        },
+        "api_version": {
+          "minimum": 1,
+          "title": "Api Version",
+          "type": "integer"
+        },
+        "calls": {
+          "items": {
+            "$ref": "#/$defs/McpCallReceipt"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Calls",
+          "type": "array"
+        },
+        "context": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "contract_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contract Fingerprint",
+          "type": "string"
+        },
+        "fixture_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Epoch",
+          "type": "string"
+        },
+        "frozen_at": {
+          "format": "date-time",
+          "title": "Frozen At",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "spec_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Spec Digest",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transport",
+        "api_id",
+        "api_version",
+        "contract_fingerprint",
+        "context",
+        "spec",
+        "spec_digest",
+        "fixture_epoch",
+        "calls",
+        "frozen_at"
+      ],
+      "title": "ReviewSource",
+      "type": "object"
+    },
+    "StackSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image",
+          "type": "string"
+        },
+        "candidate_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Candidate Image Digest",
+          "type": "string"
+        },
+        "candidate_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Candidate Source"
+        },
+        "dependency_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Dependency Digest",
+          "type": "string"
+        },
+        "fixture_image": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image",
+          "type": "string"
+        },
+        "fixture_image_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Image Digest",
+          "type": "string"
+        },
+        "fixture_internal_url": {
+          "const": "http://mock-target:8080",
+          "title": "Fixture Internal Url",
+          "type": "string"
+        },
+        "nonce": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Nonce",
+          "type": "string"
+        },
+        "observer_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Container Id",
+          "type": "string"
+        },
+        "observer_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Observer Url",
+          "type": "string"
+        },
+        "private_subnet": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Private Subnet",
+          "type": "string"
+        },
+        "project_name": {
+          "pattern": "^flowtest-selftest-[0-9a-f]{12}$",
+          "title": "Project Name",
+          "type": "string"
+        },
+        "runner_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Container Id",
+          "type": "string"
+        },
+        "runner_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Url",
+          "type": "string"
+        },
+        "runner_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Runner Volume",
+          "type": "string"
+        },
+        "runtime_profile": {
+          "enum": [
+            "full",
+            "compact",
+            "standalone"
+          ],
+          "title": "Runtime Profile",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "flowtest-selftest-binding-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Digest",
+          "type": "string"
+        },
+        "target_container_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Container Id",
+          "type": "string"
+        },
+        "target_internal_url": {
+          "const": "http://target:8000",
+          "title": "Target Internal Url",
+          "type": "string"
+        },
+        "target_url": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Url",
+          "type": "string"
+        },
+        "target_volume": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Target Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "project_name",
+        "nonce",
+        "runtime_profile",
+        "runner_url",
+        "target_url",
+        "observer_url",
+        "target_internal_url",
+        "fixture_internal_url",
+        "private_subnet",
+        "candidate_image",
+        "candidate_image_digest",
+        "fixture_image",
+        "fixture_image_digest",
+        "source_digest",
+        "candidate_source",
+        "dependency_digest",
+        "runner_container_id",
+        "target_container_id",
+        "observer_container_id",
+        "runner_volume",
+        "target_volume"
+      ],
+      "title": "StackSnapshot",
+      "type": "object"
+    },
+    "SyntheticCookieSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "enum": [
+            "set",
+            "barrier",
+            "check"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "stage",
+        "value"
+      ],
+      "title": "SyntheticCookieSnapshot",
+      "type": "object"
+    },
+    "SyntheticHeaderSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "project",
+                "environment",
+                "api",
+                "case",
+                "runtime",
+                "node"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "SyntheticHeaderSnapshot",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "authority_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Digest",
+      "type": "string"
+    },
+    "collected_at": {
+      "format": "date-time",
+      "title": "Collected At",
+      "type": "string"
+    },
+    "disposal": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisposalReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "http_admitted": {
+      "maximum": 500,
+      "minimum": 0,
+      "title": "Http Admitted",
+      "type": "integer"
+    },
+    "http_rejected": {
+      "minimum": 0,
+      "title": "Http Rejected",
+      "type": "integer"
+    },
+    "manifest_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifest Digest",
+      "type": "string"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/ReviewObservation"
+      },
+      "maxItems": 12,
+      "title": "Observations",
+      "type": "array"
+    },
+    "protocol_cleanup_complete": {
+      "title": "Protocol Cleanup Complete",
+      "type": "boolean"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/ReviewSource"
+      },
+      "maxItems": 2,
+      "title": "Sources",
+      "type": "array"
+    },
+    "stack": {
+      "$ref": "#/$defs/StackSnapshot"
+    },
+    "tools_admitted": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Tools Admitted",
+      "type": "integer"
+    },
+    "tools_rejected": {
+      "minimum": 0,
+      "title": "Tools Rejected",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "manifest_digest",
+    "authority_digest",
+    "stack",
+    "sources",
+    "observations",
+    "http_admitted",
+    "http_rejected",
+    "tools_admitted",
+    "tools_rejected",
+    "protocol_cleanup_complete",
+    "collected_at"
+  ],
+  "title": "ReviewEvidence",
+  "type": "object"
+}

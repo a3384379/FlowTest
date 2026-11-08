@@ -1,0 +1,1056 @@
+{
+  "$defs": {
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "FixtureBinaryResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "content_type": {
+          "const": "application/octet-stream",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "filename": {
+          "const": "flowtest.bin",
+          "title": "Filename",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size_bytes",
+        "sha256",
+        "content_type",
+        "filename"
+      ],
+      "title": "FixtureBinaryResponse",
+      "type": "object"
+    },
+    "FixtureBudgetReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "admitted_count": {
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Admitted Count",
+          "type": "integer"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "number"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "parent_batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Parent Batch Key",
+          "type": "string"
+        },
+        "registration_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Registration Epoch",
+          "type": "string"
+        },
+        "rejected_count": {
+          "minimum": 0,
+          "title": "Rejected Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent_batch_key",
+        "nonce",
+        "expires_at",
+        "admitted_count",
+        "rejected_count",
+        "fixture_digest",
+        "registration_epoch"
+      ],
+      "title": "FixtureBudgetReceipt",
+      "type": "object"
+    },
+    "FixtureJournal": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_key": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Batch Key",
+          "type": "string"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBudgetReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entries": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FixtureRequest"
+          },
+          "maxItems": 10000,
+          "title": "Entries",
+          "type": "array"
+        },
+        "epoch_changed": {
+          "default": false,
+          "title": "Epoch Changed",
+          "type": "boolean"
+        },
+        "expired": {
+          "default": false,
+          "title": "Expired",
+          "type": "boolean"
+        },
+        "fixture_digest": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Digest",
+          "type": "string"
+        },
+        "fixture_epoch": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Fixture Epoch",
+          "type": "string"
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "next_sequence": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Sequence"
+        },
+        "nonce": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Nonce",
+          "type": "string"
+        },
+        "request_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Request Count",
+          "type": "integer"
+        },
+        "scenario_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "batch_key",
+        "scenario_id",
+        "nonce",
+        "fixture_epoch",
+        "fixture_digest",
+        "request_count"
+      ],
+      "title": "FixtureJournal",
+      "type": "object"
+    },
+    "FixtureMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "active_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Active Count",
+          "type": "integer"
+        },
+        "cancelled_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Cancelled Count",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "completed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Completed Count",
+          "type": "integer"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/FixtureRequestEvent"
+          },
+          "maxItems": 500,
+          "title": "Events",
+          "type": "array"
+        },
+        "failed_count": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Failed Count",
+          "type": "integer"
+        },
+        "peak_concurrency": {
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Peak Concurrency",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "events",
+        "complete",
+        "active_count",
+        "peak_concurrency",
+        "completed_count",
+        "cancelled_count",
+        "failed_count"
+      ],
+      "title": "FixtureMetrics",
+      "type": "object"
+    },
+    "FixturePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "branch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Branch"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Code"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "iteration_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Iteration Key"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "request_count": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Count"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        }
+      },
+      "title": "FixturePayload",
+      "type": "object"
+    },
+    "FixtureRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "authorization_present": {
+          "default": false,
+          "title": "Authorization Present",
+          "type": "boolean"
+        },
+        "binary_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "binary_response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixtureBinaryResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cookie_present": {
+          "default": false,
+          "title": "Cookie Present",
+          "type": "boolean"
+        },
+        "fixture_epoch": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixture Epoch"
+        },
+        "marker": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marker"
+        },
+        "method": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "received_at": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Received At"
+        },
+        "request_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_value_present": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Value Present"
+        },
+        "response_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FixturePayload"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "response_status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Response Status",
+          "type": "integer"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "synthetic_cookie": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticCookieSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "synthetic_precedence_header": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SyntheticHeaderSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "sequence",
+        "method",
+        "path",
+        "response_status"
+      ],
+      "title": "FixtureRequest",
+      "type": "object"
+    },
+    "FixtureRequestEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "active_at_begin": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Active At Begin",
+          "type": "integer"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "completed",
+                "cancelled",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outcome"
+        },
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "started_at": {
+          "title": "Started At",
+          "type": "number"
+        }
+      },
+      "required": [
+        "request_id",
+        "sequence",
+        "started_at",
+        "active_at_begin"
+      ],
+      "title": "FixtureRequestEvent",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Operation": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "uuid",
+          "title": "Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "passed",
+            "failed",
+            "cancelled",
+            "quarantined"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Digest"
+        },
+        "trigger": {
+          "anyOf": [
+            {
+              "enum": [
+                "manual",
+                "ci"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger"
+        }
+      },
+      "required": [
+        "id",
+        "status"
+      ],
+      "title": "Operation",
+      "type": "object"
+    },
+    "Snapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "api_versions": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20,
+          "title": "Api Versions",
+          "type": "array"
+        },
+        "environment_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Environment Digest"
+        },
+        "execution_ids": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Execution Ids",
+          "type": "array"
+        },
+        "item_statuses": {
+          "items": {
+            "enum": [
+              "queued",
+              "running",
+              "passed",
+              "failed",
+              "cancelled",
+              "quarantined"
+            ],
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Item Statuses",
+          "type": "array"
+        },
+        "run": {
+          "$ref": "#/$defs/Operation"
+        },
+        "snapshot_digests": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Snapshot Digests",
+          "type": "array"
+        }
+      },
+      "required": [
+        "run",
+        "execution_ids",
+        "item_statuses",
+        "api_versions",
+        "snapshot_digests"
+      ],
+      "title": "Snapshot",
+      "type": "object"
+    },
+    "StandaloneGateWitness": {
+      "additionalProperties": false,
+      "properties": {
+        "at_hold": {
+          "$ref": "#/$defs/FixtureJournal"
+        },
+        "completed_at": {
+          "format": "date-time",
+          "title": "Completed At",
+          "type": "string"
+        },
+        "executions": {
+          "items": {
+            "$ref": "#/$defs/Snapshot"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Executions",
+          "type": "array"
+        },
+        "held_at": {
+          "format": "date-time",
+          "title": "Held At",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        },
+        "scenario_key": {
+          "title": "Scenario Key",
+          "type": "string"
+        },
+        "settled": {
+          "$ref": "#/$defs/FixtureJournal"
+        },
+        "slot_limit": {
+          "const": 4,
+          "default": 4,
+          "title": "Slot Limit",
+          "type": "integer"
+        },
+        "workflow_id": {
+          "format": "uuid",
+          "title": "Workflow Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_key",
+        "project_id",
+        "workflow_id",
+        "held_at",
+        "completed_at",
+        "at_hold",
+        "settled",
+        "executions"
+      ],
+      "title": "StandaloneGateWitness",
+      "type": "object"
+    },
+    "SyntheticCookieSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "stage": {
+          "enum": [
+            "set",
+            "barrier",
+            "check"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "stage",
+        "value"
+      ],
+      "title": "SyntheticCookieSnapshot",
+      "type": "object"
+    },
+    "SyntheticHeaderSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "enum": [
+                "project",
+                "environment",
+                "api",
+                "case",
+                "runtime",
+                "node"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "title": "SyntheticHeaderSnapshot",
+      "type": "object"
+    },
+    "VariantReport": {
+      "additionalProperties": false,
+      "properties": {
+        "characterization_only": {
+          "default": false,
+          "title": "Characterization Only",
+          "type": "boolean"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "maxItems": 20,
+          "title": "Findings",
+          "type": "array"
+        },
+        "native_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "running",
+                "passed",
+                "failed",
+                "cancelled",
+                "quarantined"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Native Status"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "matched",
+            "mismatched",
+            "incomplete",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "variant": {
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "variant",
+        "status",
+        "native_status",
+        "findings"
+      ],
+      "title": "VariantReport",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "budget": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FixtureBudgetReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "complete_release_acceptance": {
+      "const": false,
+      "default": false,
+      "title": "Complete Release Acceptance",
+      "type": "boolean"
+    },
+    "completed_count": {
+      "maximum": 15,
+      "minimum": 0,
+      "title": "Completed Count",
+      "type": "integer"
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ],
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "expected_count": {
+      "const": 15,
+      "default": 15,
+      "title": "Expected Count",
+      "type": "integer"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "provenance": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Provenance",
+      "type": "string"
+    },
+    "reason_codes": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 10,
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "request_count": {
+      "minimum": 0,
+      "title": "Request Count",
+      "type": "integer"
+    },
+    "run001_same_frozen_plan_distinct_runs": {
+      "title": "Run001 Same Frozen Plan Distinct Runs",
+      "type": "boolean"
+    },
+    "runtime_profile": {
+      "enum": [
+        "full",
+        "compact",
+        "standalone"
+      ],
+      "title": "Runtime Profile",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/VariantReport"
+      },
+      "maxItems": 15,
+      "minItems": 15,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "standalone_gates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/StandaloneGateWitness"
+      },
+      "maxItems": 4,
+      "title": "Standalone Gates",
+      "type": "array"
+    },
+    "verdict": {
+      "enum": [
+        "passed",
+        "blocked"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_digest",
+    "completed_count",
+    "verdict",
+    "exit_code",
+    "run001_same_frozen_plan_distinct_runs",
+    "request_count",
+    "runtime_profile",
+    "scenarios"
+  ],
+  "title": "RuntimePackReport",
+  "type": "object"
+}

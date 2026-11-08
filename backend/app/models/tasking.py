@@ -128,6 +128,11 @@ class TestPlanRun(UuidPrimaryKeyMixin, TimestampMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
 
+    worker_lease_owner: Mapped[str | None] = mapped_column(String(36))
+    worker_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+
 
 class TestPlanRunItem(UuidPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "test_plan_run_items"

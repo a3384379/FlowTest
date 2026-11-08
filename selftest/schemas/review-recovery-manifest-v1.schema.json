@@ -1,0 +1,158 @@
+{
+  "$defs": {
+    "ReviewScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "preview_cancel",
+            "unknown_publish",
+            "stale_proposal",
+            "stale_approval",
+            "concurrent_accept",
+            "partial_resume"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "scenario_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "action",
+        "transport"
+      ],
+      "title": "ReviewScenario",
+      "type": "object"
+    },
+    "ReviewScope": {
+      "additionalProperties": false,
+      "properties": {
+        "fixture_environment_id": {
+          "format": "uuid",
+          "title": "Fixture Environment Id",
+          "type": "string"
+        },
+        "fixture_service_id": {
+          "format": "uuid",
+          "title": "Fixture Service Id",
+          "type": "string"
+        },
+        "production_environment_id": {
+          "format": "uuid",
+          "title": "Production Environment Id",
+          "type": "string"
+        },
+        "project_id": {
+          "format": "uuid",
+          "title": "Project Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "fixture_environment_id",
+        "fixture_service_id",
+        "production_environment_id"
+      ],
+      "title": "ReviewScope",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "batch_key": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Batch Key",
+      "type": "string"
+    },
+    "claim": {
+      "const": "review_recovery_and_preview_only",
+      "default": "review_recovery_and_preview_only",
+      "title": "Claim",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "expires_at": {
+      "format": "date-time",
+      "title": "Expires At",
+      "type": "string"
+    },
+    "nonce": {
+      "pattern": "^[0-9a-f]{32}$",
+      "title": "Nonce",
+      "type": "string"
+    },
+    "pack_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Pack Digest",
+      "type": "string"
+    },
+    "reviewer_id": {
+      "format": "uuid",
+      "title": "Reviewer Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/ReviewScenario"
+      },
+      "maxItems": 12,
+      "minItems": 12,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/$defs/ReviewScope"
+    },
+    "source_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Source Digest",
+      "type": "string"
+    },
+    "trust": {
+      "const": "local_untrusted",
+      "default": "local_untrusted",
+      "title": "Trust",
+      "type": "string"
+    },
+    "writer_machine_id": {
+      "format": "uuid",
+      "title": "Writer Machine Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "batch_key",
+    "nonce",
+    "pack_digest",
+    "source_digest",
+    "scope",
+    "writer_machine_id",
+    "reviewer_id",
+    "created_at",
+    "expires_at",
+    "scenarios"
+  ],
+  "title": "ReviewManifest",
+  "type": "object"
+}

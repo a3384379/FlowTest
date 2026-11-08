@@ -1,0 +1,76 @@
+{
+  "expectations": [
+    {
+      "scenario_id": "ST-API-008-product-files",
+      "expected": {
+        "execution_status": "passed",
+        "assertions": [
+          {
+            "node_id": "assert_upload_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 201,
+            "actual": 201
+          },
+          {
+            "node_id": "assert_upload_sha",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f",
+            "actual": "cd5c51e17da695633571251b97d55aff7dc8bffbd4bce0b62ff492c2162b787f"
+          },
+          {
+            "node_id": "assert_download_status",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 200,
+            "actual": 200
+          },
+          {
+            "node_id": "assert_file_content",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "flowtest-download",
+            "actual": "flowtest-download"
+          },
+          {
+            "node_id": "assert_file_size",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": 17,
+            "actual": 17
+          },
+          {
+            "node_id": "assert_file_header",
+            "name": "workflow_assertion",
+            "passed": true,
+            "expected": "application/octet-stream",
+            "actual": "application/octet-stream"
+          }
+        ]
+      },
+      "required_evidence": [
+        "execution",
+        "postcondition",
+        "assertions"
+      ]
+    }
+  ],
+  "fixtures": [
+    {
+      "scenario_id": "ST-API-008-product-files",
+      "fixture": {
+        "response_statuses": [
+          200
+        ],
+        "response_body": {
+          "actual": 1,
+          "code": 0
+        },
+        "delay_ms": 0
+      },
+      "wire": [],
+      "control": null
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "apis": [
+    {
+      "scenario_id": "ST-CORE-echo-boundaries",
+      "source_id": "866b14b4-6e2e-54ee-95b1-ce661cccb4c9",
+      "name": "固定基准 echo-boundaries",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-echo-boundaries/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-business-failure",
+      "source_id": "9bfe38e7-f56d-560d-ae03-c9a9b97ee76e",
+      "name": "固定基准 business-failure",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-business-failure/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-timeout",
+      "source_id": "af94968a-a923-509f-aa4c-4f2ecaf63ef6",
+      "name": "固定基准 timeout",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-timeout/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-if",
+      "source_id": "2085f17a-4188-5078-8626-d41942a545e0",
+      "name": "固定基准 if",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-if/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-foreach",
+      "source_id": "d2da69d4-b8c6-552b-a853-db73a6af1c61",
+      "name": "固定基准 foreach",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-foreach/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-repeat",
+      "source_id": "66bfabea-c827-5d35-b4fa-9c550a162323",
+      "name": "固定基准 repeat",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-repeat/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-retry",
+      "source_id": "72d019d2-a1f4-5cea-88bb-f789316d33bc",
+      "name": "固定基准 retry",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-retry/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    },
+    {
+      "scenario_id": "ST-CORE-poll",
+      "source_id": "0dabfa7e-8240-5389-8c96-0bf0d88673f7",
+      "name": "固定基准 poll",
+      "request": {
+        "base_version": null,
+        "method": "POST",
+        "path": "/selftest/{batch_key}/ST-CORE-poll/request",
+        "query_parameters": [],
+        "headers": {},
+        "variables": {},
+        "body_kind": "json",
+        "body": {
+          "marker": "core-v1",
+          "value": null,
+          "branch": "",
+          "iteration_key": ""
+        },
+        "auth": {
+          "kind": "none",
+          "values": {}
+        },
+        "extraction_rules": [],
+        "assertions": []
+      }
+    }
+  ]
+}

@@ -49,6 +49,10 @@ celery_app.conf.update(
         "flowtest.reconcile_runner_fabric": {"queue": "general"},
     },
     beat_schedule={
+        "recover-test-plan-workers": {
+            "task": "flowtest.recover_test_plan_workers",
+            "schedule": 15.0,
+        },
         "enqueue-due-test-plans": {
             "task": "flowtest.enqueue_due_test_plans",
             "schedule": settings.scheduler_poll_seconds,

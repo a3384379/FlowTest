@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "QualityScenario": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptance_id": {
+          "enum": [
+            "ST-MCP-013",
+            "ST-MCP-016",
+            "ST-MCP-027"
+          ],
+          "title": "Acceptance Id",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "positive_control",
+            "empty_cases",
+            "needs_review",
+            "truncated",
+            "coverage_missing",
+            "prompt_injection",
+            "scope",
+            "target",
+            "credential_ref"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "expected_business_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Business Code"
+        },
+        "expected_readiness": {
+          "anyOf": [
+            {
+              "enum": [
+                "ready",
+                "incomplete",
+                "needs_review"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Readiness"
+        },
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "stdio",
+            "streamable-http"
+          ],
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "acceptance_id",
+        "action",
+        "transport"
+      ],
+      "title": "QualityScenario",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "max_requests": {
+      "const": 500,
+      "title": "Max Requests",
+      "type": "integer"
+    },
+    "max_runtime_seconds": {
+      "const": 600,
+      "title": "Max Runtime Seconds",
+      "type": "integer"
+    },
+    "max_tool_calls": {
+      "const": 100,
+      "title": "Max Tool Calls",
+      "type": "integer"
+    },
+    "pack_id": {
+      "const": "mcp-quality-boundaries-v1",
+      "title": "Pack Id",
+      "type": "string"
+    },
+    "scenarios": {
+      "items": {
+        "$ref": "#/$defs/QualityScenario"
+      },
+      "maxItems": 18,
+      "minItems": 18,
+      "title": "Scenarios",
+      "type": "array"
+    },
+    "sdk_version": {
+      "const": "2.2.0",
+      "title": "Sdk Version",
+      "type": "string"
+    },
+    "version": {
+      "const": "1.0.0",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "pack_id",
+    "version",
+    "sdk_version",
+    "max_requests",
+    "max_tool_calls",
+    "max_runtime_seconds",
+    "scenarios"
+  ],
+  "title": "QualityPack",
+  "type": "object"
+}

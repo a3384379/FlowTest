@@ -1,0 +1,1505 @@
+{
+  "admitted_request_upper_bound": 41,
+  "admitted_tool_calls": 2,
+  "calls": [
+    {
+      "batch_key": "native_control_fixture",
+      "call_id": "c219d54e-e391-4d9b-9371-50e11a7ca372",
+      "catalog_digest": "c50808971cf44433b6511829640fb18c825fba16d54b22deb8d8f8b55c099d93",
+      "completed_at": "2026-10-23T04:47:39.624367Z",
+      "phase": "native:proposal",
+      "protocol_version": "2026-07-28",
+      "request_digest": "67a29a33c4888b98fae3e95cf9a5ad7383ac9d79684a3b114f1889c1fd65b837",
+      "result_digest": "31fa656fede6582b91ae852ca7374506f9fc8e9b4823e7945cd0800b69a65121",
+      "scenario_id": "ST-MCP-023",
+      "sdk_version": "2.2.0",
+      "success": true,
+      "tool_name": "flowtest.propose_control_workflow",
+      "transport": "stdio"
+    },
+    {
+      "batch_key": "native_control_fixture",
+      "call_id": "2236df39-90d9-4da2-bb5d-bc0489f6ea98",
+      "catalog_digest": "c50808971cf44433b6511829640fb18c825fba16d54b22deb8d8f8b55c099d93",
+      "completed_at": "2026-10-23T04:47:39.628960Z",
+      "phase": "native:replay",
+      "protocol_version": "2026-07-28",
+      "request_digest": "67a29a33c4888b98fae3e95cf9a5ad7383ac9d79684a3b114f1889c1fd65b837",
+      "result_digest": "271f93eac5687cf60b9fdb5ed363a94dde91043223e5867c504f235117a9c31f",
+      "scenario_id": "ST-MCP-023",
+      "sdk_version": "2.2.0",
+      "success": true,
+      "tool_name": "flowtest.propose_control_workflow",
+      "transport": "stdio"
+    }
+  ],
+  "cleanup": {
+    "cancel_requested": false,
+    "launch_requested": true,
+    "plan_id": "f7ea7aeb-9f83-409c-a130-e595f6d1b408",
+    "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+    "reason_codes": [],
+    "run_id": "c038e405-8f96-4c03-aa63-76b5d14e2dc1",
+    "status": "completed"
+  },
+  "collected_at": "2026-10-23T04:47:39.863868Z",
+  "control_details": [
+    {
+      "kind": "branch",
+      "ordinal": 0,
+      "payload": {
+        "branch_id": "first",
+        "definition_index": 0,
+        "nodes": [
+          {
+            "error_code": null,
+            "instance_id": "__nested_request__:78d28a89893386a731b441fc8e537ec904b132c7c0e232c4c6ef70519aa9d183",
+            "node_id": "wait_first",
+            "status": "passed"
+          }
+        ],
+        "outputs": {},
+        "status": "passed",
+        "test_verdict": "passed"
+      },
+      "status": "passed",
+      "test_verdict": "passed"
+    },
+    {
+      "kind": "branch",
+      "ordinal": 1,
+      "payload": {
+        "branch_id": "second",
+        "definition_index": 1,
+        "nodes": [
+          {
+            "error_code": null,
+            "instance_id": "__nested_request__:508878d050e51374c1f6edd857bbf18f2afdd0499cbd2198e9d3413494a43945",
+            "node_id": "wait_second",
+            "status": "passed"
+          }
+        ],
+        "outputs": {},
+        "status": "passed",
+        "test_verdict": "passed"
+      },
+      "status": "passed",
+      "test_verdict": "passed"
+    }
+  ],
+  "control_page": {
+    "execution_id": "163b363b-8283-41b6-b314-2a3b35df65b7",
+    "has_more": false,
+    "items": [
+      {
+        "ordinal": 0,
+        "status": "passed",
+        "test_verdict": "passed"
+      },
+      {
+        "ordinal": 1,
+        "status": "passed",
+        "test_verdict": "passed"
+      }
+    ],
+    "kind": "branch",
+    "node_id": "parallel",
+    "page": 1,
+    "page_size": 100,
+    "total": 2,
+    "truncated": false
+  },
+  "disposal": null,
+  "execution": {
+    "api_sources": [],
+    "children": [],
+    "children_complete": true,
+    "cleanup_status": null,
+    "completed_at": "2026-10-23T04:47:39.820689Z",
+    "dataset": null,
+    "dataset_row_index": null,
+    "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+    "error_code": null,
+    "id": "163b363b-8283-41b6-b314-2a3b35df65b7",
+    "main_status": "passed",
+    "nested_nodes": [
+      {
+        "assertions": [],
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "__nested_request__:508878d050e51374c1f6edd857bbf18f2afdd0499cbd2198e9d3413494a43945",
+        "node_type": "delay",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "__nested_request__:78d28a89893386a731b441fc8e537ec904b132c7c0e232c4c6ef70519aa9d183",
+        "node_type": "delay",
+        "phase": "main",
+        "status": "passed"
+      }
+    ],
+    "nested_nodes_complete": true,
+    "nodes": [
+      {
+        "assertions": [],
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "parallel",
+        "node_type": "capability",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "start",
+        "node_type": "start",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "end",
+        "node_type": "end",
+        "phase": "main",
+        "status": "passed"
+      }
+    ],
+    "parent_execution_id": null,
+    "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+    "run_purpose": "standard",
+    "snapshot_digest": "32ea32b5861ab95dff83003809250130ef15fe0129a2542c69633203abd8203b",
+    "started_at": "2026-10-23T04:47:39.779458Z",
+    "status": "passed",
+    "subflows": [],
+    "subflows_complete": true,
+    "workflow_fingerprint": "bda175888c222214f3c315d1a13df9853cf74a3945c607b173e8197ef89e4233",
+    "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+    "workflow_version_id": "f103ddc5-2887-41c9-ab56-857d657ecf4a"
+  },
+  "exports": [
+    {
+      "after_definition_digest": "3b54c4b06358a33c0ae4c26a9f2ff6fddc3451f7797556ab1f237781e054e3e9",
+      "after_execution_ids": [],
+      "before_definition_digest": "3b54c4b06358a33c0ae4c26a9f2ff6fddc3451f7797556ab1f237781e054e3e9",
+      "before_execution_ids": [],
+      "error_code": "FLOWSPEC_CONTROL_UNSUPPORTED",
+      "path": "/projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/flow-specs/workflows/b87ec6d2-e187-4357-9cfc-fc532ea4f676/export",
+      "status": 422,
+      "trace_present": true,
+      "variant": "regions4_draft",
+      "version": null,
+      "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676"
+    },
+    {
+      "after_definition_digest": "3b54c4b06358a33c0ae4c26a9f2ff6fddc3451f7797556ab1f237781e054e3e9",
+      "after_execution_ids": [],
+      "before_definition_digest": "3b54c4b06358a33c0ae4c26a9f2ff6fddc3451f7797556ab1f237781e054e3e9",
+      "before_execution_ids": [],
+      "error_code": "FLOWSPEC_CONTROL_UNSUPPORTED",
+      "path": "/projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/flow-specs/workflows/b87ec6d2-e187-4357-9cfc-fc532ea4f676/export?version=1",
+      "status": 422,
+      "trace_present": true,
+      "variant": "regions4_published",
+      "version": 1,
+      "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676"
+    }
+  ],
+  "failure_code": null,
+  "frozen": {
+    "accepted": {
+      "actor_type": "service_account",
+      "applied_at": "2026-10-23T04:47:39.644733",
+      "approval": null,
+      "base_revision": null,
+      "created_at": "2026-10-23T04:47:39",
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "governance": {
+        "confidence": 1.0,
+        "manual_approval_required": false,
+        "reason_codes": [],
+        "requires_review": true,
+        "risk_level": "medium"
+      },
+      "id": "a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "items": [
+        {
+          "action": "create",
+          "id": "2ee351d5-bbfc-4905-a931-7378294ddd21",
+          "item_type": "workflow",
+          "materialized_resource_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+          "materialized_resource_type": "workflow",
+          "position": 0,
+          "proposed_content": {
+            "definition": {
+              "edges": [
+                {
+                  "id": "start-parallel",
+                  "mappings": [],
+                  "source": "start",
+                  "target": "parallel"
+                },
+                {
+                  "id": "parallel-end",
+                  "mappings": [],
+                  "source": "parallel",
+                  "target": "end"
+                }
+              ],
+              "nodes": [
+                {
+                  "best_effort": false,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "id": "start",
+                  "name": "start",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "start"
+                },
+                {
+                  "best_effort": false,
+                  "bindings": [],
+                  "capability_id": "flow.control.parallel",
+                  "capability_version": "1.0.0",
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "configuration": {
+                    "branches": [
+                      {
+                        "body": {
+                          "kind": "inline",
+                          "region_id": "first"
+                        },
+                        "id": "first",
+                        "label": "first"
+                      },
+                      {
+                        "body": {
+                          "kind": "inline",
+                          "region_id": "second"
+                        },
+                        "id": "second",
+                        "label": "second"
+                      }
+                    ],
+                    "policy": {
+                      "concurrency": 2,
+                      "on_error": "collect_all",
+                      "timeout_seconds": 10
+                    }
+                  },
+                  "id": "parallel",
+                  "name": "parallel",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "capability"
+                },
+                {
+                  "best_effort": false,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "id": "end",
+                  "name": "end",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "end"
+                }
+              ],
+              "regions": [
+                {
+                  "edges": [],
+                  "entry_node_id": "wait_first",
+                  "exit_node_ids": [
+                    "wait_first"
+                  ],
+                  "id": "first",
+                  "inputs": {},
+                  "nodes": [
+                    {
+                      "best_effort": false,
+                      "cleanup_for": [],
+                      "cleanup_retry_budget": 0,
+                      "cleanup_timeout_seconds": 30,
+                      "config": {
+                        "seconds": 0
+                      },
+                      "id": "wait_first",
+                      "name": "wait_first",
+                      "phase": "main",
+                      "position": {
+                        "x": 0.0,
+                        "y": 0.0
+                      },
+                      "run_when": "always",
+                      "type": "delay"
+                    }
+                  ],
+                  "outputs": {},
+                  "owner_node_id": "parallel",
+                  "role": "branch:first"
+                },
+                {
+                  "edges": [],
+                  "entry_node_id": "wait_second",
+                  "exit_node_ids": [
+                    "wait_second"
+                  ],
+                  "id": "second",
+                  "inputs": {},
+                  "nodes": [
+                    {
+                      "best_effort": false,
+                      "cleanup_for": [],
+                      "cleanup_retry_budget": 0,
+                      "cleanup_timeout_seconds": 30,
+                      "config": {
+                        "seconds": 0
+                      },
+                      "id": "wait_second",
+                      "name": "wait_second",
+                      "phase": "main",
+                      "position": {
+                        "x": 0.0,
+                        "y": 0.0
+                      },
+                      "run_when": "always",
+                      "type": "delay"
+                    }
+                  ],
+                  "outputs": {},
+                  "owner_node_id": "parallel",
+                  "role": "branch:second"
+                }
+              ],
+              "run_policy": {
+                "cleanup_request_budget": 1,
+                "force_cancel_skips_cleanup": false,
+                "max_runtime_seconds": 30,
+                "request_budget": 1
+              },
+              "runtime_inputs": [],
+              "schema_version": "4.0",
+              "settings": {
+                "concurrency": 20,
+                "default_timeout_seconds": 30,
+                "fail_fast": true
+              },
+              "variables": {}
+            },
+            "description": "隔离自测; 独立审核模式 ci_fixture; 不代表模型或真人验收",
+            "name": "native_control_fixture"
+          },
+          "review_note": "ci_fixture 独立审核; 仅物化草稿, 不自动发布或执行",
+          "review_status": "accepted",
+          "reviewed_at": "2026-10-23T04:47:39.644073",
+          "reviewed_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+          "target_resource_id": null,
+          "title": "native_control_fixture"
+        }
+      ],
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "source_fingerprint": "26724148235e43089e535e5901109bdf2101dc22a65fe8f969482c1a97673f7c",
+      "source_ref": "mcp://projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/control-workflows",
+      "source_type": "mcp",
+      "status": "accepted",
+      "title": "native_control_fixture",
+      "updated_at": "2026-10-23T04:47:39",
+      "workflow_id": null
+    },
+    "before_execution_ids": [],
+    "before_workflow_ids": [],
+    "case": {
+      "case": {
+        "archived_at": null,
+        "created_at": "2026-10-23T04:47:39",
+        "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+        "current_version": null,
+        "description": "",
+        "draft_definition": {
+          "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+          "runtime_headers": {},
+          "runtime_variables": {},
+          "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+          "workflow_version": 1
+        },
+        "draft_fingerprint": "9d8e60828a8fdce7f39201ad50a1a8a57bea846f3baca903d6f7ea9ed82b223d",
+        "folder_id": null,
+        "id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+        "is_template": false,
+        "name": "native_control_fixture",
+        "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+        "tags": [],
+        "updated_at": "2026-10-23T04:47:39"
+      },
+      "version": {
+        "change_note": "固定公开API Case版本",
+        "created_at": "2026-10-23T04:47:39",
+        "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+        "definition": {
+          "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+          "runtime_headers": {},
+          "runtime_variables": {},
+          "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+          "workflow_version": 1
+        },
+        "fingerprint": "9d8e60828a8fdce7f39201ad50a1a8a57bea846f3baca903d6f7ea9ed82b223d",
+        "id": "17ae6519-3762-40c4-9296-3dec27fe3134",
+        "test_case_id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+        "version": 1
+      }
+    },
+    "draft": {
+      "created_at": "2026-10-23T04:47:39",
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "current_version": null,
+      "description": "隔离自测; 独立审核模式 ci_fixture; 不代表模型或真人验收",
+      "draft_definition": {
+        "edges": [
+          {
+            "condition": null,
+            "id": "start-parallel",
+            "mappings": [],
+            "source": "start",
+            "target": "parallel"
+          },
+          {
+            "condition": null,
+            "id": "parallel-end",
+            "mappings": [],
+            "source": "parallel",
+            "target": "end"
+          }
+        ],
+        "nodes": [
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": null,
+            "id": "start",
+            "name": "start",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "start"
+          },
+          {
+            "best_effort": false,
+            "bindings": [],
+            "capability_id": "flow.control.parallel",
+            "capability_version": "1.0.0",
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": {
+              "branches": [
+                {
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "first"
+                  },
+                  "id": "first",
+                  "label": "first"
+                },
+                {
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "second"
+                  },
+                  "id": "second",
+                  "label": "second"
+                }
+              ],
+              "policy": {
+                "concurrency": 2,
+                "on_error": "collect_all",
+                "timeout_seconds": 10
+              }
+            },
+            "id": "parallel",
+            "name": "parallel",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "capability"
+          },
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": null,
+            "id": "end",
+            "name": "end",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "end"
+          }
+        ],
+        "regions": [
+          {
+            "edges": [],
+            "entry_node_id": "wait_first",
+            "exit_node_ids": [
+              "wait_first"
+            ],
+            "id": "first",
+            "inputs": {},
+            "nodes": [
+              {
+                "best_effort": false,
+                "bindings": null,
+                "capability_id": null,
+                "capability_version": null,
+                "cleanup_for": [],
+                "cleanup_retry_budget": 0,
+                "cleanup_timeout_seconds": 30,
+                "config": {
+                  "seconds": 0
+                },
+                "configuration": null,
+                "id": "wait_first",
+                "name": "wait_first",
+                "phase": "main",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "run_when": "always",
+                "type": "delay"
+              }
+            ],
+            "outputs": {},
+            "owner_node_id": "parallel",
+            "role": "branch:first"
+          },
+          {
+            "edges": [],
+            "entry_node_id": "wait_second",
+            "exit_node_ids": [
+              "wait_second"
+            ],
+            "id": "second",
+            "inputs": {},
+            "nodes": [
+              {
+                "best_effort": false,
+                "bindings": null,
+                "capability_id": null,
+                "capability_version": null,
+                "cleanup_for": [],
+                "cleanup_retry_budget": 0,
+                "cleanup_timeout_seconds": 30,
+                "config": {
+                  "seconds": 0
+                },
+                "configuration": null,
+                "id": "wait_second",
+                "name": "wait_second",
+                "phase": "main",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "run_when": "always",
+                "type": "delay"
+              }
+            ],
+            "outputs": {},
+            "owner_node_id": "parallel",
+            "role": "branch:second"
+          }
+        ],
+        "run_policy": {
+          "cleanup_request_budget": 1,
+          "force_cancel_skips_cleanup": false,
+          "max_runtime_seconds": 30,
+          "request_budget": 1
+        },
+        "runtime_inputs": [],
+        "schema_version": "4.0",
+        "settings": {
+          "concurrency": 20,
+          "default_timeout_seconds": 30,
+          "fail_fast": true
+        },
+        "variables": {}
+      },
+      "draft_revision": 1,
+      "folder_id": null,
+      "id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+      "name": "native_control_fixture",
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "updated_at": "2026-10-23T04:47:39"
+    },
+    "frozen_at": "2026-10-23T04:47:39.763014Z",
+    "pending": {
+      "actor_type": "service_account",
+      "applied_at": null,
+      "approval": null,
+      "base_revision": null,
+      "created_at": "2026-10-23T04:47:39",
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "governance": {
+        "confidence": 1.0,
+        "manual_approval_required": false,
+        "reason_codes": [],
+        "requires_review": true,
+        "risk_level": "medium"
+      },
+      "id": "a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "items": [
+        {
+          "action": "create",
+          "id": "2ee351d5-bbfc-4905-a931-7378294ddd21",
+          "item_type": "workflow",
+          "materialized_resource_id": null,
+          "materialized_resource_type": null,
+          "position": 0,
+          "proposed_content": {
+            "definition": {
+              "edges": [
+                {
+                  "id": "start-parallel",
+                  "mappings": [],
+                  "source": "start",
+                  "target": "parallel"
+                },
+                {
+                  "id": "parallel-end",
+                  "mappings": [],
+                  "source": "parallel",
+                  "target": "end"
+                }
+              ],
+              "nodes": [
+                {
+                  "best_effort": false,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "id": "start",
+                  "name": "start",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "start"
+                },
+                {
+                  "best_effort": false,
+                  "bindings": [],
+                  "capability_id": "flow.control.parallel",
+                  "capability_version": "1.0.0",
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "configuration": {
+                    "branches": [
+                      {
+                        "body": {
+                          "kind": "inline",
+                          "region_id": "first"
+                        },
+                        "id": "first",
+                        "label": "first"
+                      },
+                      {
+                        "body": {
+                          "kind": "inline",
+                          "region_id": "second"
+                        },
+                        "id": "second",
+                        "label": "second"
+                      }
+                    ],
+                    "policy": {
+                      "concurrency": 2,
+                      "on_error": "collect_all",
+                      "timeout_seconds": 10
+                    }
+                  },
+                  "id": "parallel",
+                  "name": "parallel",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "capability"
+                },
+                {
+                  "best_effort": false,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {},
+                  "id": "end",
+                  "name": "end",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "end"
+                }
+              ],
+              "regions": [
+                {
+                  "edges": [],
+                  "entry_node_id": "wait_first",
+                  "exit_node_ids": [
+                    "wait_first"
+                  ],
+                  "id": "first",
+                  "inputs": {},
+                  "nodes": [
+                    {
+                      "best_effort": false,
+                      "cleanup_for": [],
+                      "cleanup_retry_budget": 0,
+                      "cleanup_timeout_seconds": 30,
+                      "config": {
+                        "seconds": 0
+                      },
+                      "id": "wait_first",
+                      "name": "wait_first",
+                      "phase": "main",
+                      "position": {
+                        "x": 0.0,
+                        "y": 0.0
+                      },
+                      "run_when": "always",
+                      "type": "delay"
+                    }
+                  ],
+                  "outputs": {},
+                  "owner_node_id": "parallel",
+                  "role": "branch:first"
+                },
+                {
+                  "edges": [],
+                  "entry_node_id": "wait_second",
+                  "exit_node_ids": [
+                    "wait_second"
+                  ],
+                  "id": "second",
+                  "inputs": {},
+                  "nodes": [
+                    {
+                      "best_effort": false,
+                      "cleanup_for": [],
+                      "cleanup_retry_budget": 0,
+                      "cleanup_timeout_seconds": 30,
+                      "config": {
+                        "seconds": 0
+                      },
+                      "id": "wait_second",
+                      "name": "wait_second",
+                      "phase": "main",
+                      "position": {
+                        "x": 0.0,
+                        "y": 0.0
+                      },
+                      "run_when": "always",
+                      "type": "delay"
+                    }
+                  ],
+                  "outputs": {},
+                  "owner_node_id": "parallel",
+                  "role": "branch:second"
+                }
+              ],
+              "run_policy": {
+                "cleanup_request_budget": 1,
+                "force_cancel_skips_cleanup": false,
+                "max_runtime_seconds": 30,
+                "request_budget": 1
+              },
+              "runtime_inputs": [],
+              "schema_version": "4.0",
+              "settings": {
+                "concurrency": 20,
+                "default_timeout_seconds": 30,
+                "fail_fast": true
+              },
+              "variables": {}
+            },
+            "description": "隔离自测; 独立审核模式 ci_fixture; 不代表模型或真人验收",
+            "name": "native_control_fixture"
+          },
+          "review_note": "",
+          "review_status": "pending",
+          "reviewed_at": null,
+          "reviewed_by_id": null,
+          "target_resource_id": null,
+          "title": "native_control_fixture"
+        }
+      ],
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "source_fingerprint": "26724148235e43089e535e5901109bdf2101dc22a65fe8f969482c1a97673f7c",
+      "source_ref": "mcp://projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/control-workflows",
+      "source_type": "mcp",
+      "status": "draft",
+      "title": "native_control_fixture",
+      "updated_at": "2026-10-23T04:47:39",
+      "workflow_id": null
+    },
+    "pending_execution_ids": [],
+    "pending_workflow_ids": [],
+    "plan": {
+      "created_at": "2026-10-23T04:47:39",
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "description": "展开本批固定套件版本; 默认重试 0",
+      "enabled": true,
+      "id": "f7ea7aeb-9f83-409c-a130-e595f6d1b408",
+      "items": [
+        {
+          "environment_id": null,
+          "id": "d0723773-7d82-47fb-b370-a669a1b6ee12",
+          "max_retries": 0,
+          "position": 0,
+          "runtime_headers": {},
+          "runtime_variables": {},
+          "target_id": "305b0a9b-166b-4a76-b639-1c818ae9eb04",
+          "target_type": "suite",
+          "target_version": 1,
+          "workflow_id": null,
+          "workflow_version": null
+        }
+      ],
+      "name": "native_control_fixture",
+      "next_run_at": null,
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "queue_priority": 5,
+      "schedule_cron": null,
+      "schedule_interval_seconds": null,
+      "schedule_timezone": "Asia/Shanghai",
+      "updated_at": "2026-10-23T04:47:39"
+    },
+    "proposal": {
+      "idempotency_replayed": false,
+      "item_id": "2ee351d5-bbfc-4905-a931-7378294ddd21",
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "proposal_id": "a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "proposed_fingerprint": "26724148235e43089e535e5901109bdf2101dc22a65fe8f969482c1a97673f7c",
+      "review_url": "/projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/mcp-changes?focus=a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "status": "draft"
+    },
+    "published": {
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "definition": {
+        "edges": [
+          {
+            "condition": null,
+            "id": "start-parallel",
+            "mappings": [],
+            "source": "start",
+            "target": "parallel"
+          },
+          {
+            "condition": null,
+            "id": "parallel-end",
+            "mappings": [],
+            "source": "parallel",
+            "target": "end"
+          }
+        ],
+        "nodes": [
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": null,
+            "id": "start",
+            "name": "start",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "start"
+          },
+          {
+            "best_effort": false,
+            "bindings": [],
+            "capability_id": "flow.control.parallel",
+            "capability_version": "1.0.0",
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": {
+              "branches": [
+                {
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "first"
+                  },
+                  "id": "first",
+                  "label": "first"
+                },
+                {
+                  "body": {
+                    "kind": "inline",
+                    "region_id": "second"
+                  },
+                  "id": "second",
+                  "label": "second"
+                }
+              ],
+              "policy": {
+                "concurrency": 2,
+                "on_error": "collect_all",
+                "timeout_seconds": 10
+              }
+            },
+            "id": "parallel",
+            "name": "parallel",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "capability"
+          },
+          {
+            "best_effort": false,
+            "bindings": null,
+            "capability_id": null,
+            "capability_version": null,
+            "cleanup_for": [],
+            "cleanup_retry_budget": 0,
+            "cleanup_timeout_seconds": 30,
+            "config": {},
+            "configuration": null,
+            "id": "end",
+            "name": "end",
+            "phase": "main",
+            "position": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "run_when": "always",
+            "type": "end"
+          }
+        ],
+        "regions": [
+          {
+            "edges": [],
+            "entry_node_id": "wait_first",
+            "exit_node_ids": [
+              "wait_first"
+            ],
+            "id": "first",
+            "inputs": {},
+            "nodes": [
+              {
+                "best_effort": false,
+                "bindings": null,
+                "capability_id": null,
+                "capability_version": null,
+                "cleanup_for": [],
+                "cleanup_retry_budget": 0,
+                "cleanup_timeout_seconds": 30,
+                "config": {
+                  "seconds": 0
+                },
+                "configuration": null,
+                "id": "wait_first",
+                "name": "wait_first",
+                "phase": "main",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "run_when": "always",
+                "type": "delay"
+              }
+            ],
+            "outputs": {},
+            "owner_node_id": "parallel",
+            "role": "branch:first"
+          },
+          {
+            "edges": [],
+            "entry_node_id": "wait_second",
+            "exit_node_ids": [
+              "wait_second"
+            ],
+            "id": "second",
+            "inputs": {},
+            "nodes": [
+              {
+                "best_effort": false,
+                "bindings": null,
+                "capability_id": null,
+                "capability_version": null,
+                "cleanup_for": [],
+                "cleanup_retry_budget": 0,
+                "cleanup_timeout_seconds": 30,
+                "config": {
+                  "seconds": 0
+                },
+                "configuration": null,
+                "id": "wait_second",
+                "name": "wait_second",
+                "phase": "main",
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "run_when": "always",
+                "type": "delay"
+              }
+            ],
+            "outputs": {},
+            "owner_node_id": "parallel",
+            "role": "branch:second"
+          }
+        ],
+        "run_policy": {
+          "cleanup_request_budget": 1,
+          "force_cancel_skips_cleanup": false,
+          "max_runtime_seconds": 30,
+          "request_budget": 1
+        },
+        "runtime_inputs": [],
+        "schema_version": "4.0",
+        "settings": {
+          "concurrency": 20,
+          "default_timeout_seconds": 30,
+          "fail_fast": true
+        },
+        "variables": {}
+      },
+      "fingerprint": "bda175888c222214f3c315d1a13df9853cf74a3945c607b173e8197ef89e4233",
+      "id": "f103ddc5-2887-41c9-ab56-857d657ecf4a",
+      "published_at": "2026-10-23T04:47:39.665492",
+      "version": 1,
+      "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676"
+    },
+    "replay": {
+      "idempotency_replayed": true,
+      "item_id": "2ee351d5-bbfc-4905-a931-7378294ddd21",
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "proposal_id": "a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "proposed_fingerprint": "26724148235e43089e535e5901109bdf2101dc22a65fe8f969482c1a97673f7c",
+      "review_url": "/projects/d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d/mcp-changes?focus=a71b6131-790e-4697-8df6-2547fff9ae6e",
+      "status": "draft"
+    },
+    "request": {
+      "idempotency_key": "native_control_fixture:proposal",
+      "request": {
+        "definition": {
+          "edges": [
+            {
+              "condition": null,
+              "id": "start-parallel",
+              "mappings": [],
+              "source": "start",
+              "target": "parallel"
+            },
+            {
+              "condition": null,
+              "id": "parallel-end",
+              "mappings": [],
+              "source": "parallel",
+              "target": "end"
+            }
+          ],
+          "nodes": [
+            {
+              "best_effort": false,
+              "bindings": null,
+              "capability_id": null,
+              "capability_version": null,
+              "cleanup_for": [],
+              "cleanup_retry_budget": 0,
+              "cleanup_timeout_seconds": 30,
+              "config": {},
+              "configuration": null,
+              "id": "start",
+              "name": "start",
+              "phase": "main",
+              "position": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "run_when": "always",
+              "type": "start"
+            },
+            {
+              "best_effort": false,
+              "bindings": [],
+              "capability_id": "flow.control.parallel",
+              "capability_version": "1.0.0",
+              "cleanup_for": [],
+              "cleanup_retry_budget": 0,
+              "cleanup_timeout_seconds": 30,
+              "config": {},
+              "configuration": {
+                "branches": [
+                  {
+                    "body": {
+                      "kind": "inline",
+                      "region_id": "first"
+                    },
+                    "id": "first",
+                    "label": "first"
+                  },
+                  {
+                    "body": {
+                      "kind": "inline",
+                      "region_id": "second"
+                    },
+                    "id": "second",
+                    "label": "second"
+                  }
+                ],
+                "policy": {
+                  "concurrency": 2,
+                  "on_error": "collect_all",
+                  "timeout_seconds": 10
+                }
+              },
+              "id": "parallel",
+              "name": "parallel",
+              "phase": "main",
+              "position": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "run_when": "always",
+              "type": "capability"
+            },
+            {
+              "best_effort": false,
+              "bindings": null,
+              "capability_id": null,
+              "capability_version": null,
+              "cleanup_for": [],
+              "cleanup_retry_budget": 0,
+              "cleanup_timeout_seconds": 30,
+              "config": {},
+              "configuration": null,
+              "id": "end",
+              "name": "end",
+              "phase": "main",
+              "position": {
+                "x": 0.0,
+                "y": 0.0
+              },
+              "run_when": "always",
+              "type": "end"
+            }
+          ],
+          "regions": [
+            {
+              "edges": [],
+              "entry_node_id": "wait_first",
+              "exit_node_ids": [
+                "wait_first"
+              ],
+              "id": "first",
+              "inputs": {},
+              "nodes": [
+                {
+                  "best_effort": false,
+                  "bindings": null,
+                  "capability_id": null,
+                  "capability_version": null,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {
+                    "seconds": 0
+                  },
+                  "configuration": null,
+                  "id": "wait_first",
+                  "name": "wait_first",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "delay"
+                }
+              ],
+              "outputs": {},
+              "owner_node_id": "parallel",
+              "role": "branch:first"
+            },
+            {
+              "edges": [],
+              "entry_node_id": "wait_second",
+              "exit_node_ids": [
+                "wait_second"
+              ],
+              "id": "second",
+              "inputs": {},
+              "nodes": [
+                {
+                  "best_effort": false,
+                  "bindings": null,
+                  "capability_id": null,
+                  "capability_version": null,
+                  "cleanup_for": [],
+                  "cleanup_retry_budget": 0,
+                  "cleanup_timeout_seconds": 30,
+                  "config": {
+                    "seconds": 0
+                  },
+                  "configuration": null,
+                  "id": "wait_second",
+                  "name": "wait_second",
+                  "phase": "main",
+                  "position": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "run_when": "always",
+                  "type": "delay"
+                }
+              ],
+              "outputs": {},
+              "owner_node_id": "parallel",
+              "role": "branch:second"
+            }
+          ],
+          "run_policy": {
+            "cleanup_request_budget": 1,
+            "force_cancel_skips_cleanup": false,
+            "max_runtime_seconds": 30,
+            "request_budget": 1
+          },
+          "runtime_inputs": [],
+          "schema_version": "4.0",
+          "settings": {
+            "concurrency": 20,
+            "default_timeout_seconds": 30,
+            "fail_fast": true
+          },
+          "variables": {}
+        },
+        "description": "隔离自测; 独立审核模式 ci_fixture; 不代表模型或真人验收",
+        "name": "native_control_fixture",
+        "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d"
+      }
+    },
+    "selection": {
+      "cases": [
+        {
+          "case_id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+          "target_snapshot_digest": "44e552103f4ac4ed41045e92cabdb11b939633033edeb168c137b767c39571ce",
+          "version": 1
+        }
+      ],
+      "frozen_at": "2026-10-23T04:47:39.753237Z",
+      "plan_id": "f7ea7aeb-9f83-409c-a130-e595f6d1b408",
+      "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+      "suite_fingerprint": "6a009d47960a20c10cb1a89009b462aa15b8da90df21e443f394fa706f7ca481",
+      "suite_id": "305b0a9b-166b-4a76-b639-1c818ae9eb04",
+      "suite_version": 1
+    },
+    "suite": {
+      "change_note": "执行前固定本批真实 Case 版本",
+      "created_at": "2026-10-23T04:47:39",
+      "created_by_id": "334500bb-0102-4537-aafc-f23d2ccc3a01",
+      "definition": {
+        "items": [
+          {
+            "test_case_id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+            "test_case_version": 1
+          }
+        ]
+      },
+      "fingerprint": "6a009d47960a20c10cb1a89009b462aa15b8da90df21e443f394fa706f7ca481",
+      "id": "2a290463-edd8-4297-b6ba-11b135a8315c",
+      "test_suite_id": "305b0a9b-166b-4a76-b639-1c818ae9eb04",
+      "version": 1
+    }
+  },
+  "manifest_digest": "1ededab2eeffdf05b6e4f207d9652743fdc5ae4792c69882773eef5c8f964c17",
+  "plan_run": {
+    "completed_at": "2026-10-23T04:47:39.826655Z",
+    "has_more": false,
+    "items": [
+      {
+        "attempts": 1,
+        "attempts_complete": true,
+        "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+        "execution_id": "163b363b-8283-41b6-b314-2a3b35df65b7",
+        "execution_ids": [
+          "163b363b-8283-41b6-b314-2a3b35df65b7"
+        ],
+        "id": "5e196a44-2f22-4a0e-94b4-3c90fd519ca1",
+        "status": "passed",
+        "target_id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+        "target_snapshot_digest": "44e552103f4ac4ed41045e92cabdb11b939633033edeb168c137b767c39571ce",
+        "target_type": "case",
+        "target_version": 1,
+        "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+        "workflow_version": 1
+      }
+    ],
+    "page": 1,
+    "page_size": 100,
+    "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+    "run_id": "c038e405-8f96-4c03-aa63-76b5d14e2dc1",
+    "status": "passed",
+    "test_plan_id": "f7ea7aeb-9f83-409c-a130-e595f6d1b408",
+    "total": 1,
+    "trigger_type": "manual",
+    "truncated": false
+  },
+  "raw_execution": {
+    "api_bindings": [],
+    "bindings_complete": true,
+    "children": [],
+    "children_complete": true,
+    "children_total": 0,
+    "cleanup_status": null,
+    "completed_at": "2026-10-23T04:47:39.820689Z",
+    "dataset": null,
+    "dataset_row_index": null,
+    "environment_id": "a080a864-c9b4-4013-bd58-ee46947456a1",
+    "error_code": null,
+    "execution_id": "163b363b-8283-41b6-b314-2a3b35df65b7",
+    "main_status": "passed",
+    "nested_node_total": 2,
+    "nested_nodes": [
+      {
+        "assertions": [],
+        "assertions_complete": true,
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "__nested_request__:508878d050e51374c1f6edd857bbf18f2afdd0499cbd2198e9d3413494a43945",
+        "node_type": "delay",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "assertions_complete": true,
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "__nested_request__:78d28a89893386a731b441fc8e537ec904b132c7c0e232c4c6ef70519aa9d183",
+        "node_type": "delay",
+        "phase": "main",
+        "status": "passed"
+      }
+    ],
+    "nested_nodes_complete": true,
+    "node_total": 3,
+    "nodes": [
+      {
+        "assertions": [],
+        "assertions_complete": true,
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "parallel",
+        "node_type": "capability",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "assertions_complete": true,
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "start",
+        "node_type": "start",
+        "phase": "main",
+        "status": "passed"
+      },
+      {
+        "assertions": [],
+        "assertions_complete": true,
+        "attempts": 1,
+        "error_code": null,
+        "node_id": "end",
+        "node_type": "end",
+        "phase": "main",
+        "status": "passed"
+      }
+    ],
+    "parent_execution_id": null,
+    "project_id": "d6d10182-f4b6-4c0b-9d1f-d0fb49b3fc0d",
+    "run_purpose": "standard",
+    "snapshot_digest": "32ea32b5861ab95dff83003809250130ef15fe0129a2542c69633203abd8203b",
+    "source_case_id": "41af0d37-2cfe-49cc-ab3f-2ef1b7f350da",
+    "source_case_version": 1,
+    "source_plan_run_item_id": "5e196a44-2f22-4a0e-94b4-3c90fd519ca1",
+    "started_at": "2026-10-23T04:47:39.779458Z",
+    "status": "passed",
+    "subflows": [],
+    "subflows_complete": true,
+    "truncated": false,
+    "workflow_fingerprint": "bda175888c222214f3c315d1a13df9853cf74a3945c607b173e8197ef89e4233",
+    "workflow_id": "b87ec6d2-e187-4357-9cfc-fc532ea4f676",
+    "workflow_version_id": "f103ddc5-2887-41c9-ab56-857d657ecf4a"
+  },
+  "rejected_requests": 0,
+  "rejected_tool_calls": 0
+}

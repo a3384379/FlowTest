@@ -471,7 +471,7 @@ def test_missing_evidence_and_unsupported_runtime_targets_block_compilation() ->
     )
     compilation = compile_integration_plan(changed)
     assert compilation.importable is False
-    assert {item.code for item in compilation.diagnostics} >= {"BINDING_TARGET_RUNTIME_UNSUPPORTED"}
+    assert {item.code for item in compilation.diagnostics} >= {"PATH_BINDING_TARGET_UNKNOWN"}
 
 
 @pytest.mark.parametrize(

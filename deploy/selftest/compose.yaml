@@ -1,0 +1,143 @@
+x-candidate: &candidate
+  image: ${FLOWTEST_SELFTEST_CANDIDATE_IMAGE:?required}
+  build:
+    context: ${FLOWTEST_SELFTEST_BUILD_ROOT:-../..}
+    dockerfile: ${FLOWTEST_SELFTEST_BUILD_RECIPE:-deploy/selftest/Dockerfile}
+    target: candidate
+    args:
+      FLOWTEST_SELFTEST_RUNTIME_IMAGE: ${FLOWTEST_SELFTEST_RUNTIME_IMAGE:?required}
+  networks: [execution]
+  labels:
+    dev.flowtest.selftest.nonce: ${FLOWTEST_SELFTEST_STACK_NONCE:?required}
+  environment: &candidate-environment
+    FLOWTEST_RUNTIME_PROFILE: standalone
+    FLOWTEST_ENVIRONMENT: local
+    FLOWTEST_DATA_DIR: /data
+    FLOWTEST_STANDALONE_SCHEDULER_ENABLED: "false"
+    FLOWTEST_FEATURE_TEST_ASSETS_ENABLED: "true"
+    FLOWTEST_FEATURE_ADVANCED_WORKFLOWS_ENABLED: "true"
+    FLOWTEST_FEATURE_INTEGRATION_FLOW_ENABLED: "true"
+    FLOWTEST_REDACTION_MODE: "off"
+  healthcheck:
+    test:
+      [
+        CMD,
+        python,
+        -c,
+        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/live', timeout=3)",
+      ]
+    interval: 2s
+    timeout: 5s
+    retries: 45
+  deploy:
+    resources:
+      limits:
+        memory: 1G
+        cpus: "1.5"
+
+services:
+  runner:
+    <<: *candidate
+    networks: [execution, runner-control]
+    ports: ["127.0.0.1:${FLOWTEST_SELFTEST_RUNNER_PORT:?required}:8000"]
+    environment:
+      <<: *candidate-environment
+      FLOWTEST_CORS_ORIGINS: ${FLOWTEST_SELFTEST_CORS_ORIGINS:-["http://localhost:3000","http://localhost:5173"]}
+      FLOWTEST_SELFTEST_BINDINGS: ${FLOWTEST_SELFTEST_BINDINGS:-[]}
+      FLOWTEST_SELFTEST_PRINCIPALS: ${FLOWTEST_SELFTEST_PRINCIPALS:-[]}
+      FLOWTEST_SELFTEST_PROBE_GRANTS: ${FLOWTEST_SELFTEST_PROBE_GRANTS:-[]}
+      FLOWTEST_SELFTEST_EXTRA_TEMPLATES: ${FLOWTEST_SELFTEST_EXTRA_TEMPLATES:-[]}
+      FLOWTEST_SELFTEST_FIXTURE_RUN_DEPTH: "0"
+      FLOWTEST_SECRET_KEY: ${FLOWTEST_SELFTEST_RUNNER_KEY:?required}
+      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_SELFTEST_RUNNER_ENCRYPTION_KEY:?required}
+      FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: selftest-a@example.com
+      FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_SELFTEST_RUNNER_PASSWORD:?required}
+    volumes: [runner-data:/data]
+  target:
+    <<: *candidate
+    networks: [execution, target-control]
+    ports: ["127.0.0.1:${FLOWTEST_SELFTEST_TARGET_PORT:?required}:8000"]
+    environment:
+      <<: *candidate-environment
+      FLOWTEST_SELFTEST_FIXTURE_RUN_DEPTH: "1"
+      FLOWTEST_SELFTEST_BINDINGS: ${FLOWTEST_SELFTEST_TARGET_BINDINGS:-[]}
+      FLOWTEST_SECRET_KEY: ${FLOWTEST_SELFTEST_TARGET_KEY:?required}
+      FLOWTEST_DATA_ENCRYPTION_KEY: ${FLOWTEST_SELFTEST_TARGET_ENCRYPTION_KEY:?required}
+      FLOWTEST_BOOTSTRAP_ADMIN_EMAIL: selftest-b@example.com
+      FLOWTEST_ACCESS_TOKEN_MINUTES: ${FLOWTEST_SELFTEST_TARGET_ACCESS_TOKEN_MINUTES:-15}
+      FLOWTEST_BOOTSTRAP_ADMIN_PASSWORD: ${FLOWTEST_SELFTEST_TARGET_PASSWORD:?required}
+    volumes: [target-data:/data]
+  mock-target:
+    image: ${FLOWTEST_SELFTEST_FIXTURE_IMAGE:?required}
+    build:
+      context: ${FLOWTEST_SELFTEST_BUILD_ROOT:-../..}
+      dockerfile: ${FLOWTEST_SELFTEST_BUILD_RECIPE:-deploy/selftest/Dockerfile}
+      target: fixture
+      args:
+        FLOWTEST_SELFTEST_RUNTIME_IMAGE: ${FLOWTEST_SELFTEST_RUNTIME_IMAGE:?required}
+    networks: [execution]
+    labels:
+      dev.flowtest.selftest.nonce: ${FLOWTEST_SELFTEST_STACK_NONCE:?required}
+    environment:
+      FLOWTEST_SELFTEST_JOURNAL_PATH: /journal/selftest.sqlite3
+    volumes: [fixture-journal:/journal]
+    deploy:
+      resources:
+        limits: { memory: 256M, cpus: "0.5" }
+  observer:
+    image: ${FLOWTEST_SELFTEST_FIXTURE_IMAGE:?required}
+    command:
+      [
+        uvicorn,
+        app.selftest:create_observer_app,
+        --factory,
+        --host,
+        0.0.0.0,
+        --port,
+        "8081",
+        --no-access-log,
+      ]
+    networks: [management, observer-control]
+    labels:
+      dev.flowtest.selftest.nonce: ${FLOWTEST_SELFTEST_STACK_NONCE:?required}
+    ports: ["127.0.0.1:${FLOWTEST_SELFTEST_OBSERVER_PORT:?required}:8081"]
+    environment:
+      FLOWTEST_SELFTEST_JOURNAL_PATH: /journal/selftest.sqlite3
+      FLOWTEST_SELFTEST_OBSERVER_TOKEN: ${FLOWTEST_SELFTEST_OBSERVER_TOKEN:?required}
+    volumes: [fixture-journal:/journal]
+    deploy:
+      resources:
+        limits: { memory: 256M, cpus: "0.5" }
+
+networks:
+  execution:
+    internal: true
+    ipam:
+      config: [{ subnet: "${FLOWTEST_SELFTEST_SUBNET:?required}" }]
+  management:
+    internal: true
+  runner-control:
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+  target-control:
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+  observer-control:
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+volumes:
+  runner-data:
+    labels:
+      {
+        dev.flowtest.selftest.nonce: "${FLOWTEST_SELFTEST_STACK_NONCE:?required}",
+      }
+  target-data:
+    labels:
+      {
+        dev.flowtest.selftest.nonce: "${FLOWTEST_SELFTEST_STACK_NONCE:?required}",
+      }
+  fixture-journal:
+    labels:
+      {
+        dev.flowtest.selftest.nonce: "${FLOWTEST_SELFTEST_STACK_NONCE:?required}",
+      }

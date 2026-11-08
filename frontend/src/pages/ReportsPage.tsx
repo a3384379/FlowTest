@@ -1,3 +1,4 @@
+import { clearSelfTestReference } from '../features/self-test/self-test-navigation'
 import QueryFailureNotice from '../components/QueryFailureNotice'
 import CatalogPagination from '../components/CatalogPagination'
 import {
@@ -60,6 +61,7 @@ function ReportWorkspace() {
       next.delete('node')
       next.delete('attempt')
       clearExecutionEvidence(next)
+      clearSelfTestReference(next)
       if (executionId) next.set('execution', executionId)
       else next.delete('execution')
       setSearchParams(next)

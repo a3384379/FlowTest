@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
@@ -19,6 +20,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="FlowTest Mock Target", version="1.0.0")
+if os.environ.get("FLOWTEST_SELFTEST_JOURNAL_PATH"):
+    from .selftest import install_business_routes
+
+    install_business_routes(app)
 
 
 class LoginRequest(BaseModel):

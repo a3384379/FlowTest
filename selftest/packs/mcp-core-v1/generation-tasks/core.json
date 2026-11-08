@@ -1,0 +1,79 @@
+{
+  "format": "flowtest-mcp-generation-tasks",
+  "format_version": 1,
+  "task_set_id": "mcp-core",
+  "task_set_version": "1.0.0",
+  "profiles": ["full", "compact", "standalone"],
+  "generation_modes": ["deterministic_mcp", "host_llm_mcp"],
+  "limits": {
+    "maximum_batch_seconds": 600,
+    "maximum_requests": 500,
+    "maximum_fixture_run_depth": 1,
+    "maximum_generation_attempts": 1,
+    "maximum_tool_calls": 100,
+    "default_plan_retries": 0
+  },
+  "tasks": [
+    {
+      "scenario_id": "ST-MCP-023",
+      "variant_key": "environment_lifecycle",
+      "title": "隔离环境资源生命周期",
+      "objective": "读取本轮 B 的真实环境 API 契约，经 MCP 生成创建、查询、修改和删除的流程及用例；真实环境 ID 必须跨节点传递，最终由独立查询确认清理。",
+      "required_operations": [
+        "POST /api/v1/projects/{project_id}/environments",
+        "GET /api/v1/projects/{project_id}/environments",
+        "PATCH /api/v1/projects/{project_id}/environments/{environment_id}",
+        "DELETE /api/v1/projects/{project_id}/environments/{environment_id}"
+      ],
+      "required_inputs": [
+        "authorized_target_binding",
+        "disposable_project_id",
+        "credential_ref",
+        "batch_marker"
+      ],
+      "required_behaviors": [
+        "created_id_is_used_by_update_and_delete",
+        "updated_value_is_observed",
+        "resource_is_absent_after_cleanup"
+      ],
+      "expected_raw_status": "passed"
+    },
+    {
+      "scenario_id": "ST-MCP-025",
+      "variant_key": "negative_assertion_canary",
+      "title": "故意错误的断言必须失败",
+      "objective": "经 MCP 生成调用合成目标并断言响应 body.actual 等于 2 的真实流程与 Case。目标独立固定 actual=1。审核后的具体断言节点 ID 必须在运行前冻结。",
+      "required_inputs": [
+        "fixture_api_definition_id",
+        "fixture_api_version",
+        "fixture_binding",
+        "batch_nonce"
+      ],
+      "required_behaviors": [
+        "request_reaches_fixture_once",
+        "body_actual_equals_2_assertion_is_executed",
+        "original_failure_is_preserved"
+      ],
+      "expected_raw_status": "failed",
+      "expected_error_code": "WORKFLOW_ASSERTION_FAILED",
+      "expected_phase": "main"
+    },
+    {
+      "scenario_id": "ST-MCP-026",
+      "variant_key": "positive_assertion_canary",
+      "title": "正确的断言必须通过",
+      "objective": "同一确定性合成目标固定 actual=1，经本轮 MCP 生成 actual 等于 1 的流程及 Case，排除所有执行都失败的引擎误绿。",
+      "required_inputs": [
+        "fixture_api_definition_id",
+        "fixture_api_version",
+        "fixture_binding",
+        "batch_nonce"
+      ],
+      "required_behaviors": [
+        "request_reaches_fixture_once",
+        "body_actual_equals_1_assertion_is_executed"
+      ],
+      "expected_raw_status": "passed"
+    }
+  ]
+}

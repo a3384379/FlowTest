@@ -1,0 +1,26 @@
+{
+  "schema_version": "flowtest-fixed-pack-v1",
+  "pack_id": "native-api-v1",
+  "pack_version": "1.0.0",
+  "request_budget": 500,
+  "runtime_seconds": 600,
+  "scenario_ids": [
+    "ST-API-006-project",
+    "ST-API-006-environment",
+    "ST-API-006-api",
+    "ST-API-006-case",
+    "ST-API-006-runtime",
+    "ST-API-006-node",
+    "ST-API-004-pinned",
+    "ST-API-011-401",
+    "ST-API-011-403",
+    "ST-API-011-422",
+    "ST-API-003-directory-environment",
+    "ST-API-003-project"
+  ],
+  "files": {
+    "api-definitions.json": "1cffb0dca20648cf60693e264c5b7831baedbc0a9b41880ca44fb4493adf502a",
+    "workflows.json": "71e595c97dc259eeace52ef83e4259ec5bac84297be970545d532eea888fa043",
+    "expectations.json": "827e119cb0d5584c84e8d9ff05e3b9e389bd1d57486ccd8c1eee1e9bf5b5b7be"
+  }
+}
