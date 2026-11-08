@@ -3,3 +3,4 @@ allowBuilds:
 overrides:
   'zod@>=4.0.0 <4.6.6': '4.6.6'
   'undici@>=8.0.0 <8.12.2': '8.12.2'
+  'follow-redirects@>=1.16.0 <1.16.2': '1.16.2'
