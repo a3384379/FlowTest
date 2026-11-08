@@ -13,8 +13,9 @@ WORKDIR /src
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod edit -go=1.27.2 \
-        -require=golang.org/x/crypto@v0.57.0 \
-        -require=golang.org/x/net@v0.60.0 \
+        -require=github.com/klauspost/compress@v1.20.2 \
+        -require=golang.org/x/crypto@v0.58.0 \
+        -require=golang.org/x/net@v0.62.0 \
         -require=google.golang.org/grpc@v1.83.2 \
     && go mod tidy \
     && CGO_ENABLED=0 go build -mod=readonly -trimpath \
