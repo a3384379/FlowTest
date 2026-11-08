@@ -2,11 +2,10 @@ FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
 FROM debian:trixie-slim AS python-runtime
 
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.16" \
-    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
+    PYTHON_VERSION="3.13.18" \
+    PYTHON_SHA256="abb0102e6d4ae027509bcb82327d9dd85515b44a3ba8ad538cfc5e9847029f68"
 
-# Keep this bootstrap identical to backend/Dockerfile so BuildKit shares the
-# layers for the signed Python 3.13.16 maintenance release.
+# Use the same signed CPython security release as backend/Dockerfile.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \

@@ -148,11 +148,11 @@ RUN apk add --no-cache --upgrade 'pcre2>=10.49-r0' 'libexpat>=2.9.0-r0' 'zlib>=1
 FROM debian:trixie-slim AS python-base-source
 
 ENV PATH="/usr/local/bin:$PATH" \
-    PYTHON_VERSION="3.13.16" \
-    PYTHON_SHA256="f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d"
+    PYTHON_VERSION="3.13.18" \
+    PYTHON_SHA256="abb0102e6d4ae027509bcb82327d9dd85515b44a3ba8ad538cfc5e9847029f68"
 
 # Build the signed CPython maintenance release with an explicit checksum.
-# 3.13.16 includes the SSLContext and previously backported tarfile fixes.
+# 3.13.18 adds the CA distrust fix for CVE-2026-115557.
 RUN set -eux; \
     saved_apt_mark="$(apt-mark showmanual)"; \
     apt-get update; \
