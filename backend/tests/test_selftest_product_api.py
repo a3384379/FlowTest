@@ -23,8 +23,10 @@ from app.core.self_tests import (
 )
 from app.domain.self_tests import document_digest
 from app.main import app
+from app.models.access import User
 from app.models.self_tests import SelfTestBatch, SelfTestInstallation
 from app.models.tasking import TestPlanRun as PlanRun
+from app.models.tasking import TestPlanRunItem as PlanRunItem
 from app.schemas.self_tests import (
     BuildIdentity,
     ExpectedResult,
@@ -547,15 +549,32 @@ async def test_real_suite_plan_preserves_expected_failure_and_independent_seal(
 
 
 @pytest.fixture
-async def observation(product: ProductContext) -> AsyncIterator[tuple[dict, dict]]:
+async def observation(
+    product: ProductContext, request: pytest.FixtureRequest
+) -> AsyncIterator[tuple[dict, dict]]:
     with respx.mock:
         respx.get("http://fixture.example/value").mock(
             return_value=Response(200, json={"actual": 1})
         )
         batch, nonce = await _fixed(product)
-        await PlanRunCoordinator(product.native.session_maker, product.native.events).run(
-            UUID(batch["plan_run_ids"][0])
-        )
+        run_id = UUID(batch["plan_run_ids"][0])
+        inactive_actor_id = None
+        if getattr(request, "param", None) == "inactive_actor":
+            async with product.native.session_maker() as session:
+                run = await session.get(PlanRun, run_id)
+                assert run is not None
+                actor = await session.get(User, run.requested_by_id)
+                assert actor is not None and actor.is_active
+                inactive_actor_id = actor.id
+                actor.is_active = False
+                await session.commit()
+        await PlanRunCoordinator(product.native.session_maker, product.native.events).run(run_id)
+        if inactive_actor_id is not None:
+            async with product.native.session_maker() as session:
+                actor = await session.get(User, inactive_actor_id)
+                assert actor is not None
+                actor.is_active = True
+                await session.commit()
         current = await product.get(product.root + f"/runs/{batch['id']}")
         rows = (await product.get(product.root + f"/runs/{batch['id']}/scenarios"))["items"]
         observer = await product.post(
@@ -603,6 +622,57 @@ async def observation(product: ProductContext) -> AsyncIterator[tuple[dict, dict
                 "artifacts": [artifact],
             },
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("observation", ["inactive_actor"], indirect=True)
+@pytest.mark.parametrize("status", ["incomplete", "error"])
+async def test_observer_can_seal_a_plan_that_failed_before_execution(
+    product: ProductContext, observation: tuple[dict, dict], status: str
+) -> None:
+    batch, receipt = observation
+    path = f"/api/v1/ci/projects/{product.project_id}/self-test-runs/{batch['id']}/verification"
+    rejected = await product.post(path, receipt, machine="o", status=409)
+    assert rejected["error"]["code"] == "SELFTEST_NATIVE_RESULT_MISMATCH"
+    receipt.update(batch_verdict="blocked", evidence_integrity="missing")
+    for row in receipt["scenarios"]:
+        row.update(observed_status=None, verification_status=status)
+
+    sealed = await product.post(path, receipt, machine="o")
+    assert sealed["verdict"] == "blocked" and sealed["sealed_at"] is not None
+    rows = (await product.get(product.root + f"/runs/{batch['id']}/scenarios"))["items"]
+    assert len(rows) == 2
+    assert all(row["verification_status"] == status for row in rows)
+    assert all(row["observed_status"] == "failed" for row in rows)
+    assert all(row["executions"][0]["execution_id"] is None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_observer_rejects_missing_execution_when_a_plan_attempt_ran(
+    product: ProductContext, observation: tuple[dict, dict]
+) -> None:
+    batch, receipt = observation
+    async with product.native.session_maker() as session:
+        item = await session.scalar(
+            select(PlanRunItem).where(
+                PlanRunItem.test_plan_run_id == UUID(batch["plan_run_ids"][0]),
+                PlanRunItem.status == "failed",
+            )
+        )
+        assert item is not None and item.attempts > 0 and item.workflow_execution_id is not None
+        item.workflow_execution_id = None
+        await session.commit()
+    receipt.update(batch_verdict="blocked", evidence_integrity="missing")
+    for row in receipt["scenarios"]:
+        row.update(observed_status=None, verification_status="incomplete")
+
+    result = await product.post(
+        f"/api/v1/ci/projects/{product.project_id}/self-test-runs/{batch['id']}/verification",
+        receipt,
+        machine="o",
+        status=409,
+    )
+    assert result["error"]["code"] == "SELFTEST_NATIVE_EXECUTION_NOT_TERMINAL"
 
 
 @pytest.mark.asyncio

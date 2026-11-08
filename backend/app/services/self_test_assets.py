@@ -336,9 +336,9 @@ class SelfTestAssets:
 
     async def sync_execution(
         self, batch: SelfTestBatch, row: SelfTestScenarioResult
-    ) -> WorkflowExecution | None:
+    ) -> tuple[TestPlanRunItem | None, WorkflowExecution | None]:
         if row.run_item_id is None:
-            return None
+            return None, None
         item = await self.session.get(TestPlanRunItem, row.run_item_id)
         if item is None or str(item.test_plan_run_id) not in batch.plan_run_ids:
             raise self_test_error("SELFTEST_RUN_ITEM_MISSING", "原生运行关联已缺失")
@@ -385,4 +385,4 @@ class SelfTestAssets:
             or execution.run_purpose != "standard"
         ):
             raise self_test_error("SELFTEST_EXECUTION_SOURCE_MISMATCH", "执行不是本批正式原生运行")
-        return execution
+        return item, execution

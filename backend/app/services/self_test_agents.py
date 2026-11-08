@@ -427,12 +427,24 @@ class SelfTestAgentService:
                 raise self_test_error(
                     "SELFTEST_NATIVE_RUN_NOT_TERMINAL", "原生计划尚未全部终态或证据已到期"
                 )
+        await self._terminal_scenarios(batch)
+
+    async def _terminal_scenarios(self, batch: SelfTestBatch) -> None:
         for row in await self.repository.scenarios(batch.id):
-            execution = await self.assets.sync_execution(batch, row)
-            if execution is None or execution.status not in {"passed", "failed", "cancelled"}:
-                raise self_test_error(
-                    "SELFTEST_NATIVE_EXECUTION_NOT_TERMINAL", "子项或正式执行尚未终态"
-                )
+            item, execution = await self.assets.sync_execution(batch, row)
+            if execution is not None and execution.status in {"passed", "failed", "cancelled"}:
+                continue
+            # A deleted execution can also leave a null reference after an actual attempt.
+            if (
+                item is not None
+                and item.workflow_execution_id is None
+                and item.attempts == 0
+                and item.status in {"failed", "cancelled"}
+            ):
+                continue
+            raise self_test_error(
+                "SELFTEST_NATIVE_EXECUTION_NOT_TERMINAL", "子项或正式执行尚未终态"
+            )
 
     async def _writable(
         self,
@@ -953,7 +965,7 @@ class SelfTestAgentService:
             )
         for row in rows:
             value = actual[(row.scenario_id, row.variant_key)]
-            execution = await self.assets.sync_execution(batch, row)
+            _, execution = await self.assets.sync_execution(batch, row)
             if value.verification_status == "matched":
                 await self._matched_execution(row.frozen_scenario, value.observed_status, execution)
                 if not value.evidence_refs:
