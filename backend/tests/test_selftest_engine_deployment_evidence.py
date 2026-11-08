@@ -3,7 +3,10 @@
 import json
 import sys
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
+from threading import Barrier
+from typing import Any
 
 import httpx
 import pytest
@@ -55,6 +58,21 @@ async def test_all_eleven_use_restricted_ci_child_bindings_and_independent_mock_
     assert repeated == pack and len(context.api.posts) == post_count
     files = await context.api.object("GET", f"/projects/{context.project}/files?page_size=100")
     assert files["total"] == 1
+
+    store_type = import_module("flowtest_fixed_fixture.selftest_journal").FixtureStore
+    record = store_type.record
+    parallel_requests = Barrier(2, timeout=5)
+
+    def record_before_reply(
+        store: Any, batch: str, scenario: str, *args: Any, **kwargs: Any
+    ) -> Any:
+        reply = record(store, batch, scenario, *args, **kwargs)
+        # The fixture records each real arrival before either request can return.
+        if scenario == "ST-ADD-parallel-bound":
+            parallel_requests.wait()
+        return reply
+
+    monkeypatch.setattr(store_type, "record", record_before_reply)
 
     async def forward(request: httpx.Request) -> httpx.Response:
         response = await context.target.request(
