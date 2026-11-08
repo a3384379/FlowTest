@@ -470,7 +470,69 @@ export type BatchInput = {
 export type GenerationInput = BatchInput & {
   generation_mode: NonNullable<SelfTestBatch['generation_mode']>
   host_id: null
+  assisted_before_batch_id?: string
 }
+
+export const parseInsights = d.object({
+  batch_id: d.uuid,
+  manifest_digest: digest,
+  task_set_digest: digest,
+  template_version: d.identifier,
+  scope: d.choice(['full_pack', 'selected_suites', 'diagnostic_subset'] as const),
+  assisted_before_batch_id: d.nullable(d.uuid),
+  metrics: d.array(
+    d.object({
+      key: d.identifier,
+      label: d.identifier,
+      numerator: d.integer,
+      denominator: d.integer,
+      basis: d.boundedText(1, 500),
+      exclusions: d.array(reason, 10),
+    }),
+    11,
+  ),
+  diagnostics: d.array(
+    d.object({
+      code: d.identifier,
+      severity: d.choice(['blocker', 'review', 'input', 'unsupported'] as const),
+      scenario_id: d.nullable(d.identifier),
+      oracle_id: d.nullable(d.identifier),
+      field_path: d.nullable(d.boundedText(0, 500)),
+      repair_hint: d.boundedText(0, 1000),
+    }),
+    500,
+  ),
+  case_slots: d.array(
+    d.object({
+      ...scenarioKey,
+      workflow_slot: d.nullable(d.identifier),
+      case_id: d.uuid,
+      case_version: d.positive,
+      environment_id: d.nullable(d.uuid),
+    }),
+    100,
+  ),
+  comparisons: d.array(
+    d.object({
+      ...scenarioKey,
+      execution_id: d.nullable(d.uuid),
+      items: d.array(
+        d.object({
+          field: d.identifier,
+          expected: d.text,
+          observed: d.text,
+          difference: d.choice(['equal', 'different', 'not_recorded', 'not_required'] as const),
+          verification_status: verification,
+          reason_codes: reasons,
+        }),
+        100,
+      ),
+    }),
+    100,
+  ),
+  reason_codes: reasons,
+})
+export type SelfTestInsights = ReturnType<typeof parseInsights>
 export type ExecuteInput = {
   resource_digest: string
   environment_fingerprint: string

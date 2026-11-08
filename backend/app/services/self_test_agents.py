@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import hmac
 import json
 from datetime import UTC, datetime, timedelta
 from secrets import token_urlsafe
@@ -29,6 +30,7 @@ from app.schemas.self_tests import (
     FrozenBatchManifest,
     GenerationProgress,
     GenerationState,
+    InstallationFailure,
     InstallationMapping,
     InstallationReceipt,
     InstallationResponse,
@@ -252,10 +254,54 @@ class SelfTestAgentService:
         await self.access.actor(model.created_by_id, project_id, editing=True)
         template = self.access.template(model.template_id, model.template_version)
         await self.assets.mapping(project_id, binding, template, payload.mapping)
+        self._preserved_mapping(model, payload.mapping)
         if await self.repository.lock_installation(model) is None:
             raise self_test_error("SELFTEST_INSTALLATION_BUSY", "安装正在被其他任务修改")
         model.resource_mapping = payload.mapping.model_dump(mode="json")
         model.status, model.reason_codes, model.receipt_digest = "ready", [], digest
+        await self.session.commit()
+        await self.session.refresh(model)
+        return self.views.installation(model, editing=False)
+
+    @staticmethod
+    def _preserved_mapping(model: SelfTestInstallation, mapping: InstallationMapping) -> None:
+        if model.resource_mapping is None:
+            return
+        previous = InstallationMapping.model_validate(model.resource_mapping)
+        if previous.model_dump(exclude={"assets"}) != mapping.model_dump(
+            exclude={"assets"}
+        ) or not set(previous.assets) <= set(mapping.assets):
+            raise self_test_error(
+                "SELFTEST_INSTALLATION_MAPPING_CHANGED", "恢复不能替换已完成的原安装资源"
+            )
+
+    async def installation_failed(
+        self,
+        principal: SelfTestPrincipal,
+        project_id: UUID,
+        identifier: UUID,
+        payload: InstallationFailure,
+    ) -> InstallationResponse:
+        model = await self.access.installation(project_id, identifier)
+        binding = self.access.agent_binding(principal, project_id, model.binding_id, "install")
+        self.access.frozen_binding(model)
+        self.access.lease(model, principal, payload)
+        await self.access.actor(model.created_by_id, project_id, editing=True)
+        if model.status not in {"installing", "blocked"} or model.receipt_digest is not None:
+            raise self_test_error(
+                "SELFTEST_INSTALLATION_STATE_CONFLICT", "安装已结束, 不能写入失败回执"
+            )
+        if payload.mapping is not None:
+            template = self.access.template(model.template_id, model.template_version)
+            await self.assets.mapping(
+                project_id, binding, template, payload.mapping, complete=False
+            )
+            self._preserved_mapping(model, payload.mapping)
+        if await self.repository.lock_installation(model) is None:
+            raise self_test_error("SELFTEST_INSTALLATION_BUSY", "安装正在被其他任务修改")
+        if payload.mapping is not None:
+            model.resource_mapping = payload.mapping.model_dump(mode="json")
+        model.status, model.reason_codes = "blocked", list(payload.reason_codes)
         await self.session.commit()
         await self.session.refresh(model)
         return self.views.installation(model, editing=False)
@@ -270,6 +316,9 @@ class SelfTestAgentService:
         model = await self.access.installation(project_id, identifier)
         self.access.agent_binding(principal, project_id, model.binding_id, "install")
         self.access.frozen_binding(model)
+        if model.status == "ready":
+            self.access.lease(model, principal, payload, allow_sealed=True)
+            raise self_test_error("SELFTEST_LEASE_RELEASED", "安装已确认完成, 不再续租")
         self.access.lease(model, principal, payload)
         if model.status != "installing" or await self.repository.lock_installation(model) is None:
             raise self_test_error("SELFTEST_INSTALLATION_STATE_CONFLICT", "安装已结束或正在修改")
@@ -337,6 +386,14 @@ class SelfTestAgentService:
             or self.views.host_status(installation, batch.generation_mode) != "available"
         ):
             raise self_test_error("SELFTEST_AGENT_NOT_REGISTERED", "真实宿主登记缺失或已过期", 403)
+        manifest = FrozenBatchManifest.model_validate(batch.frozen_manifest)
+        if manifest.assisted_before_batch_id is not None:
+            await self.assisted.admit_namespace(
+                installation,
+                manifest.assisted_before_batch_id,
+                manifest.scenarios,
+                excluding_batch_id=batch.id,
+            )
         if batch.phase != "pending":
             raise self_test_error(
                 "SELFTEST_GENERATION_STATE_CONFLICT", "当前批次不接受新的生成领取"
@@ -405,6 +462,7 @@ class SelfTestAgentService:
         capability = (
             "verify" if "verify" in principal.capabilities else batch.generation_mode or "install"
         )
+        self._completed_lease(batch, principal, project_id, payload, capability)
         batch = await self._writable(principal, project_id, identifier, payload, capability)
         batch.lease_expires_at = min(
             aware(batch.deadline), datetime.now(UTC) + timedelta(seconds=self.config.lease_seconds)
@@ -427,6 +485,37 @@ class SelfTestAgentService:
         return await self._task(
             principal, installation, batch, payload.lease_token, payload.nonce, kind
         )
+
+    def _completed_lease(
+        self,
+        batch: SelfTestBatch,
+        principal: SelfTestPrincipal,
+        project_id: UUID,
+        payload: LeaseRequest,
+        capability: str,
+    ) -> None:
+        self.access.frozen_binding(batch)
+        state = GenerationState.model_validate(batch.generation_summary or {})
+        if capability == "verify" and batch.receipt_digest is not None:
+            self.access.agent_binding(principal, project_id, batch.binding_id, capability)
+            self.access.lease(batch, principal, payload, allow_sealed=True)
+            raise self_test_error("SELFTEST_LEASE_RELEASED", "独立核验已封存, O 租约已结束")
+        if capability == "install" and state.preparation_lease_digest is not None:
+            self.access.agent_binding(principal, project_id, batch.binding_id, capability)
+            self._materialized_identity(
+                batch,
+                payload,
+                state.model_copy(
+                    update={
+                        "materialized_lease_digest": state.preparation_lease_digest,
+                    }
+                ),
+            )
+            raise self_test_error("SELFTEST_LEASE_RELEASED", "固定基准准备已完成, H 租约已结束")
+        if state.observer_manifest_digest is not None and capability != "verify":
+            self.access.agent_binding(principal, project_id, batch.binding_id, capability)
+            self._materialized_identity(batch, payload, state)
+            raise self_test_error("SELFTEST_LEASE_RELEASED", "核验清单已确认, H 租约已结束")
 
     async def progress(
         self,
@@ -454,6 +543,10 @@ class SelfTestAgentService:
                 "仅真实生成任务可上报提案阶段; ready由发布校验产生",
             )
         previous = GenerationState.model_validate(batch.generation_summary or {})
+        if previous.materialized_receipt_digest is not None:
+            raise self_test_error(
+                "SELFTEST_MATERIALIZED_ALREADY_STAGED", "资源已暂存, 请完成核验清单确认"
+            )
         stages = (
             "discovering",
             "reading_contract",
@@ -491,6 +584,7 @@ class SelfTestAgentService:
             tool_call_count=payload.tool_call_count,
             proposals=payload.proposals,
             manifest=payload.manifest,
+            diagnostics=payload.diagnostics,
         ).model_dump(mode="json")
         batch.generation_stage, batch.readiness, batch.reason_codes = (
             payload.stage,
@@ -516,6 +610,29 @@ class SelfTestAgentService:
         payload: MaterializedReceipt,
     ) -> BatchResponse:
         initial = await self.access.batch(project_id, identifier)
+        self.access.agent_binding(
+            principal,
+            project_id,
+            initial.binding_id,
+            initial.generation_mode or "deterministic_mcp",
+        )
+        self.access.frozen_binding(initial)
+        digest = document_digest(
+            payload.model_dump(
+                mode="json",
+                exclude={
+                    "lease_token",
+                    "stage",
+                    "observer_manifest_digest",
+                    "observer_selection_digest",
+                },
+            )
+        )
+        state = GenerationState.model_validate(initial.generation_summary or {})
+        if state.materialized_receipt_digest is not None:
+            return await self._materialized_replay(principal, initial, payload, state, digest)
+        if payload.stage != "stage":
+            raise self_test_error("SELFTEST_MATERIALIZED_STAGE_REQUIRED", "请先暂存本批固定资源")
         batch = await self._writable(
             principal,
             project_id,
@@ -552,9 +669,75 @@ class SelfTestAgentService:
                 ).model_dump(mode="json"),
             )
             row.generation_attempt += 1
-        await self._ready(batch, rows)
+        await self._freeze_resources(batch, rows)
+        batch.generation_summary = state.model_copy(
+            update={
+                "materialized_receipt_digest": digest,
+                "materialized_lease_digest": token_digest(payload.lease_token),
+                "manifest": payload.manifest,
+            }
+        ).model_dump(mode="json")
+        batch.generation_stage, batch.readiness, batch.phase = (
+            "publishing",
+            "needs_input",
+            "awaiting_review",
+        )
+        batch.reason_codes = ["SELFTEST_OBSERVER_MANIFEST_REQUIRED"]
         await self.session.commit()
         return await self.views.batch(batch, editing=False)
+
+    async def _materialized_replay(
+        self,
+        principal: SelfTestPrincipal,
+        batch: SelfTestBatch,
+        payload: MaterializedReceipt,
+        state: GenerationState,
+        digest: str,
+    ) -> BatchResponse:
+        if state.materialized_receipt_digest != digest:
+            raise self_test_error(
+                "SELFTEST_MATERIALIZED_RECEIPT_CONFLICT", "固定资源回执已经暂存为其他内容"
+            )
+        self._materialized_identity(batch, payload, state)
+        if state.observer_manifest_digest is not None:
+            if payload.stage == "finalize" and (
+                state.observer_manifest_digest != payload.observer_manifest_digest
+                or state.observer_selection_digest != payload.observer_selection_digest
+            ):
+                raise self_test_error(
+                    "SELFTEST_MATERIALIZED_RECEIPT_CONFLICT", "核验清单确认已封存为其他内容"
+                )
+            return await self.views.batch(batch, editing=False)
+        self.access.active_batch(batch)
+        self.access.lease(batch, principal, payload)
+        if payload.stage == "stage":
+            return await self.views.batch(batch, editing=False)
+        if await self.repository.lock_batch(batch) is None:
+            raise self_test_error("SELFTEST_BATCH_BUSY", "批次正在被其他任务修改")
+        for source in payload.sources:
+            await self.assisted.validate(batch, source)
+        batch.generation_summary = state.model_copy(
+            update={
+                "observer_manifest_digest": payload.observer_manifest_digest,
+                "observer_selection_digest": payload.observer_selection_digest,
+            }
+        ).model_dump(mode="json")
+        batch.generation_stage, batch.readiness, batch.phase = "ready", "ready", "ready"
+        batch.reason_codes, batch.lease_hash = [], None
+        await self.session.commit()
+        return await self.views.batch(batch, editing=False)
+
+    @staticmethod
+    def _materialized_identity(
+        batch: SelfTestBatch, payload: LeaseRequest, state: GenerationState
+    ) -> None:
+        if not (
+            hmac.compare_digest(
+                state.materialized_lease_digest or "", token_digest(payload.lease_token)
+            )
+            and hmac.compare_digest(batch.nonce_hash or "", token_digest(payload.nonce))
+        ):
+            raise self_test_error("SELFTEST_LEASE_INVALID", "原物化任务租约或 nonce 不匹配", 403)
 
     def _host_sources(
         self, principal: SelfTestPrincipal, batch: SelfTestBatch, payload: MaterializedReceipt
@@ -615,6 +798,13 @@ class SelfTestAgentService:
             )
 
     async def _ready(self, batch: SelfTestBatch, rows: list[SelfTestScenarioResult]) -> None:
+        await self._freeze_resources(batch, rows)
+        batch.generation_stage, batch.readiness, batch.phase = "ready", "ready", "ready"
+        batch.reason_codes, batch.lease_hash = [], None
+
+    async def _freeze_resources(
+        self, batch: SelfTestBatch, rows: list[SelfTestScenarioResult]
+    ) -> None:
         actor = await self.access.actor(batch.created_by_id, batch.project_id, editing=True)
         manifest = FrozenBatchManifest.model_validate(batch.frozen_manifest)
         installation = await self.access.installation(batch.project_id, batch.installation_id)
@@ -643,8 +833,6 @@ class SelfTestAgentService:
                 "snapshot": snapshot.model_dump(mode="json"),
             }
         )
-        batch.generation_stage, batch.readiness, batch.phase = "ready", "ready", "ready"
-        batch.reason_codes, batch.lease_hash = [], None
 
     async def prepared(
         self,
@@ -662,6 +850,15 @@ class SelfTestAgentService:
         rows = await self.repository.scenarios(batch.id)
         if any(row.published_assets is None for row in rows):
             raise self_test_error("SELFTEST_FIXED_ASSETS_MISSING", "固定包发布映射不完整")
+        batch.generation_summary = (
+            GenerationState.model_validate(batch.generation_summary or {})
+            .model_copy(
+                update={
+                    "preparation_lease_digest": token_digest(payload.lease_token),
+                }
+            )
+            .model_dump(mode="json")
+        )
         await self._ready(batch, rows)
         await self.session.commit()
         actor = await self.access.actor(batch.created_by_id, project_id, editing=True)

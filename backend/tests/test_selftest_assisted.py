@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
+from selftest_materialization_helpers import finalize_fixture_materialization
 from test_selftest_product_api import ProductContext
 from test_selftest_product_api import product as product
 from test_selftest_product_sources import _materialized
@@ -48,8 +49,8 @@ async def assisted_contract(product: ProductContext) -> tuple[dict, dict, dict]:
         "authorized_budget_digest": OLD_GRANT,
         "actual_tool_calls": 40,
     }
-    before = await product.post(
-        product.agent + f"/runs/{before['id']}/materialized", original, machine="h"
+    before = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{before['id']}/materialized", original, machine="h"
     )
     async with product.native.session_maker() as session:
         model = await session.get(SelfTestBatch, UUID(before["id"]))
@@ -230,8 +231,8 @@ async def test_assisted_new_batch_keeps_origin_and_real_manual_reviews(
     product: ProductContext, owned_storage: object
 ) -> None:
     task, before, payload = await assisted_contract(product)
-    current = await product.post(
-        product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
+    current = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
     )
     assert current["phase"] == "ready" and current["resource_digest"] != before["resource_digest"]
     assert current["id"] != before["id"] and current["plan_run_ids"] == []
@@ -350,8 +351,8 @@ async def test_assisted_sealed_history_retains_before_availability(
     from app.models.artifacts import Artifact
 
     task, before, payload = await assisted_contract(product)
-    await product.post(
-        product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
+    await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
     )
     async with product.native.session_maker() as session:
         model = await session.get(SelfTestBatch, UUID(task["task_id"]))
@@ -459,8 +460,8 @@ async def test_assisted_execution_rechecks_before_evidence_before_queue(
     from app.models.artifacts import Artifact
 
     task, _, payload = await assisted_contract(product)
-    ready = await product.post(
-        product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
+    ready = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
     )
     async with product.native.session_maker() as session:
         artifact = await session.get(

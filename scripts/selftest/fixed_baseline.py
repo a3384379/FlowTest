@@ -576,6 +576,7 @@ async def install_fixed_baseline(
     output_dir: Path,
     pack: CorePack | None = None,
     dynamic_batch: bool = False,
+    on_asset: Callable[[FixedAsset], Awaitable[None]] | None = None,
 ) -> FixedInstallation:
     frozen = pack or load_core_pack()
     if (
@@ -649,6 +650,7 @@ async def install_fixed_baseline(
                 api_sources=_pinned_sources(project_id, source),
             )
         )
+        await _acknowledge_fixed_asset(on_asset, assets[-1])
     suites = [
         item
         for item in mappings
@@ -712,6 +714,13 @@ async def install_fixed_baseline(
     )
     write_json(output_dir / "installation.json", installed)
     return installed
+
+
+async def _acknowledge_fixed_asset(
+    callback: Callable[[FixedAsset], Awaitable[None]] | None, asset: FixedAsset
+) -> None:
+    if callback is not None:
+        await callback(asset)
 
 
 def _wire_matches(fixture: CoreFixture, observed: ScenarioObservation) -> bool:

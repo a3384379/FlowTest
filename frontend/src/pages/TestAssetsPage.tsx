@@ -1,3 +1,4 @@
+import { SelfTestAssetContext } from '../features/self-test/SelfTestProposalBacklink'
 import { useRouteScopedState } from '../lib/use-route-scoped-state'
 import AssetCatalogFilters from '../features/test-assets/AssetCatalogFilters'
 import CaseCatalogResult from '../features/test-assets/CaseCatalogResult'
@@ -233,6 +234,7 @@ function TestAssetsWorkspace() {
 
   return (
     <div className="test-assets-page">
+      <SelfTestAssetContext projectId={state.projectId} />
       <AssetHeading state={state} onFilter={() => resetSelection()} />
       <AssetCatalogFilters
         projectId={state.projectId}

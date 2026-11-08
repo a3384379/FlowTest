@@ -8,15 +8,13 @@ import { selfTestKeys, useSelfTestIdentity, type SelfTestIdentity } from './self
 import * as api from './self-test-service'
 import type { SelfTestBatch } from './self-test-contract'
 import { isDispatchRecovery } from './self-test-dispatch-recovery'
+import { selfTestPollingInterval } from './self-test-polling'
 
 type Context = {
   identity: SelfTestIdentity
   projectId: string
   enabled: boolean
   location: ReturnType<typeof selfTestLocation>
-}
-export function batchIsActive(batch: SelfTestBatch | undefined) {
-  return Boolean(batch && !['completed', 'cancelled', 'expired'].includes(batch.phase))
 }
 function useCatalogs(context: Context) {
   const { identity, projectId, enabled } = context
@@ -73,7 +71,8 @@ function useBatch(context: Context) {
     queryKey: batchKey,
     queryFn: ({ signal }) => api.getSelfTestBatch(projectId, location.batchId!, signal),
     enabled: enabled && Boolean(location.batchId),
-    refetchInterval: (query) => (batchIsActive(query.state.data) ? 2000 : false),
+    refetchInterval: (query) =>
+      selfTestPollingInterval(query.state.data, [], query.state.dataUpdateCount, query.state.error),
     refetchIntervalInBackground: false,
   })
   const selectedBatch = batch.isSuccess ? batch.data : undefined
@@ -81,7 +80,8 @@ function useBatch(context: Context) {
     queryKey: selfTestKeys.generation(identity, location.batchId),
     queryFn: ({ signal }) => api.getSelfTestGeneration(projectId, location.batchId!, signal),
     enabled: enabled && selectedBatch?.batch_kind === 'mcp_generated',
-    refetchInterval: batchIsActive(selectedBatch) ? 2000 : false,
+    refetchInterval: (query) =>
+      selfTestPollingInterval(selectedBatch, [], query.state.dataUpdateCount, query.state.error),
     refetchIntervalInBackground: false,
   })
   const filters = {
@@ -98,7 +98,13 @@ function useBatch(context: Context) {
     queryFn: ({ signal }) =>
       api.listSelfTestScenarios(projectId, location.batchId!, filters, signal),
     enabled: enabled && batch.isSuccess,
-    refetchInterval: batchIsActive(selectedBatch) ? 2000 : false,
+    refetchInterval: (query) =>
+      selfTestPollingInterval(
+        selectedBatch,
+        query.state.data?.items,
+        query.state.dataUpdateCount,
+        query.state.error,
+      ),
     refetchIntervalInBackground: false,
   })
   return { batch, batchInvalidated, selectedBatch, generation, scenarios }
@@ -147,9 +153,12 @@ function useAuthority(
   return {
     permissions: capabilities.permissions,
     executeAllowed: capabilities.canExecute,
-    canInitialize: [capabilities.canEdit, freshBinding, bindingActions.can_initialize].every(
-      Boolean,
-    ),
+    canInitialize: [
+      capabilities.canEdit,
+      freshBinding,
+      !scopeMismatch,
+      bindingActions.can_initialize,
+    ].every(Boolean),
     canGenerate: [
       capabilities.canEdit,
       freshBinding,

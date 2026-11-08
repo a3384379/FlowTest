@@ -859,6 +859,59 @@ describe('published resource confirmation', () => {
     protocol_receipts_digest: 'a'.repeat(64),
     generation_manifest: { id: ids.task, sha256: 'a'.repeat(64), kind: 'generation' },
   }
+  it('creates an assisted task from the complete sealed selection without invoking a new model', async () => {
+    let writes = 0
+    server.use(
+      http.get(`${base}/runs/${ids.batch}`, () =>
+        HttpResponse.json({
+          ...selfTestBatch,
+          generation_mode: 'host_llm_mcp',
+          verification_scope: 'diagnostic_subset',
+          resource_digest: 'a'.repeat(64),
+        }),
+      ),
+      http.get(`${base}/runs/${ids.batch}/generation`, () =>
+        HttpResponse.json({ ...generation, generation_mode: 'host_llm_mcp', sources: [source] }),
+      ),
+      http.post(
+        `${base}/installations/${ids.installation}/generation-batches`,
+        async ({ request }) => {
+          const body = (await request.json()) as {
+            assisted_before_batch_id: string
+            generation_mode: string
+            scenario_ids: string[]
+            verification_scope: string
+          }
+          expect(body.assisted_before_batch_id).toBe(ids.batch)
+          expect(body.generation_mode).toBe('host_llm_mcp')
+          expect(body.scenario_ids).toEqual(['ST-MCP-023'])
+          expect(body.verification_scope).toBe('diagnostic_subset')
+          writes += 1
+          return HttpResponse.json(
+            {
+              error: {
+                code: 'SELFTEST_HOST_EVIDENCE_UNAUTHORIZED',
+                message: '部署授权尚未登记',
+                trace_id: 'assisted-trace',
+              },
+            },
+            { status: 403 },
+          )
+        },
+      ),
+    )
+    mount()
+    const button = await screen.findByRole('button', { name: '创建辅助修订批次' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await userEvent.click(button)
+    const drawer = within(screen.getByRole('dialog'))
+    expect(drawer.queryByRole('combobox', { name: '选择场景' })).not.toBeInTheDocument()
+    expect(drawer.getByText(/本次不调用模型/)).toBeVisible()
+    await userEvent.click(drawer.getByRole('checkbox'))
+    await userEvent.click(drawer.getByRole('button', { name: '创建辅助修订批次' }))
+    expect(await drawer.findByText(/部署授权尚未登记/)).toBeVisible()
+    expect(writes).toBe(1)
+  })
   it('renders a real one-of-six subset and the three capability areas without an all-pack success banner', async () => {
     server.use(
       http.get(`${base}/templates`, () =>

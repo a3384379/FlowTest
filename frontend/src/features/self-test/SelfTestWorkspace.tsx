@@ -1,3 +1,7 @@
+import { useQueryClient } from '@tanstack/react-query'
+import { selfTestScope } from './self-test-query-keys'
+import SelfTestInsights from './SelfTestInsights'
+import SelfTestInstallationDetails from './SelfTestInstallationDetails'
 import { useEffect } from 'react'
 import {
   Alert,
@@ -13,13 +17,13 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { apiErrorWithTrace } from '../../lib/api'
 import { useSelfTests, type SelfTestState } from './use-self-tests'
 import type { SelfTestBatch } from './self-test-contract'
-import { selfTestReportPath } from './self-test-navigation'
+import { selfTestReportPath, selfTestReferenceWithContext } from './self-test-navigation'
 import { RawExecutionStatus, VerificationStatusTag } from './SelfTestStatus'
 import {
   phaseLabels,
@@ -38,20 +42,22 @@ import SelfTestResourceSnapshot from './SelfTestResourceSnapshot'
 import SelfTestGeneration from './SelfTestGeneration'
 import SelfTestSetupDrawer from './SelfTestSetupDrawer'
 import SelfTestBatchDrawer from './SelfTestBatchDrawer'
+import { canReviseBatch } from './self-test-assisted'
 import { useSelfTestCommand } from './use-self-test-command'
 import { cancelSelfTestBatch } from './self-test-service'
 import { isDispatchRecovery } from './self-test-dispatch-recovery'
+import { nativeCancellationPending } from './self-test-polling'
 import { SelfTestCapabilities, SelfTestScopeBanner, SelfTestSidebar } from './SelfTestOverview'
 import SelfTestIdentityValue from './SelfTestIdentityValue'
+import SelfTestHelpDrawer, { SelfTestGettingStarted } from './SelfTestGettingStarted'
 import './self-test.css'
-type Dialog = 'setup' | 'generate' | 'native' | 'execute' | null
+type Dialog =
+  'setup' | 'assisted' | 'generate' | 'native' | 'execute' | 'deployment' | 'usage' | null
 
 export default function SelfTestWorkspace() {
   const state = useSelfTests()
   const scope = `${state.identity.userId}:${state.identity.organizationId}:${state.identity.epoch}:${state.location.mode}:${state.location.bindingId}`
-  const [dialog, setDialog] = useRouteScopedState<
-    'setup' | 'generate' | 'native' | 'execute' | null
-  >(state.projectId, scope, null)
+  const [dialog, setDialog] = useRouteScopedState<Dialog>(state.projectId, scope, null)
   const cancel = useCancel(state)
   const batch = state.selectedBatch
   const select = state.select
@@ -87,11 +93,17 @@ export default function SelfTestWorkspace() {
       </Card>
       <WorkspaceNotices state={state} cancel={cancel} />
       <WorkspaceSelectors state={state} />
-      <SelfTestScopeBanner state={state} />
+      {!state.scopeMismatch && <SelfTestScopeBanner state={state} />}
       <SelfTestCapabilities />
-      <WorkspaceData state={state} />
+      <WorkspaceData state={state} onConfigure={() => setDialog('deployment')} />
       {dialog === 'setup' && <SelfTestSetupDrawer state={state} onClose={() => setDialog(null)} />}
-      {dialog && dialog !== 'setup' && (
+      {(dialog === 'deployment' || dialog === 'usage') && (
+        <SelfTestHelpDrawer state={state} initialTab={dialog} onClose={() => setDialog(null)} />
+      )}
+      {(dialog === 'assisted' ||
+        dialog === 'generate' ||
+        dialog === 'native' ||
+        dialog === 'execute') && (
         <SelfTestBatchDrawer
           key={`${scope}:${state.location.installationId}:${state.location.batchId}:${dialog}`}
           state={state}
@@ -222,6 +234,7 @@ function FrozenBatchDetails({ batch }: { batch: SelfTestBatch }) {
   )
 }
 function ScenarioResults({ state }: { state: SelfTestState }) {
+  const [params] = useSearchParams()
   const projectId = state.projectId!
   const batch = state.selectedBatch!
   const rows = state.scenarios.isSuccess ? state.scenarios.data.items : []
@@ -324,7 +337,10 @@ function ScenarioResults({ state }: { state: SelfTestState }) {
                       to={selfTestReportPath(
                         projectId,
                         { executionId: item.execution_id! },
-                        { batchId: batch.id, scenarioId: row.scenario_id },
+                        selfTestReferenceWithContext(
+                          { batchId: batch.id, scenarioId: row.scenario_id },
+                          params,
+                        ),
                       )}
                     >
                       执行 {index + 1} · {item.execution_id!.slice(0, 8)}
@@ -376,6 +392,7 @@ function WorkspaceHeading({
   setDialog: (value: Dialog) => void
   cancel: ReturnType<typeof useCancel>
 }) {
+  const client = useQueryClient()
   return (
     <>
       <div className="page-heading">
@@ -386,6 +403,8 @@ function WorkspaceHeading({
           </Typography.Paragraph>
         </div>
         <Space wrap>
+          <Button onClick={() => setDialog('deployment')}>配置自测环境</Button>
+          <Button onClick={() => setDialog('usage')}>使用指南</Button>
           <Button disabled={!state.canInitialize} onClick={() => setDialog('setup')}>
             初始化自测
           </Button>
@@ -411,6 +430,14 @@ function WorkspaceHeading({
               {isDispatchRecovery(state.selectedBatch) ? '恢复原运行派发' : '执行已发布产物'}
             </Button>
           )}
+          {state.location.mode === 'mcp_generation' && (
+            <Button
+              disabled={!state.canGenerate || !canReviseBatch(state)}
+              onClick={() => setDialog('assisted')}
+            >
+              创建辅助修订批次
+            </Button>
+          )}
           <Button
             disabled={!state.canCancel}
             loading={cancel.pending}
@@ -423,9 +450,14 @@ function WorkspaceHeading({
               void Promise.all([
                 state.bindings.refetch(),
                 state.permissions.refetch(),
+                client.refetchQueries({ queryKey: [...selfTestScope(state.identity), 'insights'] }),
                 ...(state.location.installationId ? [state.installation.refetch()] : []),
+                ...(state.selectedInstallation ? [state.runs.refetch()] : []),
                 ...(state.location.batchId
                   ? [state.batch.refetch(), state.scenarios.refetch()]
+                  : []),
+                ...(state.location.batchId && state.location.mode === 'mcp_generation'
+                  ? [state.generation.refetch()]
                   : []),
               ])
             }
@@ -462,6 +494,14 @@ function WorkspaceNotices({
       />
       {Boolean(cancel.error) && (
         <Alert type="error" showIcon title={apiErrorWithTrace(cancel.error)} />
+      )}
+      {nativeCancellationPending(state.selectedBatch, state.scenarios.data?.items) && (
+        <Alert
+          type="warning"
+          showIcon
+          title="取消请求已记录，原生执行尚未确认停止"
+          description="原始终态仍需单独读取；取消或到期不代表执行已终止。可通过刷新状态重新核对。"
+        />
       )}
       {state.scopeMismatch && (
         <Alert
@@ -546,19 +586,28 @@ function WorkspaceSelectors({ state }: { state: SelfTestState }) {
   )
 }
 
-function WorkspaceData({ state }: { state: SelfTestState }) {
+function WorkspaceData({ state, onConfigure }: { state: SelfTestState; onConfigure: () => void }) {
   const batch = state.selectedBatch
   return (
     <>
-      <BindingSelectionNotice state={state} />
       <div className="self-test-workspace-layout">
         <div className="self-test-workspace-main">
+          <BindingSelectionNotice state={state} onConfigure={onConfigure} />
           {state.selectedInstallation && (
             <Alert
               type={state.selectedInstallation.status === 'blocked' ? 'error' : 'info'}
               showIcon
               title={`安装状态：${installationStatusLabels[state.selectedInstallation.status]}`}
-              description={<SelfTestReasons reasons={state.selectedInstallation.reason_codes} />}
+              description={
+                <>
+                  <SelfTestReasons reasons={state.selectedInstallation.reason_codes} />
+                  <SelfTestInstallationDetails
+                    allowed={state.canInitialize}
+                    installation={state.selectedInstallation}
+                    projectId={state.projectId!}
+                  />
+                </>
+              }
             />
           )}
           {!batch && state.binding && (
@@ -570,6 +619,7 @@ function WorkspaceData({ state }: { state: SelfTestState }) {
           {batch && !state.scopeMismatch && (
             <>
               <BatchSummary state={state} />
+              <SelfTestInsights projectId={state.projectId!} batch={batch} />
               {state.location.mode === 'mcp_generation' && state.generation.isSuccess && (
                 <SelfTestGeneration
                   projectId={state.projectId!}
@@ -577,7 +627,11 @@ function WorkspaceData({ state }: { state: SelfTestState }) {
                   batch={batch}
                 />
               )}
-              <SelfTestResourceSnapshot snapshot={batch.resource_snapshot} />
+              <SelfTestResourceSnapshot
+                projectId={state.projectId!}
+                batchId={batch.id}
+                snapshot={batch.resource_snapshot}
+              />
               <ScenarioResults state={state} />
               <Card title="批次产物">
                 <SelfTestArtifacts
@@ -625,20 +679,19 @@ function installationOptions(state: SelfTestState) {
   )
 }
 
-function BindingSelectionNotice({ state }: { state: SelfTestState }) {
+function BindingSelectionNotice({
+  state,
+  onConfigure,
+}: {
+  state: SelfTestState
+  onConfigure: () => void
+}) {
+  if (state.binding || state.bindings.isPending) return null
+  if (state.bindings.isSuccess && state.bindings.data.items.length === 0)
+    return <SelfTestGettingStarted onConfigure={onConfigure} />
   return (
-    <>
-      {!state.binding && !state.bindings.isLoading && (
-        <Empty
-          description={
-            state.bindings.isError
-              ? '绑定读取失败，请重试'
-              : state.bindings.data?.items.length
-                ? '请选择已登记且授权的绑定'
-                : '没有已登记的自测绑定，请由部署管理员配置外部宿主与隔离目标'
-          }
-        />
-      )}
-    </>
+    <Empty
+      description={state.bindings.isError ? '绑定读取失败，请重试' : '请选择已登记且授权的绑定'}
+    />
   )
 }

@@ -9,6 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api.dependencies import CurrentUser, SessionDependency, TestPlanQueue, bearer_scheme
 from app.core.self_tests import SelfTestPrincipal, SelfTestSettings, get_self_test_settings
+from app.schemas.self_test_insights import InstallationResume, SelfTestInsights
 from app.schemas.self_tests import (
     AgentArtifactUpload,
     AgentRegistrationRequest,
@@ -24,6 +25,7 @@ from app.schemas.self_tests import (
     GenerationProgress,
     GenerationSummary,
     InstallationCreate,
+    InstallationFailure,
     InstallationPreviewRequest,
     InstallationPreviewResponse,
     InstallationReceipt,
@@ -50,6 +52,32 @@ agent_router = APIRouter(prefix="/agent/projects/{project_id}/self-tests")
 verification_router = APIRouter(prefix="/ci/projects/{project_id}/self-test-runs")
 
 
+@router.post("/installations/{identifier}/resume", response_model=InstallationResponse)
+async def resume_installation(
+    project_id: UUID,
+    identifier: UUID,
+    payload: InstallationResume,
+    current_user: CurrentUser,
+    session: SessionDependency,
+    config: Config,
+    idempotency_key: IdempotencyKey = None,
+) -> InstallationResponse:
+    return await SelfTestService(session, config).resume_installation(
+        current_user, project_id, identifier, payload, idempotency_key
+    )
+
+
+@router.get("/runs/{identifier}/insights", response_model=SelfTestInsights)
+async def insights(
+    project_id: UUID,
+    identifier: UUID,
+    current_user: CurrentUser,
+    session: SessionDependency,
+    config: Config,
+) -> SelfTestInsights:
+    return await SelfTestService(session, config).insights(current_user, project_id, identifier)
+
+
 async def external_principal(
     config: Config,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
@@ -60,6 +88,20 @@ async def external_principal(
 
 
 Agent = Annotated[SelfTestPrincipal, Depends(external_principal)]
+
+
+@agent_router.post("/installations/{identifier}/failure", response_model=InstallationResponse)
+async def installation_failed(
+    project_id: UUID,
+    identifier: UUID,
+    payload: InstallationFailure,
+    principal: Agent,
+    session: SessionDependency,
+    config: Config,
+) -> InstallationResponse:
+    return await SelfTestAgentService(session, config).installation_failed(
+        principal, project_id, identifier, payload
+    )
 
 
 @router.get("/templates", response_model=SelfTestPage[TemplateResponse])

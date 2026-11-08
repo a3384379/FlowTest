@@ -1,11 +1,9 @@
 import { Card, Descriptions, Empty, Space, Steps, Table, Tag, Typography } from 'antd'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import type { SelfTestBatch, SelfTestGeneration } from './self-test-contract'
-import { selfTestProposalPath } from './self-test-navigation'
+import { selfTestProposalPath, selfTestReferenceWithContext } from './self-test-navigation'
 
-function stageIndex(generation: SelfTestGeneration, batch: SelfTestBatch) {
-  if (['collecting', 'completed'].includes(batch.phase)) return 6
-  if (batch.phase === 'running') return 5
+function progressItems(generation: SelfTestGeneration, batch: SelfTestBatch) {
   const stages: Record<string, number> = {
     discovering: 0,
     reading_contract: 0,
@@ -16,7 +14,44 @@ function stageIndex(generation: SelfTestGeneration, batch: SelfTestBatch) {
     publishing: 4,
     ready: 4,
   }
-  return stages[generation.stage] ?? 0
+  const current = stages[generation.stage] ?? 0
+  const terminal = ['completed', 'cancelled', 'expired'].includes(batch.phase)
+  const blocked = ['blocked', 'cancelled'].includes(generation.stage) || terminal
+  const proposed = generation.proposals.length > 0
+  const reviewed =
+    proposed && generation.proposals.every((item) => item.review_status === 'accepted')
+  const published =
+    generation.sources.length === batch.expected_count && Boolean(batch.resource_digest)
+  const ran = batch.plan_run_ids.length > 0
+  const verified = ran && Boolean(batch.sealed_at) && batch.evidence_integrity === 'complete'
+  const done = [
+    proposed || current > 0,
+    proposed || current > 1,
+    proposed,
+    reviewed,
+    published,
+    ran && batch.phase === 'completed',
+    verified,
+  ]
+  return [
+    '契约发现',
+    '设计生成',
+    '流程提案',
+    '待人工审核',
+    '发布固定版本',
+    '正式执行',
+    '独立核验',
+  ].map((title, index) => ({
+    title,
+    status: (done[index]
+      ? 'finish'
+      : blocked
+        ? 'wait'
+        : index === current || (index === 5 && ran)
+          ? 'process'
+          : 'wait') as 'finish' | 'wait' | 'process',
+    description: done[index] ? '已有回执' : blocked ? '未完成' : undefined,
+  }))
 }
 export default function SelfTestGenerationProgress({
   projectId,
@@ -27,6 +62,7 @@ export default function SelfTestGenerationProgress({
   generation: SelfTestGeneration
   batch: SelfTestBatch
 }) {
+  const [params] = useSearchParams()
   const pending = generation.proposals.filter((proposal) => proposal.review_status === 'pending')
   return (
     <div className="self-test-generation-progress">
@@ -36,20 +72,7 @@ export default function SelfTestGenerationProgress({
           设计、审核发布、正式运行与独立核验分别记录
         </Typography.Text>
       </div>
-      <Steps
-        size="small"
-        current={stageIndex(generation, batch)}
-        status={['blocked', 'cancelled'].includes(generation.stage) ? 'error' : 'process'}
-        items={[
-          '契约发现',
-          '设计生成',
-          '流程提案',
-          '待人工审核',
-          '发布固定版本',
-          '正式执行',
-          '独立核验',
-        ].map((title) => ({ title }))}
-      />
+      <Steps size="small" items={progressItems(generation, batch)} />
       <div className="self-test-generation-layout">
         <div className="self-test-evidence">
           <div className="self-test-summary self-test-metric-cards">
@@ -124,7 +147,7 @@ export default function SelfTestGenerationProgress({
                         projectId,
                         proposal.route === 'flow_spec_visual' ? 'flow_spec' : 'controlled_write',
                         proposal.change_set_id,
-                        { batchId: generation.batch_id },
+                        selfTestReferenceWithContext({ batchId: generation.batch_id }, params),
                       )}
                     >
                       查看提案

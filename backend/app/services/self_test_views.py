@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.self_tests import SelfTestBinding, SelfTestSettings
 from app.core.storage import ObjectAvailability
 from app.domain.self_tests import aware, document_digest
+from app.models.ai import AIChangeItem, AIChangeSet
 from app.models.artifacts import Artifact
 from app.models.self_tests import SelfTestBatch, SelfTestInstallation, SelfTestScenarioResult
-from app.models.tasking import TestPlanRunItem
+from app.models.tasking import TestPlanRun, TestPlanRunItem
 from app.models.workflows import WorkflowExecution
 from app.schemas.self_tests import (
     Actions,
@@ -23,6 +24,7 @@ from app.schemas.self_tests import (
     GenerationState,
     GenerationSummary,
     InstallationResponse,
+    ProposalReference,
     ScenarioAssets,
     ScenarioResultResponse,
     SourceReference,
@@ -199,11 +201,25 @@ class SelfTestViews:
                 "artifacts": refs,
                 "actions": Actions(
                     can_execute=editing and ready,
-                    can_cancel=editing and not finished,
+                    can_cancel=editing and (not finished or await self._cancel_retryable(model)),
                     reason_codes=tuple(reasons),
                 ),
             }
         )
+
+    async def _cancel_retryable(self, model: SelfTestBatch) -> bool:
+        if model.sealed_at is not None or model.phase not in {"cancelled", "expired"}:
+            return False
+        for identifier in model.plan_run_ids:
+            run = await self.session.get(TestPlanRun, UUID(identifier))
+            if run is None or run.project_id != model.project_id:
+                return True
+            if (
+                run.status not in {"passed", "failed", "cancelled"}
+                and run.cancel_requested_at is None
+            ):
+                return True
+        return False
 
     async def _assisted_integrity(self, model: SelfTestBatch) -> str:
         try:
@@ -338,6 +354,13 @@ class SelfTestViews:
     ) -> GenerationSummary:
         state = GenerationState.model_validate(batch.generation_summary or {})
         response = await self.batch(batch, editing=editing)
+        proposals = {(item.change_set_id, item.item_id): item for item in state.proposals}
+        proposals.update(
+            {
+                (item.change_set_id, item.item_id): item
+                for item in await self._human_proposals(batch)
+            }
+        )
         return GenerationSummary.model_validate(
             {
                 "batch_id": batch.id,
@@ -347,7 +370,7 @@ class SelfTestViews:
                 "reason_codes": response.reason_codes,
                 "host_status": self.host_status(installation, batch.generation_mode),
                 "tool_call_count": state.tool_call_count,
-                "proposals": state.proposals,
+                "proposals": tuple(proposals.values()),
                 "sources": [
                     SourceReference.model_validate(row.source)
                     for row in rows
@@ -356,4 +379,36 @@ class SelfTestViews:
                 "manifest": state.manifest,
                 "actions": response.actions,
             }
+        )
+
+    async def _human_proposals(self, batch: SelfTestBatch) -> tuple[ProposalReference, ...]:
+        from app.services.self_test_access import self_test_error
+
+        query = (
+            select(AIChangeSet, AIChangeItem)
+            .join(AIChangeItem, AIChangeItem.change_set_id == AIChangeSet.id)
+            .where(
+                AIChangeSet.project_id == batch.project_id,
+                AIChangeSet.actor_type == "user",
+                AIChangeSet.source_snapshot["selftest_assisted_batch_id"].as_string()
+                == str(batch.id),
+                AIChangeItem.item_type == "test_case",
+            )
+            .limit(101)
+        )
+        rows = (await self.session.execute(query)).all()
+        if len(rows) > 100:
+            raise self_test_error("SELFTEST_PROPOSAL_LIMIT", "人工修订提案超过有界展示范围")
+        return tuple(
+            ProposalReference.model_validate(
+                {
+                    "change_set_id": proposal.id,
+                    "item_id": item.id,
+                    "route": "controlled_write",
+                    "content_fingerprint": proposal.source_fingerprint,
+                    "review_status": item.review_status,
+                    "materialized_resource_id": item.materialized_resource_id,
+                }
+            )
+            for proposal, item in rows
         )

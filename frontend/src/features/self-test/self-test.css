@@ -17,6 +17,39 @@
 .self-test-hero .ant-typography {
   margin-bottom: 6px;
 }
+.self-test-getting-started .ant-steps {
+  margin-block: 24px;
+}
+.self-test-help-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.self-test-help-content section .ant-typography:last-child {
+  margin-bottom: 0;
+}
+.self-test-settings-list {
+  margin-bottom: 0;
+}
+.self-test-settings-list dt {
+  overflow-wrap: anywhere;
+}
+.self-test-settings-list dd {
+  margin: 6px 0 14px;
+  color: var(--ft-text-secondary);
+}
+.self-test-deployment-checklist {
+  margin-top: 16px;
+}
+.self-test-deployment-checklist summary {
+  cursor: pointer;
+}
+.self-test-deployment-checklist pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px/1.7 var(--ft-font-mono);
+}
 .self-test-workspace .ant-card,
 .self-test-report-card.ant-card {
   border-color: #e2ebf6;

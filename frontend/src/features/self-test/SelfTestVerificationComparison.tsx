@@ -1,4 +1,6 @@
-import { Alert, Table, Tag, Typography } from 'antd'
+import { useSelfTestInsights } from './use-self-test-insights'
+import QueryFailureNotice from '../../components/QueryFailureNotice'
+import { Alert, Button, Table, Tag, Typography } from 'antd'
 import type { ReportExecutionDetail } from '../../lib/api'
 import type { SelfTestBatch, SelfTestScenario } from './self-test-contract'
 
@@ -23,6 +25,8 @@ export default function SelfTestVerificationComparison({
   trusted,
   detail,
 }: ComparisonProps) {
+  const insights = useSelfTestInsights(batch.project_id, batch)
+  const comparison = confirmedComparison(insights.isSuccess ? insights.data : undefined, scenario)
   const native = failureEvidence(detail)
   const observed = detail?.summary.status ?? scenario.observed_status
   const matched = trusted && scenario.verification_status === 'matched'
@@ -49,22 +53,19 @@ export default function SelfTestVerificationComparison({
           description={native.locations.join('；')}
         />
       )}
+      <QueryFailureNotice queries={[insights]} />
+      <Button loading={insights.isFetching} onClick={() => void insights.refetch()}>
+        刷新逐项核验
+      </Button>
+      {!comparison && (
+        <Alert type="info" title="尚无当前执行的完整 Observer 对照，请等待回执或查看原始证据。" />
+      )}
       <Table
         rowKey="key"
         size="small"
         pagination={false}
         scroll={{ x: 600 }}
-        dataSource={[
-          statusRow(scenario, observed),
-          errorRow(scenario, native, Boolean(detail)),
-          {
-            key: 'requests',
-            item: '请求次数 / 分支 / 迭代',
-            expected: '以冻结清单为准',
-            observed: '当前摘要未提供，详见执行与核验证据',
-            comparison: '以独立核验回执为准',
-          },
-        ]}
+        dataSource={comparisonRows(comparison, scenario, native, observed, Boolean(detail))}
         columns={[
           { title: '核验项', dataIndex: 'item' },
           { title: '固定期望', dataIndex: 'expected' },
@@ -156,4 +157,42 @@ function errorRow(
       : '当前摘要未提供，详见独立核验 JSON',
     comparison,
   }
+}
+
+function confirmedComparison(
+  data: import('./self-test-contract').SelfTestInsights | undefined,
+  scenario: SelfTestScenario,
+) {
+  return data?.comparisons.find(
+    (item) =>
+      item.scenario_id === scenario.scenario_id &&
+      item.variant_key === scenario.variant_key &&
+      scenario.executions.some((run) => run.execution_id === item.execution_id),
+  )
+}
+
+function differenceLabel(value: 'equal' | 'different' | 'not_recorded' | 'not_required') {
+  return {
+    equal: '字段一致',
+    different: '字段存在差异',
+    not_recorded: '缺少实际证据',
+    not_required: '冻结清单未要求',
+  }[value]
+}
+
+function comparisonRows(
+  comparison: import('./self-test-contract').SelfTestInsights['comparisons'][number] | undefined,
+  scenario: SelfTestScenario,
+  native: FailureEvidence,
+  observed: string | null,
+  hasDetail: boolean,
+): ComparisonRow[] {
+  if (!comparison) return [statusRow(scenario, observed), errorRow(scenario, native, hasDetail)]
+  return comparison.items.map((item, index) => ({
+    key: String(index),
+    item: item.field,
+    expected: item.expected,
+    observed: item.observed,
+    comparison: `${differenceLabel(item.difference)}；场景回执：${item.verification_status} · ${item.reason_codes.join(' · ')}`,
+  }))
 }

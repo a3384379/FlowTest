@@ -19,6 +19,7 @@ from app.domain.self_tests import aware, document_digest
 from app.models.access import User
 from app.models.self_tests import SelfTestBatch, SelfTestInstallation, SelfTestScenarioResult
 from app.models.workflows import WorkflowExecution
+from app.schemas.self_test_insights import InstallationResume, SelfTestInsights
 from app.schemas.self_tests import (
     Actions,
     BatchCreate,
@@ -337,6 +338,58 @@ class SelfTestService:
             await self.access.installation(project_id, identifier), editing=editing
         )
 
+    async def resume_installation(
+        self,
+        actor: User,
+        project_id: UUID,
+        identifier: UUID,
+        payload: InstallationResume,
+        key: str | None = None,
+    ) -> InstallationResponse:
+        await self.authorize(actor, project_id, editing=True)
+        model = await self.access.installation(project_id, identifier)
+
+        async def action() -> InstallationResponse:
+            self.access.safe_binding(self.access.binding(project_id, model.binding_id))
+            self.access.frozen_binding(model)
+            if model.environment_fingerprint != payload.environment_fingerprint:
+                raise self_test_error(
+                    "SELFTEST_ENVIRONMENT_CHANGED", "环境指纹已变化, 请核对原安装"
+                )
+            if (
+                await self.repository.resume_installation(
+                    model, payload.expected_revision, datetime.now(UTC)
+                )
+                is None
+            ):
+                raise self_test_error(
+                    "SELFTEST_INSTALLATION_RESUME_CONFLICT",
+                    "安装已就绪、租约仍有效或状态已改变, 请刷新原安装",
+                )
+            await self.session.flush()
+            await self.session.refresh(model)
+            return self.views.installation(model, editing=True)
+
+        response = await IdempotencyService(self.session).run(
+            key=key,
+            project_id=project_id,
+            actor_key=f"user:{actor.id}",
+            operation=f"selftest.resume_installation:{identifier}",
+            request_payload=payload.model_dump(mode="json"),
+            action=action,
+            atomic_action=True,
+        )
+        if key is None:
+            await self.session.commit()
+        return InstallationResponse.model_validate(response)
+
+    async def insights(self, actor: User, project_id: UUID, identifier: UUID) -> SelfTestInsights:
+        from app.services.self_test_insights import SelfTestInsightService
+
+        await self.authorize(actor, project_id)
+        batch = await self.access.batch(project_id, identifier)
+        return await SelfTestInsightService(self.session, self.config).read(batch)
+
     async def create_batch(
         self, actor: User, project_id: UUID, identifier: UUID, payload: BatchCreate, key: str | None
     ) -> BatchResponse:
@@ -391,8 +444,8 @@ class SelfTestService:
                 raise self_test_error(
                     "SELFTEST_ASSISTED_MODE_INVALID", "辅助修订必须保留真实宿主来源"
                 )
-            await SelfTestAssistedSources(self.session, self.config).selection_sources(
-                installation.project_id, installation.id, binding.id, before_id, scenarios
+            await SelfTestAssistedSources(self.session, self.config).admit_namespace(
+                installation, before_id, scenarios
             )
         now, identifier = datetime.now(UTC), uuid4()
         manifest = FrozenBatchManifest(

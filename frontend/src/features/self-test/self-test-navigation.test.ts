@@ -5,10 +5,45 @@ import {
   selfTestLocation,
   selfTestReportPath,
   selfTestProposalPath,
+  selfTestReferenceWithContext,
+  selfTestPath,
+  carrySelfTestContext,
 } from './self-test-navigation'
 
 const batchId = '00000000-0000-4000-8000-000000000001'
 describe('self-test URL boundaries', () => {
+  it('carries only validated internal filters across review, assets and reports', () => {
+    const origin = new URLSearchParams(
+      `tab=selftest&mode=native&batch=${batchId}&category=engine&verification=matched&page=2&cursor=${batchId}`,
+    )
+    const reference = selfTestReferenceWithContext({ batchId, scenarioId: 'ST-ENGINE-001' }, origin)
+    const review = selfTestProposalPath('project', 'flow_spec', batchId, reference)
+    const asset = carrySelfTestContext(
+      '/projects/project/workflows?focus=asset&version=3',
+      new URLSearchParams(review.split('?')[1]),
+    )
+    const restored = selfTestPath(
+      'project',
+      reportSelfTestReference(new URLSearchParams(asset.split('?')[1]))!,
+    )
+    const result = new URLSearchParams(restored.split('?')[1])
+    expect(result.get('mode')).toBe('native')
+    expect(result.get('category')).toBe('engine')
+    expect(result.get('page')).toBe('2')
+    expect(result.get('cursor')).toBe(batchId)
+  })
+  it.each([
+    'https://outside.example/path',
+    'tab=selftest&mode=native&return=https://outside.example',
+    'tab=selftest&mode=native&page=0',
+    'tab=selftest&mode=native&mode=mcp_generation',
+  ])('drops unsafe return context %s', (value) => {
+    const params = new URLSearchParams({ selfTestBatch: batchId, selfTestReturn: value })
+    expect(reportSelfTestReference(params)).toEqual({ batchId })
+    expect(selfTestPath('project', reportSelfTestReference(params)!)).toMatch(
+      /^\/projects\/project\/quality\?/,
+    )
+  })
   it('keeps quality as default and unknown modes at the MCP view without commands', () => {
     expect(selfTestLocation(new URLSearchParams()).active).toBe(false)
     expect(selfTestLocation(new URLSearchParams('tab=selftest&mode=unknown')).mode).toBe(
@@ -59,4 +94,20 @@ describe('self-test URL boundaries', () => {
     )
     expect(reportSelfTestReference(new URLSearchParams('selfTestBatch=https://other'))).toBeNull()
   })
+})
+
+it('restores the original paginated scope without adding a server scenario filter', () => {
+  const origin = new URLSearchParams(
+    `tab=selftest&mode=mcp_generation&batch=${batchId}&page=2&category=mcp`,
+  )
+  const reference = selfTestReferenceWithContext({ batchId, scenarioId: 'ST-MCP-023' }, origin)
+  const restored = new URLSearchParams(selfTestPath('project', reference).split('?')[1])
+  expect(restored.get('page')).toBe('2')
+  expect(restored.get('scenario')).toBeNull()
+  expect(restored.get('category')).toBe('mcp')
+  const direct = new URLSearchParams(
+    selfTestPath('project', { batchId, scenarioId: 'ST-MCP-023' }).split('?')[1],
+  )
+  expect(direct.get('scenario')).toBe('ST-MCP-023')
+  expect(selfTestLocation(direct).page).toBe(1)
 })

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -27,6 +28,8 @@ from scripts.selftest.review_fixture_driver import (
     ReviewedCase,
     ReviewedWorkflow,
 )
+
+from app.domain.test_design_compilation import CompileTestDesignResponse
 
 
 class GeneratedAsset(Contract):
@@ -152,6 +155,7 @@ async def generate_canary(
     expected_actual: int,
     output_dir: Path,
     review_driver: ReviewDriver | None = None,
+    on_blocked_compilation: Callable[[CompileTestDesignResponse], Awaitable[None]] | None = None,
 ) -> GeneratedAsset:
     generated_at = datetime.now(UTC)
     golden = object_value(
@@ -271,6 +275,8 @@ async def generate_canary(
     )
     if compilation["readiness"] != "ready":
         write_json(output_dir / "blocked-compilation.json", compilation)
+        if on_blocked_compilation is not None:
+            await on_blocked_compilation(CompileTestDesignResponse.model_validate(compilation))
         raise HarnessError("SELFTEST_DESIGN_COMPILATION_NOT_READY")
     write_json(output_dir / "design-compilation.json", compilation)
     compiled = objects_value(compilation["scenarios"])[0]

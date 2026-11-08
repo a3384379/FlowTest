@@ -1,7 +1,8 @@
+import { carrySelfTestContext } from '../self-test/self-test-navigation'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Button, Collapse, Descriptions, Drawer, Typography } from 'antd'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import ResponseCodeReader from '../api-console/ResponseCodeReader'
@@ -17,6 +18,7 @@ export default function MCPMaterializedResult({
   projectId: string
   changeSetId: string
 }) {
+  const [params] = useSearchParams()
   if (item.review_status !== 'accepted') return null
   const id = item.materialized_resource_id
   if (!id) return <Alert type="warning" title="已审核，但服务器未提供物化结果定位" />
@@ -31,9 +33,11 @@ export default function MCPMaterializedResult({
     )
   const result = resultPath(item, projectId, id)
   if (!result) return <Alert type="warning" title="物化结果类型与变更项不匹配，无法提供安全定位" />
+  const context = new URLSearchParams(params)
+  context.set('selfTestProposal', changeSetId)
   return (
     <Typography.Paragraph>
-      <Link to={result.path}>{result.label}</Link>
+      <Link to={carrySelfTestContext(result.path, context)}>{result.label}</Link>
       <Typography.Text code>{id}</Typography.Text>
     </Typography.Paragraph>
   )

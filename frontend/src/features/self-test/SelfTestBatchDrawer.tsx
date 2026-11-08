@@ -1,3 +1,4 @@
+import { canReviseBatch } from './self-test-assisted'
 import { useState } from 'react'
 import {
   Alert,
@@ -29,7 +30,7 @@ export default function SelfTestBatchDrawer({
   onClose,
 }: {
   state: SelfTestState
-  operation: 'generate' | 'native' | 'execute'
+  operation: 'generate' | 'native' | 'execute' | 'assisted'
   onClose: () => void
 }) {
   const controller = useBatchController({ state, operation, onClose })
@@ -59,9 +60,33 @@ export default function SelfTestBatchDrawer({
       <Space orientation="vertical" style={{ width: '100%' }}>
         <BatchIdentity controller={controller} />
         <GenerationOptions controller={controller} />
+        {operation === 'assisted' && (
+          <Descriptions
+            column={1}
+            title="本次冻结修订范围"
+            items={[
+              { label: '原批次', children: state.selectedBatch?.id },
+              {
+                label: '完整场景',
+                children: state.selectedBatch?.expected_scenario_set
+                  .map((item) => `${item.scenario_id}/${item.variant_key}`)
+                  .join('、'),
+              },
+              { label: '核验范围', children: controller.scope },
+              {
+                label: '预算上限',
+                children: `${controller.seconds} 秒 / ${controller.requests} 请求 / ${controller.calls} 工具；本次模型调用固定为零`,
+              },
+            ]}
+          />
+        )}
         <BatchScopeOptions controller={controller} />
         {operation === 'execute' && (
-          <SelfTestResourceSnapshot snapshot={state.selectedBatch?.resource_snapshot} />
+          <SelfTestResourceSnapshot
+            projectId={state.projectId!}
+            batchId={state.selectedBatch?.id}
+            snapshot={state.selectedBatch?.resource_snapshot}
+          />
         )}
         <BatchConfirmation controller={controller} />
       </Space>
@@ -99,6 +124,17 @@ function GenerationOptions({ controller }: { controller: BatchController }) {
   const { state, operation, mode, setMode, template, resetConfirm } = controller
   return (
     <>
+      {operation === 'assisted' && (
+        <Alert
+          type="warning"
+          title="辅助修订，不计首次生成"
+          description={
+            '沿用所选原批次 ' +
+            state.selectedBatch?.id +
+            ' 的完整场景、安装和模型来源；本次不调用模型，仍需部署授权、人工审核与新版本发布。'
+          }
+        />
+      )}
       {operation === 'generate' && (
         <>
           <Select
@@ -147,7 +183,7 @@ function BatchScopeOptions({ controller }: { controller: BatchController }) {
   } = controller
   return (
     <>
-      {operation !== 'execute' && (
+      {operation !== 'execute' && operation !== 'assisted' && (
         <>
           <Select
             aria-label="核验范围"
@@ -232,7 +268,7 @@ function BatchConfirmation({ controller }: { controller: BatchController }) {
         onChange={(event) => setConfirmed(event.target.checked)}
       >
         我确认上述身份、范围和预算
-        {operation === 'generate'
+        {operation === 'generate' || operation === 'assisted'
           ? '，仅创建生成任务'
           : operation === 'execute' && isDispatchRecovery(state.selectedBatch)
             ? '，恢复上述原生 Run 的派发'
@@ -254,13 +290,14 @@ function useBatchController({
   onClose,
 }: {
   state: SelfTestState
-  operation: 'generate' | 'native' | 'execute'
+  operation: 'generate' | 'native' | 'execute' | 'assisted'
   onClose: () => void
 }) {
   const [confirmed, setConfirmed] = useState(false)
-  const [mode, setMode] = useState<GenerationInput['generation_mode']>('deterministic_mcp')
-  const [scope, setScope] = useState<BatchInput['verification_scope']>('full_pack')
-  const [scenarioIds, setScenarioIds] = useState<string[]>([])
+  const initial = initialSelection(state, operation)
+  const [mode, setMode] = useState<GenerationInput['generation_mode']>(initial.mode)
+  const [scope, setScope] = useState<BatchInput['verification_scope']>(initial.scope)
+  const [scenarioIds, setScenarioIds] = useState<string[]>(initial.scenarioIds)
   const [seconds, setSeconds] = useState(600)
   const [requests, setRequests] = useState(500)
   const [calls, setCalls] = useState(100)
@@ -269,15 +306,18 @@ function useBatchController({
     (item) =>
       item.id === installation?.template_id && item.version === installation.template_version,
   )
-  const allowed = { generate: state.canGenerate, native: state.canRun, execute: state.canExecute }[
-    operation
-  ]
+  const allowed = {
+    assisted: state.canGenerate && canReviseBatch(state),
+    generate: state.canGenerate,
+    native: state.canRun,
+    execute: state.canExecute,
+  }[operation]
   const command = useSelfTestCommand({
     identity: state.identity,
     selectionKey: `${operation}:${installation?.id}:${state.selectedBatch?.id}:${mode}:${scope}`,
     allowed: allowed && confirmed,
     send: (input: BatchInput | GenerationInput | ExecuteInput, key: string) => {
-      if (operation === 'generate' && 'generation_mode' in input)
+      if ((operation === 'generate' || operation === 'assisted') && 'generation_mode' in input)
         return createGenerationBatch(state.projectId!, installation!.id, input, key)
       if (operation === 'execute' && 'resource_digest' in input)
         return executeSelfTestAssets(state.projectId!, state.selectedBatch!.id, input, key)
@@ -313,7 +353,12 @@ function useBatchController({
             scenario_ids: scope === 'full_pack' ? [] : scenarioIds,
             verification_scope: scope,
             budget: { timeout_seconds: seconds, max_requests: requests, max_tool_calls: calls },
-            ...(operation === 'generate' ? { generation_mode: mode, host_id: null } : {}),
+            ...(['generate', 'assisted'].includes(operation)
+              ? { generation_mode: mode, host_id: null }
+              : {}),
+            ...(operation === 'assisted'
+              ? { assisted_before_batch_id: state.selectedBatch!.id }
+              : {}),
           }
     const result = await command.execute(input)
     if (result) {
@@ -329,6 +374,7 @@ function useBatchController({
     }
   }
   const title = {
+    assisted: '创建辅助修订批次',
     generate: '创建 MCP 生成任务',
     native: '运行固定基准',
     execute: isDispatchRecovery(state.selectedBatch) ? '恢复原运行派发' : '执行已发布固定版本',
@@ -424,4 +470,20 @@ function validBudget(budget: import('./self-test-contract').SelfTestBudget) {
   ].every(
     (item) => Number.isInteger(item.value) && item.value >= item.min && item.value <= item.max,
   )
+}
+
+function initialSelection(state: SelfTestState, operation: string) {
+  if (operation === 'assisted')
+    return {
+      mode: 'host_llm_mcp' as const,
+      scope: state.selectedBatch!.verification_scope,
+      scenarioIds: [
+        ...new Set(state.selectedBatch!.expected_scenario_set.map((item) => item.scenario_id)),
+      ],
+    }
+  return {
+    mode: 'deterministic_mcp' as const,
+    scope: 'full_pack' as const,
+    scenarioIds: [] as string[],
+  }
 }

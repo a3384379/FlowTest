@@ -519,6 +519,20 @@ class InstallationReceipt(LeaseRequest):
     mapping: InstallationMapping
 
 
+class InstallationFailure(LeaseRequest):
+    reason_codes: tuple[Reason, ...] = Field(min_length=1, max_length=30)
+    mapping: InstallationMapping | None = None
+
+
+class GenerationDiagnostic(SelfTestDTO):
+    code: Identity
+    severity: Literal["blocker", "review", "input", "unsupported"]
+    scenario_id: ScenarioId | None = None
+    oracle_id: Identity | None = None
+    field_path: Annotated[str, Field(max_length=500)] | None = None
+    repair_hint: Annotated[str, Field(max_length=1000)]
+
+
 class GenerationProgress(LeaseRequest):
     stage: GenerationStage
     readiness: Readiness
@@ -526,11 +540,24 @@ class GenerationProgress(LeaseRequest):
     tool_call_count: int = Field(ge=0, le=100, strict=True)
     proposals: tuple[ProposalReference, ...] = Field(default=(), max_length=100)
     manifest: ArtifactReference | None = None
+    diagnostics: tuple[GenerationDiagnostic, ...] = Field(default=(), max_length=500)
 
 
 class MaterializedReceipt(LeaseRequest):
+    stage: Literal["stage", "finalize"] = "stage"
     sources: tuple[SourceReference, ...] = Field(min_length=1, max_length=100)
     manifest: ArtifactReference
+    observer_manifest_digest: Digest | None = None
+    observer_selection_digest: Digest | None = None
+
+    @model_validator(mode="after")
+    def frozen_observer_acknowledgement(self) -> MaterializedReceipt:
+        values = (self.observer_manifest_digest, self.observer_selection_digest)
+        if self.stage == "finalize" and any(item is None for item in values):
+            raise ValueError("完成物化必须确认已持久冻结的核验清单与选择快照")
+        if self.stage == "stage" and any(item is not None for item in values):
+            raise ValueError("资源暂存不能提前确认核验清单")
+        return self
 
 
 class VerificationScenario(ScenarioKey):
@@ -587,6 +614,12 @@ class FrozenBatchManifest(SelfTestDTO):
 
 
 class GenerationState(SelfTestDTO):
+    preparation_lease_digest: Digest | None = None
+    materialized_receipt_digest: Digest | None = None
+    materialized_lease_digest: Digest | None = None
+    observer_manifest_digest: Digest | None = None
+    observer_selection_digest: Digest | None = None
     tool_call_count: int = Field(default=0, ge=0, le=300)
     proposals: tuple[ProposalReference, ...] = Field(default=(), max_length=100)
     manifest: ArtifactReference | None = None
+    diagnostics: tuple[GenerationDiagnostic, ...] = Field(default=(), max_length=500)

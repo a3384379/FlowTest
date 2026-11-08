@@ -27,6 +27,7 @@ from scripts.selftest.product_agent_client import (
     agent_root,
     claim,
     keep_lease,
+    lease_body,
     register,
 )
 from scripts.selftest.product_evidence import TaskEvidenceReader
@@ -239,14 +240,7 @@ async def poll(
             await machine.object("GET", agent_root(config.project_id) + "/tasks")
         )
         if role == "harness":
-            target_cleanup = None
-            if boot.credentials.target_cleanup_token:
-                target_cleanup = PublicAPI(
-                    stack.target_url,
-                    boot.credentials.target_cleanup_token,
-                    str(installation.target_organization_id),
-                )
-                scope.push_async_callback(target_cleanup.close)
+            target_cleanup = _target_cleanup_client(scope, stack, boot)
             from scripts.selftest.product_watchdog import run_expired_watchdogs
 
             await run_expired_watchdogs(
@@ -277,18 +271,29 @@ async def poll(
                         )
                     return 1
         for batch in tasks.batches:
-            actionable = (role == "harness" and batch.phase == "pending") or (
+            if role == "harness" and await _reconcile_ready(machine, batch, state_directory):
+                return 1
+            recover_staged = (
+                role == "harness"
+                and batch.phase in {"generating", "awaiting_review"}
+                and (state_directory / str(batch.id) / "materialized-receipt.json").is_file()
+            )
+            actionable = (role == "harness" and (batch.phase == "pending" or recover_staged)) or (
                 role == "observer" and batch.phase == "running"
             )
             if actionable and not _host_ready(batch, host_config, state_directory):
                 continue
-            if role == "harness" and batch.phase == "pending":
-                task = await claim(
-                    machine,
-                    config.project_id,
-                    batch.id,
-                    batch.revision,
-                    state_directory,
+            if role == "harness" and (batch.phase == "pending" or recover_staged):
+                task = (
+                    await _resume_staged(machine, batch, state_directory)
+                    if recover_staged
+                    else await claim(
+                        machine,
+                        config.project_id,
+                        batch.id,
+                        batch.revision,
+                        state_directory,
+                    )
                 )
                 async with keep_lease(machine, task):
                     await _generate(
@@ -330,6 +335,73 @@ async def poll(
                     )
                 return 1
     return 0
+
+
+def _target_cleanup_client(
+    scope: AsyncExitStack, stack: StackBinding, boot: BootstrapResult
+) -> PublicAPI | None:
+    if not boot.credentials.target_cleanup_token:
+        return None
+    client = PublicAPI(
+        stack.target_url,
+        boot.credentials.target_cleanup_token,
+        str(boot.installation.target_organization_id),
+    )
+    scope.push_async_callback(client.close)
+    return client
+
+
+async def _resume_staged(
+    machine: PublicAPI, batch: BatchResponse, directory: Path
+) -> AgentTaskResponse:
+    task = _owned_staged_task(batch, directory)
+    path = directory / str(batch.id) / "private-lease.json"
+    renewed = AgentTaskResponse.model_validate(
+        await machine.object(
+            "POST",
+            f"{agent_root(batch.project_id)}/runs/{batch.id}/lease",
+            object_value(lease_body(task).model_dump(mode="json")),
+        )
+    )
+    write_json(path, renewed)
+    return renewed
+
+
+def _owned_staged_task(batch: BatchResponse, directory: Path) -> AgentTaskResponse:
+    from scripts.selftest.product_agent_client import staged_receipt
+
+    task_directory = directory / str(batch.id)
+    path = task_directory / "private-lease.json"
+    if path.is_symlink() or path.stat().st_mode & 0o077:
+        raise HarnessError("SELFTEST_AGENT_RUNTIME_FILE_PERMISSIONS")
+    task = AgentTaskResponse.model_validate(read_json(path))
+    if (
+        task.task_id != batch.id
+        or task.project_id != batch.project_id
+        or task.binding_id != batch.binding_id
+        or task.batch is None
+        or task.batch.manifest_digest != batch.manifest_digest
+        or staged_receipt(task, task_directory) is None
+    ):
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_CHANGED")
+    return task
+
+
+async def _reconcile_ready(machine: PublicAPI, batch: BatchResponse, directory: Path) -> bool:
+    from scripts.selftest.product_agent_client import finalize_materialization
+
+    task_directory = directory / str(batch.id)
+    if (
+        batch.phase != "ready"
+        or not (task_directory / "materialized-finalization.json").is_file()
+        or (task_directory / "materialized-acknowledged.json").exists()
+    ):
+        return False
+    task = _owned_staged_task(batch, directory)
+    result = await finalize_materialization(machine, task, task_directory)
+    if result.id != batch.id or result.resource_digest != batch.resource_digest:
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_CHANGED")
+    return True
 
 
 async def _main(arguments: argparse.Namespace) -> int:

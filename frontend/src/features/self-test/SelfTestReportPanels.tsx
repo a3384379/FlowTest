@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Card, Tabs, Typography } from 'antd'
+import { Alert, Button, Card, Tabs, Typography } from 'antd'
 import { Link, useSearchParams } from 'react-router-dom'
 import QueryFailureNotice from '../../components/QueryFailureNotice'
 import { reportSelfTestReference, selfTestPath } from './self-test-navigation'
@@ -9,6 +9,7 @@ import { SelfTestSourceEvidence, SelfTestVerificationEvidence } from './SelfTest
 import SelfTestSourceChain from './SelfTestSourceChain'
 import type { ReportExecutionDetail } from '../../lib/api'
 import type { SelfTestRelation } from './self-test-contract'
+import { nativeCancellationPending, selfTestPollingInterval } from './self-test-polling'
 import './self-test.css'
 
 function useReportRelation(projectId: string, executionId: string) {
@@ -31,6 +32,15 @@ function useReportRelation(projectId: string, executionId: string) {
         signal,
       ),
     enabled: Boolean(reference?.scenarioId && identity.userId),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return selfTestPollingInterval(
+        data?.batch,
+        data ? [data.scenario] : undefined,
+        query.state.dataUpdateCount,
+        query.state.error,
+      )
+    },
   })
   return { projectId, params, setParams, reference, relation }
 }
@@ -59,6 +69,11 @@ export default function SelfTestReportPanels({
       className="self-test-report-card"
       title="本次执行的自测来源与独立核验"
       loading={state.relation.isLoading}
+      extra={
+        <Button loading={state.relation.isFetching} onClick={() => void state.relation.refetch()}>
+          刷新独立核验
+        </Button>
+      }
     >
       <QueryFailureNotice queries={[state.relation]} />
       {state.relation.isSuccess ? (
@@ -94,6 +109,9 @@ function ConfirmedReportPanels({
       >
         返回已核验自测批次
       </Link>
+      {nativeCancellationPending(result.batch, [result.scenario]) && (
+        <Alert type="warning" showIcon title="原生执行尚未确认停止，取消请求不代表执行已终止。" />
+      )}
       <Alert
         className="self-test-report-scope"
         type={result.batch.verification_scope === 'full_pack' ? 'info' : 'warning'}

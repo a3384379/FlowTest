@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from selftest_materialization_helpers import finalize_fixture_materialization
 from sqlalchemy import select
 from test_selftest_product_api import ProductContext
 from test_selftest_product_api import product as product
@@ -16,8 +17,8 @@ async def test_observation_claim_and_renew_return_exact_frozen_sources_without_p
     product: ProductContext,
 ) -> None:
     batch, payload = await _materialized(product)
-    ready = await product.post(
-        product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
+    ready = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
     )
     other = await product.post(
         product.root + f"/installations/{batch['installation_id']}/generation-batches",

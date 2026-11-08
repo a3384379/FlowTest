@@ -16,8 +16,10 @@ from scripts.selftest.contracts import (
     FixtureBudgetScope,
     canonical_digest,
 )
+from scripts.selftest.failures import failure_codes
 from scripts.selftest.fixed_baseline import (
     CorePack,
+    FixedAsset,
     _collect_fixed,
     _execution_junit,
     install_fixed_baseline,
@@ -26,13 +28,19 @@ from scripts.selftest.fixed_baseline import (
 from scripts.selftest.fixed_recovery import PreparedFixedAssets, recover_fixed_assets
 from scripts.selftest.io import (
     HarnessError,
+    JsonObject,
     PublicAPI,
     object_value,
     read_json,
     text_value,
     write_json,
 )
-from scripts.selftest.product_agent_client import agent_root, lease_body, upload
+from scripts.selftest.product_agent_client import (
+    agent_root,
+    lease_body,
+    post_task_receipt,
+    upload,
+)
 from scripts.selftest.request_bounds import native_request_bound
 from scripts.selftest.verify import verify_batch, write_report
 
@@ -64,6 +72,52 @@ async def install_task(
     installation: Installation,
     directory: Path,
 ) -> None:
+    try:
+        await _install_task(
+            machine, writer, task=task, installation=installation, directory=directory
+        )
+    except Exception as error:
+        await machine.object(
+            "POST",
+            f"{agent_root(task.project_id)}/installations/{task.task_id}/failure",
+            object_value(
+                {
+                    **lease_body(task).model_dump(mode="json"),
+                    "reason_codes": list(failure_codes(error)),
+                    "mapping": _partial_mapping(directory),
+                }
+            ),
+        )
+        raise
+
+
+async def _install_task(
+    machine: PublicAPI,
+    writer: PublicAPI,
+    *,
+    task: AgentTaskResponse,
+    installation: Installation,
+    directory: Path,
+) -> None:
+    mapping_path = directory / "installation-mapping.json"
+    base = _installation_mapping(task, installation, ())
+    previous = _partial_mapping(directory)
+    mapping = base if previous is None else InstallationMapping.model_validate(previous)
+    if mapping.model_dump(exclude={"assets"}) != base.model_dump(exclude={"assets"}):
+        raise HarnessError("SELFTEST_INSTALLATION_MAPPING_CHANGED")
+    write_json(mapping_path, mapping)
+
+    async def acknowledged(asset: FixedAsset) -> None:
+        nonlocal mapping
+        reference = _scenario_asset(asset)
+        keyed = {(item.scenario_id, item.variant_key): item for item in mapping.assets}
+        key = (reference.scenario_id, reference.variant_key)
+        if key in keyed and keyed[key] != reference:
+            raise HarnessError("SELFTEST_INSTALLATION_MAPPING_CHANGED")
+        keyed[key] = reference
+        mapping = mapping.model_copy(update={"assets": tuple(keyed.values())})
+        write_json(mapping_path, mapping)
+
     assets: tuple[ScenarioAssets, ...] = ()
     if task.installation.template_id != "mcp-core-v1":
         pack = fixed_pack(task.installation.template_id)
@@ -79,24 +133,56 @@ async def install_task(
             output_dir=directory,
             pack=pack,
             dynamic_batch=True,
+            on_asset=acknowledged,
         )
-        assets = tuple(
-            ScenarioAssets(
-                scenario_id=item.scenario_id,
-                workflow=PublishedAsset(
-                    id=item.workflow_id,
-                    version=item.workflow_version,
-                    fingerprint=item.workflow_fingerprint,
-                ),
-                case=PublishedAsset(
-                    id=item.case_id, version=item.case_version, fingerprint=item.case_fingerprint
-                ),
-            )
-            for item in fixed.assets
-        )
+        assets = tuple(_scenario_asset(item) for item in fixed.assets)
+    mapping = _installation_mapping(task, installation, assets)
+    write_json(mapping_path, mapping)
+    receipt = InstallationReceipt(
+        **lease_body(task).model_dump(),
+        environment_fingerprint=task.environment_fingerprint,
+        mapping=mapping,
+    )
+    await post_task_receipt(
+        machine,
+        f"{agent_root(task.project_id)}/installations/{task.task_id}/receipt",
+        object_value(receipt.model_dump(mode="json")),
+    )
+
+
+def _partial_mapping(directory: Path) -> JsonObject | None:
+    path = directory / "installation-mapping.json"
+    if not path.exists():
+        return None
+    if path.is_symlink():
+        raise HarnessError("SELFTEST_INSTALLATION_MAPPING_CHANGED")
+    return InstallationMapping.model_validate(read_json(path)).model_dump(mode="json")
+
+
+def _scenario_asset(asset: FixedAsset) -> ScenarioAssets:
+    return ScenarioAssets(
+        scenario_id=asset.scenario_id,
+        workflow=PublishedAsset(
+            id=asset.workflow_id,
+            version=asset.workflow_version,
+            fingerprint=asset.workflow_fingerprint,
+        ),
+        case=PublishedAsset(
+            id=asset.case_id,
+            version=asset.case_version,
+            fingerprint=asset.case_fingerprint,
+        ),
+    )
+
+
+def _installation_mapping(
+    task: AgentTaskResponse,
+    installation: Installation,
+    assets: tuple[ScenarioAssets, ...],
+) -> InstallationMapping:
     if installation.target_organization_id is None:
         raise HarnessError("SELFTEST_AGENT_TARGET_ORGANIZATION_MISSING")
-    mapping = InstallationMapping(
+    return InstallationMapping(
         environment_id=installation.fixture_environment_id,
         target_environment_id=installation.target_environment_id,
         fixture_service_id=installation.fixture_service_id,
@@ -107,16 +193,6 @@ async def install_task(
         target_instance_id=f"target-{installation.binding_nonce}",
         target_build_digest=task.builds.target,
         assets=assets,
-    )
-    receipt = InstallationReceipt(
-        **lease_body(task).model_dump(),
-        environment_fingerprint=task.environment_fingerprint,
-        mapping=mapping,
-    )
-    await machine.object(
-        "POST",
-        f"{agent_root(task.project_id)}/installations/{task.task_id}/receipt",
-        object_value(receipt.model_dump(mode="json")),
     )
 
 
@@ -241,7 +317,13 @@ async def observe_fixed(
     run = await wait_plan(reader, str(task.project_id), str(batch.plan_run_ids[0]), batch.deadline)
     write_json(directory / "plan-run.json", run)
     observations = await _collect_fixed(
-        reader, observer, installed, run, selected_pack(task), directory, deadline=batch.deadline
+        reader,
+        observer,
+        installed,
+        run,
+        selected_pack(task),
+        directory,
+        deadline=batch.deadline,
     )
     cleanup = RoundCleanup(
         batch_key=batch.batch_key,
@@ -256,7 +338,8 @@ async def observe_fixed(
     for fixture in selected_pack(task).fixtures:
         cleanup.register_fixture(fixture.scenario_id)
     cleanup.arm_plan(
-        UUID(text_value(run["test_plan_id"])), tuple(asset.case_id for asset in installed.assets)
+        UUID(text_value(run["test_plan_id"])),
+        tuple(asset.case_id for asset in installed.assets),
     )
     cleanup.started_plan(batch.plan_run_ids[0])
     cleanup.plan.observe(run)
@@ -301,7 +384,11 @@ async def seal_verification(
     references = tuple(
         [
             await upload(
-                machine, task, kind=kind, filename=name, content=(directory / name).read_bytes()
+                machine,
+                task,
+                kind=kind,
+                filename=name,
+                content=(directory / name).read_bytes(),
             )
             for kind, name in artifacts
         ]

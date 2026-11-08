@@ -8,9 +8,20 @@ import {
   type SelfTestReference,
 } from './self-test-navigation'
 import { selfTestKeys, useSelfTestIdentity } from './self-test-query-keys'
+import QueryFailureNotice from '../../components/QueryFailureNotice'
 import type { SelfTestGeneration, SelfTestProposal } from './self-test-contract'
 
 type Props = { projectId: string; proposalId: string | undefined; route: SelfTestProposal['route'] }
+export function SelfTestAssetContext({ projectId }: { projectId: string | null }) {
+  const [params] = useSearchParams()
+  return projectId ? (
+    <SelfTestProposalBacklink
+      projectId={projectId}
+      proposalId={params.get('selfTestProposal') ?? undefined}
+      route="controlled_write"
+    />
+  ) : null
+}
 function verifiedProposal(
   data: SelfTestGeneration | undefined,
   reference: SelfTestReference,
@@ -46,6 +57,7 @@ function RoutedProposalBacklink(props: Props) {
   if (!params.has('selfTestBatch')) return null
   if (!reference) return <Alert type="warning" title="自测来源链接无效，未建立回链。" />
   if (!props.proposalId || generation.isLoading) return null
+  if (generation.isError) return <QueryFailureNotice queries={[generation]} />
   const verified = verifiedProposal(
     generation.isSuccess ? generation.data : undefined,
     reference,

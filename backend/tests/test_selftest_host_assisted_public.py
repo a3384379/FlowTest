@@ -21,6 +21,7 @@ from scripts.selftest.host_assisted import _case, _flow  # noqa: E402
 from scripts.selftest.host_launch import VerifiedGrant  # noqa: E402
 from scripts.selftest.host_revisions import AssistedSelection  # noqa: E402
 from scripts.selftest.io import PublicAPI  # noqa: E402
+from selftest_materialization_helpers import finalize_fixture_materialization  # noqa: E402
 from test_selftest_host_adapter import authorization  # noqa: E402
 
 from app.main import app  # noqa: E402
@@ -46,6 +47,12 @@ async def test_reviewed_assisted_assets_readback_then_real_new_suite_plan_run(
 ):
     task, before, payload = await assisted_contract(product)
     source = payload["sources"][0]
+    generation = await product.get(product.root + f"/runs/{task['task_id']}/generation")
+    assert any(
+        item["change_set_id"] == source["case_proposal"]["change_set_id"]
+        and item["review_status"] == "accepted"
+        for item in generation["proposals"]
+    )
     lineage = source["assisted"]
     selected = AssistedSelection(
         scenario_id=source["scenario_id"],
@@ -83,8 +90,8 @@ async def test_reviewed_assisted_assets_readback_then_real_new_suite_plan_run(
         path.endswith(f"/mcp/write/change-sets/{selected.workflow_proposal_id}")
         for _, path in transport.calls
     )
-    ready = await product.post(
-        product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
+    ready = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{task['task_id']}/materialized", payload, machine="h"
     )
     assert ready["plan_run_ids"] == []
     target = respx.get("http://fixture.example/value").mock(

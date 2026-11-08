@@ -1,11 +1,13 @@
 import type { AxiosResponseTransformer } from 'axios'
 import { apiClient } from '../../lib/api'
 import { SelfTestContractError } from './self-test-decode'
+import { selfTestCommandConfig } from './self-test-command-config'
 import {
   pageOf,
   parseBatch,
   parseBinding,
   parseGeneration,
+  parseInsights,
   parseInstallation,
   parsePreview,
   parseRelation,
@@ -22,7 +24,49 @@ import {
 const root = (projectId: string) => `/projects/${encodeURIComponent(projectId)}/self-tests`
 const run = (projectId: string, batchId: string) =>
   `${root(projectId)}/runs/${encodeURIComponent(batchId)}`
-const keyHeader = (idempotencyKey: string) => ({ headers: { 'Idempotency-Key': idempotencyKey } })
+const keyHeader = selfTestCommandConfig
+
+export async function getSelfTestInsights(
+  projectId: string,
+  batchId: string,
+  signal?: AbortSignal,
+) {
+  const result = parseInsights(
+    (await apiClient.get<unknown>(`${run(projectId, batchId)}/insights`, { signal })).data,
+  )
+  if (
+    result.batch_id !== batchId ||
+    result.metrics.some((metric) => metric.numerator > metric.denominator)
+  )
+    throw new SelfTestContractError()
+  return result
+}
+export async function resumeSelfTestInstallation(
+  projectId: string,
+  installation: import('./self-test-contract').SelfTestInstallation,
+  key: string,
+) {
+  const result = parseInstallation(
+    (
+      await apiClient.post<unknown>(
+        `${root(projectId)}/installations/${installation.id}/resume`,
+        {
+          expected_revision: installation.revision,
+          environment_fingerprint: installation.environment_fingerprint,
+          confirmed: true,
+        },
+        keyHeader(key),
+      )
+    ).data,
+  )
+  if (
+    result.id !== installation.id ||
+    result.project_id !== projectId ||
+    result.binding_id !== installation.binding_id
+  )
+    throw new SelfTestContractError()
+  return result
+}
 
 export async function listSelfTestTemplates(projectId: string, signal?: AbortSignal) {
   return pageOf(parseTemplate)(

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from selftest_materialization_helpers import finalize_fixture_materialization
 from test_selftest_product_api import ProductContext
 from test_selftest_product_api import product as product
 from test_selftest_product_sources import _materialized
@@ -22,8 +23,8 @@ async def test_namespace_aliases_require_complete_actual_public_resource_digest(
 ) -> None:
     batch, payload = await _materialized(product)
     actual = BatchResponse.model_validate(
-        await product.post(
-            product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
+        await finalize_fixture_materialization(
+            product, product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
         )
     )
     generation = GenerationSummary.model_validate(

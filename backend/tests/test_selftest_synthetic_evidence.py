@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 import respx
 from httpx import ASGITransport, Response
+from selftest_materialization_helpers import finalize_fixture_materialization
 from test_selftest_product_api import ProductContext, _ready
 from test_selftest_product_api import product as product
 from test_selftest_product_sources import _case_proposal
@@ -222,7 +223,8 @@ async def _materialized(product: ProductContext, *, declared: bool = True) -> tu
         },
         "generation_manifest": artifact,
     }
-    ready = await product.post(
+    ready = await finalize_fixture_materialization(
+        product,
         product.agent + f"/runs/{batch['id']}/materialized",
         {**lease, "sources": [source], "manifest": artifact},
         machine="h",

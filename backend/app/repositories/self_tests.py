@@ -133,6 +133,10 @@ class SelfTestRepository:
                 SelfTestInstallation.revision == expected_revision,
                 SelfTestInstallation.status.in_(("needs_input", "queued")),
                 SelfTestInstallation.lease_hash.is_(None),
+                or_(
+                    SelfTestInstallation.nonce_hash.is_(None),
+                    SelfTestInstallation.nonce_hash == nonce_hash,
+                ),
             )
             .values(
                 status="installing",
@@ -141,6 +145,33 @@ class SelfTestRepository:
                 lease_hash=lease_hash,
                 nonce_hash=nonce_hash,
                 lease_expires_at=expiry,
+            )
+            .returning(SelfTestInstallation)
+            .execution_options(populate_existing=True, synchronize_session="fetch")
+        )
+        return cast(SelfTestInstallation | None, await self.session.scalar(query))
+
+    async def resume_installation(
+        self, model: SelfTestInstallation, expected_revision: int, now: datetime
+    ) -> SelfTestInstallation | None:
+        query = (
+            update(SelfTestInstallation)
+            .where(
+                SelfTestInstallation.id == model.id,
+                SelfTestInstallation.revision == expected_revision,
+                SelfTestInstallation.receipt_digest.is_(None),
+                SelfTestInstallation.status.in_(("blocked", "needs_input", "queued", "installing")),
+                or_(
+                    SelfTestInstallation.lease_expires_at.is_(None),
+                    SelfTestInstallation.lease_expires_at <= now,
+                ),
+            )
+            .values(
+                status="needs_input",
+                reason_codes=["WAITING_FOR_HOST"],
+                revision=SelfTestInstallation.revision + 1,
+                lease_hash=None,
+                lease_expires_at=None,
             )
             .returning(SelfTestInstallation)
             .execution_options(populate_existing=True, synchronize_session="fetch")

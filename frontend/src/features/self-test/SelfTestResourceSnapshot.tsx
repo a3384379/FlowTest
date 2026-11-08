@@ -1,9 +1,14 @@
+import SelfTestAssetLink from './SelfTestAssetLink'
 import { Alert, Descriptions, Table, Typography } from 'antd'
 import type { SelfTestBatch } from './self-test-contract'
 
 export default function SelfTestResourceSnapshot({
   snapshot,
+  projectId,
+  batchId,
 }: {
+  projectId?: string
+  batchId?: string
   snapshot: SelfTestBatch['resource_snapshot']
 }) {
   if (!snapshot)
@@ -17,7 +22,14 @@ export default function SelfTestResourceSnapshot({
           {
             key: 'suite',
             label: 'Suite 固定版本',
-            children: `${snapshot.suite.id}@${snapshot.suite.version}`,
+            children: (
+              <SelfTestAssetLink
+                projectId={projectId}
+                batchId={batchId}
+                kind="suite"
+                asset={snapshot.suite}
+              />
+            ),
           },
           {
             key: 'suite-digest',
@@ -35,10 +47,27 @@ export default function SelfTestResourceSnapshot({
         scroll={{ x: 1000, y: 320 }}
         columns={[
           { title: '冻结场景', render: (_, row) => `${row.scenario_id} / ${row.variant_key}` },
-          { title: 'Case 固定版本', render: (_, row) => `${row.case.id}@${row.case.version}` },
+          {
+            title: 'Case 固定版本',
+            render: (_, row) => (
+              <SelfTestAssetLink
+                projectId={projectId}
+                batchId={batchId}
+                kind="case"
+                asset={row.case}
+              />
+            ),
+          },
           {
             title: 'Workflow 固定版本',
-            render: (_, row) => `${row.workflow.id}@${row.workflow.version}`,
+            render: (_, row) => (
+              <SelfTestAssetLink
+                projectId={projectId}
+                batchId={batchId}
+                kind="workflow"
+                asset={row.workflow}
+              />
+            ),
           },
           { title: '固定环境', dataIndex: 'environment_id' },
           { title: '执行目标快照摘要', dataIndex: 'target_snapshot_digest' },

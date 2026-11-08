@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import json
+import os
 import secrets
+import tempfile
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -16,7 +20,14 @@ import jwt
 from pydantic import Field
 from scripts.selftest.bootstrap import BootstrapResult, Credentials, Installation
 from scripts.selftest.contracts import Contract, canonical_digest
-from scripts.selftest.io import HarnessError, PublicAPI, object_value, read_json, write_json
+from scripts.selftest.io import (
+    HarnessError,
+    JsonObject,
+    PublicAPI,
+    object_value,
+    read_json,
+    write_json,
+)
 from scripts.selftest.local_stack import StackBinding
 
 from app.core.self_tests import SelfTestBinding, SelfTestPrincipal
@@ -26,8 +37,10 @@ from app.schemas.self_tests import (
     AgentTaskResponse,
     ArtifactKind,
     ArtifactReference,
+    BatchResponse,
     LeaseClaim,
     LeaseRequest,
+    MaterializedReceipt,
 )
 
 
@@ -163,9 +176,29 @@ async def register(api: PublicAPI, config: ProductAgentConfig, *, observer: bool
 
 def task_nonce(directory: Path, identifier: UUID) -> str:
     path = directory / str(identifier) / "nonce.json"
-    if not path.exists():
-        write_json(path, {"nonce": secrets.token_hex(32)})
-    nonce = read_json(path).get("nonce")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    descriptor, candidate = tempfile.mkstemp(prefix=".nonce-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(json.dumps({"nonce": secrets.token_hex(32)}).encode())
+            output.flush()
+            os.fsync(output.fileno())
+        # Publish the complete inode exclusively; readers never observe a partial file.
+        with suppress(FileExistsError):
+            os.link(candidate, path)
+        _sync_task_directory(path.parent)
+        return _read_task_nonce(path)
+    finally:
+        Path(candidate).unlink(missing_ok=True)
+
+
+def _read_task_nonce(path: Path) -> str:
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
+            raise HarnessError("SELFTEST_AGENT_NONCE_INVALID")
+        nonce = read_json(path).get("nonce")
+    except (OSError, ValueError) as error:
+        raise HarnessError("SELFTEST_AGENT_NONCE_INVALID") from error
     if not isinstance(nonce, str) or len(nonce) != 64:
         raise HarnessError("SELFTEST_AGENT_NONCE_INVALID")
     return nonce
@@ -213,11 +246,16 @@ async def keep_lease(api: PublicAPI, task: AgentTaskResponse) -> AsyncIterator[N
                 return
             except TimeoutError:
                 kind = "installations" if task.task_kind == "installation" else "runs"
-                result = await api.object(
-                    "POST",
-                    f"{agent_root(task.project_id)}/{kind}/{task.task_id}/lease",
-                    object_value(lease_body(task).model_dump(mode="json")),
-                )
+                try:
+                    result = await post_task_receipt(
+                        api,
+                        f"{agent_root(task.project_id)}/{kind}/{task.task_id}/lease",
+                        object_value(lease_body(task).model_dump(mode="json")),
+                    )
+                except HarnessError as error:
+                    if str(error).startswith("SELFTEST_HTTP_409:SELFTEST_LEASE_RELEASED:"):
+                        return
+                    raise
                 current = AgentTaskResponse.model_validate(result)
 
     async with asyncio.TaskGroup() as group:
@@ -229,7 +267,12 @@ async def keep_lease(api: PublicAPI, task: AgentTaskResponse) -> AsyncIterator[N
 
 
 async def upload(
-    api: PublicAPI, task: AgentTaskResponse, *, kind: ArtifactKind, filename: str, content: bytes
+    api: PublicAPI,
+    task: AgentTaskResponse,
+    *,
+    kind: ArtifactKind,
+    filename: str,
+    content: bytes,
 ) -> ArtifactReference:
     if not content or len(content) > 1024 * 1024:
         raise HarnessError("SELFTEST_AGENT_ARTIFACT_SIZE_LIMIT")
@@ -246,3 +289,111 @@ async def upload(
         object_value(request.model_dump(mode="json")),
     )
     return ArtifactReference.model_validate(result)
+
+
+def staged_receipt(task: AgentTaskResponse, directory: Path) -> MaterializedReceipt | None:
+    path = directory / "materialized-receipt.json"
+    if not path.exists():
+        return None
+    if path.is_symlink() or path.stat().st_mode & 0o077:
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_CHANGED")
+    receipt = MaterializedReceipt.model_validate(read_json(path))
+    if (
+        receipt.stage != "stage"
+        or receipt.nonce != task.nonce
+        or receipt.lease_token != task.lease_token
+    ):
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_CHANGED")
+    return receipt
+
+
+async def stage_materialization(
+    api: PublicAPI,
+    task: AgentTaskResponse,
+    receipt: MaterializedReceipt,
+    directory: Path,
+) -> BatchResponse:
+    previous = staged_receipt(task, directory)
+    if previous is not None and previous != receipt:
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_CHANGED")
+    write_json(directory / "materialized-receipt.json", receipt)
+    _sync_task_directory(directory)
+    return BatchResponse.model_validate(
+        await post_task_receipt(
+            api,
+            f"{agent_root(task.project_id)}/runs/{task.task_id}/materialized",
+            object_value(receipt.model_dump(mode="json")),
+        )
+    )
+
+
+async def finalize_materialization(
+    api: PublicAPI, task: AgentTaskResponse, directory: Path
+) -> BatchResponse:
+    receipt = staged_receipt(task, directory)
+    if receipt is None:
+        raise HarnessError("SELFTEST_MATERIALIZED_LOCAL_RECEIPT_MISSING")
+    manifest, selection = directory / "manifest.json", directory / "selection.json"
+    for path in (manifest, selection):
+        if not path.is_file() or path.is_symlink():
+            raise HarnessError("SELFTEST_OBSERVER_MANIFEST_NOT_FROZEN")
+    finalization = MaterializedReceipt.model_validate(
+        {
+            **receipt.model_dump(mode="json"),
+            "stage": "finalize",
+            "observer_manifest_digest": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            "observer_selection_digest": hashlib.sha256(selection.read_bytes()).hexdigest(),
+        }
+    )
+    path = directory / "materialized-finalization.json"
+    if path.exists() and MaterializedReceipt.model_validate(read_json(path)) != finalization:
+        raise HarnessError("SELFTEST_OBSERVER_MANIFEST_CHANGED")
+    write_json(path, finalization)
+    _sync_task_directory(directory)
+    result = BatchResponse.model_validate(
+        await post_task_receipt(
+            api,
+            f"{agent_root(task.project_id)}/runs/{task.task_id}/materialized",
+            object_value(finalization.model_dump(mode="json")),
+        )
+    )
+    write_json(
+        directory / "materialized-acknowledged.json",
+        {
+            "batch_id": str(task.task_id),
+            "resource_digest": result.resource_digest,
+            "finalization_digest": canonical_digest(
+                finalization.model_dump(mode="json", exclude={"lease_token"})
+            ),
+        },
+    )
+    _sync_task_directory(directory)
+    return result
+
+
+async def post_task_receipt(api: PublicAPI, path: str, payload: JsonObject) -> JsonObject:
+    for attempt in range(3):
+        try:
+            return await api.object("POST", path, payload)
+        except HarnessError as error:
+            conflict = any(
+                str(error).startswith(f"SELFTEST_HTTP_409:{code}:")
+                for code in (
+                    "SELFTEST_BATCH_BUSY",
+                    "SELFTEST_INSTALLATION_BUSY",
+                )
+            )
+            if not conflict or attempt == 2:
+                raise
+            await asyncio.sleep(0)
+    raise HarnessError("SELFTEST_TASK_RECEIPT_RETRY_EXHAUSTED")
+
+
+def _sync_task_directory(directory: Path) -> None:
+    if os.name != "posix":
+        return
+    descriptor = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)

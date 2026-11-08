@@ -17,7 +17,12 @@ from scripts.selftest.host_attempts import AttemptStore
 from scripts.selftest.host_contracts import HostAttemptResult
 from scripts.selftest.host_controller import HostController
 from scripts.selftest.host_gateway import BoundedGateway
-from scripts.selftest.host_launch import HostDeployment, HostReadiness, VerifiedGrant, readiness
+from scripts.selftest.host_launch import (
+    HostDeployment,
+    HostReadiness,
+    VerifiedGrant,
+    readiness,
+)
 from scripts.selftest.host_materialized import HostMaterialization, HostSelection
 from scripts.selftest.host_product_bridge import publish_materialized, publish_pending
 from scripts.selftest.host_prompts import (
@@ -31,8 +36,18 @@ from scripts.selftest.host_quality import QualityAttempt, quality_report
 from scripts.selftest.host_quality_history import QualityHistory
 from scripts.selftest.host_runtime_config import HostRuntimeConfig, approved_runtime
 from scripts.selftest.host_sources import reviewed_workflows
-from scripts.selftest.io import HarnessError, JsonObject, PublicAPI, read_json, write_json
+from scripts.selftest.io import (
+    HarnessError,
+    JsonObject,
+    PublicAPI,
+    read_json,
+    write_json,
+)
 from scripts.selftest.local_stack import StackBinding
+from scripts.selftest.product_agent_client import (
+    finalize_materialization,
+    staged_receipt,
+)
 from scripts.selftest.run import _protocol
 
 from app.core.self_tests import SelfTestPrincipal
@@ -75,7 +90,11 @@ def _binding(
 
 
 async def _review_pause(
-    controller: HostController, machine: PublicAPI, task: AgentTaskResponse, *, case: bool
+    controller: HostController,
+    machine: PublicAPI,
+    task: AgentTaskResponse,
+    *,
+    case: bool,
 ) -> None:
     from scripts.selftest.host_sources import FrozenHostCase, FrozenHostSource
 
@@ -123,6 +142,14 @@ async def generate_task(
             {"status": status.status, "reason_codes": list(status.reason_codes)},
         )
         return status
+    if staged_receipt(task, directory) is not None:
+        materialized = HostMaterialization.model_validate(
+            read_json(directory / "host-materialized.json")
+        )
+        if materialized.authorization_digest != grant.digest:
+            raise HarnessError("HOST_PRODUCT_AUTHORIZATION_TASK_MISMATCH")
+        await _prepare_product(machine, observer, task, materialized, directory)
+        return materialized
     if frozen_task.assisted is not None:
         return await _generate_assisted(
             machine,
@@ -156,7 +183,11 @@ async def generate_task(
     if batch is None:
         raise HarnessError("HOST_PRODUCT_BATCH_REQUIRED")
     async with _protocol(
-        stack, "stdio", boot.credentials.mcp_token, batch.batch_key, directory / "upstream"
+        stack,
+        "stdio",
+        boot.credentials.mcp_token,
+        batch.batch_key,
+        directory / "upstream",
     ) as client:
         catalog = TypeAdapter(tuple[Tool, ...]).validate_python(
             read_json(directory / "upstream" / "mcp-catalog.json")["tools"]
@@ -180,7 +211,12 @@ async def generate_task(
         )
         try:
             await _run_model_phases(
-                controller, machine, task, frozen_task, skill, resume_known_review=prior is not None
+                controller,
+                machine,
+                task,
+                frozen_task,
+                skill,
+                resume_known_review=prior is not None,
             )
         finally:
             _record_attempt_quality(controller, frozen_task, history)
@@ -211,7 +247,9 @@ async def _run_model_phases(
                 (controller.directory / "workflow-sources.json").read_bytes()
             )
             bindings = await reviewed_workflows(
-                controller.reader, sources, reviewer_ids=controller.grant.authorization.reviewer_ids
+                controller.reader,
+                sources,
+                reviewer_ids=controller.grant.authorization.reviewer_ids,
             )
             controller.gateway.begin_case_phase(bindings)
             return
@@ -227,7 +265,9 @@ async def _run_model_phases(
         (controller.directory / "workflow-sources.json").read_bytes()
     )
     bindings = await reviewed_workflows(
-        controller.reader, sources, reviewer_ids=controller.grant.authorization.reviewer_ids
+        controller.reader,
+        sources,
+        reviewer_ids=controller.grant.authorization.reviewer_ids,
     )
     result = await controller.resume_after_workflow_review(
         prompt=case_prompt(frozen_task, skill, controller.grant, sources, bindings)
@@ -282,7 +322,9 @@ async def _wait_workflows(controller: HostController) -> None:
     while datetime.now(UTC) < controller.gateway.deadline:
         try:
             await reviewed_workflows(
-                controller.reader, sources, reviewer_ids=controller.grant.authorization.reviewer_ids
+                controller.reader,
+                sources,
+                reviewer_ids=controller.grant.authorization.reviewer_ids,
             )
             return
         except HarnessError as error:
@@ -317,16 +359,33 @@ async def _prepare_product(
     materialized: HostMaterialization,
     directory: Path,
 ) -> None:
+    from scripts.selftest.contracts import FixtureBudgetScope
     from scripts.selftest.host_product_prepare import (
         configure_fixtures,
         freeze_product_expectations,
     )
+    from scripts.selftest.io import object_value
 
-    scope, epoch = await configure_fixtures(observer, task, materialized)
+    prepared_path = directory / "materialization-preparation.json"
+    if staged_receipt(task, directory) is not None:
+        prepared = read_json(prepared_path)
+        scope = FixtureBudgetScope.model_validate(prepared["scope"])
+        epoch_value = prepared["epoch"]
+        if epoch_value is not None and not isinstance(epoch_value, str):
+            raise HarnessError("HOST_FIXTURE_EPOCH_CHANGED")
+        epoch = epoch_value
+    else:
+        scope, epoch = await configure_fixtures(observer, task, materialized)
+        write_json(
+            prepared_path,
+            object_value({"scope": scope.model_dump(mode="json"), "epoch": epoch}),
+        )
     ready = await publish_materialized(
         machine, task, materialized=materialized, directory=directory
     )
-    freeze_product_expectations(task, ready, materialized, scope, epoch, directory)
+    if not (directory / "materialized-finalization.json").exists():
+        freeze_product_expectations(task, ready, materialized, scope, epoch, directory)
+    await finalize_materialization(machine, task, directory)
 
 
 async def _generate_assisted(
@@ -364,7 +423,16 @@ async def _generate_assisted(
         )
         await _prepare_product(machine, observer, task, result, directory)
         return result
-    except (HarnessError, OSError, ValueError, httpx.HTTPError, asyncio.CancelledError):
+    except (HarnessError, OSError, ValueError, httpx.HTTPError, asyncio.CancelledError) as error:
+        uncertain = (
+            isinstance(error, (httpx.HTTPError, asyncio.CancelledError))
+            or str(error).startswith("SELFTEST_HTTP_5")
+            or (directory / "materialized-finalization.json").is_file()
+        )
+        if uncertain and staged_receipt(task, directory) is not None:
+            # An exact durable receipt can still be committed; O resolves the attempt.
+            write_json(directory / "host-quality.json", history.report())
+            raise
         records = tuple(
             QualityAttempt(
                 task_id=item.scenario_id,
@@ -379,6 +447,7 @@ async def _generate_assisted(
             for item in frozen_task.selections
         )
         write_json(
-            directory / "host-quality.json", history.finish(grant, attempt_id, records, failed=True)
+            directory / "host-quality.json",
+            history.finish(grant, attempt_id, records, failed=True),
         )
         raise

@@ -11,7 +11,13 @@ from scripts.selftest.host_materialized import HostMaterialization
 from scripts.selftest.host_sources import FrozenHostCase, FrozenHostSource
 from scripts.selftest.io import HarnessError, PublicAPI, object_value, write_json
 from scripts.selftest.mcp_generation_journey import GeneratedAsset
-from scripts.selftest.product_agent_client import agent_root, lease_body, upload
+from scripts.selftest.product_agent_client import (
+    agent_root,
+    lease_body,
+    stage_materialization,
+    staged_receipt,
+    upload,
+)
 from scripts.selftest.product_mcp import _PendingReference, _refresh_proposal, _source
 
 from app.schemas.self_tests import (
@@ -122,10 +128,22 @@ async def publish_materialized(
     directory: Path,
 ) -> BatchResponse:
     verify_task(task, materialized)
+    previous = staged_receipt(task, directory)
+    if previous is not None:
+        expected = tuple(
+            materialized_source(materialized, asset, source.generation_manifest)
+            for asset, source in zip(materialized.assets, previous.sources, strict=True)
+        )
+        if expected != previous.sources:
+            raise HarnessError("HOST_PRODUCT_TASK_BINDING_CHANGED")
+        return await stage_materialization(machine, task, previous, directory)
     sources = []
     for asset in materialized.assets:
         content = json.dumps(
-            asset.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            asset.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
         ).encode()
         reference = await upload(
             machine,
@@ -166,13 +184,7 @@ async def publish_materialized(
     receipt = MaterializedReceipt(
         **lease_body(task).model_dump(), sources=tuple(sources), manifest=reference
     )
-    return BatchResponse.model_validate(
-        await machine.object(
-            "POST",
-            f"{agent_root(task.project_id)}/runs/{task.task_id}/materialized",
-            object_value(receipt.model_dump(mode="json")),
-        )
-    )
+    return await stage_materialization(machine, task, receipt, directory)
 
 
 def materialized_source(

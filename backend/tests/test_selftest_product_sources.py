@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from httpx import ASGITransport, Request
+from selftest_materialization_helpers import finalize_fixture_materialization
 from sqlalchemy import select
 from test_selftest_product_api import ProductContext, _ready
 from test_selftest_product_api import product as product
@@ -389,8 +390,8 @@ async def test_materialized_preserves_semantics_across_real_visual_and_published
     product: ProductContext,
 ) -> None:
     batch, payload = await _materialized(product)
-    result = await product.post(
-        product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
+    result = await finalize_fixture_materialization(
+        product, product.agent + f"/runs/{batch['id']}/materialized", payload, machine="h"
     )
     assert result["readiness"] == "ready" and result["phase"] == "ready"
     assert (

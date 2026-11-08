@@ -1,3 +1,6 @@
+import SelfTestInstallationRecovery from './SelfTestInstallationRecovery'
+import { InstallationMappingDetails } from './SelfTestInstallationDetails'
+import { installationStatusLabels } from './self-test-labels'
 import { useLayoutEffect, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -197,25 +200,30 @@ function SetupFooter({ controller }: { controller: SetupController }) {
 }
 
 function SetupReceipt({ controller }: { controller: SetupController }) {
-  const { runConfirmed, created, installed, waitingRun, run, startRun } = controller
+  const { runConfirmed, created, installed, run, startRun } = controller
   return (
     <>
       <SetupFailure controller={controller} />
       {created && (
         <Alert
-          type="info"
+          type={installed?.status === 'blocked' ? 'error' : 'info'}
           showIcon
-          title={
-            installed?.status === 'ready' ? '初始化已完成' : '初始化任务已创建，等待外部宿主完成'
-          }
-          description={
-            run.error
-              ? '初始化成功，启动失败。重试只启动运行，不重复初始化。'
-              : waitingRun
-                ? '已记录运行确认，资源就绪后在当前页面启动。离开或权限失效会停止后续操作。'
-                : undefined
-          }
+          title={receiptTitle(installed)}
+          description={receiptDescription(controller)}
         />
+      )}
+      {created && installed && (
+        <>
+          <InstallationMappingDetails
+            installation={installed}
+            projectId={controller.state.projectId!}
+          />
+          <SelfTestInstallationRecovery
+            installation={installed}
+            projectId={controller.state.projectId!}
+            allowed={controller.state.canInitialize}
+          />
+        </>
       )}
       {created && Boolean(run.error) && (
         <Button disabled={run.pending || !runConfirmed} onClick={() => void startRun()}>
@@ -584,4 +592,17 @@ function SetupFailure({ controller }: { controller: SetupController }) {
       )}
     </>
   )
+}
+
+function receiptTitle(installed: SelfTestInstallation | null) {
+  if (installed?.status === 'ready') return '初始化已完成'
+  return `初始化状态：${installed ? installationStatusLabels[installed.status] : '等待读取'}`
+}
+function receiptDescription(controller: SetupController) {
+  if (controller.run.error) return '初始化成功，启动失败。重试只启动运行，不重复初始化。'
+  if (controller.installed && ['blocked', 'archived'].includes(controller.installed.status))
+    return '初始化未就绪，后续运行不会启动；请核对原因和原安装映射。'
+  if (controller.waitingRun)
+    return '已记录运行确认，资源就绪后在当前页面启动。离开或权限失效会停止后续操作。'
+  return undefined
 }

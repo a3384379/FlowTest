@@ -1,3 +1,4 @@
+import SelfTestAssetLink from './SelfTestAssetLink'
 import { Card, Steps, Typography } from 'antd'
 import type { SelfTestRelation, SelfTestSource, SelfTestScenario } from './self-test-contract'
 import { scenarioHasCompleteEvidence } from './self-test-verdict'
@@ -10,7 +11,7 @@ export default function SelfTestSourceChain({ relation }: { relation: SelfTestRe
   const fixed = batch.batch_kind === 'fixed_baseline'
   const items = [
     ...designSteps(relation),
-    ...assetSteps(asset),
+    ...assetSteps(asset, batch.project_id, batch.id),
     { title: '本次正式执行', description: executionId },
     {
       title: '独立核验收据',
@@ -71,14 +72,33 @@ function sourceDesignSteps(source: SelfTestSource) {
     },
   ]
 }
-function assetSteps(asset: SelfTestSource | SelfTestScenario['published_assets']) {
+function assetSteps(
+  asset: SelfTestSource | SelfTestScenario['published_assets'],
+  projectId: string,
+  batchId: string,
+) {
   if (!asset)
     return [
       { title: 'Workflow', description: '缺少固定版本来源' },
       { title: '原生 Case', description: '缺少固定版本来源' },
     ]
   return [
-    { title: `Workflow v${asset.workflow.version}`, description: asset.workflow.id },
-    { title: `原生 Case v${asset.case.version}`, description: asset.case.id },
+    {
+      title: `Workflow v${asset.workflow.version}`,
+      description: (
+        <SelfTestAssetLink
+          projectId={projectId}
+          batchId={batchId}
+          kind="workflow"
+          asset={asset.workflow}
+        />
+      ),
+    },
+    {
+      title: `原生 Case v${asset.case.version}`,
+      description: (
+        <SelfTestAssetLink projectId={projectId} batchId={batchId} kind="case" asset={asset.case} />
+      ),
+    },
   ]
 }

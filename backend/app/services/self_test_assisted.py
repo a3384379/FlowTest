@@ -1,17 +1,20 @@
 """Validate explicitly reviewed revisions without rewriting model-origin evidence."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from pydantic import JsonValue
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.self_tests import SelfTestSettings
 from app.domain.assisted_revisions import RevisionDifferenceLimit, revision_differences
 from app.domain.self_tests import aware, document_digest
-from app.engine.contracts import WorkflowDefinition
+from app.engine.contracts import WorkflowDefinition, WorkflowEdge
 from app.models.ai import AIChangeItem, AIChangeSet
-from app.models.self_tests import SelfTestBatch, SelfTestScenarioResult
+from app.models.self_tests import SelfTestBatch, SelfTestInstallation, SelfTestScenarioResult
+from app.models.tasking import TestPlanRun, TestPlanRunItem
+from app.models.workflows import WorkflowExecution
 from app.repositories.test_assets import TestAssetRepository
 from app.repositories.workflows import WorkflowRepository
 from app.schemas.self_tests import (
@@ -259,7 +262,10 @@ class SelfTestAssistedSources:
     def _required_assertions(source: SourceReference, before: JsonValue, after: JsonValue) -> None:
         old = WorkflowDefinition.model_validate(before)
         new = WorkflowDefinition.model_validate(after)
-        left, right = {node.id: node for node in old.nodes}, {node.id: node for node in new.nodes}
+        left, right = (
+            {node.id: node for node in old.all_nodes()},
+            {node.id: node for node in new.all_nodes()},
+        )
         for oracle in source.oracle_bindings:
             prior, current = left.get(oracle.node_id), right.get(oracle.node_id)
             if (
@@ -267,6 +273,8 @@ class SelfTestAssistedSources:
                 or current is None
                 or prior.model_dump(mode="json", exclude={"name", "position"})
                 != current.model_dump(mode="json", exclude={"name", "position"})
+                or _assertion_control_path(old, oracle.node_id)
+                != _assertion_control_path(new, oracle.node_id)
             ):
                 raise self_test_error(
                     "SELFTEST_ASSISTED_REQUIRED_ORACLE_CHANGED",
@@ -324,6 +332,84 @@ class SelfTestAssistedSources:
             raise self_test_error("SELFTEST_ASSISTED_SOURCE_LIMIT", "辅助来源超过有界投影范围")
         return tuple(result.values())
 
+    async def admit_namespace(
+        self,
+        installation: SelfTestInstallation,
+        before_id: UUID,
+        scenarios: tuple[TemplateScenario, ...],
+        *,
+        excluding_batch_id: UUID | None = None,
+    ) -> None:
+        """Serialize admission on the ready installation before reserving an origin namespace."""
+        projections = await self.selection_sources(
+            installation.project_id, installation.id, installation.binding_id, before_id, scenarios
+        )
+        namespaces = _namespace_origins(projections, before_id)
+        locked = await self.session.scalar(
+            update(SelfTestInstallation)
+            .where(
+                SelfTestInstallation.id == installation.id,
+                SelfTestInstallation.status == "ready",
+                SelfTestInstallation.revision == installation.revision,
+            )
+            .values(revision=SelfTestInstallation.revision + 1)
+            .returning(SelfTestInstallation.id)
+        )
+        if locked is None:
+            raise self_test_error("SELFTEST_INSTALLATION_BUSY", "安装状态已变化, 请刷新后重试")
+        await self.session.refresh(installation)
+        query = (
+            select(SelfTestBatch)
+            .where(
+                SelfTestBatch.installation_id == installation.id,
+                or_(SelfTestBatch.sealed_at.is_(None), SelfTestBatch.cleanup_status != "completed"),
+            )
+            .limit(101)
+        )
+        candidates = (await self.session.scalars(query)).all()
+        if len(candidates) > 100:
+            raise self_test_error(
+                "SELFTEST_ASSISTED_NAMESPACE_BUSY", "活动任务过多, 请先完成或取消原任务"
+            )
+        for candidate in candidates:
+            if candidate.id == excluding_batch_id or not await self._namespace_reserved(candidate):
+                continue
+            manifest = FrozenBatchManifest.model_validate(candidate.frozen_manifest)
+            if manifest.assisted_before_batch_id is None:
+                continue
+            active = await self.selection_sources(
+                installation.project_id,
+                installation.id,
+                installation.binding_id,
+                manifest.assisted_before_batch_id,
+                manifest.scenarios,
+            )
+            if namespaces & _namespace_origins(active, manifest.assisted_before_batch_id):
+                raise self_test_error(
+                    "SELFTEST_ASSISTED_NAMESPACE_BUSY",
+                    "同一来源仍有任务或目标占用, 请等待原任务清理和截止",
+                )
+
+    async def _namespace_reserved(self, batch: SelfTestBatch) -> bool:
+        if aware(batch.deadline) > datetime.now(UTC):
+            return True
+        for value in batch.plan_run_ids:
+            run = await self.session.get(TestPlanRun, UUID(value))
+            if run is None or run.status not in {"passed", "failed", "cancelled"}:
+                return True
+        item_ids = select(TestPlanRunItem.id).where(
+            TestPlanRunItem.test_plan_run_id.in_([UUID(value) for value in batch.plan_run_ids])
+        )
+        active = await self.session.scalar(
+            select(WorkflowExecution.id)
+            .where(
+                WorkflowExecution.source_plan_run_item_id.in_(item_ids),
+                WorkflowExecution.status.not_in(("passed", "failed", "cancelled")),
+            )
+            .limit(1)
+        )
+        return active is not None
+
     async def selection_sources(
         self,
         project: UUID,
@@ -368,3 +454,67 @@ class SelfTestAssistedSources:
         if len(results) > 20:
             raise self_test_error("SELFTEST_ASSISTED_SOURCE_LIMIT", "辅助来源超过有界投影范围")
         return tuple(results.values())
+
+
+def _namespace_origins(projections: tuple[AssistedBeforeSource, ...], before_id: UUID) -> set[UUID]:
+    return {
+        item.batch_id if item.source.assisted is None else item.source.assisted.origin_batch_id
+        for item in projections
+        if item.batch_id == before_id
+    }
+
+
+def _assertion_control_path(definition: WorkflowDefinition, identifier: str) -> str:
+    """Fingerprint controlling topology independently of names, layout, and edge IDs."""
+    nodes = {node.id: node for node in definition.all_nodes()}
+    edges = (*definition.edges, *(edge for region in definition.regions for edge in region.edges))
+    owners = {
+        node.id: region.owner_node_id for region in definition.regions for node in region.nodes
+    }
+    ancestors = _control_ancestors(identifier, edges, owners)
+    controls: list[JsonValue] = [
+        node.model_dump(mode="json", exclude={"name", "position"})
+        for key in sorted(ancestors)
+        for node in (nodes[key],)
+        if node.type.value in {"condition", "for_each", "subflow"}
+        or (node.capability_id or "").startswith("flow.control.")
+    ]
+    paths: list[JsonValue] = sorted(
+        (
+            edge.model_dump(mode="json", exclude={"id"})
+            for edge in edges
+            if edge.target in ancestors
+        ),
+        key=document_digest,
+    )
+    regions: list[JsonValue] = [
+        region.model_dump(mode="json", exclude={"nodes", "edges"})
+        for region in definition.regions
+        if any(node.id in ancestors for node in region.nodes)
+    ]
+    document: dict[str, JsonValue] = {
+        "nodes": list(sorted(ancestors)),
+        "controls": controls,
+        "edges": paths,
+        "regions": regions,
+    }
+    return document_digest(document)
+
+
+def _control_ancestors(
+    identifier: str, edges: tuple[WorkflowEdge, ...], owners: dict[str, str]
+) -> set[str]:
+    incoming: dict[str, set[str]] = {}
+    for edge in edges:
+        incoming.setdefault(edge.target, set()).add(edge.source)
+    pending = [identifier]
+    found: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in found:
+            continue
+        found.add(current)
+        pending.extend(incoming.get(current, ()))
+        if current in owners:
+            pending.append(owners[current])
+    return found

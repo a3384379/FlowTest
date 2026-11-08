@@ -49,6 +49,8 @@ class SelfTestAssets:
         binding: SelfTestBinding,
         template: TemplateResponse,
         mapping: InstallationMapping,
+        *,
+        complete: bool = True,
     ) -> None:
         remote = (
             mapping.target_project_id,
@@ -80,7 +82,12 @@ class SelfTestAssets:
         if template.batch_kind == "fixed_baseline":
             actual = [(item.scenario_id, item.variant_key) for item in mapping.assets]
             required = [(item.scenario_id, item.variant_key) for item in template.scenarios]
-            if sorted(actual) != sorted(required):
+            matches = (
+                sorted(actual) == sorted(required)
+                if complete
+                else len(actual) == len(set(actual)) and set(actual) <= set(required)
+            )
+            if not matches:
                 raise self_test_error(
                     "SELFTEST_INSTALLATION_ASSET_SET_MISMATCH", "安装资源必须覆盖完整固定模板"
                 )

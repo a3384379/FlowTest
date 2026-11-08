@@ -4,6 +4,21 @@ import { setupServer } from 'msw/node'
 import { project } from './fixtures'
 
 export const server = setupServer(
+  http.get('/api/v1/projects/:projectId/self-tests/runs/:batchId/insights', ({ params }) =>
+    HttpResponse.json({
+      batch_id: params.batchId,
+      manifest_digest: 'a'.repeat(64),
+      task_set_digest: 'a'.repeat(64),
+      template_version: '1.0.0',
+      scope: 'full_pack',
+      assisted_before_batch_id: null,
+      metrics: [],
+      diagnostics: [],
+      case_slots: [],
+      comparisons: [],
+      reason_codes: [],
+    }),
+  ),
   http.get('/api/v1/organizations', () => HttpResponse.json([])),
   http.get('/api/v1/v3/features', () =>
     HttpResponse.json({

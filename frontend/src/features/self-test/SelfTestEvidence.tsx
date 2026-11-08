@@ -1,6 +1,7 @@
+import SelfTestAssetLink from './SelfTestAssetLink'
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { Alert, Button, Card, Descriptions, Empty, Space, Tag, Typography } from 'antd'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useRouteScopedState } from '../../lib/use-route-scoped-state'
 import { apiErrorWithTrace, type ReportExecutionDetail } from '../../lib/api'
 import type {
@@ -9,7 +10,7 @@ import type {
   SelfTestScenario,
   SelfTestSource,
 } from './self-test-contract'
-import { selfTestProposalPath } from './self-test-navigation'
+import { selfTestProposalPath, selfTestReferenceWithContext } from './self-test-navigation'
 import { selfTestReasonLabel } from './self-test-labels'
 import SelfTestSourceBindings from './SelfTestSourceBindings'
 import SelfTestVerificationComparison from './SelfTestVerificationComparison'
@@ -34,6 +35,7 @@ export function SelfTestSourceEvidence({
   batchId: string
   source: SelfTestSource | null
 }) {
+  const [params] = useSearchParams()
   if (!source)
     return (
       <Empty
@@ -56,12 +58,26 @@ export function SelfTestSourceEvidence({
           {
             key: 'workflow',
             label: 'Workflow 固定版本',
-            children: `${source.workflow.id}@${source.workflow.version}`,
+            children: (
+              <SelfTestAssetLink
+                projectId={projectId}
+                batchId={batchId}
+                kind="workflow"
+                asset={source.workflow}
+              />
+            ),
           },
           {
             key: 'case',
             label: 'Case 固定版本',
-            children: `${source.case.id}@${source.case.version}`,
+            children: (
+              <SelfTestAssetLink
+                projectId={projectId}
+                batchId={batchId}
+                kind="case"
+                asset={source.case}
+              />
+            ),
           },
           {
             key: 'design',
@@ -100,7 +116,10 @@ export function SelfTestSourceEvidence({
                       projectId,
                       proposal.route === 'flow_spec_visual' ? 'flow_spec' : 'controlled_write',
                       proposal.change_set_id,
-                      { batchId, scenarioId: source.scenario_id },
+                      selfTestReferenceWithContext(
+                        { batchId, scenarioId: source.scenario_id },
+                        params,
+                      ),
                     )}
                   >
                     {index === 0 ? '查看流程提案' : '查看用例提案'}

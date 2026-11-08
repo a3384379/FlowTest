@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
+from pydantic import JsonValue
 from scripts.selftest.bootstrap import BootstrapResult
 from scripts.selftest.cleanup import RoundCleanup
 from scripts.selftest.collect_evidence import collect_scenario, wait_plan
@@ -38,18 +40,32 @@ from scripts.selftest.io import (
 )
 from scripts.selftest.local_stack import StackBinding
 from scripts.selftest.mcp_generation_journey import GeneratedAsset, generate_canary
-from scripts.selftest.product_agent_client import agent_root, lease_body, upload
+from scripts.selftest.mcp_protocol_runner import ProtocolClient
+from scripts.selftest.product_agent_client import (
+    agent_root,
+    finalize_materialization,
+    lease_body,
+    stage_materialization,
+    staged_receipt,
+    upload,
+)
 from scripts.selftest.product_fixed import seal_verification
 from scripts.selftest.request_bounds import native_request_bound
-from scripts.selftest.review_driver import FixtureReviewDriver, HumanReviewDriver, PendingReview
+from scripts.selftest.review_driver import (
+    FixtureReviewDriver,
+    HumanReviewDriver,
+    PendingReview,
+)
 from scripts.selftest.run import _configure, _expectation, _pack_digest, _protocol
 from scripts.selftest.start_plan import PlanSelection, _frozen_case
 
+from app.domain.test_design_compilation import CompileTestDesignResponse
 from app.schemas.self_tests import (
     AgentTaskResponse,
     APISourceReference,
     ArtifactReference,
     BatchResponse,
+    GenerationDiagnostic,
     GenerationProgress,
     MaterializedReceipt,
     OracleReference,
@@ -97,7 +113,8 @@ async def _proposal_document(
 ) -> tuple[JsonObject, JsonObject]:
     if reference.route == "flow_spec_visual":
         change = await writer.object(
-            "GET", f"/projects/{project}/flow-specs/change-sets/{reference.change_set_id}"
+            "GET",
+            f"/projects/{project}/flow-specs/change-sets/{reference.change_set_id}",
         )
         _proposal_identity(project, reference, change)
         if reference.item_id is not None or change.get("source_type") != "flow_spec":
@@ -344,6 +361,8 @@ async def generate_task(
         raise HarnessError("SELFTEST_MODEL_HOST_NOT_REGISTERED")
     if frozen.template.pack_digest != _pack_digest():
         raise HarnessError("SELFTEST_AGENT_GENERATION_PACK_MISMATCH")
+    if await _resume_materialization(machine, task, directory):
+        return
     selected = {item.scenario_id for item in frozen.scenarios}
     proposals: list[_PendingReference] = []
     async with _protocol(
@@ -365,7 +384,10 @@ async def generate_task(
             else FixtureReviewDriver()
         )
         await client.call(
-            "flowtest.inspect_connection", {"request": {}}, scenario_id="batch", phase="connection"
+            "flowtest.inspect_connection",
+            {"request": {}},
+            scenario_id="batch",
+            phase="connection",
         )
         assets = tuple(
             [
@@ -377,6 +399,13 @@ async def generate_task(
                     expected_actual=expected,
                     output_dir=directory / scenario,
                     review_driver=review,
+                    on_blocked_compilation=partial(
+                        _blocked_compilation,
+                        machine=machine,
+                        task=task,
+                        client=client,
+                        proposals=proposals,
+                    ),
                 )
                 for scenario, expected in (("ST-MCP-025", 2), ("ST-MCP-026", 1))
                 if scenario in selected
@@ -450,13 +479,49 @@ async def generate_task(
     payload = MaterializedReceipt(
         **lease_body(task).model_dump(), sources=tuple(sources), manifest=reference
     )
-    ready = BatchResponse.model_validate(
-        await machine.object(
-            "POST",
-            f"{agent_root(task.project_id)}/runs/{task.task_id}/materialized",
-            object_value(payload.model_dump(mode="json")),
-        )
+    epoch_values: list[JsonValue] = list(epochs)
+    write_json(
+        directory / "materialization-preparation.json",
+        {"scope": scope.model_dump(mode="json"), "epochs": epoch_values},
     )
+    ready = await stage_materialization(machine, task, payload, directory)
+    await _finish_materialization(machine, task, ready, generated, scope, epochs, directory)
+
+
+async def _resume_materialization(
+    machine: PublicAPI, task: AgentTaskResponse, directory: Path
+) -> bool:
+    previous = staged_receipt(task, directory)
+    if previous is None:
+        return False
+    generated = ProductGeneration.model_validate(read_json(directory / "product-generation.json"))
+    prepared = read_json(directory / "materialization-preparation.json")
+    scope = FixtureBudgetScope.model_validate(prepared["scope"])
+    epochs_raw = prepared["epochs"]
+    if not isinstance(epochs_raw, list) or any(not isinstance(item, str) for item in epochs_raw):
+        raise HarnessError("SELFTEST_FIXTURE_EPOCH_CHANGED")
+    epochs = [text_value(item) for item in epochs_raw]
+    ready = await stage_materialization(machine, task, previous, directory)
+    await _finish_materialization(machine, task, ready, generated, scope, epochs, directory)
+    return True
+
+
+async def _finish_materialization(
+    machine: PublicAPI,
+    task: AgentTaskResponse,
+    ready: BatchResponse,
+    generated: ProductGeneration,
+    scope: FixtureBudgetScope,
+    epochs: list[str],
+    directory: Path,
+) -> None:
+    batch, frozen = task.batch, task.frozen_manifest
+    if batch is None or frozen is None:
+        raise HarnessError("SELFTEST_AGENT_FROZEN_MANIFEST_MISMATCH")
+    if (directory / "materialized-finalization.json").exists():
+        await finalize_materialization(machine, task, directory)
+        return
+    assets, lifecycle = generated.assets, generated.lifecycle
     selection = _selection(ready, generated, directory)
     expectations = tuple(_expectation(asset, epochs[0], selection) for asset in assets)
     if lifecycle is not None:
@@ -482,6 +547,7 @@ async def generate_task(
         expires_at=batch.deadline,
     )
     write_json(directory / "manifest.json", manifest)
+    await finalize_materialization(machine, task, directory)
 
 
 async def observe_task(
@@ -594,3 +660,29 @@ async def observe_task(
         cleanup_status=status,
     )
     await seal_verification(machine, task, manifest, evidence, directory)
+
+
+async def _blocked_compilation(
+    result: CompileTestDesignResponse,
+    *,
+    machine: PublicAPI,
+    task: AgentTaskResponse,
+    client: ProtocolClient,
+    proposals: list[_PendingReference],
+) -> None:
+    payload = GenerationProgress(
+        **lease_body(task).model_dump(),
+        stage="blocked",
+        readiness=result.readiness,
+        reason_codes=("SELFTEST_DESIGN_COMPILATION_NOT_READY",),
+        tool_call_count=len(client.receipts),
+        proposals=tuple(item.reference for item in proposals),
+        diagnostics=tuple(
+            GenerationDiagnostic.model_validate(item.model_dump()) for item in result.diagnostics
+        ),
+    )
+    await machine.object(
+        "POST",
+        f"{agent_root(task.project_id)}/runs/{task.task_id}/generation",
+        object_value(payload.model_dump(mode="json")),
+    )
